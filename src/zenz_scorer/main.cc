@@ -873,22 +873,6 @@ bool HttpPostCompletion(
   body += "\"stream\":false,";
   body += "\"cache_prompt\":true,";
   body += "\"stop\":["
-          "\"\\uee00\","
-          "\"\\uee01\","
-          "\"\\uee02\","
-          "\"\\uee03\","
-          "\"\\uee04\","
-          "\"\\uee05\","
-          "\"\\uee06\","
-          "\"\\uee07\","
-          "\"\\uee08\","
-          "\"\\uee09\","
-          "\"\\uee0a\","
-          "\"\\uee0b\","
-          "\"\\uee0c\","
-          "\"\\uee0d\","
-          "\"\\uee0e\","
-          "\"\\uee0f\","
           "\"\\n\","
           "\"\\r\""
           "]";

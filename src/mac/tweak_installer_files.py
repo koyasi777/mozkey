@@ -270,7 +270,15 @@ def TweakInstallerFiles(args: argparse.Namespace, work_dir: str) -> None:
   orig_dir = os.getcwd()
   os.chdir(work_dir)
   cmd = ['zip', '-q', '-ry', os.path.join(orig_dir, args.output), 'installer']
-  util.RunOrDie(cmd)
+  old_copyfile_disable = os.environ.get('COPYFILE_DISABLE')
+  os.environ['COPYFILE_DISABLE'] = '1'
+  try:
+    util.RunOrDie(cmd)
+  finally:
+    if old_copyfile_disable is None:
+      os.environ.pop('COPYFILE_DISABLE', None)
+    else:
+      os.environ['COPYFILE_DISABLE'] = old_copyfile_disable
   os.chdir(orig_dir)
 
 

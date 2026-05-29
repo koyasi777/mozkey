@@ -185,6 +185,10 @@
 }
 @end
 
+@interface MozcImkInputController (TestOnly)
+- (void)processOutput:(const mozc::commands::Output *)output client:(id)sender;
+@end
+
 namespace mozc {
 namespace {
 
@@ -604,6 +608,49 @@ TEST_F(MozcImkInputControllerTest, LiveConversionRecalculatesRendererPosition) {
   EXPECT_TRUE(controller_.rendererCommand.visible());
   EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().left(), 50);
   EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().right(), 51);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       DelayedZenzLiveCorrectionCallbackUpdatesRendererThroughGenericPath) {
+  commands::Output initial_output;
+  initial_output.set_consumed(true);
+  commands::Output::Callback *callback = initial_output.mutable_callback();
+  callback->set_delay_millisec(1);
+  commands::SessionCommand *session_command = callback->mutable_session_command();
+  session_command->set_type(commands::SessionCommand::APPLY_ZENZ_LIVE_CORRECTION);
+  session_command->set_live_conversion_generation(7);
+  session_command->set_live_conversion_key("かれはてんてきです");
+
+  commands::Output callback_output;
+  callback_output.set_consumed(true);
+  callback_output.set_live_conversion(true);
+  callback_output.set_zenz_live_correction_applied(true);
+  commands::Preedit *preedit = callback_output.mutable_preedit();
+  preedit->set_cursor(1);
+  commands::Preedit::Segment *segment = preedit->add_segment();
+  segment->set_annotation(commands::Preedit::Segment::HIGHLIGHT);
+  segment->set_key("かれはてんてきです");
+  segment->set_value("彼は天敵です");
+  segment->set_value_length(6);
+
+  mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
+  mock_client_.expectedAttributes =
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+
+  commands::SessionCommand actual_command;
+  EXPECT_CALL(*mock_mozc_client_, SendCommandWithContext(_, _, NotNull()))
+      .WillOnce(DoAll(SaveArg<0>(&actual_command), SetArgPointee<2>(callback_output), Return(true)));
+
+  [controller_ processOutput:&initial_output client:mock_client_];
+  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  EXPECT_EQ(actual_command.type(), commands::SessionCommand::APPLY_ZENZ_LIVE_CORRECTION);
+  EXPECT_EQ(actual_command.live_conversion_generation(), 7);
+  EXPECT_EQ(actual_command.live_conversion_key(), "かれはてんてきです");
+  EXPECT_EQ(mock_renderer_->counter_ExecCommand(), 2);
+  EXPECT_TRUE(controller_.rendererCommand.visible());
+  EXPECT_TRUE(controller_.rendererCommand.output().live_conversion());
+  EXPECT_TRUE(controller_.rendererCommand.output().zenz_live_correction_applied());
 }
 
 TEST_F(MozcImkInputControllerTest, OpenLink) {

@@ -70,7 +70,15 @@ def main():
 
     CopyFiles(args.inputs, out_dir)
     basename = os.path.splitext(args.output)[0]
-    shutil.make_archive(basename, format='zip', root_dir=tmp_dir)
+    old_copyfile_disable = os.environ.get('COPYFILE_DISABLE')
+    os.environ['COPYFILE_DISABLE'] = '1'
+    try:
+      shutil.make_archive(basename, format='zip', root_dir=tmp_dir)
+    finally:
+      if old_copyfile_disable is None:
+        os.environ.pop('COPYFILE_DISABLE', None)
+      else:
+        os.environ['COPYFILE_DISABLE'] = old_copyfile_disable
 
 
 if __name__ == '__main__':

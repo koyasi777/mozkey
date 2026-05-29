@@ -58,7 +58,7 @@
 #include "session/ime_context.h"
 #include "session/key_event_transformer.h"
 #include "session/keymap.h"
-#include "session/zenz_named_pipe_client.h"
+#include "session/zenz_client_factory.h"
 #include "session/zenz_prompt_builder.h"
 #include "transliteration/transliteration.h"
 
@@ -3100,7 +3100,7 @@ bool Session::OutputCurrentLiveConversionAfterZenzStop(
 ZenzLiveCorrector* Session::EnsureZenzLiveCorrector() {
   if (zenz_live_corrector_ == nullptr) {
     zenz_live_corrector_ = std::make_unique<ZenzLiveCorrector>(
-        std::make_unique<ZenzNamedPipeClient>());
+        CreateDefaultZenzClient());
   }
   return zenz_live_corrector_.get();
 }
