@@ -125,6 +125,19 @@ std::string ResolveBundledScorerPath(const std::string& module_dir) {
     return bundled_path;
   }
 
+  constexpr char kNestedHelperResourcesDir[] = "/Contents/Resources/";
+  const size_t nested_resources_pos =
+      module_dir.rfind(kNestedHelperResourcesDir, macos_dir_pos);
+  if (nested_resources_pos != std::string::npos) {
+    const std::string outer_resources_dir =
+        module_dir.substr(0, nested_resources_pos) + "/Contents/Resources";
+    const std::string outer_bundled_path =
+        JoinPath(outer_resources_dir, kDefaultScorerBinaryName);
+    if (FileExists(outer_bundled_path)) {
+      return outer_bundled_path;
+    }
+  }
+
   return adjacent_path;
 }
 
@@ -267,9 +280,15 @@ int ConnectWithAutoLaunch(const sockaddr_un& addr,
   *launched = LaunchZenzScorerIfNeeded();
 
   constexpr uint32_t kColdStartRetryMsec = 50;
-  const uint32_t retry_budget_msec =
-      std::max<uint32_t>(timeout_msec == 0 ? kColdStartRetryMsec : timeout_msec,
-                         kColdStartRetryMsec);
+  constexpr uint32_t kMinAutoLaunchRetryBudgetMsec = 1000;
+  const uint32_t retry_budget_msec = *launched
+                                         ? std::max<uint32_t>(
+                                               timeout_msec,
+                                               kMinAutoLaunchRetryBudgetMsec)
+                                         : std::max<uint32_t>(
+                                               timeout_msec == 0 ? kColdStartRetryMsec
+                                                                 : timeout_msec,
+                                               kColdStartRetryMsec);
   const uint32_t retry_attempts =
       std::max<uint32_t>(1, retry_budget_msec / kColdStartRetryMsec);
 
