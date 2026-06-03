@@ -37,7 +37,7 @@
 #include "absl/strings/string_view.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_matcher.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 
 namespace mozc {
 namespace dictionary {
@@ -77,24 +77,20 @@ class DictionaryImpl : public DictionaryInterface {
   bool LookupComment(absl::string_view key, absl::string_view value,
                      std::string* comment) const override;
 
-  // Legacy interfaces with conversion_request.
-  void LookupPredictive(absl::string_view key,
-                        const ConversionRequest& conversion_request,
+  // Interfaces with conversion_options.
+  void LookupPredictive(absl::string_view key, const ConversionOptions& options,
                         Callback* callback) const override;
-  void LookupPrefix(absl::string_view key,
-                    const ConversionRequest& conversion_request,
+  void LookupPrefix(absl::string_view key, const ConversionOptions& options,
                     Callback* callback) const override;
 
-  void LookupExact(absl::string_view key,
-                   const ConversionRequest& conversion_request,
+  void LookupExact(absl::string_view key, const ConversionOptions& options,
                    Callback* callback) const override;
 
-  void LookupReverse(absl::string_view str,
-                     const ConversionRequest& conversion_request,
+  void LookupReverse(absl::string_view str, const ConversionOptions& options,
                      Callback* callback) const override;
 
   bool LookupComment(absl::string_view key, absl::string_view value,
-                     const ConversionRequest& conversion_request,
+                     const ConversionOptions& options,
                      std::string* comment) const override;
   void PopulateReverseLookupCache(absl::string_view str) const override;
   void ClearReverseLookupCache() const override;

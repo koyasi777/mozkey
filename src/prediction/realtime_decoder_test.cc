@@ -45,6 +45,7 @@
 #include "data_manager/testing/mock_data_manager.h"
 #include "prediction/result.h"
 #include "request/conversion_request.h"
+#include "request/options.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 
@@ -63,10 +64,10 @@ class MockImmutableConverter : public ImmutableConverterInterface {
   ~MockImmutableConverter() override = default;
 
   MOCK_METHOD(bool, Convert,
-              (const ConversionRequest& request, Segments* segments),
+              (const ConversionOptions& options, Segments* segments),
               (const, override));
 
-  static bool ConvertImpl(const ConversionRequest& request,
+  static bool ConvertImpl(const ConversionOptions& options,
                           Segments* segments) {
     if (!segments || segments->conversion_segments_size() != 1 ||
         segments->conversion_segment(0).key().empty()) {

@@ -127,7 +127,7 @@ bool ReverseConverter::ReverseConvert(absl::string_view key,
       ConversionRequestBuilder()
           .SetOptions({.request_type = ConversionRequest::REVERSE_CONVERSION})
           .Build();
-  if (!immutable_converter_.Convert(default_request, segments)) {
+  if (!immutable_converter_.Convert(default_request.options(), segments)) {
     return false;
   }
   if (segments->segments_size() == 0) {

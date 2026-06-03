@@ -102,6 +102,7 @@ mozc_cc_library(
     ],
     deps = [
         ":conversion_request",
+        ":options",
         "//composer",
         "//protocol:commands_cc_proto",
     ],

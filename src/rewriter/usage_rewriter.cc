@@ -212,7 +212,7 @@ bool UsageRewriter::Rewrite(const ConversionRequest& request,
       // First, search the user dictionary for comment.
       if (dictionary_.LookupComment(segment->candidate(j).content_key,
                                     segment->candidate(j).content_value,
-                                    request, &comment)) {
+                                    request.options(), &comment)) {
         converter::Candidate* candidate = segment->mutable_candidate(j);
         candidate->usage_id = usage_id_for_user_comment;
         candidate->usage_title = segment->candidate(j).content_value;

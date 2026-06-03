@@ -67,6 +67,7 @@
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
+#include "request/options.h"
 #include "request/request_test_util.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
@@ -1549,8 +1550,7 @@ class TestSuffixDictionary : public DictionaryInterface {
 
   bool HasValue(absl::string_view value) const override { return false; }
 
-  void LookupPredictive(absl::string_view key,
-                        const ConversionRequest& conversion_request,
+  void LookupPredictive(absl::string_view key, const ConversionOptions& options,
                         Callback* callback) const override {
     Token token;
     for (size_t i = 0; i < std::size(kSuffixTokens); ++i) {
@@ -1580,16 +1580,13 @@ class TestSuffixDictionary : public DictionaryInterface {
     }
   }
 
-  void LookupPrefix(absl::string_view key,
-                    const ConversionRequest& conversion_request,
+  void LookupPrefix(absl::string_view key, const ConversionOptions& options,
                     Callback* callback) const override {}
 
-  void LookupExact(absl::string_view key,
-                   const ConversionRequest& conversion_request,
+  void LookupExact(absl::string_view key, const ConversionOptions& options,
                    Callback* callback) const override {}
 
-  void LookupReverse(absl::string_view str,
-                     const ConversionRequest& conversion_request,
+  void LookupReverse(absl::string_view str, const ConversionOptions& options,
                      Callback* callback) const override {}
 };
 

@@ -102,7 +102,8 @@ bool ExecCommand(const ImmutableConverter& immutable_converter,
   Segments segments;
   Lattice lattice;
   segments.InitForConvert(conversion_request.key());
-  if (!immutable_converter.Convert(conversion_request, &segments, &lattice)) {
+  if (!immutable_converter.Convert(conversion_request.options(), &segments,
+                                   &lattice)) {
     return false;
   }
 

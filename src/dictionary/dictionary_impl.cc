@@ -43,7 +43,7 @@
 #include "dictionary/dictionary_token.h"
 #include "dictionary/pos_matcher.h"
 #include "protocol/config.pb.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 
 namespace mozc {
 namespace dictionary {
@@ -82,11 +82,11 @@ namespace {
 
 class CallbackWithFilter : public DictionaryInterface::Callback {
  public:
-  CallbackWithFilter(const ConversionRequest& request,
+  CallbackWithFilter(const ConversionOptions& options,
                      const PosMatcher& pos_matcher,
                      const UserDictionaryInterface& user_dictionary,
                      DictionaryInterface::Callback* callback)
-      : request_(request),
+      : options_(options),
         pos_matcher_(pos_matcher),
         user_dictionary_(user_dictionary),
         has_suppressed_entries_(user_dictionary_.HasSuppressedEntries()),
@@ -104,15 +104,15 @@ class CallbackWithFilter : public DictionaryInterface::Callback {
   ResultType OnToken(absl::string_view key, absl::string_view actual_key,
                      const Token& token) override {
     if (!(token.attributes & Token::USER_DICTIONARY)) {
-      if (!request_.config().use_spelling_correction() &&
+      if (!options_.use_spelling_correction &&
           (token.attributes & Token::SPELLING_CORRECTION)) {
         return TRAVERSE_CONTINUE;
       }
-      if (!request_.config().use_zip_code_conversion() &&
+      if (!options_.use_zip_code_conversion &&
           pos_matcher_.IsZipcode(token.lid)) {
         return TRAVERSE_CONTINUE;
       }
-      if (!request_.config().use_t13n_conversion() &&
+      if (!options_.use_t13n_conversion &&
           Util::IsEnglishTransliteration(token.value)) {
         return TRAVERSE_CONTINUE;
       }
@@ -125,11 +125,11 @@ class CallbackWithFilter : public DictionaryInterface::Callback {
   }
 
   bool IsKanaModifierInsensitiveConversion() const override {
-    return request_.IsKanaModifierInsensitiveConversion();
+    return options_.kana_modifier_insensitive_conversion;
   }
 
  private:
-  const ConversionRequest& request_;
+  const ConversionOptions& options_;
   const PosMatcher& pos_matcher_;
   const UserDictionaryInterface& user_dictionary_;
   // cache the result of HasSuppressedEntries, because calling
@@ -141,55 +141,55 @@ class CallbackWithFilter : public DictionaryInterface::Callback {
 
 }  // namespace
 
-void DictionaryImpl::LookupPredictive(
-    absl::string_view key, const ConversionRequest& conversion_request,
-    Callback* callback) const {
-  CallbackWithFilter callback_with_filter(conversion_request, pos_matcher_,
+void DictionaryImpl::LookupPredictive(absl::string_view key,
+                                      const ConversionOptions& options,
+                                      Callback* callback) const {
+  CallbackWithFilter callback_with_filter(options, pos_matcher_,
                                           user_dictionary_, callback);
   for (const DictionaryInterface* dic :
-       GetDictionaries(conversion_request.incognito_mode())) {
+       GetDictionaries(options.incognito_mode)) {
     dic->LookupPredictive(key, &callback_with_filter);
   }
 }
 
 void DictionaryImpl::LookupPrefix(absl::string_view key,
-                                  const ConversionRequest& conversion_request,
+                                  const ConversionOptions& options,
                                   Callback* callback) const {
-  CallbackWithFilter callback_with_filter(conversion_request, pos_matcher_,
+  CallbackWithFilter callback_with_filter(options, pos_matcher_,
                                           user_dictionary_, callback);
   for (const DictionaryInterface* dic :
-       GetDictionaries(conversion_request.incognito_mode())) {
+       GetDictionaries(options.incognito_mode)) {
     dic->LookupPrefix(key, &callback_with_filter);
   }
 }
 
 void DictionaryImpl::LookupExact(absl::string_view key,
-                                 const ConversionRequest& conversion_request,
+                                 const ConversionOptions& options,
                                  Callback* callback) const {
-  CallbackWithFilter callback_with_filter(conversion_request, pos_matcher_,
+  CallbackWithFilter callback_with_filter(options, pos_matcher_,
                                           user_dictionary_, callback);
   for (const DictionaryInterface* dic :
-       GetDictionaries(conversion_request.incognito_mode())) {
+       GetDictionaries(options.incognito_mode)) {
     dic->LookupExact(key, &callback_with_filter);
   }
 }
 
 void DictionaryImpl::LookupReverse(absl::string_view str,
-                                   const ConversionRequest& conversion_request,
+                                   const ConversionOptions& options,
                                    Callback* callback) const {
-  CallbackWithFilter callback_with_filter(conversion_request, pos_matcher_,
+  CallbackWithFilter callback_with_filter(options, pos_matcher_,
                                           user_dictionary_, callback);
   for (const DictionaryInterface* dic :
-       GetDictionaries(conversion_request.incognito_mode())) {
+       GetDictionaries(options.incognito_mode)) {
     dic->LookupReverse(str, &callback_with_filter);
   }
 }
 
 bool DictionaryImpl::LookupComment(absl::string_view key,
                                    absl::string_view value,
-                                   const ConversionRequest& conversion_request,
+                                   const ConversionOptions& options,
                                    std::string* comment) const {
-  auto dics = GetDictionaries(conversion_request.incognito_mode());
+  auto dics = GetDictionaries(options.incognito_mode);
   // Access dics in reverse order to prefer UserDictionary (if not in incognito)
   return std::any_of(dics.rbegin(), dics.rend(),
                      [&](const DictionaryInterface* dic) {

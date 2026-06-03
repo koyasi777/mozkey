@@ -183,7 +183,7 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
   const ConversionRequest convreq_type = ConvReq(type);
   const ConversionRequest convreq_conv = ConvReq(ConversionRequest::CONVERSION);
 
-  EXPECT_EQ(filter->FilterCandidate(convreq_type, "abc", c1, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq_type.options(), "abc", c1, n, n),
             CandidateFilter::GOOD_CANDIDATE);
   // Clear the internal set |seen_| to prevent "abc" from being filtered by
   // "seen" rule.
@@ -197,9 +197,9 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
   c2->value = "abc";
 
   // Once filter "abc" so that the filter memorizes it.
-  EXPECT_EQ(filter->FilterCandidate(convreq_conv, "abc", c1, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq_conv.options(), "abc", c1, n, n),
             CandidateFilter::GOOD_CANDIDATE);
-  EXPECT_EQ(filter->FilterCandidate(convreq_type, "abc", c2, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq_type.options(), "abc", c2, n, n),
             CandidateFilter::BAD_CANDIDATE);
 
   // A candidate having high structure cost should be rejected.
@@ -208,12 +208,12 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
   c3->key = "def";
   c3->value = "def";
 
-  EXPECT_EQ(filter->FilterCandidate(convreq_conv, "def", c3, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq_conv.options(), "def", c3, n, n),
             CandidateFilter::BAD_CANDIDATE);
 
   // Check if a candidate is active before appending many candidates.
   Candidate* c4 = NewCandidate();
-  EXPECT_EQ(filter->FilterCandidate(convreq_conv, "", c4, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq_conv.options(), "", c4, n, n),
             CandidateFilter::GOOD_CANDIDATE);
 
   // Don't filter if lid/rid is the same as that of the top candidate.
@@ -222,7 +222,7 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
   c5->value = "foo";
   c5->lid = 1;
   c5->rid = 1;
-  EXPECT_EQ(filter->FilterCandidate(convreq_conv, "foo", c5, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq_conv.options(), "foo", c5, n, n),
             CandidateFilter::GOOD_CANDIDATE);
 
   // Although CandidateFilter may change its limit, 1000 should always exceed
@@ -231,10 +231,10 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
     Candidate* cand = NewCandidate();
     cand->key = absl::StrFormat("%d", i);
     cand->value = cand->key;
-    filter->FilterCandidate(convreq_conv, cand->key, cand, n, n);
+    filter->FilterCandidate(convreq_conv.options(), cand->key, cand, n, n);
   }
   // There will be no more candidates.
-  EXPECT_EQ(filter->FilterCandidate(convreq_type, "", c4, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq_type.options(), "", c4, n, n),
             CandidateFilter::STOP_ENUMERATION);
 }
 
@@ -253,7 +253,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
     cand->rid = 1;
     cand->key = "abc";
     cand->value = "abc";
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", cand, n, n),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), "abc", cand, n, n),
               CandidateFilter::GOOD_CANDIDATE);
   }
 
@@ -265,7 +265,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
     cand->rid = 1;
     cand->key = "abc";
     cand->value = "abc";
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", cand, n, n),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), "abc", cand, n, n),
               CandidateFilter::BAD_CANDIDATE);
   }
 
@@ -276,7 +276,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
     cand->rid = 1;
     cand->key = "abc";
     cand->value = "abc";
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", cand, n, n),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), "abc", cand, n, n),
               CandidateFilter::GOOD_CANDIDATE);
   }
 
@@ -287,7 +287,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
     cand->rid = 2;
     cand->key = "abc";
     cand->value = "abc";
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", cand, n, n),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), "abc", cand, n, n),
               CandidateFilter::GOOD_CANDIDATE);
   }
 
@@ -298,7 +298,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
     cand->rid = 1;
     cand->key = "abc";
     cand->value = "xyz";
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", cand, n, n),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), "abc", cand, n, n),
               CandidateFilter::GOOD_CANDIDATE);
   }
 }
@@ -320,8 +320,9 @@ TEST_P(CandidateFilterTestWithParam, KatakanaT13N) {
     n->key = "えびし";
     n->value = "abc";
     nodes[0] = n;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "abc", c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
     // Clear the internal set |seen_| to prevent "abc" from being filtered by
     // "seen" rule.
     filter->Reset();
@@ -340,8 +341,9 @@ TEST_P(CandidateFilterTestWithParam, KatakanaT13N) {
     n->key = "えびし";
     n->value = "abc";
     nodes[1] = n;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "abc", c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
   }
   {
     std::unique_ptr<CandidateFilter> filter(CreateCandidateFilter());
@@ -363,7 +365,8 @@ TEST_P(CandidateFilterTestWithParam, KatakanaT13N) {
     n2->key = "てすと";
     n2->value = "てすと";
     nodes[1] = n2;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abcてすと", c, nodes, nodes),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), "abcてすと", c, nodes,
+                                      nodes),
               CandidateFilter::BAD_CANDIDATE);
   }
 }
@@ -395,35 +398,40 @@ TEST_P(CandidateFilterTestWithParam, IsolatedWordOrGeneralSymbol) {
 
     node->prev->node_type = Node::NOR_NODE;
     node->next->node_type = Node::EOS_NODE;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "abc", c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
     // Clear the internal set |seen_| to prevent "abc" from being filtered by
     // "seen" rule.
     filter->Reset();
 
     node->prev->node_type = Node::BOS_NODE;
     node->next->node_type = Node::NOR_NODE;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "abc", c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
     filter->Reset();
 
     node->prev->node_type = Node::NOR_NODE;
     node->next->node_type = Node::NOR_NODE;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "abc", c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
     filter->Reset();
 
     node->prev->node_type = Node::BOS_NODE;
     node->next->node_type = Node::EOS_NODE;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "abc", c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
     filter->Reset();
 
     Node* backup_node = node->prev;
     node->prev = nullptr;
     node->next->node_type = Node::EOS_NODE;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "abc", c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
     filter->Reset();
 
     node->prev = backup_node;
@@ -431,8 +439,9 @@ TEST_P(CandidateFilterTestWithParam, IsolatedWordOrGeneralSymbol) {
     backup_node = node->next;
     node->prev->node_type = Node::BOS_NODE;
     node->next = nullptr;
-    EXPECT_EQ(filter->FilterCandidate(convreq, "abc", c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "abc", c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
     filter->Reset();
 
     node->next = backup_node;
@@ -471,8 +480,8 @@ TEST_F(CandidateFilterTest, IsolatedWordInMultipleNodes) {
 
   const std::vector<const Node*> const_nodes(nodes.begin(), nodes.end());
   const ConversionRequest convreq = ConvReq(ConversionRequest::CONVERSION);
-  EXPECT_EQ(filter->FilterCandidate(convreq, "abcisolatedxyz", c, const_nodes,
-                                    const_nodes),
+  EXPECT_EQ(filter->FilterCandidate(convreq.options(), "abcisolatedxyz", c,
+                                    const_nodes, const_nodes),
             CandidateFilter::BAD_CANDIDATE);
 }
 
@@ -486,7 +495,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   c1->key = "abc";
   c1->value = "abc";
   const ConversionRequest convreq1 = ConvReq(type);
-  EXPECT_EQ(filter->FilterCandidate(convreq1, "abc", c1, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq1.options(), "abc", c1, n, n),
             CandidateFilter::GOOD_CANDIDATE);
   // Clear the internal set |seen_| to prevent "abc" from being filtered by
   // "seen" rule.
@@ -497,12 +506,12 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   c2->value = "abc";
   // Once filter "abc" so that the filter memorizes it.
   const ConversionRequest convreq2 = ConvReq(ConversionRequest::CONVERSION);
-  EXPECT_EQ(filter->FilterCandidate(convreq2, "abc", c1, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq2.options(), "abc", c1, n, n),
             CandidateFilter::GOOD_CANDIDATE);
   // Candidates having the same value as c1 should be rejected but enumeration
   // should continue (i.e., STOP_ENUMERATION is not returned).
   const ConversionRequest convreq3 = ConvReq(type);
-  EXPECT_EQ(filter->FilterCandidate(convreq3, "abc", c2, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq3.options(), "abc", c2, n, n),
             CandidateFilter::BAD_CANDIDATE);
 
   Candidate* c3 = NewCandidate();
@@ -510,7 +519,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   c3->key = "def";
   c3->value = "def";
   // High structure cost should not Stop enumeration.
-  EXPECT_EQ(filter->FilterCandidate(convreq3, "def", c3, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq3.options(), "def", c3, n, n),
             CandidateFilter::BAD_CANDIDATE);
 
   Candidate* c4 = NewCandidate();
@@ -519,7 +528,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   c4->key = "ghi";
   c4->value = "ghi";
   // High cost candidate should be rejected.
-  EXPECT_EQ(filter->FilterCandidate(convreq3, "ghi", c4, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq3.options(), "ghi", c4, n, n),
             CandidateFilter::BAD_CANDIDATE);
 
   // Insert many valid candidates
@@ -528,7 +537,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
     Candidate* tmp = NewCandidate();
     tmp->key = std::to_string(i) + "test";
     tmp->value = tmp->key;
-    filter->FilterCandidate(convreq4, tmp->key, tmp, n, n);
+    filter->FilterCandidate(convreq4.options(), tmp->key, tmp, n, n);
   }
 
   Candidate* c5 = NewCandidate();
@@ -542,7 +551,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   c5->value = "ghi2";
   c5->value = "ghi2";
   const ConversionRequest convreq5 = ConvReq(type);
-  EXPECT_EQ(filter->FilterCandidate(convreq5, "ghi2", c5, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq5.options(), "ghi2", c5, n, n),
             CandidateFilter::STOP_ENUMERATION);
 }
 
@@ -558,7 +567,7 @@ TEST_P(CandidateFilterTestWithParam, Regression3437022) {
   c1->value = "test_value";
 
   const ConversionRequest convreq = ConvReq(type);
-  EXPECT_EQ(filter->FilterCandidate(convreq, "test_key", c1, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq.options(), "test_key", c1, n, n),
             CandidateFilter::GOOD_CANDIDATE);
   // Clear the internal set |seen_| to prevent "test_key" from being filtered by
   // "seen" rule.
@@ -570,7 +579,7 @@ TEST_P(CandidateFilterTestWithParam, Regression3437022) {
               IsSuppressedEntry("test_key", "test_value"))
       .WillRepeatedly(Return(true));
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c1->key, c1, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq.options(), c1->key, c1, n, n),
             CandidateFilter::BAD_CANDIDATE);
 
   c1->key = "test_key_suffix";
@@ -578,15 +587,17 @@ TEST_P(CandidateFilterTestWithParam, Regression3437022) {
   c1->content_key = "test_key";
   c1->content_value = "test_value";
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, "test_key_suffix", c1, n, n),
-            CandidateFilter::BAD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), "test_key_suffix", c1, n, n),
+      CandidateFilter::BAD_CANDIDATE);
 
   ::testing::Mock::VerifyAndClearExpectations(&mock_user_dictionary_);
   EXPECT_CALL(mock_user_dictionary_, IsSuppressedEntry(_, _))
       .WillRepeatedly(Return(false));
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, "test_key_suffix", c1, n, n),
-            CandidateFilter::GOOD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), "test_key_suffix", c1, n, n),
+      CandidateFilter::GOOD_CANDIDATE);
 }
 
 TEST_P(CandidateFilterTestWithParam, FilterRealtimeConversionTest) {
@@ -616,7 +627,7 @@ TEST_P(CandidateFilterTestWithParam, FilterRealtimeConversionTest) {
   // Don't filter a candidate because it starts with alphabets and
   // is followed by a non-functional word.
   const ConversionRequest convreq = ConvReq(type);
-  EXPECT_EQ(filter->FilterCandidate(convreq, "PCてすと", c1, n, n),
+  EXPECT_EQ(filter->FilterCandidate(convreq.options(), "PCてすと", c1, n, n),
             CandidateFilter::GOOD_CANDIDATE);
 }
 
@@ -651,9 +662,9 @@ TEST_P(CandidateFilterTestWithParam, DoNotFilterExchangeableCandidates) {
   c1->structure_cost = 1000;
 
   // Good top candidate
-  ASSERT_EQ(
-      CandidateFilter::GOOD_CANDIDATE,
-      filter->FilterCandidate(convreq, c1->key, c1, top_nodes, top_nodes));
+  ASSERT_EQ(CandidateFilter::GOOD_CANDIDATE,
+            filter->FilterCandidate(convreq.options(), c1->key, c1, top_nodes,
+                                    top_nodes));
 
   {
     Node* n1 = NewNode();
@@ -679,8 +690,9 @@ TEST_P(CandidateFilterTestWithParam, DoNotFilterExchangeableCandidates) {
   c2->cost = 12000;
   c2->structure_cost = 7500;  // has big structure cost
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c2->key, c2, top_nodes, nodes),
-            CandidateFilter::GOOD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c2->key, c2, top_nodes, nodes),
+      CandidateFilter::GOOD_CANDIDATE);
 
   nodes.clear();
   {
@@ -714,8 +726,9 @@ TEST_P(CandidateFilterTestWithParam, DoNotFilterExchangeableCandidates) {
   c3->cost = 12000;
   c3->structure_cost = 7500;  // has big structure cost
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c3->key, c3, top_nodes, nodes),
-            CandidateFilter::GOOD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c3->key, c3, top_nodes, nodes),
+      CandidateFilter::GOOD_CANDIDATE);
 }
 
 TEST_P(CandidateFilterTestWithParam,
@@ -774,10 +787,12 @@ TEST_P(CandidateFilterTestWithParam,
   c2->cost = 12000;
   c2->structure_cost = 8000;  // has big structure cost
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c1->key, c1, nodes1, nodes1),
-            CandidateFilter::GOOD_CANDIDATE);
-  EXPECT_EQ(filter->FilterCandidate(convreq, c2->key, c2, nodes1, nodes2),
-            CandidateFilter::BAD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c1->key, c1, nodes1, nodes1),
+      CandidateFilter::GOOD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c2->key, c2, nodes1, nodes2),
+      CandidateFilter::BAD_CANDIDATE);
 }
 
 TEST_P(CandidateFilterTestWithParam, NotFilteringAntiPhraseNode) {
@@ -813,7 +828,8 @@ TEST_P(CandidateFilterTestWithParam, NotFilteringAntiPhraseNode) {
     c->cost = 6000;
     c->structure_cost = 500;
 
-    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, top_nodes, top_nodes),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), c->key, c, top_nodes,
+                                      top_nodes),
               CandidateFilter::GOOD_CANDIDATE);
   }
   {
@@ -845,8 +861,9 @@ TEST_P(CandidateFilterTestWithParam, NotFilteringAntiPhraseNode) {
     c->cost = 6000;
     c->structure_cost = 500;
 
-    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, top_nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), c->key, c, top_nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
   }
 }
 
@@ -880,8 +897,9 @@ TEST_P(CandidateFilterTestWithParam, FilterMultipleNumberNodesWord) {
   c1->cost = 6000;
   c1->structure_cost = 500;
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c1->key, c1, nodes1, nodes1),
-            CandidateFilter::BAD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c1->key, c1, nodes1, nodes1),
+      CandidateFilter::BAD_CANDIDATE);
 
   std::vector<const Node*> nodes2;
   {
@@ -901,8 +919,9 @@ TEST_P(CandidateFilterTestWithParam, FilterMultipleNumberNodesWord) {
   c2->cost = 6000;
   c2->structure_cost = 5000;
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c2->key, c2, nodes1, nodes2),
-            CandidateFilter::GOOD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c2->key, c2, nodes1, nodes2),
+      CandidateFilter::GOOD_CANDIDATE);
 
   std::vector<const Node*> nodes3;
   {
@@ -943,8 +962,9 @@ TEST_P(CandidateFilterTestWithParam, FilterMultipleNumberNodesWord) {
   c3->cost = 6000;
   c3->structure_cost = 500;
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c3->key, c3, nodes1, nodes3),
-            CandidateFilter::GOOD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c3->key, c3, nodes1, nodes3),
+      CandidateFilter::GOOD_CANDIDATE);
 }
 
 TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
@@ -981,8 +1001,9 @@ TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
   c1->cost = 1000;
   c1->structure_cost = 50;
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c1->key, c1, nodes1, nodes1),
-            CandidateFilter::BAD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c1->key, c1, nodes1, nodes1),
+      CandidateFilter::BAD_CANDIDATE);
 
   std::vector<const Node*> nodes2;
   {
@@ -1009,8 +1030,9 @@ TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
   c2->cost = 1000;
   c2->structure_cost = 50;
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c2->key, c2, nodes2, nodes2),
-            CandidateFilter::BAD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c2->key, c2, nodes2, nodes2),
+      CandidateFilter::BAD_CANDIDATE);
 
   std::vector<const Node*> nodes3;
   {
@@ -1037,8 +1059,9 @@ TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
   c3->cost = 1000;
   c3->structure_cost = 50;
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c3->key, c3, nodes3, nodes3),
-            CandidateFilter::GOOD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c3->key, c3, nodes3, nodes3),
+      CandidateFilter::GOOD_CANDIDATE);
 
   std::vector<const Node*> nodes4;
   {
@@ -1070,8 +1093,9 @@ TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
   c4->cost = 1000;
   c4->structure_cost = 50;
 
-  EXPECT_EQ(filter->FilterCandidate(convreq, c4->key, c4, nodes4, nodes4),
-            CandidateFilter::GOOD_CANDIDATE);
+  EXPECT_EQ(
+      filter->FilterCandidate(convreq.options(), c4->key, c4, nodes4, nodes4),
+      CandidateFilter::GOOD_CANDIDATE);
 }
 
 TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterConversion) {
@@ -1095,8 +1119,9 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterConversion) {
     c->structure_cost = 2000;
 
     const ConversionRequest convreq = ConvReq(ConversionRequest::CONVERSION);
-    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), c->key, c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
   }
 }
 
@@ -1123,12 +1148,14 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterSuggestion) {
     c->structure_cost = 2000;
 
     // Test case where "フィルター" is suggested from key "ふぃる".
-    EXPECT_EQ(filter->FilterCandidate(convreq, "ふぃる", c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "ふぃる", c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
     filter->Reset();
     // Test case where "フィルター" is suggested from key "ふぃるたー".
-    EXPECT_EQ(filter->FilterCandidate(convreq, n->key, c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), n->key, c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
   }
   // Next test bigram case.
   {
@@ -1155,12 +1182,14 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterSuggestion) {
     c->structure_cost = 2000;
 
     // Test case where "これはフィルター" is suggested from key "これはふ".
-    EXPECT_EQ(filter->FilterCandidate(convreq, "これはふ", c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "これはふ", c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
     filter->Reset();
     // Test case where "これはフィルター" is suggested from the same key.
-    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), c->key, c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
   }
   // TODO(noriyukit): This is a limitation of current implementation. If
   // multiple nodes constitute a word in suggestion filter, it cannot be
@@ -1195,12 +1224,14 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterSuggestion) {
 
     // Test case where "これはフィルター" is suggested from key "これはふ".
     // Since "フィルター" is constructed from two nodes, it cannot be filtered.
-    EXPECT_EQ(filter->FilterCandidate(convreq, "これはふ", c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "これはふ", c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
     filter->Reset();
     // Test case where "これはフィルター" is suggested from the same key.
-    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), c->key, c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
   }
 }
 
@@ -1228,14 +1259,16 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterPrediction) {
     c->structure_cost = 2000;
 
     // Test case where "フィルター" is predicted from key "ふぃる".
-    EXPECT_EQ(filter->FilterCandidate(convreq, "ふぃる", c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "ふぃる", c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
     // Test case where "フィルター" is predicted from key "ふぃるたー". Note the
     // difference from the case of SUGGESTION, now words in suggestion filter
     // are good if its key is equal to the original key.
     filter->Reset();
-    EXPECT_EQ(filter->FilterCandidate(convreq, n->key, c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), n->key, c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
   }
   // Next test bigram case.
   {
@@ -1262,12 +1295,14 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterPrediction) {
     c->structure_cost = 2000;
 
     // Test case where "これはフィルター" is predicted from key "これはふ".
-    EXPECT_EQ(filter->FilterCandidate(convreq, "これはふ", c, nodes, nodes),
-              CandidateFilter::BAD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "これはふ", c, nodes, nodes),
+        CandidateFilter::BAD_CANDIDATE);
     filter->Reset();
     // Test case where "これはフィルター" is predicted from the same key.
-    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), c->key, c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
   }
   // TODO(noriyukit): This is a limitation of current implementation. If
   // multiple nodes constitute a word in suggestion filter, it cannot be
@@ -1302,12 +1337,14 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterPrediction) {
     c->structure_cost = 2000;
 
     // Test case where "これはフィルター" is predicted from key "これはふ".
-    EXPECT_EQ(filter->FilterCandidate(convreq, "これはふ", c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), "これはふ", c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
     filter->Reset();
     // Test case where "これはフィルター" is predicted from the same key.
-    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, nodes, nodes),
-              CandidateFilter::GOOD_CANDIDATE);
+    EXPECT_EQ(
+        filter->FilterCandidate(convreq.options(), c->key, c, nodes, nodes),
+        CandidateFilter::GOOD_CANDIDATE);
   }
 }
 
@@ -1339,10 +1376,12 @@ TEST_F(CandidateFilterTest, ReverseConversion) {
     c->content_value = c->value;
     c->cost = 1000;
     c->structure_cost = 2000;
-    EXPECT_EQ(filter->FilterCandidate(convreq, kHonHiragana, c, nodes, nodes),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), kHonHiragana, c, nodes,
+                                      nodes),
               CandidateFilter::GOOD_CANDIDATE);
     // Duplicates should be removed.
-    EXPECT_EQ(filter->FilterCandidate(convreq, kHonHiragana, c, nodes, nodes),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), kHonHiragana, c, nodes,
+                                      nodes),
               CandidateFilter::BAD_CANDIDATE);
   }
   {
@@ -1354,7 +1393,7 @@ TEST_F(CandidateFilterTest, ReverseConversion) {
     c->content_value = c->value;
     c->cost = 1000;
     c->structure_cost = 2000;
-    EXPECT_EQ(filter->FilterCandidate(convreq, " ", c, nodes, nodes),
+    EXPECT_EQ(filter->FilterCandidate(convreq.options(), " ", c, nodes, nodes),
               CandidateFilter::GOOD_CANDIDATE);
   }
 }

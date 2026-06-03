@@ -76,6 +76,7 @@
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
+#include "request/options.h"
 #include "rewriter/rewriter_interface.h"
 
 namespace mozc {
@@ -1498,8 +1499,7 @@ std::vector<std::string> GetExtraFormats(
     return TRAVERSE_DONE;
   });
 
-  ConversionRequest crequest;
-  dictionary->LookupExact(format_key, crequest, &cb);
+  dictionary->LookupExact(format_key, ConversionOptions{}, &cb);
   return extra_formats;
 }
 }  // namespace

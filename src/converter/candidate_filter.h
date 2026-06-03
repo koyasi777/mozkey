@@ -44,7 +44,7 @@
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_matcher.h"
 #include "prediction/suggestion_filter.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 
 namespace mozc {
 namespace converter {
@@ -103,7 +103,7 @@ class CandidateFilter {
   //
   // top_nodes: Node vector for the top candidate for the segment.
   // nodes: Node vector for the target candidate
-  ResultType FilterCandidate(const ConversionRequest& request,
+  ResultType FilterCandidate(const ConversionOptions& options,
                              absl::string_view original_key,
                              const converter::Candidate* candidate,
                              absl::Span<const Node* const> top_nodes,
@@ -113,11 +113,11 @@ class CandidateFilter {
   void Reset();
 
  private:
-  ResultType CheckRequestType(const ConversionRequest& request,
+  ResultType CheckRequestType(const ConversionOptions& options,
                               absl::string_view original_key,
                               const converter::Candidate& candidate,
                               absl::Span<const Node* const> nodes) const;
-  ResultType FilterCandidateInternal(const ConversionRequest& request,
+  ResultType FilterCandidateInternal(const ConversionOptions& options,
                                      absl::string_view original_key,
                                      const converter::Candidate* candidate,
                                      absl::Span<const Node* const> top_nodes,

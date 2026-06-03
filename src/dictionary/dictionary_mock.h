@@ -37,7 +37,7 @@
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/dictionary_token.h"
 #include "protocol/user_dictionary_storage.pb.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 #include "testing/gmock.h"
 
 namespace mozc {
@@ -54,25 +54,24 @@ class MockDictionary : public DictionaryInterface {
   MOCK_METHOD(bool, HasKey, (absl::string_view key), (const, override));
   MOCK_METHOD(bool, HasValue, (absl::string_view value), (const, override));
   MOCK_METHOD(void, LookupPredictive,
-              (absl::string_view key,
-               const ConversionRequest& conversion_request, Callback* callback),
+              (absl::string_view key, const ConversionOptions& options,
+               Callback* callback),
               (const, override));
   MOCK_METHOD(void, LookupPrefix,
-              (absl::string_view key,
-               const ConversionRequest& conversion_request, Callback* callback),
+              (absl::string_view key, const ConversionOptions& options,
+               Callback* callback),
               (const, override));
   MOCK_METHOD(void, LookupExact,
-              (absl::string_view key,
-               const ConversionRequest& conversion_request, Callback* callback),
+              (absl::string_view key, const ConversionOptions& options,
+               Callback* callback),
               (const, override));
   MOCK_METHOD(void, LookupReverse,
-              (absl::string_view str,
-               const ConversionRequest& conversion_request, Callback* callback),
+              (absl::string_view str, const ConversionOptions& options,
+               Callback* callback),
               (const, override));
   MOCK_METHOD(bool, LookupComment,
               (absl::string_view key, absl::string_view value,
-               const ConversionRequest& conversion_request,
-               std::string* comment),
+               const ConversionOptions& options, std::string* comment),
               (const, override));
   MOCK_METHOD(void, PopulateReverseLookupCache, (absl::string_view str),
               (const, override));

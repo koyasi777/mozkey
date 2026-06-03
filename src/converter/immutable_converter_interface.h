@@ -31,7 +31,7 @@
 #define MOZC_CONVERTER_IMMUTABLE_CONVERTER_INTERFACE_H_
 
 #include "converter/segments.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 
 namespace mozc {
 
@@ -41,7 +41,7 @@ class ImmutableConverterInterface {
  public:
   virtual ~ImmutableConverterInterface() = default;
 
-  [[nodiscard]] virtual bool Convert(const ConversionRequest& request,
+  [[nodiscard]] virtual bool Convert(const ConversionOptions& options,
                                      Segments* segments) const = 0;
 
  protected:

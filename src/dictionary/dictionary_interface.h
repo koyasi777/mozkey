@@ -38,7 +38,7 @@
 #include "absl/strings/string_view.h"
 #include "dictionary/dictionary_token.h"
 #include "protocol/user_dictionary_storage.pb.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 
 namespace mozc {
 namespace dictionary {
@@ -149,14 +149,13 @@ class DictionaryInterface {
     return false;
   }
 
-  // Legacy interfaces with conversion_request.
-  // TODO(taku): Gets rid of the dependency from Dictionary to
-  // ConversionRequest.
+  // Interfaces with conversion_options.
+  // Decoupled from ConversionRequest.
 
   // Looks up values whose keys start from the key.
   // (e.g. key = "abc" -> {"abc": "ABC", "abcd": "ABCD"})
   virtual void LookupPredictive(absl::string_view key,
-                                const ConversionRequest& conversion_request,
+                                const ConversionOptions& options,
                                 Callback* callback) const {
     return LookupPredictive(key, callback);
   }
@@ -164,7 +163,7 @@ class DictionaryInterface {
   // Looks up values whose keys are prefixes of the key.
   // (e.g. key = "abc" -> {"abc": "ABC", "a": "A"})
   virtual void LookupPrefix(absl::string_view key,
-                            const ConversionRequest& conversion_request,
+                            const ConversionOptions& options,
                             Callback* callback) const {
     return LookupPrefix(key, callback);
   }
@@ -172,7 +171,7 @@ class DictionaryInterface {
   // Looks up values whose keys are same with the key.
   // (e.g. key = "abc" -> {"abc": "ABC"})
   virtual void LookupExact(absl::string_view key,
-                           const ConversionRequest& conversion_request,
+                           const ConversionOptions& options,
                            Callback* callback) const {
     return LookupExact(key, callback);
   }
@@ -180,7 +179,7 @@ class DictionaryInterface {
   // For reverse lookup, the reading is stored in Token::value and the word
   // is stored in Token::key.
   virtual void LookupReverse(absl::string_view str,
-                             const ConversionRequest& conversion_request,
+                             const ConversionOptions& options,
                              Callback* callback) const {
     return LookupReverse(str, callback);
   }
@@ -189,7 +188,7 @@ class DictionaryInterface {
   // doesn't exist in this dictionary or user comment is empty, bool is
   // returned and string is kept as-is.
   virtual bool LookupComment(absl::string_view key, absl::string_view value,
-                             const ConversionRequest& conversion_request,
+                             const ConversionOptions& options,
                              std::string* comment) const {
     return LookupComment(key, value, comment);
   }
