@@ -355,7 +355,8 @@ void ClearModifyerKeyIfNeeded(const KeyEvent* key,
 BYTE GetPhysicalVirtualKey(const VirtualKey& virtual_key, UINT scan_code) {
   switch (virtual_key.virtual_key()) {
     case VK_SHIFT:
-    case VK_CONTROL: {
+    case VK_CONTROL:
+    case VK_MENU: {
       const UINT physical_virtual_key =
           ::MapVirtualKeyW(scan_code, MAPVK_VSC_TO_VK_EX);
       switch (physical_virtual_key) {
@@ -363,6 +364,8 @@ BYTE GetPhysicalVirtualKey(const VirtualKey& virtual_key, UINT scan_code) {
         case VK_RSHIFT:
         case VK_LCONTROL:
         case VK_RCONTROL:
+        case VK_LMENU:
+        case VK_RMENU:
           return static_cast<BYTE>(physical_virtual_key);
         default:
           break;
@@ -486,6 +489,16 @@ bool ConvertToKeyEventMain(const VirtualKey& virtual_key, UINT scan_code,
     modifer_keys->insert(KeyEvent::ALT);
   }
 
+  if (keyboard_status.IsPressed(VK_LMENU)) {
+    modifer_keys->insert(KeyEvent::ALT);
+    modifer_keys->insert(KeyEvent::LEFT_ALT);
+  }
+
+  if (keyboard_status.IsPressed(VK_RMENU)) {
+    modifer_keys->insert(KeyEvent::ALT);
+    modifer_keys->insert(KeyEvent::RIGHT_ALT);
+  }
+
   if (keyboard_status.IsPressed(VK_CAPITAL)) {
     modifer_keys->insert(KeyEvent::CAPS);
   }
@@ -536,6 +549,16 @@ bool ConvertToKeyEventMain(const VirtualKey& virtual_key, UINT scan_code,
 
     case VK_MENU:
       modifer_keys->insert(KeyEvent::ALT);
+      return true;
+
+    case VK_LMENU:
+      modifer_keys->insert(KeyEvent::ALT);
+      modifer_keys->insert(KeyEvent::LEFT_ALT);
+      return true;
+
+    case VK_RMENU:
+      modifer_keys->insert(KeyEvent::ALT);
+      modifer_keys->insert(KeyEvent::RIGHT_ALT);
       return true;
 
     case VK_CAPITAL:
@@ -823,6 +846,8 @@ KeyEventHandlerResult KeyEventHandler::HandleKey(
     case VK_LCONTROL:
     case VK_RCONTROL:
     case VK_MENU:
+    case VK_LMENU:
+    case VK_RMENU:
       if (is_key_down) {
         // Will not eat this message.
         result.succeeded = true;

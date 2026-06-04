@@ -46,6 +46,8 @@ class ConfigSnapshot {
     std::vector<KeyInformation> direct_mode_keys;
     std::vector<KeyInformation> direct_mode_ime_off_keys;
     std::vector<KeyInformation> active_mode_ime_on_keys;
+    std::vector<KeyInformation> active_mode_ime_off_keys;
+    std::vector<KeyInformation> direct_mode_ime_on_keys;
 
     Info();
   };

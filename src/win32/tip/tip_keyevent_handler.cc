@@ -580,6 +580,121 @@ HRESULT TipKeyeventHandler::OnKeyUp(TipTextService* text_service,
   return OnKey(text_service, context, kKeyUp, wparam, lparam, eaten);
 }
 
+HRESULT TipKeyeventHandler::OnModifierTap(TipTextService* text_service,
+                                          ITfContext* context, BYTE vk) {
+  DCHECK(text_service);
+  TipPrivateContext* private_context = text_service->GetPrivateContext(context);
+  if (private_context == nullptr) {
+    return S_OK;
+  }
+
+  BYTE key_state[256] = {};
+  if (!::GetKeyboardState(key_state)) {
+    return S_OK;
+  }
+
+  bool open = false;
+  uint32_t logical_mode = 0;
+  uint32_t visible_mode = 0;
+  if (!GetOpenAndMode(text_service, context, &open, &logical_mode,
+                      &visible_mode)) {
+    return S_OK;
+  }
+
+  const KeyboardStatus keyboard_status(key_state);
+  const VirtualKey virtual_key = VirtualKey::FromVirtualKey(vk);
+  // Left Alt: scan code 0x38. Right Alt: extended scan code 0xE038. The scan
+  // code lets ConvertToKeyEvent set the LEFT_ALT / RIGHT_ALT modifier so the
+  // server keymap can match "LeftAlt" / "RightAlt".
+  const UINT scan_code = (vk == VK_RMENU) ? 0xE038 : 0x38;
+
+  std::unique_ptr<Win32KeyboardInterface> keyboard(
+      Win32KeyboardInterface::CreateDefault());
+  // A lone IMEOn/IMEOff (or Commit) command never consults surrounding text, so
+  // use the lightweight context fill and skip the synchronous surrounding-text
+  // round-trip that FillMozcContextForOnKey would perform.
+  Context mozc_context;
+  FillMozcContextCommon(text_service, context, &mozc_context);
+
+  // The server recognizes a lone modifier toggle differently depending on the
+  // current state (see KeyEventHandler::HandleKey). OnModifierTap is only
+  // invoked (by the keyboard hook) when the tap will actually toggle in the
+  // current state, so deriving the edge from the open state is correct here:
+  //   * While the IME is ON, an active-mode command (e.g. Commit|IMEOff) fires
+  //     on the modifier *key-up* whose key matches the last key pressed.
+  //   * While the IME is OFF, a direct-mode force-activation command (IMEOn)
+  //     fires only on the modifier *key-down*.
+  // So drive a key-down when the IME is off and a key-up when it is on.
+  const bool is_key_down = !open;
+  InputState ime_state;
+  ime_state.logical_conversion_mode = logical_mode;
+  ime_state.visible_conversion_mode = visible_mode;
+  ime_state.open = open;
+  // Pretend this modifier was the last key pressed so the key-up case is
+  // treated as a tap.
+  ime_state.last_down_key = virtual_key;
+
+  InputState next_state;
+  commands::Output output;
+  const KeyEventHandlerResult result = KeyEventHandler::ImeToAsciiEx(
+      virtual_key, scan_code, is_key_down, keyboard_status,
+      private_context->input_behavior(), ime_state, mozc_context,
+      private_context->GetClient(), keyboard.get(), &next_state, &output);
+
+  if (!result.succeeded || !result.should_be_sent_to_server) {
+    return S_OK;
+  }
+
+  *private_context->mutable_last_down_key() = next_state.last_down_key;
+
+  // Apply the IME open/close and conversion mode from the server output here,
+  // outside of any edit session. The normal output path applies these inside a
+  // document-locked edit session (UpdatePrivateContext), but that lock cannot
+  // be obtained while the IME is off, which would otherwise make turning the
+  // IME *on* via a right Alt tap silently fail. Routing through the input mode
+  // manager keeps its internal state in sync (unlike a bare SetIMEOpen).
+  //
+  // TODO(mozkey): This open/close + conversion-mode block mirrors
+  // tip_edit_session_impl.cc's UpdatePrivateContext. A shared helper would
+  // avoid the duplication, but the natural homes create a dependency cycle
+  // (tip_keyevent_handler -> tip_edit_session -> ... -> tip_keyevent_handler),
+  // so it is left inline for now.
+  if (output.has_status()) {
+    const commands::Status &status = output.status();
+    TipInputModeManager *input_mode_manager =
+        text_service->GetThreadContext()->GetInputModeManager();
+    const TipInputModeManager::NotifyActionSet action_set =
+        input_mode_manager->OnReceiveCommand(
+            status.activated(), status.comeback_mode(), status.mode());
+    if ((action_set & TipInputModeManager::kNotifySystemOpenClose) ==
+        TipInputModeManager::kNotifySystemOpenClose) {
+      TipStatus::SetIMEOpen(text_service->GetThreadManager(),
+                            text_service->GetClientID(),
+                            input_mode_manager->GetEffectiveOpenClose());
+    }
+    if ((action_set & TipInputModeManager::kNotifySystemConversionMode) ==
+        TipInputModeManager::kNotifySystemConversionMode) {
+      const CompositionMode mozc_mode = static_cast<CompositionMode>(
+          input_mode_manager->GetEffectiveConversionMode());
+      uint32_t native_mode = 0;
+      if (ConversionModeUtil::ToNativeMode(
+              mozc_mode, private_context->input_behavior().prefer_kana_input,
+              &native_mode)) {
+        TipStatus::SetInputModeConversion(text_service->GetThreadManager(),
+                                          text_service->GetClientID(),
+                                          native_mode);
+      }
+    }
+  }
+
+  // Apply the rest of the output (committed text, composition, candidates)
+  // asynchronously: a synchronous edit session is only allowed inside a TSF
+  // key-event handler, and OnModifierTap runs from the task window message
+  // loop.
+  TipEditSession::OnOutputReceivedAsync(text_service, context, output);
+  return S_OK;
+}
+
 }  // namespace tsf
 }  // namespace win32
 }  // namespace mozc

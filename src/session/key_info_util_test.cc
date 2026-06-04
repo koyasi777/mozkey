@@ -88,6 +88,49 @@ TEST(KeyInfoUtilTest, ExtractSortedDirectModeKeys) {
   }
 }
 
+TEST(KeyInfoUtilTest, ExtractActiveModeImeOffAndDirectModeImeOnKeys) {
+  Config config;
+  ConfigHandler::GetDefaultConfig(&config);
+
+  // Mirrors the documented left/right Alt IME toggle configuration. The active
+  // modes use the "Commit|IMEOff" command *sequence*, which must still be
+  // recognized as an IMEOff binding.
+  constexpr char kCustomKeymapTable[] =
+      "status\tkey\tcommand\n"
+      "DirectInput\tRightAlt\tIMEOn\n"
+      "Precomposition\tLeftAlt\tIMEOff\n"
+      "Composition\tLeftAlt\tCommit|IMEOff\n"
+      "Conversion\tLeftAlt\tCommit|IMEOff\n";
+  config.set_session_keymap(Config::CUSTOM);
+  config.set_custom_keymap_table(kCustomKeymapTable);
+
+  {
+    // LeftAlt turns the IME off in the active modes, including via the
+    // "Commit|IMEOff" sequence.
+    const auto& actual = KeyInfoUtil::ExtractSortedActiveModeImeOffKeys(config);
+    std::vector<KeyInformation> expected;
+    PushKey("LeftAlt", &expected);
+    ASSERT_EQ(actual.size(), expected.size());
+    EXPECT_EQ(actual[0], expected[0]);
+
+    KeyEvent left_alt;
+    KeyParser::ParseKey("LeftAlt", &left_alt);
+    EXPECT_TRUE(KeyInfoUtil::ContainsKey(actual, left_alt));
+    KeyEvent right_alt;
+    KeyParser::ParseKey("RightAlt", &right_alt);
+    EXPECT_FALSE(KeyInfoUtil::ContainsKey(actual, right_alt));
+  }
+
+  {
+    // RightAlt turns the IME on from direct mode.
+    const auto& actual = KeyInfoUtil::ExtractSortedDirectModeImeOnKeys(config);
+    std::vector<KeyInformation> expected;
+    PushKey("RightAlt", &expected);
+    ASSERT_EQ(actual.size(), expected.size());
+    EXPECT_EQ(actual[0], expected[0]);
+  }
+}
+
 TEST(KeyInfoUtilTest, ContainsKey) {
   std::vector<KeyInformation> direct_mode_keys;
   PushKey("HENKAN", &direct_mode_keys);

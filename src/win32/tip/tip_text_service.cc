@@ -57,7 +57,10 @@
 #include "base/win32/hresult.h"
 #include "base/win32/hresultor.h"
 #include "base/win32/win_util.h"
+#include "composer/key_event_util.h"
 #include "protocol/commands.pb.h"
+#include "session/key_info_util.h"
+#include "win32/base/input_state.h"
 #include "win32/base/win32_window_util.h"
 #include "win32/tip/tip_display_attributes.h"
 #include "win32/tip/tip_dll_module.h"
@@ -111,7 +114,20 @@ volatile bool g_module_unloaded = false;
 volatile DWORD g_tls_index = TLS_OUT_OF_INDEXES;
 
 constexpr UINT kUpdateUIMessage = WM_USER;
+// Posted from the Alt-tap keyboard hook to the task window to drive the
+// synthetic modifier tap. wParam is the modifier virtual key (VK_LMENU or
+// VK_RMENU).
+constexpr UINT kAltTapToggleMessage = WM_USER + 1;
 constexpr UINT_PTR kDelayedSessionCommandTimerId = 1;
+
+// The "menu mask" key injected to prevent the application menu from activating
+// on a lone Alt tap. VK 0xE8 is unassigned (the same key AutoHotkey uses for
+// this purpose), so it has no effect on applications.
+constexpr WORD kMenuMaskVk = 0xE8;
+
+// Marker placed in dwExtraInfo of the synthetic input injected by
+// InjectAltDisguise so that this and other tools can recognize it as our own.
+constexpr ULONG_PTR kAltDisguiseExtraInfo = 0x6D7A4B79;  // 'mzKy'
 
 bool NeedsRendererUpdateOnLayoutChange(TipTextService* text_service,
                                        ITfContext* context) {
@@ -490,6 +506,9 @@ class TipTextServiceImpl
       return S_OK;
     }
 
+    // Remove the Alt-tap keyboard hook if it is still installed.
+    UninstallAltTapHook();
+
     // Stop advising the ITfThreadFocusSink events.
     UninitThreadFocusSink();
 
@@ -754,6 +773,9 @@ class TipTextServiceImpl
                           ITfDocumentMgr* previous) override {
     GetThreadContext()->IncrementFocusRevision();
     OnDocumentMgrChanged(focused);
+    // The private context (and thus the Alt-tap configuration) may not have
+    // been ready when OnSetThreadFocus() fired. Retry installing here.
+    MaybeInstallAltTapHook();
     return S_OK;
   }
   STDMETHODIMP OnPushContext(ITfContext* context) override {
@@ -790,10 +812,12 @@ class TipTextServiceImpl
       return S_OK;
     }
     TipUiHandler::OnFocusChange(this, document_manager.get());
+    MaybeInstallAltTapHook();
     return S_OK;
   }
   STDMETHODIMP OnKillThreadFocus() override {
     // See the comment in OnSetThreadFocus().
+    UninstallAltTapHook();
     TipUiHandler::OnFocusChange(this, nullptr);
     return S_OK;
   }
@@ -1065,6 +1089,213 @@ class TipTextServiceImpl
       return nullptr;
     }
     return static_cast<TipTextServiceImpl*>(::TlsGetValue(g_tls_index));
+  }
+
+  // Builds the KeyInformation for a lone left/right Alt tap (ALT + LEFT_ALT or
+  // ALT + RIGHT_ALT), matching how the keymap "LeftAlt" / "RightAlt" entries are
+  // parsed. Returns false if the information could not be built.
+  static bool BuildAltKeyInformation(DWORD alt_vk, KeyInformation* key_info) {
+    commands::KeyEvent key_event;
+    key_event.add_modifier_keys(commands::KeyEvent::ALT);
+    key_event.add_modifier_keys(alt_vk == VK_LMENU
+                                    ? commands::KeyEvent::LEFT_ALT
+                                    : commands::KeyEvent::RIGHT_ALT);
+    return KeyEventUtil::GetKeyInformation(key_event, key_info);
+  }
+
+  // Returns true if the user has actually bound a left or right Alt tap to an
+  // IME on/off command. Note that this must check for the *Alt* keys
+  // specifically: active_mode_ime_off_keys / direct_mode_ime_on_keys contain
+  // every key bound to IMEOff / IMEOn (Hankaku/Zenkaku, Henkan, Ctrl-based
+  // shortcuts, ...), which are non-empty in virtually every config, so an
+  // emptiness check would install the keyboard hook for users who never
+  // configured Alt.
+  bool IsAltTapEnabled() {
+    TipPrivateContext* private_context = GetFocusedPrivateContext();
+    if (private_context == nullptr) {
+      return false;
+    }
+    const InputBehavior& behavior = private_context->input_behavior();
+    for (const DWORD alt_vk : {VK_LMENU, VK_RMENU}) {
+      KeyInformation key_info;
+      if (!BuildAltKeyInformation(alt_vk, &key_info)) {
+        continue;
+      }
+      if (KeyInfoUtil::ContainsKeyInformation(behavior.active_mode_ime_off_keys,
+                                              key_info) ||
+          KeyInfoUtil::ContainsKeyInformation(behavior.direct_mode_ime_on_keys,
+                                              key_info)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Installs the low-level keyboard hook used to detect lone Alt taps, but only
+  // while this thread owns the OS keyboard focus and the feature is enabled.
+  // Idempotent.
+  void MaybeInstallAltTapHook() {
+    if (alt_tap_hook_ != nullptr) {
+      return;
+    }
+    BOOL thread_focus = FALSE;
+    if (thread_mgr_ == nullptr ||
+        FAILED(thread_mgr_->IsThreadFocus(&thread_focus)) || !thread_focus) {
+      return;
+    }
+    if (!IsAltTapEnabled()) {
+      return;
+    }
+    alt_tap_pending_vk_ = 0;
+    const HMODULE module_handle = g_module;
+    alt_tap_hook_ = ::SetWindowsHookExW(WH_KEYBOARD_LL, AltTapKeyboardHookProc,
+                                        module_handle, 0);
+  }
+
+  void UninstallAltTapHook() {
+    if (alt_tap_hook_ == nullptr) {
+      return;
+    }
+    ::UnhookWindowsHookEx(alt_tap_hook_);
+    alt_tap_hook_ = nullptr;
+    alt_tap_pending_vk_ = 0;
+  }
+
+  // Called from the keyboard hook when a lone left/right Alt tap is detected.
+  // Returns true if the tap is reserved for IME toggling and therefore the
+  // Alt key-up should be swallowed (to suppress the application menu).
+  static bool OnAltTap(DWORD alt_vk) {
+    TipTextServiceImpl* self = Self();
+    if (self == nullptr || self->thread_mgr_ == nullptr ||
+        !::IsWindow(self->task_window_handle_)) {
+      return false;
+    }
+
+    // Only react when the keyboard focus is on an editable (non-disabled)
+    // context, so menus keep working where text input is not possible.
+    wil::com_ptr_nothrow<ITfDocumentMgr> document_mgr;
+    if (FAILED(self->thread_mgr_->GetFocus(&document_mgr)) || !document_mgr) {
+      return false;
+    }
+    wil::com_ptr_nothrow<ITfContext> context;
+    if (FAILED(document_mgr->GetTop(&context)) || !context) {
+      return false;
+    }
+    if (TipStatus::IsDisabledContext(context.get())) {
+      return false;
+    }
+    TipPrivateContext* private_context = self->GetPrivateContext(context.get());
+    if (private_context == nullptr) {
+      return false;
+    }
+    const InputBehavior& behavior = private_context->input_behavior();
+
+    // Look this Alt tap up in the configured IME on/off key lists, exactly as
+    // the server keymap would.
+    KeyInformation key_info;
+    if (!BuildAltKeyInformation(alt_vk, &key_info)) {
+      return false;
+    }
+    const bool is_off_key = KeyInfoUtil::ContainsKeyInformation(
+        behavior.active_mode_ime_off_keys, key_info);
+    const bool is_on_key = KeyInfoUtil::ContainsKeyInformation(
+        behavior.direct_mode_ime_on_keys, key_info);
+
+    // Only consume the Alt tap when it will actually toggle the IME in the
+    // *current* state: an active-mode off key while the IME is on, or a
+    // direct-mode on key while the IME is off. In any other state this tap is a
+    // no-op, so let the Alt key keep its normal (menu) behavior instead of
+    // swallowing it. This is what keeps a configured Alt key from breaking the
+    // application menu in the state where it has no IME effect.
+    const bool open = TipStatus::IsOpen(self->thread_mgr_.get());
+    const bool will_toggle = (open && is_off_key) || (!open && is_on_key);
+    if (!will_toggle) {
+      return false;
+    }
+
+    // Hand the actual processing to the task window, which runs in the normal
+    // message loop where the server key event and an async edit session can be
+    // driven safely (the server keymap decides the command, e.g. Commit|IMEOff
+    // or IMEOn, based on the current composition/open state).
+    ::PostMessageW(self->task_window_handle_, kAltTapToggleMessage,
+                   static_cast<WPARAM>(alt_vk), 0);
+    return true;
+  }
+
+  // Runs in the task window message loop: drives the synthetic modifier tap
+  // through the server keymap and applies the resulting output.
+  void OnAltTapToggle(BYTE alt_vk) {
+    if (thread_mgr_ == nullptr) {
+      return;
+    }
+    wil::com_ptr_nothrow<ITfDocumentMgr> document_mgr;
+    if (FAILED(thread_mgr_->GetFocus(&document_mgr)) || !document_mgr) {
+      return;
+    }
+    wil::com_ptr_nothrow<ITfContext> context;
+    if (FAILED(document_mgr->GetTop(&context)) || !context) {
+      return;
+    }
+    TipKeyeventHandler::OnModifierTap(this, context.get(), alt_vk);
+  }
+
+  // After a lone Alt tap is consumed, the real Alt key-up is swallowed. To
+  // keep the application's key state balanced (otherwise it believes Alt is
+  // still held) and to prevent the menu bar from activating, inject a benign
+  // "mask" key (pressed while Alt is logically down) followed by an Alt key-up.
+  static void InjectAltDisguise(DWORD alt_vk) {
+    INPUT inputs[3] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = kMenuMaskVk;
+    inputs[0].ki.dwExtraInfo = kAltDisguiseExtraInfo;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = kMenuMaskVk;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[1].ki.dwExtraInfo = kAltDisguiseExtraInfo;
+    inputs[2].type = INPUT_KEYBOARD;
+    inputs[2].ki.wVk = static_cast<WORD>(alt_vk);
+    inputs[2].ki.dwFlags =
+        KEYEVENTF_KEYUP | (alt_vk == VK_RMENU ? KEYEVENTF_EXTENDEDKEY : 0);
+    inputs[2].ki.dwExtraInfo = kAltDisguiseExtraInfo;
+    ::SendInput(3, inputs, sizeof(INPUT));
+  }
+
+  static LRESULT CALLBACK AltTapKeyboardHookProc(int code, WPARAM wparam,
+                                                 LPARAM lparam) {
+    // The hook callback runs on the thread that installed it, which is the
+    // thread whose TipTextServiceImpl is stored in TLS. Resolve it so the
+    // pending-tap state stays per-thread.
+    TipTextServiceImpl* self = Self();
+    if (self != nullptr && code == HC_ACTION) {
+      const auto* info = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
+      if (info != nullptr && (info->flags & LLKHF_INJECTED) == 0) {
+        const bool is_key_down =
+            (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN);
+        const bool is_key_up = (wparam == WM_KEYUP || wparam == WM_SYSKEYUP);
+        const DWORD vk = info->vkCode;
+        const bool is_alt = (vk == VK_LMENU || vk == VK_RMENU);
+        if (is_key_down) {
+          // A lone Alt press starts a potential tap. Any other key (including a
+          // second modifier or an auto-repeat of Alt) cancels it.
+          self->alt_tap_pending_vk_ =
+              (is_alt && self->alt_tap_pending_vk_ == 0) ? vk : 0;
+        } else if (is_key_up) {
+          if (is_alt && vk == self->alt_tap_pending_vk_) {
+            self->alt_tap_pending_vk_ = 0;
+            if (OnAltTap(vk)) {
+              // Swallow the real Alt key-up and replace it with a disguised
+              // sequence so the application neither activates its menu bar nor
+              // believes Alt is stuck down.
+              InjectAltDisguise(vk);
+              return 1;
+            }
+          } else if (is_alt) {
+            self->alt_tap_pending_vk_ = 0;
+          }
+        }
+      }
+    }
+    return ::CallNextHookEx(nullptr, code, wparam, lparam);
   }
 
   HRESULT OnDocumentMgrChanged(ITfDocumentMgr* document_mgr) {
@@ -1423,6 +1654,14 @@ class TipTextServiceImpl
         return 0;
       }
 
+      if (message == kAltTapToggleMessage) {
+        // Drive the synthetic modifier tap through the server keymap in the
+        // normal message context (the low-level keyboard hook callback is not
+        // a safe place to run a key event / edit session).
+        self->OnAltTapToggle(static_cast<BYTE>(wparam));
+        return 0;
+      }
+
       if (message == WM_TIMER &&
           wparam == kDelayedSessionCommandTimerId) {
         self->OnDelayedSessionCommandTimer();
@@ -1592,6 +1831,15 @@ class TipTextServiceImpl
   bool has_pending_delayed_session_command_;
   commands::SessionCommand pending_delayed_session_command_;
   wil::com_ptr_nothrow<ITfContext> pending_delayed_session_context_;
+
+  // Alt-tap keyboard hook state. A WH_KEYBOARD_LL hook is owned by the thread
+  // that installs it, and each TSF UI thread has its own TipTextServiceImpl
+  // (resolved via the thread-local Self()), so this state is per-instance
+  // rather than process-global.
+  HHOOK alt_tap_hook_ = nullptr;
+  // The virtual key (VK_LMENU or VK_RMENU) of a lone Alt press that has not yet
+  // been released, or 0 if the current key sequence cannot be a lone Alt tap.
+  DWORD alt_tap_pending_vk_ = 0;
 };
 
 }  // namespace

@@ -59,6 +59,12 @@ struct StaticConfigSnapshot {
 
   size_t num_active_mode_ime_on_keys;
   KeyInformation active_mode_ime_on_keys[kMaxModeSwitchKeys];
+
+  size_t num_active_mode_ime_off_keys;
+  KeyInformation active_mode_ime_off_keys[kMaxModeSwitchKeys];
+
+  size_t num_direct_mode_ime_on_keys;
+  KeyInformation direct_mode_ime_on_keys[kMaxModeSwitchKeys];
 };
 
 void CopyKeys(const std::vector<KeyInformation>& keys, size_t max_size,
@@ -97,6 +103,18 @@ StaticConfigSnapshot GetConfigSnapshotImpl() {
           &snapshot.num_active_mode_ime_on_keys,
           snapshot.active_mode_ime_on_keys);
 
+  const auto active_mode_ime_off_keys =
+      KeyInfoUtil::ExtractSortedActiveModeImeOffKeys(*config);
+  CopyKeys(active_mode_ime_off_keys, kMaxModeSwitchKeys,
+          &snapshot.num_active_mode_ime_off_keys,
+          snapshot.active_mode_ime_off_keys);
+
+  const auto direct_mode_ime_on_keys =
+      KeyInfoUtil::ExtractSortedDirectModeImeOnKeys(*config);
+  CopyKeys(direct_mode_ime_on_keys, kMaxModeSwitchKeys,
+          &snapshot.num_direct_mode_ime_on_keys,
+          snapshot.direct_mode_ime_on_keys);
+
   return snapshot;
 }
 
@@ -132,6 +150,20 @@ bool ConfigSnapshot::Get(Info* info) {
   for (size_t i = 0; i < cached_snapshot.num_active_mode_ime_on_keys; ++i) {
     info->active_mode_ime_on_keys[i] =
         cached_snapshot.active_mode_ime_on_keys[i];
+  }
+
+  info->active_mode_ime_off_keys.resize(
+      cached_snapshot.num_active_mode_ime_off_keys);
+  for (size_t i = 0; i < cached_snapshot.num_active_mode_ime_off_keys; ++i) {
+    info->active_mode_ime_off_keys[i] =
+        cached_snapshot.active_mode_ime_off_keys[i];
+  }
+
+  info->direct_mode_ime_on_keys.resize(
+      cached_snapshot.num_direct_mode_ime_on_keys);
+  for (size_t i = 0; i < cached_snapshot.num_direct_mode_ime_on_keys; ++i) {
+    info->direct_mode_ime_on_keys[i] =
+        cached_snapshot.direct_mode_ime_on_keys[i];
   }
 
   return true;
