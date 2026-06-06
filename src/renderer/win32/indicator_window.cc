@@ -94,6 +94,150 @@ double GetDPIScaling() {
   return static_cast<double>(dpi_x) / kDefaultDPI;
 }
 
+enum class ColorScheme {
+  kLight,
+  kDark,
+};
+
+ColorScheme GetWindowsAppColorScheme() {
+  // Windows Settings:
+  // Personalization -> Colors -> Choose your default app mode
+  //
+  // AppsUseLightTheme:
+  //   0 = Dark
+  //   1 = Light
+  //
+  // If this registry value does not exist, use Light as a safe default.
+  DWORD apps_use_light_theme = 1;
+  DWORD size = sizeof(apps_use_light_theme);
+
+  const LONG result = ::RegGetValueW(
+      HKEY_CURRENT_USER,
+      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+      L"AppsUseLightTheme",
+      RRF_RT_REG_DWORD,
+      nullptr,
+      &apps_use_light_theme,
+      &size);
+
+  if (result != ERROR_SUCCESS) {
+    return ColorScheme::kLight;
+  }
+
+  return apps_use_light_theme == 0 ? ColorScheme::kDark : ColorScheme::kLight;
+}
+
+bool IsImmersiveColorSetChange(LPCTSTR section) {
+  return section != nullptr &&
+         ::lstrcmpi(section, TEXT("ImmersiveColorSet")) == 0;
+}
+
+constexpr int kIndicatorModes[] = {
+    commands::DIRECT,
+    commands::HIRAGANA,
+    commands::FULL_KATAKANA,
+    commands::HALF_ASCII,
+    commands::FULL_ASCII,
+    commands::HALF_KATAKANA,
+};
+
+struct IndicatorColors {
+  RGBColor inside;
+  RGBColor frame;
+  RGBColor blur;
+  RGBColor label;
+};
+
+IndicatorColors GetAsciiIndicatorColors(ColorScheme color_scheme) {
+  if (color_scheme == ColorScheme::kDark) {
+    return {
+        RGBColor(30, 38, 52),
+        RGBColor(96, 130, 170),
+        RGBColor(0, 0, 0),
+        RGBColor(235, 242, 250),
+    };
+  }
+
+  return {
+      RGBColor(245, 248, 252),
+      RGBColor(92, 116, 145),
+      RGBColor(120, 130, 145),
+      RGBColor(28, 38, 52),
+  };
+}
+
+IndicatorColors GetHiraganaIndicatorColors(ColorScheme color_scheme) {
+  if (color_scheme == ColorScheme::kDark) {
+    return {
+        RGBColor(20, 64, 61),
+        RGBColor(70, 190, 180),
+        RGBColor(0, 0, 0),
+        RGBColor(245, 255, 255),
+    };
+  }
+
+  return {
+      RGBColor(235, 252, 248),
+      RGBColor(36, 150, 140),
+      RGBColor(105, 145, 138),
+      RGBColor(18, 78, 72),
+  };
+}
+
+IndicatorColors GetKatakanaIndicatorColors(ColorScheme color_scheme) {
+  if (color_scheme == ColorScheme::kDark) {
+    return {
+        RGBColor(42, 44, 70),
+        RGBColor(126, 135, 245),
+        RGBColor(0, 0, 0),
+        RGBColor(245, 245, 255),
+    };
+  }
+
+  return {
+      RGBColor(244, 244, 255),
+      RGBColor(98, 108, 215),
+      RGBColor(120, 120, 155),
+      RGBColor(48, 52, 105),
+  };
+}
+
+IndicatorColors GetIndicatorColors(int mode, ColorScheme color_scheme) {
+  switch (mode) {
+    case commands::HIRAGANA:
+      return GetHiraganaIndicatorColors(color_scheme);
+
+    case commands::FULL_KATAKANA:
+    case commands::HALF_KATAKANA:
+      return GetKatakanaIndicatorColors(color_scheme);
+
+    case commands::DIRECT:
+    case commands::HALF_ASCII:
+    case commands::FULL_ASCII:
+    default:
+      return GetAsciiIndicatorColors(color_scheme);
+  }
+}
+
+const char* GetIndicatorLabel(int mode) {
+  switch (mode) {
+    case commands::DIRECT:
+      return "A";
+    case commands::HIRAGANA:
+      return "あ";
+    case commands::FULL_KATAKANA:
+      return "ア";
+    case commands::HALF_ASCII:
+      return "_A";
+    case commands::FULL_ASCII:
+      return "Ａ";
+    case commands::HALF_KATAKANA:
+      return "_ｱ";
+    default:
+      return "";
+  }
+}
+
 }  // namespace
 
 class IndicatorWindow::WindowImpl
@@ -101,7 +245,11 @@ class IndicatorWindow::WindowImpl
                          IndicatorWindowTraits> {
  public:
   DECLARE_WND_CLASS_EX(kIndicatorWindowClassName, 0, COLOR_WINDOW);
-  WindowImpl() : alpha_(255), dpi_scaling_(GetDPIScaling()) {
+  WindowImpl()
+      : current_image_(nullptr),
+        alpha_(255),
+        dpi_scaling_(GetDPIScaling()),
+        color_scheme_(GetWindowsAppColorScheme()) {
     sprites_.resize(commands::NUM_OF_COMPOSITIONS);
   }
   WindowImpl(const WindowImpl&) = delete;
@@ -111,6 +259,7 @@ class IndicatorWindow::WindowImpl
   MESSAGE_HANDLER(WM_CREATE, OnCreate)
   MESSAGE_HANDLER(WM_TIMER, OnTimer)
   MESSAGE_HANDLER(WM_SETTINGCHANGE, OnSettingChange)
+  MESSAGE_HANDLER(WM_THEMECHANGED, OnThemeChanged)
   END_MSG_MAP()
 
   void OnUpdate(const commands::RendererCommand& command,
@@ -198,15 +347,36 @@ class IndicatorWindow::WindowImpl
     ShowWindow(SW_SHOWNA);
   }
 
+  void ReloadSprites() {
+    current_image_ = nullptr;
+
+    for (Sprite& sprite : sprites_) {
+      sprite.bitmap.reset();
+      sprite.offset = CPoint(0, 0);
+    }
+
+    for (size_t i = 0; i < std::size(kIndicatorModes); ++i) {
+      LoadSprite(kIndicatorModes[i]);
+    }
+  }
+
+  void ReloadSpritesIfColorSchemeChanged() {
+    const ColorScheme new_color_scheme = GetWindowsAppColorScheme();
+    if (new_color_scheme == color_scheme_) {
+      return;
+    }
+
+    color_scheme_ = new_color_scheme;
+
+    // current_image_ may point to a bitmap owned by sprites_.
+    // Hide the window before destroying and recreating sprite bitmaps.
+    HideIndicator();
+    ReloadSprites();
+  }
+
   LRESULT OnCreate(LPCREATESTRUCT create_struct) {
     EnableOrDisableWindowForWorkaround();
-    constexpr int kModes[] = {
-        commands::DIRECT,     commands::HIRAGANA,   commands::FULL_KATAKANA,
-        commands::HALF_ASCII, commands::FULL_ASCII, commands::HALF_KATAKANA,
-    };
-    for (size_t i = 0; i < std::size(kModes); ++i) {
-      LoadSprite(kModes[i]);
-    }
+    ReloadSprites();
     return 1;
   }
 
@@ -226,15 +396,18 @@ class IndicatorWindow::WindowImpl
     }
   }
 
-  void OnSettingChange(UINT flags, LPCTSTR /*lpszSection*/) {
-    switch (flags) {
-      case SPI_SETACTIVEWINDOWTRACKING:
-        EnableOrDisableWindowForWorkaround();
-        [[fallthrough]];
-      default:
-        // We ignore other changes.
-        break;
+  void OnSettingChange(UINT flags, LPCTSTR lpszSection) {
+    if (flags == SPI_SETACTIVEWINDOWTRACKING) {
+      EnableOrDisableWindowForWorkaround();
     }
+
+    if (IsImmersiveColorSetChange(lpszSection)) {
+      ReloadSpritesIfColorSchemeChanged();
+    }
+  }
+
+  void OnThemeChanged() {
+    ReloadSpritesIfColorSchemeChanged();
   }
 
   void EnableOrDisableWindowForWorkaround() {
@@ -254,69 +427,25 @@ class IndicatorWindow::WindowImpl
     LOGFONT logfont = GetMessageBoxLogFont(::GetDpiForSystem());
     info.label_font = mozc::win32::WideToUtf8(logfont.lfFaceName);
 
-    info.frame_color = RGBColor(1, 122, 204);
-    info.blur_color = RGBColor(1, 122, 204);
     info.rect_width = ceil(dpi_scaling_ * 36.0);
     info.rect_height = ceil(dpi_scaling_ * 28.0);
     info.corner_radius = dpi_scaling_ * 8.0;
     info.tail_height = 0.0;
     info.tail_width = 0.0;
     info.blur_sigma = dpi_scaling_ * 4.0;
-    info.blur_alpha = 0.25;
+    info.blur_alpha = color_scheme_ == ColorScheme::kDark ? 0.25 : 0.22;
     info.frame_thickness = dpi_scaling_ * 1.0;
     info.label_size = 12.0;
     info.blur_offset_x = 0;
     info.blur_offset_y = static_cast<int>(ceil(dpi_scaling_ * 1.0));
 
-    switch (mode) {
-      case commands::DIRECT:
-        info.inside_color = RGBColor(30, 38, 52);
-        info.frame_color = RGBColor(96, 130, 170);
-        info.blur_color = RGBColor(0, 0, 0);
-        info.label_color = RGBColor(235, 242, 250);
-        info.label = "A";
-        break;
+    const IndicatorColors colors = GetIndicatorColors(mode, color_scheme_);
+    info.inside_color = colors.inside;
+    info.frame_color = colors.frame;
+    info.blur_color = colors.blur;
+    info.label_color = colors.label;
+    info.label = GetIndicatorLabel(mode);
 
-      case commands::HIRAGANA:
-        info.inside_color = RGBColor(20, 64, 61);
-        info.frame_color = RGBColor(70, 190, 180);
-        info.blur_color = RGBColor(0, 0, 0);
-        info.label_color = RGBColor(245, 255, 255);
-        info.label = "あ";
-        break;
-
-      case commands::FULL_KATAKANA:
-        info.inside_color = RGBColor(42, 44, 70);
-        info.frame_color = RGBColor(126, 135, 245);
-        info.blur_color = RGBColor(0, 0, 0);
-        info.label_color = RGBColor(245, 245, 255);
-        info.label = "ア";
-        break;
-
-      case commands::HALF_ASCII:
-        info.inside_color = RGBColor(30, 38, 52);
-        info.frame_color = RGBColor(96, 130, 170);
-        info.blur_color = RGBColor(0, 0, 0);
-        info.label_color = RGBColor(235, 242, 250);
-        info.label = "_A";
-        break;
-
-      case commands::FULL_ASCII:
-        info.inside_color = RGBColor(30, 38, 52);
-        info.frame_color = RGBColor(96, 130, 170);
-        info.blur_color = RGBColor(0, 0, 0);
-        info.label_color = RGBColor(235, 242, 250);
-        info.label = "Ａ";
-        break;
-
-      case commands::HALF_KATAKANA:
-        info.inside_color = RGBColor(42, 44, 70);
-        info.frame_color = RGBColor(126, 135, 245);
-        info.blur_color = RGBColor(0, 0, 0);
-        info.label_color = RGBColor(245, 245, 255);
-        info.label = "_ｱ";
-        break;
-    }
     if (!info.label.empty()) {
       sprites_[mode].bitmap.reset(
           BalloonImage::Create(info, &sprites_[mode].offset));
@@ -340,10 +469,17 @@ class IndicatorWindow::WindowImpl
     return 0;
   }
 
+  inline LRESULT OnThemeChanged(UINT msg_id, WPARAM wparam, LPARAM lparam,
+                                BOOL& handled) {
+    OnThemeChanged();
+    return 0;
+  }
+
   HBITMAP current_image_;
   CPoint top_left_;
   BYTE alpha_;
   double dpi_scaling_;
+  ColorScheme color_scheme_;
   std::vector<Sprite> sprites_;
 };
 

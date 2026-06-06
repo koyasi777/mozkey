@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 質問・相談・アイデア / Questions and ideas
+    url: https://github.com/koyasi777/mozkey/discussions
+    about: 使い方の質問、相談、提案、アイデアは Issues ではなく Discussions を利用してください。
+
+  - name: upstream Mozc の Discussions
+    url: https://github.com/google/mozc/discussions
+    about: Mozkey 固有ではなく、upstream Mozc 自体に関する話題はこちらを利用してください。

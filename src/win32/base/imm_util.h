@@ -30,6 +30,8 @@
 #ifndef MOZC_WIN32_BASE_IMM_UTIL_H_
 #define MOZC_WIN32_BASE_IMM_UTIL_H_
 
+#include <string>
+
 namespace mozc {
 namespace win32 {
 
@@ -38,14 +40,19 @@ class ImeUtil {
   ImeUtil(const ImeUtil&) = delete;
   ImeUtil& operator=(const ImeUtil&) = delete;
 
+  // Returns the Windows InputTip string for Mozkey/Mozc Japanese profile.
+  // Example:
+  //   0411:{TEXT_SERVICE_GUID}{PROFILE_GUID}
+  static std::wstring GetInputTip();
+
   // Sets Google Japanese Input as the default IME and update the runtime
   // keyboard setting of the current session.
   // Returns true if the operation completed successfully.
   // NOTE: This function internally calls LoadKeyboardLayout on Windows XP.
   // Loading the specified keyboard layout might result in loading
   // corresponding IME module (*.ime) into the current process, although I
-  // have not tested. If this is true, you cannot freely call SetDefault()
-  // in some special situations like CustomAction.
+  // have not tested. If this is true, you cannot freely call SetDefault() in
+  // some special situations like CustomAction.
   static bool SetDefault();
 };
 

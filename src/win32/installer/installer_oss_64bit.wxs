@@ -57,8 +57,8 @@
     http://msdn.microsoft.com/en-us/library/aa367850.aspx.
     So we change the product ID for every new version.
   -->
-  <Package Name="Mozc" Language="1041" Codepage="932" Version="$(var.MozcVersion)" Manufacturer="Google LLC" UpgradeCode="$(var.UpgradeCode)" InstallerVersion="500">
-    <SummaryInformation Keywords="Installer" Description="Mozc インストーラー" Manufacturer="Google LLC" Codepage="932" />
+  <Package Name="Mozkey" Language="1041" Codepage="932" Version="$(var.MozcVersion)" Manufacturer="koyasi777" UpgradeCode="$(var.UpgradeCode)" InstallerVersion="500">
+    <SummaryInformation Keywords="Installer" Description="Mozkey インストーラー" Manufacturer="koyasi777" Codepage="932" />
 
     <!--
        While obtaining the OS build number from the registry does not seem to be officially
@@ -101,10 +101,10 @@
     <Property Id="OS_BUILD_NUMBER" Secure="yes">
       <RegistrySearch Id="CurrentBuildNumberValue" Type="raw" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion" Name="CurrentBuildNumber" />
     </Property>
-    <Launch Condition="(OS_BUILD_NUMBER AND (OS_BUILD_NUMBER &gt;= 17763)) OR (REMOVE=&quot;ALL&quot;)" Message="Mozc をインストールするには Windows 10 1809 以降にアップグレードする必要があります。" />
+    <Launch Condition="(OS_BUILD_NUMBER AND (OS_BUILD_NUMBER &gt;= 17763)) OR (REMOVE=&quot;ALL&quot;)" Message="Mozkey をインストールするには Windows 10 1809 以降にアップグレードする必要があります。" />
 
     <!-- Check if the user have the administrative privileges. -->
-    <Launch Condition="Privileged" Message="Mozc をインストールするには管理者権限が必要です。" />
+    <Launch Condition="Privileged" Message="Mozkey をインストールするには管理者権限が必要です。" />
     <Media Id="1" Cabinet="Mozc.cab" EmbedCab="yes" CompressionLevel="high" />
 
     <?if $(var.MozcTIP64ArmPath) == "" and $(var.MozcTIP64XPath) == "" and $(var.MozcUniversalInstaller) == "" ?>
@@ -136,10 +136,10 @@
     </Upgrade>
 
     <UI>
-      <Error Id="4000" Message="新しいバージョンの Mozc が既にインストールされています。" />
+      <Error Id="4000" Message="新しいバージョンの Mozkey が既にインストールされています。" />
     </UI>
 
-    <Feature Id="MozcInstall" Title="Mozc" Level="1">
+    <Feature Id="MozcInstall" Title="Mozkey" Level="1">
       <ComponentRef Id="MozcTIP32" />
       <ComponentRef Id="MozcTIP64" />
       <?if $(var.MozcTIP64ArmPath) != "" and $(var.MozcTIP64XPath) != "" ?>

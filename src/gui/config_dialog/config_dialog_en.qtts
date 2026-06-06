@@ -121,7 +121,7 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="817"/>
-        <source>Use dark mode for candidate window</source>
+        <source>Use dark mode for candidate and ruby windows</source>
         <translation></translation>
     </message>
     <message>
@@ -352,7 +352,12 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="1385"/>
-        <source>Check if [ProductName] is the default IME on startup</source>
+        <source>Set as Windows default IME</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="1385"/>
+        <source>Restore previous setting</source>
         <translation></translation>
     </message>
     <message>
@@ -477,6 +482,54 @@
     <message>
         <location filename="character_form_editor.cc" line="95"/>
         <source>Conversion</source>
+        <translation></translation>
+    </message>
+</context>
+<context>
+    <name>mozc::gui::CommandSequenceEditorDialog</name>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="48"/>
+        <source>Edit command sequence</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="51"/>
+        <source>Filter commands</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="56"/>
+        <source>Add &gt;</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="57"/>
+        <source>&lt; Remove</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="58"/>
+        <source>Up</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="59"/>
+        <source>Down</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="60"/>
+        <source>Clear</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="63"/>
+        <source>Available commands</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="79"/>
+        <source>Command sequence</source>
         <translation></translation>
     </message>
 </context>
@@ -642,7 +695,7 @@
     </message>
     <message>
         <location filename="config_dialog.cc" line="406"/>
-        <source>Candidate window dark mode setting is enabled from new applications.</source>
+        <source>Candidate window and ruby overlay dark mode setting is enabled from new applications.</source>
         <translation></translation>
     </message>
     <message>
@@ -674,6 +727,43 @@
     <message>
         <location filename="config_dialog.cc" line="776"/>
         <source>[ProductName] Converter is not running. Operation was not executed.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Set %1 as the Windows default IME?
+
+The current Windows default IME override will be saved so it can be restored later.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>%1 has been set as the Windows default IME.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Failed to set %1 as the Windows default IME.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Restore the previous Windows default IME setting?</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>The previous Windows default IME setting has been restored.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>No previous Windows default IME setting has been saved.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Failed to restore the previous Windows default IME setting.</source>
         <translation></translation>
     </message>
 </context>

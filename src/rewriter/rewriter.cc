@@ -168,9 +168,9 @@ Rewriter::Rewriter(const engine::Modules& modules) {
 
   if (absl::GetFlag(FLAGS_use_history_rewriter)) {
     AddRewriter(std::make_unique<UserBoundaryHistoryRewriter>());
+    AddRewriter(std::make_unique<ZenzFeedbackCandidateRewriter>());
     AddRewriter(
         std::make_unique<UserSegmentHistoryRewriter>(pos_matcher, pos_group));
-    AddRewriter(std::make_unique<ZenzFeedbackCandidateRewriter>());
   }
 
 #ifdef MOZC_DATE_REWRITER

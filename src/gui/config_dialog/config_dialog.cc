@@ -80,12 +80,14 @@
 
 #ifdef _WIN32
 // clang-format off
+#include <shellapi.h>
 #include <windows.h>
 #include <QGuiApplication>
 // clang-format on
 
 #include "base/run_level.h"
 #include "gui/base/win_util.h"
+#include "win32/base/imm_util.h"
 #endif  // _WIN32
 
 #ifdef __APPLE__
@@ -315,6 +317,10 @@ ConfigDialog::ConfigDialog()
                    SLOT(SelectSuggestionSetting(int)));
   QObject::connect(launchAdministrationDialogButton, SIGNAL(clicked()), this,
                    SLOT(LaunchAdministrationDialog()));
+  QObject::connect(setDefaultImeButton, SIGNAL(clicked()), this,
+                   SLOT(SetMozkeyAsDefaultIme()));
+  QObject::connect(restoreDefaultImeButton, SIGNAL(clicked()), this,
+                   SLOT(RestorePreviousDefaultImeSetting()));
 
   QObject::connect(inputPreeditTextColorButton, SIGNAL(clicked()), this,
                    SLOT(SelectPreeditColor()));
@@ -361,7 +367,7 @@ ConfigDialog::ConfigDialog()
   incognitoModeMessage->installEventFilter(this);
 
 #ifndef _WIN32
-  checkDefaultCheckBox->setVisible(false);
+  defaultImeButtonsWidget->setVisible(false);
   checkDefaultLine->setVisible(false);
   checkDefaultLabel->setVisible(false);
 #endif  // !_WIN32
@@ -547,7 +553,7 @@ bool ConfigDialog::Update() {
   if (use_dark_mode_candidate_window_changed) {
     QMessageBox::information(
         this, windowTitle(),
-        tr("Candidate window dark mode setting is enabled from"
+        tr("Candidate window and ruby overlay dark mode setting is enabled from"
            " new applications."));
     initial_use_dark_mode_candidate_window_ =
         config.use_dark_mode_candidate_window();
@@ -750,6 +756,153 @@ void ShowJapaneseCritical(QWidget* parent,
   message_box.setDefaultButton(ok_button);
   message_box.exec();
 }
+
+#ifdef _WIN32
+int RunPowerShellScript(const std::wstring& script) {
+  const std::wstring parameters =
+      L"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"" +
+      script + L"\"";
+
+  SHELLEXECUTEINFOW execute_info = {};
+  execute_info.cbSize = sizeof(execute_info);
+  execute_info.fMask = SEE_MASK_NOCLOSEPROCESS;
+  execute_info.lpVerb = L"open";
+  execute_info.lpFile = L"powershell.exe";
+  execute_info.lpParameters = parameters.c_str();
+  execute_info.nShow = SW_HIDE;
+
+  if (!::ShellExecuteExW(&execute_info) ||
+      execute_info.hProcess == nullptr) {
+    return -1;
+  }
+
+  ::WaitForSingleObject(execute_info.hProcess, INFINITE);
+
+  DWORD exit_code = 1;
+  if (!::GetExitCodeProcess(execute_info.hProcess, &exit_code)) {
+    ::CloseHandle(execute_info.hProcess);
+    return -1;
+  }
+
+  ::CloseHandle(execute_info.hProcess);
+  return static_cast<int>(exit_code);
+}
+
+std::wstring BuildSetDefaultImeScript(const std::wstring& mozkey_input_tip) {
+  return std::wstring(
+             L"$ErrorActionPreference='Stop';"
+             L"$path='HKCU:\\Software\\Mozkey\\DefaultImeOverrideBackup';"
+
+             // Read the current Windows default input method override.
+             L"$current=Get-WinDefaultInputMethodOverride;"
+             L"$currentTip='';"
+             L"if ($null -ne $current -and "
+             L"    -not [string]::IsNullOrWhiteSpace($current.InputMethodTip)) {"
+             L"  $currentTip=[string]$current.InputMethodTip;"
+             L"};"
+             L"$mozkeyInputTip='") +
+         mozkey_input_tip +
+         std::wstring(
+             L"';"
+
+             // Do not overwrite an active backup.  This preserves the
+             // original restore point even if the user presses the button
+             // multiple times.
+             L"$backupActive=0;"
+             L"if (Test-Path $path) {"
+             L"  $backup=Get-ItemProperty -Path $path;"
+             L"  if ($backup.BackupActive -eq 1) { $backupActive=1 }"
+             L"};"
+
+             L"$alreadyMozkey=($currentTip -eq $mozkeyInputTip);"
+
+             L"if ($backupActive -eq 1) {"
+             L"  if (-not $alreadyMozkey) {"
+             L"    Set-WinDefaultInputMethodOverride -InputTip $mozkeyInputTip;"
+             L"  }"
+             L"  exit 0;"
+             L"};"
+
+             // If Mozkey is already the override and there is no active
+             // backup, do not create a pointless restore point whose restore
+             // target is Mozkey itself.
+             L"if ($alreadyMozkey) { exit 0 };"
+
+             L"if (!(Test-Path $path)) {"
+             L"  New-Item -Path $path -Force | Out-Null;"
+             L"};"
+
+             // Save the current Windows default input method override.
+             L"if ([string]::IsNullOrWhiteSpace($currentTip)) {"
+             L"  New-ItemProperty -Path $path -Name WasEmpty -PropertyType DWord "
+             L"    -Value 1 -Force | Out-Null;"
+             L"  Remove-ItemProperty -Path $path -Name InputTip "
+             L"    -ErrorAction SilentlyContinue;"
+             L"} else {"
+             L"  New-ItemProperty -Path $path -Name WasEmpty -PropertyType DWord "
+             L"    -Value 0 -Force | Out-Null;"
+             L"  New-ItemProperty -Path $path -Name InputTip -PropertyType String "
+             L"    -Value $currentTip -Force | Out-Null;"
+             L"};"
+
+             // Save the current ja InputMethodTips order because
+             // Set-WinDefaultInputMethodOverride may reorder the list.
+             L"$list=Get-WinUserLanguageList;"
+             L"$ja=$list | Where-Object { $_.LanguageTag -eq 'ja' } | "
+             L"  Select-Object -First 1;"
+             L"if ($null -ne $ja) {"
+             L"  $tips=@($ja.InputMethodTips) -join '|';"
+             L"  New-ItemProperty -Path $path -Name JapaneseInputMethodTips "
+             L"    -PropertyType String -Value $tips -Force | Out-Null;"
+             L"};"
+
+             L"New-ItemProperty -Path $path -Name BackupActive "
+             L"  -PropertyType DWord -Value 1 -Force | Out-Null;"
+
+             // Set Mozkey as the Windows default input method override.
+             L"Set-WinDefaultInputMethodOverride -InputTip $mozkeyInputTip;");
+}
+
+std::wstring BuildRestoreDefaultImeScript() {
+  return
+      L"$ErrorActionPreference='Stop';"
+      L"$path='HKCU:\\Software\\Mozkey\\DefaultImeOverrideBackup';"
+      L"if (!(Test-Path $path)) { exit 2 };"
+      L"$backup=Get-ItemProperty -Path $path;"
+      L"if ($backup.BackupActive -ne 1) { exit 2 };"
+
+      // Restore the previous Windows default input method override.
+      L"if ($backup.WasEmpty -eq 1 -or "
+      L"    [string]::IsNullOrWhiteSpace($backup.InputTip)) {"
+      L"  Set-WinDefaultInputMethodOverride;"
+      L"} else {"
+      L"  $savedInputTip=[string]$backup.InputTip;"
+      L"  Set-WinDefaultInputMethodOverride -InputTip $savedInputTip;"
+      L"};"
+
+      // Restore the previous ja InputMethodTips order if it was saved.
+      L"if (-not [string]::IsNullOrWhiteSpace("
+      L"    $backup.JapaneseInputMethodTips)) {"
+      L"  $tips=$backup.JapaneseInputMethodTips -split '\\|';"
+      L"  $list=Get-WinUserLanguageList;"
+      L"  $ja=$list | Where-Object { $_.LanguageTag -eq 'ja' } | "
+      L"    Select-Object -First 1;"
+      L"  if ($null -ne $ja) {"
+      L"    $ja.InputMethodTips.Clear();"
+      L"    foreach ($tip in $tips) {"
+      L"      if (-not [string]::IsNullOrWhiteSpace($tip)) {"
+      L"        $ja.InputMethodTips.Add($tip) | Out-Null;"
+      L"      }"
+      L"    }"
+      L"    Set-WinUserLanguageList $list -Force;"
+      L"  }"
+      L"};"
+
+      // The restore point has been consumed.  Remove it so the next
+      // Set action captures the then-current state as a new restore point.
+      L"Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue;";
+}
+#endif  // _WIN32
 
 void ShowZenzFeedbackManagementDialog(QWidget* parent) {
   QDialog dialog(parent);
@@ -1299,7 +1452,6 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
 
   // tab6
   SET_COMBOBOX(verboseLevelComboBox, int, verbose_level);
-  SET_CHECKBOX(checkDefaultCheckBox, check_default);
   SET_COMBOBOX(yenSignComboBox, YenSignCharacter, yen_sign_character);
 
   characterFormEditor->Load(config);
@@ -1478,7 +1630,6 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
 
   // tab6
   config->set_verbose_level(verboseLevelComboBox->currentIndex());
-  GET_CHECKBOX(checkDefaultCheckBox, check_default);
   GET_COMBOBOX(yenSignComboBox, YenSignCharacter, yen_sign_character);
 
   characterFormEditor->Save(config);
@@ -1714,6 +1865,74 @@ void ConfigDialog::ResetToDefaults() {
 void ConfigDialog::LaunchAdministrationDialog() {
 #ifdef _WIN32
   client_->LaunchTool("administration_dialog", "");
+#endif  // _WIN32
+}
+
+void ConfigDialog::SetMozkeyAsDefaultIme() {
+#ifdef _WIN32
+  const std::wstring mozkey_input_tip = mozc::win32::ImeUtil::GetInputTip();
+  if (mozkey_input_tip.empty()) {
+    QMessageBox::critical(
+        this, windowTitle(),
+        tr("Failed to get %1 InputTip.").arg(GuiUtil::ProductName()));
+    return;
+  }
+
+  const QMessageBox::StandardButton result = QMessageBox::question(
+      this, windowTitle(),
+      tr("Set %1 as the Windows default IME?\n\n"
+         "The current Windows default IME override will be saved so it can "
+         "be restored later.")
+          .arg(GuiUtil::ProductName()),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+
+  if (result != QMessageBox::Yes) {
+    return;
+  }
+
+  const int exit_code =
+      RunPowerShellScript(BuildSetDefaultImeScript(mozkey_input_tip));
+
+  if (exit_code == 0) {
+    QMessageBox::information(
+        this, windowTitle(),
+        tr("%1 has been set as the Windows default IME.")
+            .arg(GuiUtil::ProductName()));
+  } else {
+    QMessageBox::critical(
+        this, windowTitle(),
+        tr("Failed to set %1 as the Windows default IME.")
+            .arg(GuiUtil::ProductName()));
+  }
+#endif  // _WIN32
+}
+
+void ConfigDialog::RestorePreviousDefaultImeSetting() {
+#ifdef _WIN32
+  const QMessageBox::StandardButton result = QMessageBox::question(
+      this, windowTitle(),
+      tr("Restore the previous Windows default IME setting?"),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+
+  if (result != QMessageBox::Yes) {
+    return;
+  }
+
+  const int exit_code = RunPowerShellScript(BuildRestoreDefaultImeScript());
+
+  if (exit_code == 0) {
+    QMessageBox::information(
+        this, windowTitle(),
+        tr("The previous Windows default IME setting has been restored."));
+  } else if (exit_code == 2) {
+    QMessageBox::warning(
+        this, windowTitle(),
+        tr("No previous Windows default IME setting has been saved."));
+  } else {
+    QMessageBox::critical(
+        this, windowTitle(),
+        tr("Failed to restore the previous Windows default IME setting."));
+  }
 #endif  // _WIN32
 }
 

@@ -104,6 +104,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_VARIABLE(live_conversion_active_);
   PEER_VARIABLE(live_conversion_key_);
   PEER_VARIABLE(live_conversion_value_);
+  PEER_VARIABLE(live_conversion_preedit_output_);
   PEER_VARIABLE(zenz_live_key_);
   PEER_VARIABLE(zenz_live_value_);
   PEER_VARIABLE(zenz_live_mozc_value_);
@@ -523,6 +524,18 @@ void SwitchCompositionMode(commands::CompositionMode mode, Session* session) {
   EXPECT_TRUE(SwitchCompositionModeCommand(mode, session, &command));
 }
 
+void SetCustomKeymapForSession(absl::string_view custom_keymap_table,
+                               Session* session) {
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(std::string(custom_keymap_table));
+
+  auto key_map_manager = std::make_shared<keymap::KeyMapManager>(config);
+  session->SetConfig(config);
+  session->SetKeyMapManager(key_map_manager);
+}
+
 }  // namespace
 
 class SessionTest : public testing::TestWithTempUserProfile {
@@ -901,6 +914,84 @@ TEST_F(SessionTest, TestOfTestForSetup) {
   }
 }
 
+TEST_F(SessionTest, KeymapCommandSequenceCommitAndImeOffFromComposition) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Composition\tCtrl Enter\tCommit|IMEOff\n",
+      &session);
+  InitSessionToPrecomposition(&session);
+
+  commands::Command command;
+  SendKey("a", &session, &command);
+  EXPECT_SINGLE_SEGMENT("あ", command);
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+
+  command.Clear();
+  EXPECT_TRUE(SendKey("Ctrl Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("あ", command);
+  EXPECT_EQ(session.context().state(), ImeContext::DIRECT);
+  EXPECT_EQ(command.output().mode(), commands::DIRECT);
+}
+
+TEST_F(SessionTest, KeymapCommandSequenceCrossesCompositionToConversion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Composition\tCtrl Enter\tConvert|ConvertNext\n",
+      &session);
+  InitSessionToPrecomposition(&session);
+
+  commands::Command command;
+  InsertCharacterChars("aiueo", &session, &command);
+  EXPECT_SINGLE_SEGMENT_AND_KEY("あいうえお", "あいうえお", command);
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+
+  const ConversionRequest request = CreateConversionRequest(session);
+  Segments segments;
+  SetAiueo(&segments);
+  FillT13Ns(request, &segments);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  command.Clear();
+  EXPECT_TRUE(SendKey("Ctrl Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+
+  // Convert selects the first candidate, then ConvertNext advances to the
+  // second candidate.
+  EXPECT_SINGLE_SEGMENT("アイウエオ", command);
+
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest, KeymapCommandSequenceCommitAndImeOffFromConversion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Enter\tCommit|IMEOff\n",
+      &session);
+  InitSessionToConversionWithAiueo(&session, converter.get());
+
+  commands::Command command;
+  EXPECT_TRUE(SendKey("Ctrl Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("あいうえお", command);
+  EXPECT_EQ(session.context().state(), ImeContext::DIRECT);
+  EXPECT_EQ(command.output().mode(), commands::DIRECT);
+}
+
 TEST_F(SessionTest, PendingZenzFeedbackIsConfirmedByNextTextInput) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -989,7 +1080,7 @@ TEST_F(SessionTest, PendingZenzFeedbackStoresContextClassOnly) {
 #if defined(_WIN32)
 
 TEST_F(SessionTest,
-       ZenzFeedbackFastPathAppliesAcceptedCandidateAsLiveCorrection) {
+       ZenzFeedbackFastPathAppliesAcceptedCandidateForMultiSegmentLiveConversion) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -1012,6 +1103,20 @@ TEST_F(SessionTest,
   session_peer.live_conversion_key_() = "かれはてんてきです";
   session_peer.live_conversion_value_() = "彼は点滴です";
 
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれは");
+  segment->set_value("彼は");
+  segment->set_value_length(Util::CharsLen("彼は"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("てんてきです");
+  segment->set_value("点滴です");
+  segment->set_value_length(Util::CharsLen("点滴です"));
+
   commands::Command command;
   EXPECT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
 
@@ -1028,6 +1133,52 @@ TEST_F(SessionTest,
   EXPECT_EQ(session_peer.zenz_live_value_(), "彼は天敵です");
   EXPECT_EQ(session_peer.zenz_live_mozc_value_(), "彼は点滴です");
   EXPECT_EQ(session_peer.zenz_live_context_class_(), "empty");
+}
+
+TEST_F(SessionTest,
+       ZenzFeedbackFastPathDoesNotOverrideSingleSegmentLiveConversion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzLiveCorrectionWithFeedbackLearning(&session);
+
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "たなべ",
+      "japanese_only",
+      "田辺");
+  ASSERT_FALSE(session_peer.zenz_feedback_store_().ListEntries().empty());
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "たなべ";
+  session_peer.live_conversion_value_() = "田邊";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("たなべ");
+  segment->set_value("田邊");
+  segment->set_value_length(Util::CharsLen("田邊"));
+
+  commands::Command command;
+  EXPECT_FALSE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
+
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(command.output().has_callback());
+  EXPECT_FALSE(command.output().has_preedit());
+
+  EXPECT_TRUE(session_peer.zenz_live_key_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_value_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_mozc_value_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_context_class_().empty());
 }
 
 TEST_F(SessionTest,
@@ -1053,6 +1204,20 @@ TEST_F(SessionTest,
   session_peer.live_conversion_active_() = true;
   session_peer.live_conversion_key_() = "かれはてんてきです";
   session_peer.live_conversion_value_() = "彼は点滴です";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれは");
+  segment->set_value("彼は");
+  segment->set_value_length(Util::CharsLen("彼は"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("てんてきです");
+  segment->set_value("点滴です");
+  segment->set_value_length(Util::CharsLen("点滴です"));
 
   commands::Command command;
   EXPECT_FALSE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
@@ -1093,6 +1258,20 @@ TEST_F(SessionTest,
   session_peer.live_conversion_active_() = true;
   session_peer.live_conversion_key_() = "かれはてんてきです";
   session_peer.live_conversion_value_() = "彼は点滴です";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれは");
+  segment->set_value("彼は");
+  segment->set_value_length(Util::CharsLen("彼は"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("てんてきです");
+  segment->set_value("点滴です");
+  segment->set_value_length(Util::CharsLen("点滴です"));
 
   commands::Command command;
   EXPECT_FALSE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
@@ -7807,6 +7986,130 @@ TEST_F(SessionTest, AutoConversion) {
         }
       }
     }
+  }
+}
+
+TEST_F(SessionTest, DirectCommitAfterCustomRomajiPunctuation) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  config::Config config;
+  config.set_use_auto_conversion(false);
+  config.set_use_direct_commit(true);
+  config.set_direct_commit_key(
+      config::Config::DIRECT_COMMIT_KUTEN |
+      config::Config::DIRECT_COMMIT_TOUTEN |
+      config::Config::DIRECT_COMMIT_QUESTION_MARK |
+      config::Config::DIRECT_COMMIT_EXCLAMATION_MARK);
+
+  auto table = std::make_shared<composer::Table>();
+  table->AddRule("te", "て", "");
+  table->AddRule("su", "す", "");
+  table->AddRule("to", "と", "");
+  table->AddRule("zz", "。", "");
+  table->AddRule("cc", "、", "");
+  table->AddRule("qq", "？", "");
+  table->AddRule("ee", "！", "");
+
+  {
+    Session session(engine);
+    session.SetConfig(config);
+    InitSessionToPrecomposition(&session);
+    session.get_internal_composer_only_for_unittest()->SetTable(table);
+
+    commands::Command command;
+    InsertCharacterChars("tesutozz", &session, &command);
+
+    EXPECT_RESULT("てすと。", command);
+    EXPECT_FALSE(command.output().has_preedit());
+    EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  }
+
+  {
+    Session session(engine);
+    session.SetConfig(config);
+    InitSessionToPrecomposition(&session);
+    session.get_internal_composer_only_for_unittest()->SetTable(table);
+
+    commands::Command command;
+    InsertCharacterChars("tesutocc", &session, &command);
+
+    EXPECT_RESULT("てすと、", command);
+    EXPECT_FALSE(command.output().has_preedit());
+    EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  }
+
+  {
+    Session session(engine);
+    session.SetConfig(config);
+    InitSessionToPrecomposition(&session);
+    session.get_internal_composer_only_for_unittest()->SetTable(table);
+
+    commands::Command command;
+    InsertCharacterChars("tesutoqq", &session, &command);
+
+    EXPECT_RESULT("てすと？", command);
+    EXPECT_FALSE(command.output().has_preedit());
+    EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  }
+
+  {
+    Session session(engine);
+    session.SetConfig(config);
+    InitSessionToPrecomposition(&session);
+    session.get_internal_composer_only_for_unittest()->SetTable(table);
+
+    commands::Command command;
+    InsertCharacterChars("tesutoee", &session, &command);
+
+    EXPECT_RESULT("てすと！", command);
+    EXPECT_FALSE(command.output().has_preedit());
+    EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  }
+}
+
+TEST_F(SessionTest, DirectCommitAfterCustomRomajiPunctuationRespectsConfig) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  config::Config config;
+  config.set_use_auto_conversion(false);
+  config.set_use_direct_commit(true);
+  config.set_direct_commit_key(config::Config::DIRECT_COMMIT_TOUTEN);
+
+  auto table = std::make_shared<composer::Table>();
+  table->AddRule("te", "て", "");
+  table->AddRule("su", "す", "");
+  table->AddRule("to", "と", "");
+  table->AddRule("zz", "。", "");
+  table->AddRule("cc", "、", "");
+
+  {
+    Session session(engine);
+    session.SetConfig(config);
+    InitSessionToPrecomposition(&session);
+    session.get_internal_composer_only_for_unittest()->SetTable(table);
+
+    commands::Command command;
+    InsertCharacterChars("tesutozz", &session, &command);
+
+    EXPECT_SINGLE_SEGMENT("てすと。", command);
+    EXPECT_FALSE(command.output().has_result());
+    EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  }
+
+  {
+    Session session(engine);
+    session.SetConfig(config);
+    InitSessionToPrecomposition(&session);
+    session.get_internal_composer_only_for_unittest()->SetTable(table);
+
+    commands::Command command;
+    InsertCharacterChars("tesutocc", &session, &command);
+
+    EXPECT_RESULT("てすと、", command);
+    EXPECT_FALSE(command.output().has_preedit());
+    EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
   }
 }
 

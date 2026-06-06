@@ -43,6 +43,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "base/config_file_stream.h"
@@ -116,6 +117,19 @@ constexpr absl::string_view NormalizeCommand(absl::string_view command_string) {
     return *normalized;
   }
   return command_string;
+}
+
+CommandSequence ParseCommandSequenceString(
+    const std::string& command_sequence_string) {
+  CommandSequence sequence;
+  for (absl::string_view token :
+       absl::StrSplit(command_sequence_string, '|', absl::SkipEmpty())) {
+    token = absl::StripAsciiWhitespace(token);
+    if (!token.empty()) {
+      sequence.push_back(std::string(token));
+    }
+  }
+  return sequence;
 }
 }  // namespace
 
@@ -286,18 +300,27 @@ bool KeyMapManager::LoadStreamWithErrors(std::istream* ifs,
 
   commands::KeyEvent key_event;
   KeyParser::ParseKey("TextInput", &key_event);
-  keymap_precomposition_.AddRule(key_event,
-                                 PrecompositionState::INSERT_CHARACTER);
-  keymap_composition_.AddRule(key_event, CompositionState::INSERT_CHARACTER);
-  keymap_conversion_.AddRule(key_event, ConversionState::INSERT_CHARACTER);
+  keymap_precomposition_.AddRule(
+      key_event, PrecompositionState::INSERT_CHARACTER,
+      CommandSequence{"InsertCharacter"});
+  keymap_composition_.AddRule(
+      key_event, CompositionState::INSERT_CHARACTER,
+      CommandSequence{"InsertCharacter"});
+  keymap_conversion_.AddRule(
+      key_event, ConversionState::INSERT_CHARACTER,
+      CommandSequence{"InsertCharacter"});
 
   key_event.Clear();
   KeyParser::ParseKey("Shift", &key_event);
-  keymap_composition_.AddRule(key_event, CompositionState::INSERT_CHARACTER);
+  keymap_composition_.AddRule(
+      key_event, CompositionState::INSERT_CHARACTER,
+      CommandSequence{"InsertCharacter"});
 
   key_event.Clear();
   key_event.set_special_key(commands::KeyEvent::IME_ACTION);
-  keymap_precomposition_.AddRule(key_event, PrecompositionState::IME_ACTION);
+  keymap_precomposition_.AddRule(
+      key_event, PrecompositionState::IME_ACTION,
+      CommandSequence{"IMEAction"});
 
   return true;
 }
@@ -305,87 +328,129 @@ bool KeyMapManager::LoadStreamWithErrors(std::istream* ifs,
 bool KeyMapManager::AddCommand(const std::string& state_name,
                                const std::string& key_event_name,
                                const std::string& command_name) {
+  const CommandSequence command_sequence =
+      ParseCommandSequenceString(command_name);
+  if (command_sequence.empty()) {
+    return false;
+  }
+
 #ifdef NDEBUG  // means RELEASE BUILD
-  // On the release build, we do not support the ReportBug
-  // commands.  Note, true is returned as the arguments are
-  // interpreted properly.
-  if (command_name == "ReportBug") {
-    return true;
+  // On the release build, we do not support the ReportBug command.
+  // Preserve the existing behavior: accept the line syntactically but do not
+  // install the rule.
+  for (const std::string& command : command_sequence) {
+    if (command == "ReportBug") {
+      return true;
+    }
   }
 #endif  // NDEBUG
+
+  for (const std::string& command : command_sequence) {
+    if (!IsKnownCommandNameForAnyState(command)) {
+      return false;
+    }
+  }
 
   commands::KeyEvent key_event;
   if (!KeyParser::ParseKey(key_event_name, &key_event)) {
     return false;
   }
 
+  const std::string& first_command_name = command_sequence.front();
+
   if (state_name == "DirectInput" || state_name == "Direct") {
     DirectInputState::Commands command;
-    if (!ParseCommandDirect(command_name, &command)) {
+    if (!ParseCommandDirect(first_command_name, &command)) {
       return false;
     }
 
-    keymap_direct_.AddRule(key_event, command);
+    keymap_direct_.AddRule(key_event, command, command_sequence);
     return true;
   }
 
   if (state_name == "Precomposition") {
     PrecompositionState::Commands command;
-    if (!ParseCommandPrecomposition(command_name, &command)) {
+    if (!ParseCommandPrecomposition(first_command_name, &command)) {
       return false;
     }
 
-    keymap_precomposition_.AddRule(key_event, command);
+    keymap_precomposition_.AddRule(key_event, command, command_sequence);
     return true;
   }
 
   if (state_name == "Composition") {
     CompositionState::Commands command;
-    if (!ParseCommandComposition(command_name, &command)) {
+    if (!ParseCommandComposition(first_command_name, &command)) {
       return false;
     }
 
-    keymap_composition_.AddRule(key_event, command);
+    keymap_composition_.AddRule(key_event, command, command_sequence);
     return true;
   }
 
   if (state_name == "Conversion") {
     ConversionState::Commands command;
-    if (!ParseCommandConversion(command_name, &command)) {
+    if (!ParseCommandConversion(first_command_name, &command)) {
       return false;
     }
 
-    keymap_conversion_.AddRule(key_event, command);
+    keymap_conversion_.AddRule(key_event, command, command_sequence);
     return true;
   }
 
   if (state_name == "ZeroQuerySuggestion") {
     PrecompositionState::Commands command;
-    if (!ParseCommandPrecomposition(command_name, &command)) {
+    if (!ParseCommandPrecomposition(first_command_name, &command)) {
       return false;
     }
 
-    keymap_zero_query_suggestion_.AddRule(key_event, command);
+    keymap_zero_query_suggestion_.AddRule(key_event, command,
+                                          command_sequence);
     return true;
   }
 
   if (state_name == "Suggestion") {
     CompositionState::Commands command;
-    if (!ParseCommandComposition(command_name, &command)) {
+    if (!ParseCommandComposition(first_command_name, &command)) {
       return false;
     }
 
-    keymap_suggestion_.AddRule(key_event, command);
+    keymap_suggestion_.AddRule(key_event, command, command_sequence);
     return true;
   }
 
   if (state_name == "Prediction") {
     ConversionState::Commands command;
-    if (!ParseCommandConversion(command_name, &command)) {
+    if (!ParseCommandConversion(first_command_name, &command)) {
       return false;
     }
 
-    keymap_prediction_.AddRule(key_event, command);
+    keymap_prediction_.AddRule(key_event, command, command_sequence);
+    return true;
+  }
+
+  return false;
+}
+
+bool KeyMapManager::IsKnownCommandNameForAnyState(
+    const std::string& command_string) const {
+  DirectInputState::Commands direct_command;
+  if (ParseCommandDirect(command_string, &direct_command)) {
+    return true;
+  }
+
+  PrecompositionState::Commands precomposition_command;
+  if (ParseCommandPrecomposition(command_string, &precomposition_command)) {
+    return true;
+  }
+
+  CompositionState::Commands composition_command;
+  if (ParseCommandComposition(command_string, &composition_command)) {
+    return true;
+  }
+
+  ConversionState::Commands conversion_command;
+  if (ParseCommandConversion(command_string, &conversion_command)) {
     return true;
   }
 
@@ -796,6 +861,81 @@ bool KeyMapManager::GetCommandPrediction(
   }
   // use conversion rule
   return keymap_conversion_.GetCommand(key_event, command);
+}
+
+bool KeyMapManager::GetCommandSequenceDirect(
+    const commands::KeyEvent& key_event,
+    CommandSequence* commands) const {
+  return keymap_direct_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequencePrecomposition(
+    const commands::KeyEvent& key_event,
+    CommandSequence* commands) const {
+  return keymap_precomposition_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequenceComposition(
+    const commands::KeyEvent& key_event,
+    CommandSequence* commands) const {
+  return keymap_composition_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequenceConversion(
+    const commands::KeyEvent& key_event,
+    CommandSequence* commands) const {
+  return keymap_conversion_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequenceZeroQuerySuggestion(
+    const commands::KeyEvent& key_event,
+    CommandSequence* commands) const {
+  if (keymap_zero_query_suggestion_.GetCommandSequence(key_event, commands)) {
+    return true;
+  }
+  return keymap_precomposition_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequenceSuggestion(
+    const commands::KeyEvent& key_event,
+    CommandSequence* commands) const {
+  if (keymap_suggestion_.GetCommandSequence(key_event, commands)) {
+    return true;
+  }
+  return keymap_composition_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequencePrediction(
+    const commands::KeyEvent& key_event,
+    CommandSequence* commands) const {
+  if (keymap_prediction_.GetCommandSequence(key_event, commands)) {
+    return true;
+  }
+  return keymap_conversion_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::ResolveDirectCommandName(
+    const std::string& command_string,
+    DirectInputState::Commands* command) const {
+  return ParseCommandDirect(command_string, command);
+}
+
+bool KeyMapManager::ResolvePrecompositionCommandName(
+    const std::string& command_string,
+    PrecompositionState::Commands* command) const {
+  return ParseCommandPrecomposition(command_string, command);
+}
+
+bool KeyMapManager::ResolveCompositionCommandName(
+    const std::string& command_string,
+    CompositionState::Commands* command) const {
+  return ParseCommandComposition(command_string, command);
+}
+
+bool KeyMapManager::ResolveConversionCommandName(
+    const std::string& command_string,
+    ConversionState::Commands* command) const {
+  return ParseCommandConversion(command_string, command);
 }
 
 bool KeyMapManager::ParseCommandDirect(

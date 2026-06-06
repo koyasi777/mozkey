@@ -544,6 +544,29 @@ class Session {
   void OutputComposition(mozc::commands::Command* command) const;
   void OutputKey(mozc::commands::Command* command) const;
 
+  bool ExecuteCommandSequence(
+      const mozc::keymap::CommandSequence& command_sequence,
+      mozc::commands::Command* command);
+
+  bool ExecuteDirectInputCommand(
+      mozc::keymap::DirectInputState::Commands key_command,
+      mozc::commands::Command* command);
+
+  bool ExecutePrecompositionCommand(
+      mozc::keymap::PrecompositionState::Commands key_command,
+      mozc::commands::Command* command);
+
+  bool ExecuteCompositionCommand(
+      mozc::keymap::CompositionState::Commands key_command,
+      mozc::commands::Command* command);
+
+  bool ExecuteConversionCommand(
+      mozc::keymap::ConversionState::Commands key_command,
+      mozc::commands::Command* command);
+
+  bool ExecuteCommandName(const std::string& command_name,
+                          mozc::commands::Command* command);
+
   bool SendKeyDirectInputState(mozc::commands::Command* command);
   bool SendKeyPrecompositionState(mozc::commands::Command* command);
   bool SendKeyCompositionState(mozc::commands::Command* command);

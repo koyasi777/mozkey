@@ -1,0 +1,130 @@
+name: 不具合報告 / Bug report
+description: Mozkey の再現可能な不具合を報告
+title: 'Bug: '
+labels: ['bug']
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        不具合報告ありがとうございます。
+
+        再現可能な Mozkey の不具合はこちらから報告してください。
+        使い方の質問、相談、提案、アイデアは Issues ではなく Discussions を利用してください。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 内容
+      description: 何が起きたかを説明してください。
+      placeholder: 不具合の内容を簡潔に書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: できるだけ具体的に、実際の操作手順を書いてください。
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した動作
+      description: 本来どう動いてほしかったかを書いてください。
+    validations:
+      required: false
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動作
+      description: 実際に何が起きたかを書いてください。
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Mozkey のバージョンまたは commit ID
+      description: 「Version」または「ばーじょん」と変換するとバージョン文字列を確認できます。不明な場合は "不明" と記載してください。
+      placeholder: '例: Mozkey v0.7.1、d50a8b9ae28c4fba265f734b38bc5ae392fe4d25、不明'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 環境
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: OS バージョン
+      description: 不明な場合は "不明" と記載してください。
+      placeholder: '例: Windows 11 24H2, macOS 15.1, Ubuntu 24.04、不明'
+    validations:
+      required: true
+
+  - type: textarea
+    id: app
+    attributes:
+      label: 問題が発生するアプリケーション
+      description: 問題が発生するアプリケーションを列挙してください。
+      placeholder: '例: Chrome, VS Code, メモ帳, Word, Slack'
+    validations:
+      required: false
+
+  - type: textarea
+    id: investigations
+    attributes:
+      label: 切り分け状況
+      value: |
+        - upstream Mozc または Google 日本語入力でも発生しますか？
+          - yes / no / 未確認
+        - 他の IME でも発生しますか？
+          - yes / no / 未確認
+        - 特定のアプリケーションだけで発生しますか？
+          - yes / no / 不明
+        - 古い Mozkey バージョンでは正常に動いていましたか？
+          - yes / no / 不明
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ
+      description: ログがある場合は貼ってください。
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: スクリーンショット・画面録画
+      description: 必要であればスクリーンショットや画面録画を添付してください。
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 補足情報
+      description: その他、調査に役立ちそうな情報があれば記載してください。
+    validations:
+      required: false

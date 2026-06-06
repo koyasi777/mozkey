@@ -80,6 +80,8 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   virtual void SelectSuggestionSetting(int state);
   virtual void SelectPreeditColor();
   virtual void LaunchAdministrationDialog();
+  virtual void SetMozkeyAsDefaultIme();
+  virtual void RestorePreviousDefaultImeSetting();
   virtual void EnableApplyButton();
 
  protected:

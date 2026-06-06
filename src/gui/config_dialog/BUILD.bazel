@@ -61,6 +61,14 @@ mozc_qt_moc(
 )
 
 mozc_qt_moc(
+    name = "moc_command_sequence_editor_dialog",
+    srcs = [
+        "command_sequence_editor_dialog.h",
+    ],
+    outs = ["moc_command_sequence_editor_dialog.cc"],
+)
+
+mozc_qt_moc(
     name = "moc_config_dialog",
     srcs = [
         "config_dialog.h",
@@ -162,6 +170,8 @@ mozc_cc_qt_library(
     name = "config_dialog",
     srcs = [
         "character_form_editor.cc",
+        "command_sequence_delegate.cc",
+        "command_sequence_editor_dialog.cc",
         "config_dialog.cc",
         "config_dialog_libmain.cc",
         "generic_table_editor.cc",
@@ -170,6 +180,7 @@ mozc_cc_qt_library(
         "keymap_editor.cc",
         "roman_table_editor.cc",
         ":moc_character_form_editor",
+        ":moc_command_sequence_editor_dialog",
         ":moc_config_dialog",
         ":moc_generic_table_editor",
         ":moc_keybinding_editor",
@@ -180,6 +191,8 @@ mozc_cc_qt_library(
     ],
     hdrs = [
         "character_form_editor.h",
+        "command_sequence_delegate.h",
+        "command_sequence_editor_dialog.h",
         "config_dialog.h",
         "generic_table_editor.h",
         "keybinding_editor.h",
@@ -228,6 +241,7 @@ mozc_cc_qt_library(
         ],
         windows = [
             "//gui/base:win_util",
+            "//win32/base:imm_util",
         ],
     ),
 )

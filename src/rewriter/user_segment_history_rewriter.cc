@@ -420,6 +420,32 @@ size_t LongestCommittedPrefixSuffixSize(absl::string_view committed_value,
 std::optional<UserSegmentHistoryRewriter::PendingRevert>
     UserSegmentHistoryRewriter::pending_revert_;
 
+void UpdateBestCandidateAfterUserSegmentHistoryRewrite(Segment* segment) {
+  DCHECK(segment);
+  if (segment->candidates_size() == 0) {
+    return;
+  }
+
+  // UserSegmentHistoryRewriter physically moves the learned candidate to
+  // candidate(0).  The previous default candidate may still have
+  // BEST_CANDIDATE because Rewrite() marks the old candidate(0) before
+  // reranking.
+  //
+  // Some output paths consult BEST_CANDIDATE rather than blindly using
+  // candidate(0), so keeping the stale marker makes the UI/commit path show
+  // the old default value even after SortCandidates() has promoted the learned
+  // value.
+  for (size_t i = 0; i < segment->candidates_size(); ++i) {
+    segment->mutable_candidate(i)->attributes &=
+        ~converter::Attribute::BEST_CANDIDATE;
+  }
+
+  segment->mutable_candidate(0)->attributes |=
+      converter::Attribute::BEST_CANDIDATE;
+  segment->mutable_candidate(0)->attributes |=
+      converter::Attribute::USER_SEGMENT_HISTORY_REWRITER;
+}
+
 bool UserSegmentHistoryRewriter::SortCandidates(
     absl::Span<const ScoreCandidate> sorted_scores, Segment* segment) const {
   const uint32_t top_score = sorted_scores[0].score;
@@ -1061,9 +1087,16 @@ bool UserSegmentHistoryRewriter::Rewrite(const ConversionRequest& request,
 
     std::stable_sort(scores.begin(), scores.end(),
                      std::greater<ScoreCandidate>());
-    modified |= SortCandidates(scores, segment);
-    if (!(segment->candidate(0).attributes &
-          converter::Attribute::BEST_CANDIDATE)) {
+
+    const std::string old_top_value = segment->candidate(0).value;
+    const bool sorted = SortCandidates(scores, segment);
+    modified |= sorted;
+
+    if (sorted && segment->candidate(0).value != old_top_value) {
+      UpdateBestCandidateAfterUserSegmentHistoryRewrite(segment);
+    } else if (sorted &&
+               !(segment->candidate(0).attributes &
+                 converter::Attribute::BEST_CANDIDATE)) {
       segment->mutable_candidate(0)->attributes |=
           converter::Attribute::USER_SEGMENT_HISTORY_REWRITER;
     }

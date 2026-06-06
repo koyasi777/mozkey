@@ -1,0 +1,113 @@
+name: 変換・入力の問題 / Conversion issue
+description: 入力、変換、ライブ変換、Zenz 補正に関する問題を報告
+title: 'Conversion issue: '
+labels: ['conversion']
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Mozkey 固有の入力・変換まわりの問題はこちらから報告してください。
+
+        例:
+        - 変換結果がおかしい
+        - ライブ変換の挙動がおかしい
+        - Zenz 補正の結果がおかしい
+        - 変換履歴・フィードバックの反映がおかしい
+        - 句読点単打確定の挙動がおかしい
+        - 意図しない文字が出力される
+
+        upstream Mozc の辞書品質に関する問題だと思われる場合は、その旨も記載してください。
+
+  - type: textarea
+    id: input
+    attributes:
+      label: 入力した文字
+      description: 実際に何を入力しましたか？
+      placeholder: '例: かえる, nihongo, 今日haいい天気'
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の結果
+      description: Mozkey はどのような結果を出しましたか？
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した結果
+      description: 本来どのような結果を期待していましたか？
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 関連しそうな機能
+      options:
+        - 通常変換 / Normal conversion
+        - ライブ変換 / Live conversion
+        - Zenz 補正 / Zenz correction
+        - 変換履歴・フィードバック / User history and feedback
+        - 句読点単打確定 / Punctuation confirmation
+        - ルビウィンドウ / Ruby window
+        - 不明 / Unknown
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Mozkey のバージョンまたは commit ID
+      description: 不明な場合は "不明" と記載してください。
+      placeholder: '例: Mozkey v0.7.1、commit hash、不明'
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS バージョン
+      description: 不明な場合は "不明" と記載してください。
+      placeholder: '例: Windows 11 24H2、不明'
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: 関連しそうな設定
+      value: |
+        - ライブ変換 / Live conversion: on / off
+        - Zenz 補正 / Zenz correction: on / off
+        - 遅延付きライブ変換 / Delayed live conversion: on / off
+        - 句読点単打確定 / Punctuation single-key confirmation: on / off
+        - その他:
+    validations:
+      required: false
+
+  - type: textarea
+    id: comparison
+    attributes:
+      label: 比較・切り分け
+      value: |
+        - upstream Mozc でも発生しますか？
+          - yes / no / 未確認
+        - Google 日本語入力でも発生しますか？
+          - yes / no / 未確認
+        - 古い Mozkey バージョンでは正常に動いていましたか？
+          - yes / no / 不明
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 補足情報
+      description: その他、調査に役立ちそうな情報があれば記載してください。
+    validations:
+      required: false

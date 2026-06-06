@@ -51,6 +51,22 @@
 namespace mozc {
 namespace win32 {
 
+std::wstring ImeUtil::GetInputTip() {
+  wchar_t clsid[64] = {};
+  if (!::StringFromGUID2(TsfProfile::GetTextServiceGuid(), clsid,
+                         std::size(clsid))) {
+    return std::wstring();
+  }
+
+  wchar_t profile_id[64] = {};
+  if (!::StringFromGUID2(TsfProfile::GetProfileGuid(), profile_id,
+                         std::size(profile_id))) {
+    return std::wstring();
+  }
+
+  return StrCatW(L"0411:", clsid, profile_id);
+}
+
 bool ImeUtil::SetDefault() {
   wchar_t clsid[64] = {};
   if (!::StringFromGUID2(TsfProfile::GetTextServiceGuid(), clsid,

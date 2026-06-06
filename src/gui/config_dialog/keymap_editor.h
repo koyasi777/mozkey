@@ -40,6 +40,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "gui/config_dialog/combobox_delegate.h"
+#include "gui/config_dialog/command_sequence_delegate.h"
 #include "gui/config_dialog/generic_table_editor.h"
 #include "gui/config_dialog/keybinding_editor_delegate.h"
 
@@ -78,11 +79,12 @@ class KeyMapEditorDialog : public GenericTableEditorDialog {
   absl::FixedArray<QAction *> actions_;
   absl::FixedArray<QAction *> import_actions_;
   std::unique_ptr<ComboBoxDelegate> status_delegate_;
-  std::unique_ptr<ComboBoxDelegate> commands_delegate_;
+  std::unique_ptr<CommandSequenceDelegate> command_sequence_delegate_;
   std::unique_ptr<KeyBindingEditorDelegate> keybinding_delegate_;
   std::unique_ptr<KeyMapValidator> validator_;
 
   absl::flat_hash_map<std::string, std::string> normalized_command_map_;
+  absl::flat_hash_map<std::string, std::string> localized_command_map_;
   absl::flat_hash_map<std::string, std::string> normalized_status_map_;
 };
 

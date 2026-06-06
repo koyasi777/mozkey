@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include <windows.h>
+#include <bcrypt.h>
 #include <sddl.h>
 #include <winhttp.h>
 
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -18,6 +20,7 @@
 #include <vector>
 
 #pragma comment(lib, "Advapi32.lib")
+#pragma comment(lib, "Bcrypt.lib")
 #pragma comment(lib, "Winhttp.lib")
 
 namespace {
@@ -36,7 +39,9 @@ constexpr wchar_t kSingleInstanceMutexName[] =
     L"Local\\MozcZenzScorerSingleInstance";
 
 constexpr wchar_t kDefaultHost[] = L"127.0.0.1";
-constexpr int kDefaultPort = 18080;
+constexpr int kRandomPortMin = 49152;
+constexpr int kRandomPortMax = 65535;
+constexpr int kApiKeyBytes = 32;
 constexpr int kDefaultCtx = 256;
 constexpr int kDefaultThreads = 4;
 constexpr int kDefaultNPredict = 64;
@@ -92,7 +97,10 @@ struct ZenzWireResponseHeader {
 struct Options {
   std::wstring pipe_name = kDefaultPipeName;
   std::wstring host = kDefaultHost;
-  int port = kDefaultPort;
+  int port = 0;
+  std::string api_key;
+  bool random_ok = false;
+
   int ctx = kDefaultCtx;
   int threads = kDefaultThreads;
   int n_predict = kDefaultNPredict;
@@ -198,6 +206,58 @@ int GetEnvInt(const wchar_t* name, int default_value) {
   return static_cast<int>(parsed);
 }
 
+bool FillRandomBytes(void* buffer, size_t size) {
+  if (buffer == nullptr) {
+    return false;
+  }
+  if (size == 0) {
+    return true;
+  }
+  if (size > static_cast<size_t>(std::numeric_limits<ULONG>::max())) {
+    return false;
+  }
+
+  return ::BCryptGenRandom(
+             nullptr,
+             static_cast<PUCHAR>(buffer),
+             static_cast<ULONG>(size),
+             BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+}
+
+std::string HexEncode(const uint8_t* data, size_t size) {
+  constexpr char kHex[] = "0123456789abcdef";
+
+  std::string output;
+  output.reserve(size * 2);
+
+  for (size_t i = 0; i < size; ++i) {
+    const uint8_t b = data[i];
+    output.push_back(kHex[(b >> 4) & 0x0f]);
+    output.push_back(kHex[b & 0x0f]);
+  }
+
+  return output;
+}
+
+int GenerateRandomPort() {
+  uint32_t value = 0;
+  if (!FillRandomBytes(&value, sizeof(value))) {
+    return 0;
+  }
+
+  constexpr int kRange = kRandomPortMax - kRandomPortMin + 1;
+  return kRandomPortMin + static_cast<int>(value % kRange);
+}
+
+std::string GenerateApiKey() {
+  std::vector<uint8_t> bytes(kApiKeyBytes);
+  if (!FillRandomBytes(bytes.data(), bytes.size())) {
+    return "";
+  }
+
+  return HexEncode(bytes.data(), bytes.size());
+}
+
 std::wstring GetExeDirectory() {
   wchar_t path[MAX_PATH] = {};
   DWORD size = GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -237,21 +297,29 @@ Options LoadOptions() {
 
   const std::wstring exe_dir = GetExeDirectory();
 
+#if !defined(NDEBUG)
   options.llama_server_path = GetEnvWide(L"MOZC_ZENZ_LLAMA_SERVER");
+#endif  // !defined(NDEBUG)
+
   if (options.llama_server_path.empty()) {
     options.llama_server_path = JoinPath(exe_dir, L"llama-server.exe");
   }
 
+#if !defined(NDEBUG)
   options.model_path = GetEnvWide(L"MOZC_ZENZ_MODEL");
+#endif  // !defined(NDEBUG)
+
   if (options.model_path.empty()) {
     options.model_path =
         JoinPath(JoinPath(exe_dir, L"models"), L"zenz-v3.2-small-Q5_K_M.gguf");
   }
 
-  options.port = std::clamp(
-      GetEnvInt(L"MOZC_ZENZ_PORT", kDefaultPort),
-      1,
-      65535);
+  options.port = GenerateRandomPort();
+  options.api_key = GenerateApiKey();
+  options.random_ok = options.port >= kRandomPortMin &&
+                      options.port <= kRandomPortMax &&
+                      !options.api_key.empty();
+
   options.ctx = std::clamp(
       GetEnvInt(L"MOZC_ZENZ_CTX", kDefaultCtx),
       64,
@@ -759,8 +827,14 @@ bool LaunchLlamaServer(const Options& options, std::wstring* error) {
   cmd += std::to_wstring(options.threads);
   cmd += L" --host 127.0.0.1 --port ";
   cmd += std::to_wstring(options.port);
+  // The API key is defense-in-depth for accidental or stale localhost servers.
+  // It is passed to llama-server via command line because llama-server exposes
+  // --api-key.  Do not treat it as a strong same-user secret.
+  cmd += L" --api-key ";
+  cmd += Utf8ToWide(options.api_key);
 
-  Debug(L"launch llama-server");
+  Debug(L"launch llama-server port=random api_key_bytes=" +
+        std::to_wstring(options.api_key.size()));
 
   std::vector<wchar_t> cmd_buffer(cmd.begin(), cmd.end());
   cmd_buffer.push_back(L'\0');
@@ -775,7 +849,7 @@ bool LaunchLlamaServer(const Options& options, std::wstring* error) {
   const std::wstring work_dir = GetExeDirectory();
 
   if (!CreateProcessW(
-          nullptr,
+          options.llama_server_path.c_str(),
           cmd_buffer.data(),
           nullptr,
           nullptr,
@@ -878,11 +952,14 @@ bool HttpPostCompletion(
           "]";
   body += "}";
 
-  const wchar_t headers[] = L"Content-Type: application/json; charset=utf-8\r\n";
+  std::wstring headers = L"Content-Type: application/json; charset=utf-8\r\n";
+  headers += L"Authorization: Bearer ";
+  headers += Utf8ToWide(options.api_key);
+  headers += L"\r\n";
 
   BOOL ok = WinHttpSendRequest(
       request,
-      headers,
+      headers.c_str(),
       static_cast<DWORD>(-1L),
       body.data(),
       static_cast<DWORD>(body.size()),
@@ -1030,8 +1107,7 @@ void StartLlamaReadyProbeInBackground(const Options& options) {
     }
 
     Debug(L"ready probe timeout");
-    g_llama_ready_probe_started = false;
-    g_llama_server_ready = false;
+    StopLlamaServer();
   }).detach();
 }
 
@@ -1214,7 +1290,14 @@ int RunServer(const Options& options) {
         RedactedWideChars(L"llama_server_path", options.llama_server_path) +
         L" " +
         RedactedWideChars(L"model_path", options.model_path));
-  Debug(L"port=" + std::to_wstring(options.port));
+
+  if (!options.random_ok) {
+    Debug(L"secure random initialization failed");
+    return 1;
+  }
+
+  Debug(L"http_port_mode=random");
+  Debug(L"api_key_bytes=" + std::to_wstring(options.api_key.size()));
   Debug(L"n_predict=" + std::to_wstring(options.n_predict));
 
   // Start llama-server in the background. Never block Mozc's request path on

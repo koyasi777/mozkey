@@ -3,7 +3,7 @@ name: Secure Offline Checks
 on:
   push:
     branches:
-      - my-product
+      - main
       - "feature/**"
       - "fix/**"
       - "harden/**"

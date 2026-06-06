@@ -34,6 +34,7 @@
 
 #include <istream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -45,6 +46,8 @@
 
 namespace mozc {
 namespace keymap {
+
+using CommandSequence = std::vector<std::string>;
 
 struct DirectInputState {
   enum Commands {
@@ -207,12 +210,24 @@ class KeyMap {
 
   bool GetCommand(const commands::KeyEvent& key_event,
                   CommandsType* command) const;
+
+  bool GetCommandSequence(const commands::KeyEvent& key_event,
+                          CommandSequence* commands) const;
+
   bool AddRule(const commands::KeyEvent& key_event, CommandsType command);
+
+  bool AddRule(const commands::KeyEvent& key_event, CommandsType command,
+               CommandSequence command_sequence);
+
   void Clear();
 
  private:
   using KeyToCommandMap = absl::flat_hash_map<KeyInformation, CommandsType>;
+  using KeyToCommandSequenceMap =
+      absl::flat_hash_map<KeyInformation, CommandSequence>;
+
   KeyToCommandMap keymap_;
+  KeyToCommandSequenceMap sequence_keymap_;
 };
 
 // A manager of key mapping rule for a Config.
@@ -249,6 +264,40 @@ class KeyMapManager {
 
   bool GetCommandPrediction(const commands::KeyEvent& key_event,
                             ConversionState::Commands* command) const;
+
+  bool GetCommandSequenceDirect(const commands::KeyEvent& key_event,
+                                CommandSequence* commands) const;
+
+  bool GetCommandSequencePrecomposition(const commands::KeyEvent& key_event,
+                                        CommandSequence* commands) const;
+
+  bool GetCommandSequenceComposition(const commands::KeyEvent& key_event,
+                                     CommandSequence* commands) const;
+
+  bool GetCommandSequenceConversion(const commands::KeyEvent& key_event,
+                                    CommandSequence* commands) const;
+
+  bool GetCommandSequenceZeroQuerySuggestion(
+      const commands::KeyEvent& key_event,
+      CommandSequence* commands) const;
+
+  bool GetCommandSequenceSuggestion(const commands::KeyEvent& key_event,
+                                    CommandSequence* commands) const;
+
+  bool GetCommandSequencePrediction(const commands::KeyEvent& key_event,
+                                    CommandSequence* commands) const;
+
+  bool ResolveDirectCommandName(const std::string& command_string,
+                                DirectInputState::Commands* command) const;
+  bool ResolvePrecompositionCommandName(
+      const std::string& command_string,
+      PrecompositionState::Commands* command) const;
+  bool ResolveCompositionCommandName(
+      const std::string& command_string,
+      CompositionState::Commands* command) const;
+  bool ResolveConversionCommandName(
+      const std::string& command_string,
+      ConversionState::Commands* command) const;
 
   bool GetNameFromCommandDirect(DirectInputState::Commands command,
                                 std::string* name) const;
@@ -306,6 +355,9 @@ class KeyMapManager {
   bool AddCommand(const std::string& state_name,
                   const std::string& key_event_name,
                   const std::string& command_name);
+
+  bool IsKnownCommandNameForAnyState(
+      const std::string& command_string) const;
 
   bool ParseCommandDirect(const std::string& command_string,
                           DirectInputState::Commands* command) const;
@@ -417,6 +469,55 @@ bool KeyMap<T>::GetCommand(const commands::KeyEvent& key_event,
 }
 
 template <typename T>
+bool KeyMap<T>::GetCommandSequence(const commands::KeyEvent& key_event,
+                                   CommandSequence* commands) const {
+  KeyInformation key;
+
+  // First, try exact match without normalization so that explicit
+  // LeftShift / RightShift bindings can work.
+  if (KeyEventUtil::GetKeyInformation(key_event, &key)) {
+    if (const auto it = sequence_keymap_.find(key);
+        it != sequence_keymap_.end()) {
+      *commands = it->second;
+      return true;
+    }
+
+    if (KeyEventUtil::MaybeGetKeyStub(key_event, &key)) {
+      const auto it = sequence_keymap_.find(key);
+      if (it != sequence_keymap_.end()) {
+        *commands = it->second;
+        return true;
+      }
+    }
+  }
+
+  // Fallback to normalized match so that existing generic shortcuts
+  // such as Shift Space keep working as before.
+  commands::KeyEvent normalized_key_event;
+  KeyEventUtil::NormalizeModifiers(key_event, &normalized_key_event);
+
+  if (!KeyEventUtil::GetKeyInformation(normalized_key_event, &key)) {
+    return false;
+  }
+
+  if (const auto it = sequence_keymap_.find(key);
+      it != sequence_keymap_.end()) {
+    *commands = it->second;
+    return true;
+  }
+
+  if (KeyEventUtil::MaybeGetKeyStub(normalized_key_event, &key)) {
+    const auto it = sequence_keymap_.find(key);
+    if (it != sequence_keymap_.end()) {
+      *commands = it->second;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+template <typename T>
 bool KeyMap<T>::AddRule(const commands::KeyEvent& key_event,
                         CommandsType command) {
   KeyInformation key;
@@ -425,12 +526,32 @@ bool KeyMap<T>::AddRule(const commands::KeyEvent& key_event,
   }
 
   keymap_[key] = command;
+  sequence_keymap_.erase(key);
+  return true;
+}
+
+template <typename T>
+bool KeyMap<T>::AddRule(const commands::KeyEvent& key_event,
+                        CommandsType command,
+                        CommandSequence command_sequence) {
+  if (command_sequence.empty()) {
+    return false;
+  }
+
+  KeyInformation key;
+  if (!KeyEventUtil::GetKeyInformation(key_event, &key)) {
+    return false;
+  }
+
+  keymap_[key] = command;
+  sequence_keymap_[key] = std::move(command_sequence);
   return true;
 }
 
 template <typename T>
 void KeyMap<T>::Clear() {
   keymap_.clear();
+  sequence_keymap_.clear();
 }
 
 }  // namespace keymap

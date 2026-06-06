@@ -1,48 +1,46 @@
-Mozc fork by koyasi777
-======================
+<p align="center">
+  <img src="src/data/images/icon.svg" width="112" height="112" alt="Mozkey icon">
+</p>
 
-このリポジトリは [google/mozc](https://github.com/google/mozc) の個人用フォークです。
+<h1 align="center">Mozkey（もずきー）</h1>
+
+<p align="center">
+  <strong>Mozc をベースに、遅延付きライブ変換・ローカル Zenz 補正・ダークテーマ対応<br>句読点単打確定・文脈を見た変換補正などを統合した、ローカルファーストな日本語入力 fork です。</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/koyasi777/mozkey/releases"><img alt="Releases" src="https://img.shields.io/github/v/release/koyasi777/mozkey?include_prereleases&label=release"></a>
+  <img alt="Based on Mozc" src="https://img.shields.io/badge/based%20on-Mozc-88A2DD">
+  <img alt="Local first" src="https://img.shields.io/badge/local--first-Zenz-53D4C7">
+  <img alt="Release build" src="https://img.shields.io/badge/release-Windows%20MSI-178B8B">
+  <img alt="macOS/Linux status" src="https://img.shields.io/badge/macOS%20%2F%20Linux-untested-lightgrey">
+</p>
+
+<br>
+
+Mozkey（もずきー）は [google/mozc](https://github.com/google/mozc) をベースにした非公式フォークです。
 
 本 fork は、主に自分の Windows 環境で日常的に使うために、Mozc に入力補助・ライブ変換・文脈補正・ローカル Zenz 補正・オフライン配布向けの調整を加えたものです。
 
-このビルドは google/mozc の公式配布物ではありません。
+本プロジェクトは Google 日本語入力ではありません。
+Google または google/mozc の公式配布物ではありません。
+Google によるサポートや品質保証の対象ではありません。
 
-プライバシー / ネットワークアクセス
-------------------------------------
+upstream Mozc との追従性および既存インストールとの互換性を保つため、
+一部の内部実行ファイル名、パス、実装上の識別子には `mozc` / `Mozc` 名が残ります。
 
-この fork は、通常の IME 利用時に Mozc の実行時プロセスがネットワーク通信を行わない構成を目指しています。
-
-upstream 由来の使用統計・クラッシュレポート送信オプションは、管理ダイアログおよび設定ダイアログから削除しています。
-
-この fork では `StatsConfigUtil` のデフォルト実装を Null 実装に固定しており、通常の実行経路から使用統計を有効化できません。
-
-Windows 向けリリースバイナリについては、Mozc core runtime executable が `winhttp.dll`, `wininet.dll`, `urlmon.dll` などの代表的なネットワーク関連 DLL を import していないことを検査します。
-
-この fork では、llama.cpp ベースのローカル Zenz 推論 runtime を同梱する場合があります。同梱される `llama-server.exe` はローカル推論用の server として使用され、`127.0.0.1` のみに bind することを前提としています。外部ネットワークサービスを公開したり、入力内容を外部サーバーへ送信したりする目的のものではありません。
-
-Zenz helper process は、同梱された `llama-server.exe` と localhost endpoint のみで通信します。この local HTTP endpoint は推論処理を分離するための内部的なプロセス境界であり、外部ネットワークアクセスを目的としたものではありません。
-
-Zenz feedback learning は、読み、候補、粗い文脈クラス、採用/却下回数、理由 marker などのローカル学習情報だけを保存します。生の左文脈は保存しません。feedback に使う文脈は、`empty`、`japanese_only`、`japanese_with_punctuation`、`mixed_japanese_ascii`、`sensitive_like` などの非可逆な context class に落とします。
-
-さらに、リリース時には Mozc core runtime binaries にテレメトリ、アップデータ、クラッシュアップロード、使用統計関連の危険な marker が含まれないことを確認します。
-
-`http://`, `https://`, `googleapis.com` などの汎用的な URL 風 marker は、manifest、XML namespace、コメント、license file、ライブラリ metadata に由来する場合があるため、監査用に表示しますが hard failure にはしていません。
-
-ソースからビルドする場合、ビルド依存関係の取得にネットワーク接続が必要になる場合があります。これは、インストール済み IME の実行時通信とは別です。
-
-Windows 版では、追加のオフライン防御層として、インストーラーが Mozc の実行ファイルに outbound 通信をブロックする Windows Firewall rule を追加します。これらの rule はアンインストール時に削除されます。
-
-関連ドキュメント:
-
-- [Secure Offline Guarantee](docs/security/offline_guarantee.md)
-- [Secure Offline Release Checklist](docs/security/release_checklist.md)
+<br>
 
 ダウンロード / インストール
 --------------------------
 
-Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mozc/releases) からダウンロードできます。
+現時点で公開しているビルド済みパッケージと実機確認済み環境は Windows です。
 
-- 通常の 64-bit Windows では、Releases にある最新の `Mozc64_*_x64.msi` を使用してください。
+macOS / Linux については、upstream Mozc 自体は対応していますが、この fork で追加した機能、ビルド設定、Zenz 同梱構成、インストーラーまわりについては、まだ実機確認できていません。
+
+Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mozkey/releases) からダウンロードできます。
+
+- 通常の 64-bit Windows では、Releases にある最新の `Mozkey_v*_x64.msi` を使用してください。
 - 本 fork のリリースは個人用の experimental build として公開しています。
 - Zenz 同梱版は、ローカル推論 runtime と GGUF model を含むため、従来の offline MSI よりファイルサイズが大きくなります。
 
@@ -51,14 +49,9 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 > 個人用 fork の experimental / pre-release build です。
 > MSI は署名されていないため、Windows の警告が表示される場合があります。
 
-主なブランチ
-------------
+<br>
 
-- `my-product`: 日常利用向けの main branch
-- `master`: upstream tracking branch
-- `pr/*`: upstream 提案向けの作業 branch
-
-主な追加機能（`my-product`）
+主な追加機能
 ---------------------------
 
 - 曖昧なローマ字規則でも途中表示できるオプションを追加
@@ -74,11 +67,15 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 1文字だけの未確定文字列では、助詞などの誤変換を避けるためライブ変換を実行しない
 - `え~`、`えー`、`ん？` のような「かな1文字 + 装飾的な末尾記号」でも、短すぎる漢字化を避けるためライブ変換を抑制
 - 確定済みの左文脈や直前の文節、限定的な右文脈を参照し、`mainにマージしました`、`githubには`、`2名しかいない`、`追記したい`、`山梨県立美術館`、`滋賀方面` のような文脈で、助詞・複合機能語・機能表現・接尾的な語構成・地名接尾構成が同音漢字候補に負ける挙動を抑制
+- キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
+- 複数コマンドは `Commit|IMEOff` のような形式で保存され、設定画面では `Commit → IMEOff` のように編集可能
 - Windows 版で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を個別キーとして設定画面から割り当て可能
 - Windows 版で IMEOn / IMEOff に割り当てたキーを押した場合、すでに同じ状態でも IME モードインジケータを表示
-- Windows 版の候補ウィンドウにダークモード切り替えを追加
+- Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
+- Windows 版の候補ウィンドウ/ルビ表示にダークモード切り替えを追加
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能
 - Windows 版の候補ウィンドウや IME 切り替えインジケータの配色・余白・角丸などの見た目を調整
+- Windows 版の IME 切り替えインジケータが、Windows のライト / ダークテーマに合わせて表示されるように改善
 - system dictionary 強化用の追加辞書生成パイプラインを追加
 - merge-ut-dictionaries 由来の地名・SudachiDict 系語彙を system dictionary に取り込めるようにした
 - dic-nico-intersection-pixiv 由来のネット・サブカル系固有名詞を、既存辞書との差分として daily 辞書に追加可能
@@ -97,6 +94,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Zenz 学習データを設定画面から安全に管理できる UI を追加。TSV を直接編集せず、検索、インポート、エクスポート、選択項目削除、全削除が可能
 - Zenz accepted feedback を通常変換候補の promotion に利用。1 文節の通常変換では、保存済み accepted feedback が既存候補にあれば先頭へ昇格し、候補にない場合は synthetic candidate として追加
 - 文節境界を壊さないため、複数文節に分かれた通常変換では Zenz feedback promotion を行わない
+- 複数文節に分かれるライブ変換では、全文補正の学習を保つため、accepted Zenz feedback を session-level live correction fast path として再利用
 - sensitive-like context で得られた feedback は、通常文脈の候補 promotion には使わない
 - accepted として確定した Zenz 候補は、条件を満たす場合は Mozc の user history にも外部変換結果として学習
 - Zenz prompt に使う左文脈は sanitizer を通し、URL、email、file path、token、長い数字列など sensitive-like な文脈は prompt に含めない
@@ -104,7 +102,43 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Zenz model / llama.cpp runtime の third-party license notice を MSI に同梱
 - 自分の Windows 開発環境向けのビルド調整
 
-使用例
+<br>
+
+プライバシー / ネットワークアクセス
+------------------------------------
+
+この fork は、通常の IME 利用時に Mozc の実行時プロセスがネットワーク通信を行わない構成を目指しています。
+
+upstream 由来の使用統計・クラッシュレポート送信オプションは、管理ダイアログおよび設定ダイアログから削除しています。
+
+この fork では `StatsConfigUtil` のデフォルト実装を Null 実装に固定しており、通常の実行経路から使用統計を有効化できません。
+
+Windows 向けリリースバイナリについては、Mozc core runtime executable が `winhttp.dll`, `wininet.dll`, `urlmon.dll` などの代表的なネットワーク関連 DLL を import していないことを検査します。
+
+この fork では、llama.cpp ベースのローカル Zenz 推論 runtime を同梱する場合があります。同梱される `llama-server.exe` はローカル推論用の server として使用され、`127.0.0.1` のみに bind することを前提としています。外部ネットワークサービスを公開したり、入力内容を外部サーバーへ送信したりする目的のものではありません。
+
+Zenz helper process は、同梱された `llama-server.exe` と localhost endpoint のみで通信します。この local HTTP endpoint は推論処理を分離するための内部的なプロセス境界であり、外部ネットワークアクセスを目的としたものではありません。
+
+Zenz の localhost 通信は、固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
+
+Zenz feedback learning は、読み、候補、粗い文脈クラス、採用/却下回数、理由 marker などのローカル学習情報だけを保存します。生の左文脈は保存しません。feedback に使う文脈は、`empty`、`japanese_only`、`japanese_with_punctuation`、`mixed_japanese_ascii`、`sensitive_like` などの非可逆な context class に落とします。
+
+さらに、リリース時には Mozc core runtime binaries にテレメトリ、アップデータ、クラッシュアップロード、使用統計関連の危険な marker が含まれないことを確認します。
+
+`http://`, `https://`, `googleapis.com` などの汎用的な URL 風 marker は、manifest、XML namespace、コメント、license file、ライブラリ metadata に由来する場合があるため、監査用に表示しますが hard failure にはしていません。
+
+ソースからビルドする場合、ビルド依存関係の取得にネットワーク接続が必要になる場合があります。これは、インストール済み IME の実行時通信とは別です。
+
+Windows 版では、追加のオフライン防御層として、インストーラーが Mozc の実行ファイルに outbound 通信をブロックする Windows Firewall rule を追加します。これらの rule はアンインストール時に削除されます。
+
+関連ドキュメント:
+
+- [Secure Offline Guarantee](docs/security/offline_guarantee.md)
+- [Secure Offline Release Checklist](docs/security/release_checklist.md)
+
+<br>
+
+修正詳細
 ------
 
 ### 曖昧なローマ字規則の途中表示
@@ -151,21 +185,25 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 
 ライブ変換と Zenz ライブ補正の両方を有効にすると、まず通常の Mozc ライブ変換結果を表示し、その後でローカルの Zenz runtime に非同期で補正を依頼します。
 
-Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。
+Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
 Zenz 補正は設定可能なデバウンス時間の後に実行されます。デフォルトは 1000 ms です。Zenz 結果が返る前に入力内容が変わった場合、古い結果は generation / key の検査により破棄されます。
 
 Zenz 出力は表示前に検証されます。空出力、短すぎる入力、Mozc 結果と同一の出力、長すぎる出力、不正な文字列、安全でない可能性のある文字列は拒否されます。拒否された場合は、通常の Mozc ライブ変換結果をそのまま表示します。
 
-Zenz ライブ補正は password field では実行されません。また、入力途中の romaji のように ASCII alphabet を含む読みも補正対象外です。
+Zenz ライブ補正は password field では実行されません。また、入力途中の raw romaji のように日本語文字シグナルを含まない読みは補正対象外です。日本語文字を含む英字混じりの入力は、privacy gate を通る場合に限り補正対象になり得ます。
 
 Zenz feedback learning は任意機能です。有効な場合でも、Zenz 補正結果が表示されただけでは保存されません。Enter や句読点・記号の単打確定などで、表示中の Zenz 結果が明示的に確定された場合だけ、accepted feedback の候補として保留されます。
 
 保留された accepted feedback は、次のユーザー操作で取り消されなかった場合だけローカル TSV に保存されます。Backspace、Escape、Revert、Undo、IME off などの修正操作が入った場合、保留 feedback は破棄されます。表示中の Zenz 補正から Space や候補移動などの通常変換操作へ移った場合、その Zenz 結果は rejected feedback として扱われます。
 
-accepted feedback は 2 つの経路で再利用されます。ライブ変換中には、Zenz runtime を再度呼ばずに補正する fast path として使われます。通常変換中には、1 文節の変換に対して学習済み候補を昇格できます。複数文節に分かれた変換は、文節境界を converter の責務として保持するため、feedback promotion では書き換えません。
+accepted feedback の再利用方法は、単文節と複数文節で異なります。
 
-`sensitive_like` context で得られた feedback は、同じ `sensitive_like` context class のライブ変換 fast path でのみ再利用されます。ただし、通常文脈への候補 promotion には使いません。
+単文節の通常変換では、Zenz feedback は rewriter chain 内の candidate promotion として再利用されます。保存済み accepted feedback が既存候補にあれば先頭へ昇格し、候補にない場合は synthetic candidate として追加できます。その後に UserSegmentHistoryRewriter が走るため、明示的なユーザー選択履歴が最終順位を決めます。
+
+複数文節に分かれるライブ変換では、converter の文節境界を feedback promotion で壊さないため、rewriter chain では通常変換候補を書き換えません。その代わり、session-level の live correction fast path として再利用します。これにより、`かれはてんてきです` → `彼は天敵です` のような全文補正の学習も再利用できます。
+
+`sensitive_like` context で得られた feedback は、通常文脈への候補 promotion には使いません。
 
 Zenz 学習データは設定画面から管理できます。管理画面では、学習済みエントリを読み取り専用 table で表示し、検索、インポート、エクスポート、選択項目削除、全削除を行えます。ユーザーが TSV ファイルを直接編集する必要はありません。
 
@@ -205,6 +243,10 @@ Zenz 学習データは設定画面から管理できます。管理画面では
 
 のように動作します。
 
+ローマ字テーブルで句読点・記号を出すように設定している場合も、出力された文字が単打確定の対象に含まれていれば、その時点で確定されます。
+
+たとえば、ローマ字テーブルで `zz -> 。` や `qq -> ？` のように設定している場合でも、句点や疑問符を単打確定の対象にしていれば、`tesutozz` → `てすと。`、`tesutoqq` → `てすと？` のように確定されます。
+
 どの句読点・記号を単打確定の対象にするかは、設定画面のチェックボックスで選択できます。
 
 ライブ変換が有効な場合、句読点・記号の単打確定では、ひらがなの未変換文字列ではなく、現在表示されているライブ変換結果を確定します。
@@ -228,6 +270,20 @@ Zenz 学習データは設定画面から管理できます。管理画面では
 
 これにより、変換確定直後の修正操作がユーザーの意図に近い形で履歴学習へ反映されます。
 
+### 複数コマンドのキー割り当て
+
+キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当てられるようにしました。
+
+たとえば、次のような割り当てができます。
+
+- `Composition + Ctrl Enter -> Commit → IMEOff`
+- `Composition + Ctrl Space -> Convert → ConvertNext`
+- `Conversion + Ctrl Enter -> Commit → IMEOff`
+
+コマンド列は左から右へ順に実行されます。途中で入力状態が変わった場合、後続コマンドはその時点の状態に合わせて解決されます。たとえば `Convert → ConvertNext` では、まず未変換状態から変換状態へ入り、その後に次候補へ移動します。
+
+設定ファイル上では、複数コマンドは `Commit|IMEOff` や `Convert|ConvertNext` のように `|` 区切りで保存されます。設定画面では `Commit → IMEOff` のように表示され、コマンドの追加、削除、並べ替えができます。
+
 ### 左右 Shift / Ctrl の個別キー割り当て（Windows）
 
 Windows 版では、キー設定エディタ上で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を別々のキーとして扱えます。
@@ -249,11 +305,23 @@ Windows 版では、キー設定エディタ上で左 Shift / 右 Shift / 左 Ct
 
 これにより、IME 有効化・無効化キーを「状態を切り替えるキー」としてだけでなく、現在状態を視覚的に確認するためのキーとしても使えます。
 
-### Windows 候補ウィンドウのテーマ
+### Windows 既定 IME 設定
+
+Windows 版では、設定画面の「その他の設定」→「既定の IME」から、Mozkey を Windows の既定 IME として明示的に設定できます。
+
+この操作はログオン時に自動実行されるものではなく、ユーザーが設定ボタンを押した場合だけ実行されます。
+
+設定時には、変更前の Windows 既定 IME の上書き設定と、日本語入力方式リストの順序を保存します。「以前の Windows 既定 IME 設定に戻す...」ボタンを押すと、保存していた設定へ戻します。
+
+すでに Mozkey が既定 IME として設定されている場合や、未復元のバックアップが残っている場合は、変更前の復元点を上書きしないようにしています。
+
+### Windows 候補ウィンドウと IME インジケータの表示テーマ
 
 Windows 版では、設定画面から候補ウィンドウの通常テーマとダークテーマを切り替えられます。
 
 ダークテーマでは配色だけでなく、余白、角丸、フッター表示なども調整し、候補ウィンドウ全体の見た目をよりモダンにしています。
+
+IME 切り替えインジケータは Windows のライト / ダークテーマに追従し、現在の入力モードを確認しやすいように配色を切り替えます。
 
 ### Windows 未確定文字の表示色
 
@@ -307,6 +375,8 @@ Upstream-oriented changes are organized in `pr/*` branches.
 この fork は主に個人利用向けに保守しています。
 upstream 提案向けの変更は `pr/*` branches に整理しています。
 
+<br>
+
 # English
 
 This repository is my personal fork of [google/mozc](https://github.com/google/mozc).
@@ -341,6 +411,10 @@ The Zenz helper process communicates with the bundled `llama-server.exe` only
 through a localhost endpoint. This local HTTP endpoint is used as an internal
 process boundary for inference and is not intended for external network access.
 
+The Zenz localhost transport is hardened so that it does not rely on a fixed
+endpoint, and internal requests include protection against accidental or stale
+local endpoint mismatches.
+
 Zenz feedback learning stores only local learning records such as reading,
 candidate, coarse context class, accepted/rejected counts, and reason markers.
 Raw left context is not stored. Context used for feedback is reduced to a
@@ -367,12 +441,17 @@ See also:
 - [Secure Offline Guarantee](docs/security/offline_guarantee.md)
 - [Secure Offline Release Checklist](docs/security/release_checklist.md)
 
+
 Download / Install
 ------------------
 
-Windows MSI packages are available from [Releases](https://github.com/koyasi777/mozc/releases).
+At the moment, prebuilt packages and real-machine testing are available only for Windows.
 
-- On ordinary 64-bit Windows, use the latest `Mozc64_*_x64.msi` from Releases.
+macOS / Linux are supported by upstream Mozc itself, but this fork's added features, build settings, Zenz-bundled configuration, and installer-related behavior have not yet been tested on real macOS / Linux environments.
+
+Windows MSI packages are available from [Releases](https://github.com/koyasi777/mozkey/releases).
+
+- On ordinary 64-bit Windows, use the latest `Mozkey_v*_x64.msi` from Releases.
 - For the Zenz-bundled build, choose an MSI whose file name contains `zenz` or `zenz_offline`.
 - Releases from this fork are published as personal experimental builds.
 - Zenz-bundled builds are larger than the traditional offline MSI because they include a local inference runtime and a GGUF model.
@@ -385,12 +464,12 @@ Windows MSI packages are available from [Releases](https://github.com/koyasi777/
 Main branches
 -------------
 
-- `my-product`: my main branch for daily use
+- `main`: main branch for daily use
 - `master`: upstream tracking branch
 - `pr/*`: upstream-oriented proposal branches
 
-Main features added in `my-product`
------------------------------------
+Main features added in this fork
+--------------------------------
 
 - Adds an option to display ambiguous romaji rules before the input is fully disambiguated
 - Adds a checkbox UI for that option to the romaji table editor
@@ -405,11 +484,15 @@ Main features added in `my-product`
 - Suppresses live conversion for one-character compositions to avoid over-converting particles
 - Suppresses live conversion for very short kana compositions with decorative trailing symbols such as `え~`, `えー`, or `ん？`
 - Uses committed left context, previous segments, and limited right context to reduce unnatural homophone results in cases such as `mainにマージしました`, `githubには`, `2名しかいない`, `追記したい`, `山梨県立美術館`, and `滋賀方面`
+- Allows assigning multiple commands to a single key binding as an ordered command sequence
+- Stores command sequences as `Commit|IMEOff` and shows them in the keymap editor as `Commit → IMEOff`
 - Allows assigning left/right Shift and left/right Ctrl separately on Windows
 - Shows the IME mode indicator even when a key assigned to IMEOn or IMEOff is pressed while Mozc is already in that state
+- Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Adds a dark-mode switch for the Windows candidate window
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog
 - Adjusts the appearance of the Windows candidate window and IME mode indicator, including colors, spacing, rounded corners, and layout
+- Makes the Windows IME mode indicator follow the Windows light/dark theme
 - Adds an enhanced system dictionary generation pipeline
 - Allows incorporating place names and SudachiDict-derived vocabulary from merge-ut-dictionaries into the system dictionary
 - Allows adding internet/subculture proper nouns from dic-nico-intersection-pixiv as daily-dictionary differences
@@ -428,6 +511,7 @@ Main features added in `my-product`
 - Adds a safe Zenz feedback management UI to the config dialog. Users can search, import, export, delete selected entries, and clear all entries without directly editing the TSV file
 - Reuses accepted Zenz feedback for normal conversion candidate promotion. In single-segment conversions, an accepted feedback candidate is promoted to the top if it already exists, or inserted as a synthetic candidate if it does not
 - Does not apply Zenz feedback promotion to multi-segment conversions, to avoid collapsing phrase boundaries
+- Reuses accepted Zenz feedback via the session-level live-correction fast path for multi-segment live conversion to preserve learned full-phrase corrections
 - Does not promote feedback obtained from `sensitive_like` context into ordinary context
 - Learns accepted Zenz candidates into Mozc user history as external conversion results when the runtime conditions allow it
 - Sanitizes left context before using it in Zenz prompts, and excludes sensitive-like context such as URLs, email addresses, file paths, tokens, and long digit sequences
@@ -488,7 +572,9 @@ Zenz runtime to refine the visible preedit.
 
 The Zenz request is sent from `mozc_server` to `mozc_zenz_scorer.exe` through a
 Windows named pipe. The scorer then calls the bundled `llama-server.exe` on a
-localhost endpoint for local inference.
+localhost endpoint for local inference. The localhost transport is hardened so
+that it does not rely on a fixed endpoint, and internal requests include
+protection against accidental or stale local endpoint mismatches.
 
 Zenz correction is delayed by a configurable debounce interval. The default
 delay is 1000 ms. If the current composition changes before the Zenz result
@@ -499,8 +585,10 @@ identical to the Mozc result, too long, malformed, or likely to contain unsafe
 text are rejected. If validation fails, the normal Mozc live conversion result
 remains visible.
 
-Zenz live correction is disabled for password fields and for readings that still
-contain ASCII alphabet characters, such as intermediate romaji input.
+Zenz live correction is disabled for password fields and for composition text
+that has no Japanese-script signal, such as intermediate raw romaji input.
+Japanese text mixed with ASCII can still be eligible when it passes the privacy
+gate.
 
 Zenz feedback learning is optional. When enabled, a displayed Zenz result is not
 stored just because it was shown. It becomes a pending accepted feedback only
@@ -513,13 +601,23 @@ correction actions discard the pending feedback. Moving from a visible Zenz
 correction to normal conversion operations, such as Space or candidate movement,
 records the Zenz result as rejected feedback instead.
 
-Accepted feedback can be reused in two ways. During live conversion, it can
-provide a fast path without calling the Zenz runtime again. During normal
-conversion, it can promote a learned candidate for single-segment conversions.
-Multi-segment conversions are not rewritten, because phrase boundaries are owned
-by the converter and should not be collapsed by feedback promotion.
+Accepted feedback is reused differently for single-segment and multi-segment
+conversions.
 
-Feedback learned in a `sensitive_like` context can be reused only for the live-conversion fast path within the same `sensitive_like` context class. It is not promoted into ordinary-context conversion candidates.
+For single-segment normal conversion, Zenz feedback is reused as candidate
+promotion inside the rewriter chain. A learned feedback candidate can be
+promoted to the top if it already exists, or inserted as a synthetic candidate
+if it does not. ZenzFeedbackCandidateRewriter runs before
+UserSegmentHistoryRewriter, so explicit user selection history can still make
+the final ranking decision.
+
+For multi-segment live conversion, the rewriter-chain feedback promotion does
+not rewrite normal conversion candidates, because phrase boundaries are owned by
+the converter and should not be collapsed. Instead, accepted feedback can still be replayed via
+the session-level live-correction fast path. This preserves learned full-phrase
+corrections such as `かれはてんてきです` -> `彼は天敵です`.
+
+Feedback learned in a `sensitive_like` context is not promoted into ordinary-context conversion candidates.
 
 Zenz feedback data can be managed from the config dialog. The management dialog
 shows learned entries in a read-only table and supports search, import, export,
@@ -599,6 +697,20 @@ For example:
 
 This makes immediate correction after conversion confirmation behave closer to user intent.
 
+### Multiple commands per key binding
+
+The keymap editor can assign multiple commands to one key binding as an ordered command sequence.
+
+Examples:
+
+- `Composition + Ctrl Enter -> Commit → IMEOff`
+- `Composition + Ctrl Space -> Convert → ConvertNext`
+- `Conversion + Ctrl Enter -> Commit → IMEOff`
+
+Commands are executed from left to right. If the input state changes during the sequence, the following command is resolved against the current state at that point. For example, `Convert → ConvertNext` first enters conversion from composition and then moves to the next candidate.
+
+In exported keymap files, command sequences are stored with `|`, such as `Commit|IMEOff` or `Convert|ConvertNext`. In the keymap editor UI, they are displayed with arrows, such as `Commit → IMEOff`.
+
 ### Independent left/right Shift and Ctrl key bindings (Windows)
 
 On Windows, left/right Shift and left/right Ctrl can be configured as separate keys in the keybinding editor.
@@ -622,11 +734,23 @@ an `IMEOff` key while IME is already off still shows the direct-input indicator.
 This makes mode-confirmation keys useful as explicit visual feedback, not only
 as state-changing toggles.
 
-### Windows candidate window theme
+### Windows default IME setting
+
+On Windows, the config dialog can explicitly set Mozkey as the Windows default IME.
+
+This operation is not performed automatically at login. It is executed only when the user presses the setting button.
+
+Before changing the setting, Mozkey saves the previous Windows default input method override and the Japanese input method order. The restore button restores those saved values.
+
+If Mozkey is already the default IME, or if an active restore point already exists, Mozkey does not overwrite the previous restore point.
+
+### Windows candidate window and IME indicator themes
 
 On Windows, the candidate window can be switched between the default light theme and a dark theme from the config dialog.
 
 The dark theme also adjusts the candidate window appearance, including colors, spacing, rounded corners, and footer visibility, to make it look more modern.
+
+The IME mode indicator follows the Windows light/dark theme and changes its colors to keep the current input mode easy to recognize.
 
 ### Windows preedit display colors
 

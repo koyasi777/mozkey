@@ -999,7 +999,7 @@
             <bool>true</bool>
            </property>
            <property name="text">
-            <string>Use dark mode for candidate window</string>
+            <string>Use dark mode for candidate and ruby windows</string>
            </property>
           </widget>
          </item>
@@ -1677,9 +1677,9 @@
       <property name="geometry">
        <rect>
         <x>50</x>
-        <y>30</y>
+        <y>42</y>
         <width>421</width>
-        <height>51</height>
+        <height>48</height>
        </rect>
       </property>
       <property name="text">
@@ -1687,6 +1687,9 @@
       </property>
       <property name="wordWrap">
        <bool>true</bool>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
       </property>
      </widget>
      <widget class="QCheckBox" name="presentationModeCheckBox">
@@ -1851,19 +1854,35 @@
               <number>0</number>
              </property>
              <item>
-              <widget class="QCheckBox" name="checkDefaultCheckBox">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
-                 <horstretch>0</horstretch>
-                 <verstretch>0</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="text">
-                <string>Check if [ProductName] is the default IME on startup</string>
-               </property>
-               <property name="tristate">
-                <bool>false</bool>
-               </property>
+              <widget class="QWidget" name="defaultImeButtonsWidget" native="true">
+               <layout class="QHBoxLayout" name="defaultImeButtonsLayout">
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="QPushButton" name="setDefaultImeButton">
+                  <property name="text">
+                   <string>Set as Windows default IME</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="restoreDefaultImeButton">
+                  <property name="text">
+                   <string>Restore previous setting</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
               </widget>
              </item>
              <item>
@@ -2363,7 +2382,8 @@
   <tabstop>suggestionsSizeSpinBox</tabstop>
   <tabstop>incognitoModeCheckBox</tabstop>
   <tabstop>presentationModeCheckBox</tabstop>
-  <tabstop>checkDefaultCheckBox</tabstop>
+  <tabstop>setDefaultImeButton</tabstop>
+  <tabstop>restoreDefaultImeButton</tabstop>
   <tabstop>IMEHotKeyDisabledCheckBox</tabstop>
   <tabstop>launchAdministrationDialogButton</tabstop>
   <tabstop>startupCheckBox</tabstop>

@@ -34,6 +34,15 @@ FORBIDDEN_DLLS = {
     "rtutils.dll",
 }
 
+ALLOWED_FORBIDDEN_DLLS_BY_BINARY = {
+    # mozc_zenz_scorer.exe uses WinHTTP only to talk to the bundled
+    # llama-server.exe through a localhost endpoint for local Zenz inference.
+    # This is not telemetry, updater, crash upload, or external network access.
+    "mozc_zenz_scorer.exe": {
+        "winhttp.dll",
+    },
+}
+
 RUNTIME_BINARY_PATTERN = re.compile(r"^mozc.*\.(exe|dll)$", re.IGNORECASE)
 
 
@@ -259,7 +268,8 @@ def main(argv: list[str]) -> int:
             failed = True
             continue
 
-        forbidden = sorted(imported & FORBIDDEN_DLLS)
+        allowed_forbidden = ALLOWED_FORBIDDEN_DLLS_BY_BINARY.get(path.name.lower(), set())
+        forbidden = sorted((imported & FORBIDDEN_DLLS) - allowed_forbidden)
 
         if forbidden:
             failed = True

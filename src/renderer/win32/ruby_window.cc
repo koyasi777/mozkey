@@ -6,14 +6,16 @@
 #include "base/win32/wide_char.h"
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
+#include "renderer/renderer_style_handler.h"
 
 namespace mozc {
 namespace renderer {
 namespace win32 {
 namespace {
 
-// Dark translucent pill UI.
-// This intentionally avoids the old "white tooltip with gray border" look.
+// Theme-aware translucent pill UI.
+// The colors follow RendererStyle so that the ruby overlay matches the
+// candidate window light/dark setting.
 constexpr int kPaddingX = 14;
 constexpr int kPaddingY = 6;
 constexpr int kGapFromComposition = 0;
@@ -21,12 +23,58 @@ constexpr int kFontPointSize = 13;
 constexpr int kCornerRadius = 18;
 
 // Whole-window alpha. 255 is opaque.
-// Dark backgrounds tolerate alpha better than light ones because text remains
-// readable and the overlay does not look like a legacy tooltip.
 constexpr BYTE kWindowAlpha = 228;
 
 // Keep the overlay close to the preedit, but do not let it cover the glyphs.
 constexpr int kFallbackLineHeight = 22;
+
+constexpr size_t kCandidateTextStyleIndex = 2;
+
+struct RubyWindowTheme {
+  COLORREF background_color;
+  COLORREF border_color;
+  COLORREF text_color;
+};
+
+COLORREF ToColorRef(const RendererStyle::RGBAColor& color) {
+  return RGB(static_cast<int>(color.r()),
+             static_cast<int>(color.g()),
+             static_cast<int>(color.b()));
+}
+
+RubyWindowTheme GetRubyWindowTheme() {
+  // Fallback is the current dark pill. Even if RendererStyle is incomplete,
+  // the ruby window stays readable.
+  RubyWindowTheme theme = {
+      RGB(24, 27, 31),    // background
+      RGB(58, 64, 72),    // border
+      RGB(246, 248, 250)  // text
+  };
+
+  RendererStyle style;
+  if (!RendererStyleHandler::GetRendererStyle(&style)) {
+    return theme;
+  }
+
+  if (style.has_border_color()) {
+    theme.border_color = ToColorRef(style.border_color());
+  }
+
+  if (style.text_styles_size() > kCandidateTextStyleIndex) {
+    const RendererStyle::TextStyle& candidate_style =
+        style.text_styles(kCandidateTextStyleIndex);
+
+    if (candidate_style.has_background_color()) {
+      theme.background_color = ToColorRef(candidate_style.background_color());
+    }
+
+    if (candidate_style.has_foreground_color()) {
+      theme.text_color = ToColorRef(candidate_style.foreground_color());
+    }
+  }
+
+  return theme;
+}
 
 std::wstring ToWide(const std::string& text) {
   return mozc::win32::Utf8ToWide(text);
@@ -314,11 +362,12 @@ void RubyWindow::DoPaint(HDC dc) {
   RECT rect = {};
   GetClientRect(&rect);
 
+  const RubyWindowTheme theme = GetRubyWindowTheme();
+
   ::SetBkMode(dc, TRANSPARENT);
 
-  // Dark floating pill.
-  HBRUSH bg_brush = ::CreateSolidBrush(RGB(24, 27, 31));
-  HPEN border_pen = ::CreatePen(PS_SOLID, 1, RGB(58, 64, 72));
+  HBRUSH bg_brush = ::CreateSolidBrush(theme.background_color);
+  HPEN border_pen = ::CreatePen(PS_SOLID, 1, theme.border_color);
 
   HGDIOBJ old_brush = ::SelectObject(dc, bg_brush);
   HGDIOBJ old_pen = ::SelectObject(dc, border_pen);
@@ -336,7 +385,7 @@ void RubyWindow::DoPaint(HDC dc) {
     old_font = static_cast<HFONT>(::SelectObject(dc, font_));
   }
 
-  ::SetTextColor(dc, RGB(246, 248, 250));
+  ::SetTextColor(dc, theme.text_color);
 
   RECT text_rect = rect;
   text_rect.left += kPaddingX;

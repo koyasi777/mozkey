@@ -306,18 +306,589 @@ bool UseZenzFeedbackLearning(const config::Config& config) {
   return config.use_zenz_feedback_learning();
 }
 
-bool ContainsAsciiAlphabet(absl::string_view s) {
-  for (const unsigned char c : s) {
-    if (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')) {
+bool StartsWithString(absl::string_view text, absl::string_view prefix) {
+  return text.size() >= prefix.size() &&
+         text.substr(0, prefix.size()) == prefix;
+}
+
+constexpr size_t kMaxZenzLiveCorrectionKeyChars = 64;
+constexpr size_t kMaxZenzLiveCorrectionValueChars = 128;
+
+struct ZenzTextPrivacyDecision {
+  bool allow = false;
+  const char* reason = "unspecified";
+};
+
+bool IsAsciiAlpha(unsigned char c) {
+  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
+}
+
+bool IsAsciiDigit(unsigned char c) {
+  return '0' <= c && c <= '9';
+}
+
+bool IsAsciiAlnum(unsigned char c) {
+  return IsAsciiAlpha(c) || IsAsciiDigit(c);
+}
+
+bool IsAsciiControl(unsigned char c) {
+  return c < 0x20 || c == 0x7f;
+}
+
+std::string ToLowerAscii(absl::string_view text) {
+  std::string result;
+  result.reserve(text.size());
+
+  for (const unsigned char c : text) {
+    if ('A' <= c && c <= 'Z') {
+      result.push_back(static_cast<char>(c - 'A' + 'a'));
+    } else {
+      result.push_back(static_cast<char>(c));
+    }
+  }
+
+  return result;
+}
+
+bool ContainsAsciiSubstring(const std::string& text,
+                            absl::string_view needle) {
+  if (needle.empty()) {
+    return true;
+  }
+
+  return text.find(needle.data(), 0, needle.size()) != std::string::npos;
+}
+
+bool ContainsAsciiControl(absl::string_view text) {
+  for (const unsigned char c : text) {
+    if (IsAsciiControl(c)) {
       return true;
     }
   }
   return false;
 }
 
-bool StartsWithString(absl::string_view text, absl::string_view prefix) {
-  return text.size() >= prefix.size() &&
-         text.substr(0, prefix.size()) == prefix;
+bool IsJapaneseScriptSignal(char32_t c) {
+  // Hiragana
+  if (0x3040 <= c && c <= 0x309F) {
+    return true;
+  }
+
+  // Katakana
+  if (0x30A0 <= c && c <= 0x30FF) {
+    return true;
+  }
+
+  // Halfwidth Katakana
+  if (0xFF66 <= c && c <= 0xFF9F) {
+    return true;
+  }
+
+  // CJK Unified Ideographs
+  if (0x4E00 <= c && c <= 0x9FFF) {
+    return true;
+  }
+
+  // CJK Unified Ideographs Extension A
+  if (0x3400 <= c && c <= 0x4DBF) {
+    return true;
+  }
+
+  // CJK Compatibility Ideographs
+  if (0xF900 <= c && c <= 0xFAFF) {
+    return true;
+  }
+
+  // CJK extensions outside BMP.
+  if ((0x20000 <= c && c <= 0x2A6DF) ||
+      (0x2A700 <= c && c <= 0x2B73F) ||
+      (0x2B740 <= c && c <= 0x2B81F) ||
+      (0x2B820 <= c && c <= 0x2CEAF) ||
+      (0x30000 <= c && c <= 0x3134F)) {
+    return true;
+  }
+
+  return false;
+}
+
+bool ContainsJapaneseScriptSignal(absl::string_view text) {
+  for (ConstChar32Iterator iter(text); !iter.Done(); iter.Next()) {
+    if (IsJapaneseScriptSignal(iter.Get())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool LooksLikeUrlOrDomain(absl::string_view text) {
+  const std::string lower = ToLowerAscii(text);
+
+  if (lower.find("://") != std::string::npos ||
+      lower.find("www.") != std::string::npos) {
+    return true;
+  }
+
+  constexpr absl::string_view kDomainSuffixes[] = {
+      ".com",
+      ".net",
+      ".org",
+      ".jp",
+      ".co.jp",
+      ".io",
+      ".dev",
+      ".app",
+      ".local",
+      ".localhost",
+  };
+
+  for (const absl::string_view suffix : kDomainSuffixes) {
+    if (ContainsAsciiSubstring(lower, suffix)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool LooksLikeEmail(absl::string_view text) {
+  // Broad by design. In Japanese composition, raw '@' almost always means an
+  // address-like or handle-like token. Keep it out of the local model path.
+  return text.find('@') != absl::string_view::npos;
+}
+
+bool LooksLikePath(absl::string_view text) {
+  const std::string lower = ToLowerAscii(text);
+
+  if (text.find('\\') != absl::string_view::npos) {
+    return true;
+  }
+
+  if (lower.size() >= 3 &&
+      IsAsciiAlpha(static_cast<unsigned char>(lower[0])) &&
+      lower[1] == ':' &&
+      (lower[2] == '\\' || lower[2] == '/')) {
+    return true;
+  }
+
+  if (StartsWithString(lower, "/") ||
+      StartsWithString(lower, "~/") ||
+      lower.find("../") != std::string::npos ||
+      lower.find("./") != std::string::npos) {
+    return true;
+  }
+
+  return false;
+}
+
+bool IsAsciiTokenChar(unsigned char c) {
+  return IsAsciiAlnum(c) || c == '_' || c == '-' || c == '.';
+}
+
+bool IsAsciiHexDigit(unsigned char c) {
+  return IsAsciiDigit(c) ||
+         ('a' <= c && c <= 'f') ||
+         ('A' <= c && c <= 'F');
+}
+
+bool IsIpv4LikeAsciiToken(absl::string_view token) {
+  size_t i = 0;
+  int group_count = 0;
+
+  while (i < token.size()) {
+    if (group_count >= 4) {
+      return false;
+    }
+
+    const size_t start = i;
+    int value = 0;
+
+    while (i < token.size() &&
+           IsAsciiDigit(static_cast<unsigned char>(token[i]))) {
+      value = value * 10 + (token[i] - '0');
+      if (value > 255) {
+        return false;
+      }
+      ++i;
+    }
+
+    if (i == start) {
+      return false;
+    }
+
+    ++group_count;
+
+    if (group_count == 4) {
+      break;
+    }
+
+    if (i >= token.size() || token[i] != '.') {
+      return false;
+    }
+
+    ++i;
+  }
+
+  return group_count == 4 && i == token.size();
+}
+
+bool IsVersionLikeAsciiToken(absl::string_view token) {
+  if (token.empty()) {
+    return false;
+  }
+
+  size_t i = 0;
+
+  if (i < token.size() && (token[i] == 'v' || token[i] == 'V')) {
+    ++i;
+  }
+
+  const auto consume_digits = [&token, &i]() {
+    const size_t start = i;
+    while (i < token.size() &&
+           IsAsciiDigit(static_cast<unsigned char>(token[i]))) {
+      ++i;
+    }
+    return i > start;
+  };
+
+  if (!consume_digits()) {
+    return false;
+  }
+
+  size_t numeric_group_count = 1;
+  bool saw_dot = false;
+
+  while (i < token.size() && token[i] == '.') {
+    saw_dot = true;
+    ++i;
+
+    if (!consume_digits()) {
+      return false;
+    }
+
+    ++numeric_group_count;
+    if (numeric_group_count > 4) {
+      return false;
+    }
+  }
+
+  // Require at least one dot so plain "v12345678" is not treated as a
+  // harmless version string.
+  if (!saw_dot) {
+    return false;
+  }
+
+  if (i < token.size() && token[i] == '-') {
+    ++i;
+
+    const size_t suffix_start = i;
+    while (i < token.size() &&
+           IsAsciiAlpha(static_cast<unsigned char>(token[i]))) {
+      ++i;
+    }
+
+    if (i == suffix_start) {
+      return false;
+    }
+
+    while (i < token.size() &&
+           IsAsciiDigit(static_cast<unsigned char>(token[i]))) {
+      ++i;
+    }
+  }
+
+  return i == token.size();
+}
+
+bool LooksLikeLongAsciiToken(absl::string_view text) {
+  size_t token_start = 0;
+  bool in_token = false;
+
+  const auto check_token = [&](size_t start, size_t end) {
+    if (end <= start) {
+      return false;
+    }
+
+    const absl::string_view token = text.substr(start, end - start);
+
+    if (IsIpv4LikeAsciiToken(token)) {
+      return true;
+    }
+
+    if (IsVersionLikeAsciiToken(token)) {
+      return false;
+    }
+
+    size_t longest_digit_run = 0;
+    size_t current_digit_run = 0;
+
+    bool has_alpha = false;
+    bool has_digit = false;
+    bool has_symbol = false;
+    bool all_hex = true;
+
+    for (const unsigned char c : token) {
+      if (IsAsciiDigit(c)) {
+        has_digit = true;
+        ++current_digit_run;
+        longest_digit_run = std::max(longest_digit_run, current_digit_run);
+      } else {
+        current_digit_run = 0;
+      }
+
+      if (IsAsciiAlpha(c)) {
+        has_alpha = true;
+      }
+
+      if (c == '_' || c == '-' || c == '.') {
+        has_symbol = true;
+      }
+
+      if (!IsAsciiHexDigit(c)) {
+        all_hex = false;
+      }
+    }
+
+    const size_t len = token.size();
+
+    // Long digit runs are often phone numbers, account IDs, ticket IDs,
+    // verification codes, order numbers, or other sensitive identifiers.
+    //
+    // This intentionally rejects some harmless numbers.  For live correction,
+    // falling back to Mozc is safer than sending opaque numeric IDs to Zenz.
+    if (longest_digit_run >= 8) {
+      return true;
+    }
+
+    // Separator-bearing mixed identifiers:
+    //   ghb_741298790561977834
+    //   abc-1234567890
+    //   user_12345678
+    //
+    // Keep version-like strings such as v0.7.0 and v1.0.0-alpha out of this
+    // branch by checking IsVersionLikeAsciiToken() first.
+    if (len >= 12 && has_alpha && has_digit && has_symbol) {
+      return true;
+    }
+
+    // Mixed alphanumeric opaque identifiers without separators:
+    //   AKIAIOSFODNN7EXAMPLE
+    //   a1b2c3d4e5f6g7h8
+    if (len >= 16 && has_alpha && has_digit) {
+      return true;
+    }
+
+    // Long hex-like values:
+    //   deadbeefcafebabe
+    //   0123456789abcdef
+    if (len >= 16 && all_hex && has_alpha) {
+      return true;
+    }
+
+    // Very long ASCII words / identifiers are poor live-correction targets and
+    // may be generated IDs, slugs, or copied tokens.
+    if (len >= 24 && has_alpha) {
+      return true;
+    }
+
+    if (len >= 32) {
+      return true;
+    }
+
+    return false;
+  };
+
+  for (size_t i = 0; i < text.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+
+    if (IsAsciiTokenChar(c)) {
+      if (!in_token) {
+        token_start = i;
+        in_token = true;
+      }
+      continue;
+    }
+
+    if (in_token) {
+      if (check_token(token_start, i)) {
+        return true;
+      }
+      in_token = false;
+    }
+  }
+
+  if (in_token && check_token(token_start, text.size())) {
+    return true;
+  }
+
+  return false;
+}
+
+bool LooksLikeKnownSecretPrefix(absl::string_view text) {
+  const std::string lower = ToLowerAscii(text);
+
+  constexpr absl::string_view kPrefixes[] = {
+      "ghp_",
+      "github_pat_",
+      "glpat-",
+      "sk-",
+      "xoxb-",
+      "xoxp-",
+      "ya29.",
+      "akia",
+      "bearer ",
+  };
+
+  for (const absl::string_view prefix : kPrefixes) {
+    if (ContainsAsciiSubstring(lower, prefix)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ContainsSensitiveCredentialWord(absl::string_view text) {
+  const std::string lower = ToLowerAscii(text);
+
+  constexpr absl::string_view kAsciiWords[] = {
+      "password",
+      "passwd",
+      "passphrase",
+      "secret",
+      "token",
+      "apikey",
+      "api_key",
+      "credential",
+      "privatekey",
+      "private_key",
+      "authorization",
+  };
+
+  for (const absl::string_view word : kAsciiWords) {
+    if (ContainsAsciiSubstring(lower, word)) {
+      return true;
+    }
+  }
+
+  constexpr absl::string_view kJapaneseWords[] = {
+      "パスワード",
+      "暗証番号",
+      "認証コード",
+      "認証番号",
+      "秘密鍵",
+      "秘密キー",
+      "トークン",
+      "アクセストークン",
+      "APIキー",
+      "apiキー",
+  };
+
+  for (const absl::string_view word : kJapaneseWords) {
+    if (text.find(word) != absl::string_view::npos) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+ZenzTextPrivacyDecision EvaluateZenzLiveKeyPrivacy(
+    absl::string_view key) {
+  if (key.empty()) {
+    return {false, "empty_key"};
+  }
+
+  if (!Util::IsValidUtf8(key)) {
+    return {false, "invalid_utf8"};
+  }
+
+  if (ContainsAsciiControl(key)) {
+    return {false, "control_char"};
+  }
+
+  if (Util::CharsLen(key) > kMaxZenzLiveCorrectionKeyChars) {
+    return {false, "key_too_long"};
+  }
+
+  // Main difference from the old ContainsAsciiAlphabet() gate:
+  // ASCII is allowed only when the composition has a Japanese script signal.
+  if (!ContainsJapaneseScriptSignal(key)) {
+    return {false, "no_japanese_signal"};
+  }
+
+  if (LooksLikeEmail(key)) {
+    return {false, "email_like"};
+  }
+
+  if (LooksLikeUrlOrDomain(key)) {
+    return {false, "url_or_domain_like"};
+  }
+
+  if (LooksLikePath(key)) {
+    return {false, "path_like"};
+  }
+
+  if (LooksLikeKnownSecretPrefix(key)) {
+    return {false, "secret_prefix"};
+  }
+
+  if (LooksLikeLongAsciiToken(key)) {
+    return {false, "token_like"};
+  }
+
+  if (ContainsSensitiveCredentialWord(key)) {
+    return {false, "credential_word"};
+  }
+
+  return {true, "allow"};
+}
+
+ZenzTextPrivacyDecision EvaluateZenzLiveValuePrivacy(
+    absl::string_view value) {
+  if (value.empty()) {
+    return {false, "empty_value"};
+  }
+
+  if (!Util::IsValidUtf8(value)) {
+    return {false, "invalid_utf8"};
+  }
+
+  if (ContainsAsciiControl(value)) {
+    return {false, "control_char"};
+  }
+
+  if (Util::CharsLen(value) > kMaxZenzLiveCorrectionValueChars) {
+    return {false, "value_too_long"};
+  }
+
+  // Do not require a Japanese signal for value.
+  // Example: key=ぎっとはぶ, value=GitHub should remain valid.
+  if (LooksLikeEmail(value)) {
+    return {false, "email_like"};
+  }
+
+  if (LooksLikeUrlOrDomain(value)) {
+    return {false, "url_or_domain_like"};
+  }
+
+  if (LooksLikePath(value)) {
+    return {false, "path_like"};
+  }
+
+  if (LooksLikeKnownSecretPrefix(value)) {
+    return {false, "secret_prefix"};
+  }
+
+  if (LooksLikeLongAsciiToken(value)) {
+    return {false, "token_like"};
+  }
+
+  if (ContainsSensitiveCredentialWord(value)) {
+    return {false, "credential_word"};
+  }
+
+  return {true, "allow"};
 }
 
 void AddPreeditSegment(absl::string_view key,
@@ -942,13 +1513,130 @@ bool Session::UpdateComposition(commands::Command* command) {
   return result;
 }
 
-bool Session::SendKeyDirectInputState(commands::Command* command) {
-  keymap::DirectInputState::Commands key_command;
-  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
-  if (!keymap->GetCommandDirect(command->input().key(), &key_command)) {
-    return EchoBackAndClearUndoContext(command);
+bool Session::ExecuteCommandSequence(
+    const keymap::CommandSequence& command_sequence,
+    commands::Command* command) {
+  bool executed = false;
+  bool consumed = false;
+  bool has_accumulated_result = false;
+  commands::Result accumulated_result;
+  commands::Output final_output;
+
+  const auto merge_result = [](const commands::Result& step_result,
+                               commands::Result* accumulated_result) {
+    if (!accumulated_result->has_key() && !accumulated_result->has_value()) {
+      *accumulated_result = step_result;
+      return;
+    }
+
+    if (step_result.has_key()) {
+      accumulated_result->set_key(
+          absl::StrCat(accumulated_result->key(), step_result.key()));
+    }
+    if (step_result.has_value()) {
+      accumulated_result->set_value(
+          absl::StrCat(accumulated_result->value(), step_result.value()));
+    }
+  };
+
+  for (const std::string& command_name : command_sequence) {
+    if (command_name.empty()) {
+      continue;
+    }
+
+    command->mutable_output()->Clear();
+
+    if (!ExecuteCommandName(command_name, command)) {
+      if (!executed) {
+        return DoNothing(command);
+      }
+
+      final_output.set_consumed(consumed);
+      if (has_accumulated_result) {
+        *final_output.mutable_result() = accumulated_result;
+      }
+      *command->mutable_output() = final_output;
+      return true;
+    }
+
+    executed = true;
+
+    const commands::Output step_output = command->output();
+    consumed = consumed || step_output.consumed();
+
+    final_output = step_output;
+
+    if (step_output.has_result()) {
+      merge_result(step_output.result(), &accumulated_result);
+      has_accumulated_result = true;
+    }
+
+    final_output.set_consumed(consumed);
+    if (has_accumulated_result) {
+      *final_output.mutable_result() = accumulated_result;
+    }
   }
 
+  if (!executed) {
+    return DoNothing(command);
+  }
+
+  final_output.set_consumed(consumed);
+  if (has_accumulated_result) {
+    *final_output.mutable_result() = accumulated_result;
+  }
+  *command->mutable_output() = final_output;
+  return true;
+}
+
+bool Session::ExecuteCommandName(const std::string& command_name,
+                                 commands::Command* command) {
+  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
+
+  switch (context_->state()) {
+    case ImeContext::DIRECT: {
+      keymap::DirectInputState::Commands key_command;
+      if (!keymap->ResolveDirectCommandName(command_name, &key_command)) {
+        return false;
+      }
+      return ExecuteDirectInputCommand(key_command, command);
+    }
+
+    case ImeContext::PRECOMPOSITION: {
+      keymap::PrecompositionState::Commands key_command;
+      if (!keymap->ResolvePrecompositionCommandName(command_name,
+                                                    &key_command)) {
+        return false;
+      }
+      return ExecutePrecompositionCommand(key_command, command);
+    }
+
+    case ImeContext::COMPOSITION: {
+      keymap::CompositionState::Commands key_command;
+      if (!keymap->ResolveCompositionCommandName(command_name, &key_command)) {
+        return false;
+      }
+      return ExecuteCompositionCommand(key_command, command);
+    }
+
+    case ImeContext::CONVERSION: {
+      keymap::ConversionState::Commands key_command;
+      if (!keymap->ResolveConversionCommandName(command_name, &key_command)) {
+        return false;
+      }
+      return ExecuteConversionCommand(key_command, command);
+    }
+
+    case ImeContext::NONE:
+      return false;
+  }
+
+  return false;
+}
+
+bool Session::ExecuteDirectInputCommand(
+    keymap::DirectInputState::Commands key_command,
+    commands::Command* command) {
   switch (key_command) {
     case keymap::DirectInputState::IME_ON:
       return IMEOn(command);
@@ -967,53 +1655,13 @@ bool Session::SendKeyDirectInputState(commands::Command* command) {
     case keymap::DirectInputState::RECONVERT:
       return RequestConvertReverse(command);
   }
+
   return false;
 }
 
-bool Session::SendKeyPrecompositionState(commands::Command* command) {
-  keymap::PrecompositionState::Commands key_command;
-  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
-  const bool result =
-      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)
-          ? keymap->GetCommandZeroQuerySuggestion(command->input().key(),
-                                                  &key_command)
-          : keymap->GetCommandPrecomposition(command->input().key(),
-                                             &key_command);
-
-  if (!result) {
-    if (HasUndoContext() &&
-        IsCancelKeyForCompositionOrConversion(command->input().key())) {
-      return Revert(command);
-    }
-    return EchoBackAndClearUndoContext(command);
-  }
-
-  // Update the client context (if any) for later use. Note that the client
-  // context is updated only here. In other words, we will stop updating the
-  // client context once a conversion starts (mainly for performance reasons).
-  if (command->has_input() && command->input().has_context()) {
-    *context_->mutable_client_context() = command->input().context();
-
-#if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
-    const commands::Context& client_context = command->input().context();
-    if (client_context.has_preceding_text()) {
-      MozcLeftContextDebugOutput(absl::StrCat(
-          "[mozc-left-context] session preceding_text=[",
-          client_context.preceding_text(), "]"));
-    } else {
-      MozcLeftContextDebugOutput(
-          "[mozc-left-context] session context has no preceding_text");
-    }
-#endif  // defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
-
-  } else {
-    context_->mutable_client_context()->Clear();
-
-#if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
-    MozcLeftContextDebugOutput("[mozc-left-context] session no context");
-#endif  // defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
-  }
-
+bool Session::ExecutePrecompositionCommand(
+    keymap::PrecompositionState::Commands key_command,
+    commands::Command* command) {
   switch (key_command) {
     case keymap::PrecompositionState::INSERT_CHARACTER:
       return InsertCharacter(command);
@@ -1056,19 +1704,12 @@ bool Session::SendKeyPrecompositionState(commands::Command* command) {
     case keymap::PrecompositionState::LAUNCH_WORD_REGISTER_DIALOG:
       return LaunchWordRegisterDialog(command);
 
-    // For zero query suggestion
     case keymap::PrecompositionState::CANCEL:
-      // It is a little kind of abuse of the EditCancel command.  It
-      // would be nice to make a new command when EditCancel is
-      // extended or the requirement of this command is added.
       return EditCancel(command);
     case keymap::PrecompositionState::CANCEL_AND_IME_OFF:
-      // The same to keymap::PrecompositionState::CANCEL.
       return EditCancelAndIMEOff(command);
-    // For zero query suggestion
     case keymap::PrecompositionState::COMMIT_FIRST_SUGGESTION:
       return CommitFirstSuggestion(command);
-    // For zero query suggestion
     case keymap::PrecompositionState::PREDICT_AND_CONVERT:
       return PredictAndConvert(command);
 
@@ -1084,21 +1725,13 @@ bool Session::SendKeyPrecompositionState(commands::Command* command) {
     case keymap::PrecompositionState::IME_ACTION:
       return ImeAction(command);
   }
+
   return false;
 }
 
-bool Session::SendKeyCompositionState(commands::Command* command) {
-  keymap::CompositionState::Commands key_command;
-  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
-  const bool result =
-      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)
-          ? keymap->GetCommandSuggestion(command->input().key(), &key_command)
-          : keymap->GetCommandComposition(command->input().key(), &key_command);
-
-  if (!result) {
-    return DoNothing(command);
-  }
-
+bool Session::ExecuteCompositionCommand(
+    keymap::CompositionState::Commands key_command,
+    commands::Command* command) {
   switch (key_command) {
     case keymap::CompositionState::INSERT_CHARACTER:
       return InsertCharacter(command);
@@ -1223,94 +1856,13 @@ bool Session::SendKeyCompositionState(commands::Command* command) {
     case keymap::CompositionState::NONE:
       return DoNothing(command);
   }
+
   return false;
 }
 
-bool Session::SendKeyConversionState(commands::Command* command) {
-  keymap::ConversionState::Commands key_command;
-  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
-  const bool result =
-      context_->converter().CheckState(EngineConverterInterface::PREDICTION)
-          ? keymap->GetCommandPrediction(command->input().key(), &key_command)
-          : keymap->GetCommandConversion(command->input().key(), &key_command);
-
-  if (!result) {
-    return DoNothing(command);
-  }
-
-  const commands::KeyEvent& input_key = command->input().key();
-
-  ZenzDebugOutput(absl::StrCat(
-      "[zenz-feedback] SendKeyConversionState"
-      " key_command=", static_cast<int>(key_command),
-      " live_conversion_active=", ZenzBool(live_conversion_active_),
-      " ", ZenzRedactedTextStats("live_key", live_conversion_key_),
-      " ", ZenzRedactedTextStats("live_value", live_conversion_value_),
-      " pending_zenz_pending=", ZenzBool(pending_zenz_live_.pending),
-      " pending_zenz_gen=", pending_zenz_live_.generation,
-      " pending_context_class=", pending_zenz_live_.context_class,
-      " ", ZenzRedactedTextStats("pending_key", pending_zenz_live_.key),
-      " ", ZenzRedactedTextStats("pending_value",
-                                  pending_zenz_live_.mozc_value),
-      " ", ZenzRedactedTextStats("zenz_key", zenz_live_key_),
-      " ", ZenzRedactedTextStats("zenz_value", zenz_live_value_),
-      " state=", static_cast<int>(context_->state()),
-      " has_special_key=", ZenzBool(input_key.has_special_key()),
-      " special_key=",
-      input_key.has_special_key()
-          ? static_cast<int>(input_key.special_key())
-          : -1,
-      " has_key_code=", ZenzBool(input_key.has_key_code()),
-      " key_code=", input_key.has_key_code() ? input_key.key_code() : 0,
-      " has_key_string=", ZenzBool(input_key.has_key_string()),
-      " key_string_bytes=",
-      input_key.has_key_string() ? input_key.key_string().size() : 0,
-      " modifier_count=", input_key.modifier_keys_size(),
-      " has_mode=", ZenzBool(input_key.has_mode()),
-      " mode=", input_key.has_mode() ? static_cast<int>(input_key.mode()) : -1,
-      " input_style=", static_cast<int>(input_key.input_style())));
-
-  if (live_conversion_active_) {
-    // During live conversion, Backspace should edit the underlying
-    // composition instead of cancelling conversion.
-    if (IsPlainBackspaceKey(command->input().key())) {
-      DiscardPendingZenzFeedback("backspace_after_zenz");
-      ClearZenzLiveCorrectionState();
-      return Backspace(command);
-    }
-
-    // If a zenz correction is visible, Enter should commit the zenz value
-    // immediately. Do not route this through normal Commit(), because some client
-    // paths may promote the live conversion state before Commit() observes the
-    // zenz state.
-    if (key_command == keymap::ConversionState::COMMIT &&
-        HasVisibleZenzLiveCorrection()) {
-      ZenzDebugOutput(absl::StrCat(
-          "[zenz-feedback] commit key while zenz visible ",
-          ZenzRedactedTextStats("key", zenz_live_key_),
-          " ", ZenzRedactedTextStats("value", zenz_live_value_)));
-
-      return CommitZenzLiveCorrectionResult(command);
-    }
-
-    // Explicit conversion operations such as Space, candidate movement, or Cancel
-    // promote live conversion back to normal conversion behavior.
-    if (key_command != keymap::ConversionState::INSERT_CHARACTER) {
-      if (key_command != keymap::ConversionState::COMMIT) {
-        if (key_command == keymap::ConversionState::CANCEL ||
-            key_command == keymap::ConversionState::CANCEL_AND_IME_OFF ||
-            key_command == keymap::ConversionState::UNDO) {
-          DiscardPendingZenzFeedback("cancel_after_zenz");
-        } else if (HasVisibleZenzLiveCorrection()) {
-          SetPendingZenzFeedbackRejected("explicit_conversion_after_zenz");
-        }
-        ClearZenzLiveCorrectionState();
-      }
-      live_conversion_active_ = false;
-      context_->mutable_converter()->SetCandidateListVisible(true);
-    }
-  }
-
+bool Session::ExecuteConversionCommand(
+    keymap::ConversionState::Commands key_command,
+    commands::Command* command) {
   switch (key_command) {
     case keymap::ConversionState::INSERT_CHARACTER:
       return InsertCharacter(command);
@@ -1447,7 +1999,189 @@ bool Session::SendKeyConversionState(commands::Command* command) {
     case keymap::ConversionState::NONE:
       return DoNothing(command);
   }
+
   return false;
+}
+
+bool Session::SendKeyDirectInputState(commands::Command* command) {
+  keymap::CommandSequence command_sequence;
+  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
+  if (!keymap->GetCommandSequenceDirect(command->input().key(),
+                                        &command_sequence)) {
+    return EchoBackAndClearUndoContext(command);
+  }
+
+  return ExecuteCommandSequence(command_sequence, command);
+}
+
+bool Session::SendKeyPrecompositionState(commands::Command* command) {
+  keymap::CommandSequence command_sequence;
+  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
+  const bool result =
+      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)
+          ? keymap->GetCommandSequenceZeroQuerySuggestion(
+                command->input().key(), &command_sequence)
+          : keymap->GetCommandSequencePrecomposition(command->input().key(),
+                                                     &command_sequence);
+
+  if (!result) {
+    if (HasUndoContext() &&
+        IsCancelKeyForCompositionOrConversion(command->input().key())) {
+      return Revert(command);
+    }
+    return EchoBackAndClearUndoContext(command);
+  }
+
+  // Update the client context (if any) for later use. Note that the client
+  // context is updated only here. In other words, we will stop updating the
+  // client context once a conversion starts (mainly for performance reasons).
+  if (command->has_input() && command->input().has_context()) {
+    *context_->mutable_client_context() = command->input().context();
+
+#if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
+    const commands::Context& client_context = command->input().context();
+    if (client_context.has_preceding_text()) {
+      MozcLeftContextDebugOutput(absl::StrCat(
+          "[mozc-left-context] session preceding_text=[",
+          client_context.preceding_text(), "]"));
+    } else {
+      MozcLeftContextDebugOutput(
+          "[mozc-left-context] session context has no preceding_text");
+    }
+#endif  // defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
+
+  } else {
+    context_->mutable_client_context()->Clear();
+
+#if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
+    MozcLeftContextDebugOutput("[mozc-left-context] session no context");
+#endif  // defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
+  }
+
+  return ExecuteCommandSequence(command_sequence, command);
+}
+
+bool Session::SendKeyCompositionState(commands::Command* command) {
+  keymap::CommandSequence command_sequence;
+  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
+  const bool result =
+      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)
+          ? keymap->GetCommandSequenceSuggestion(command->input().key(),
+                                                 &command_sequence)
+          : keymap->GetCommandSequenceComposition(command->input().key(),
+                                                  &command_sequence);
+
+  if (!result) {
+    return DoNothing(command);
+  }
+
+  return ExecuteCommandSequence(command_sequence, command);
+}
+
+bool Session::SendKeyConversionState(commands::Command* command) {
+  keymap::CommandSequence command_sequence;
+  const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
+  const bool result =
+      context_->converter().CheckState(EngineConverterInterface::PREDICTION)
+          ? keymap->GetCommandSequencePrediction(command->input().key(),
+                                                 &command_sequence)
+          : keymap->GetCommandSequenceConversion(command->input().key(),
+                                                 &command_sequence);
+
+  if (!result || command_sequence.empty()) {
+    return DoNothing(command);
+  }
+
+  keymap::ConversionState::Commands key_command;
+  if (!keymap->ResolveConversionCommandName(command_sequence.front(),
+                                            &key_command)) {
+    return DoNothing(command);
+  }
+
+  const commands::KeyEvent& input_key = command->input().key();
+
+  ZenzDebugOutput(absl::StrCat(
+      "[zenz-feedback] SendKeyConversionState"
+      " key_command=", static_cast<int>(key_command),
+      " live_conversion_active=", ZenzBool(live_conversion_active_),
+      " ", ZenzRedactedTextStats("live_key", live_conversion_key_),
+      " ", ZenzRedactedTextStats("live_value", live_conversion_value_),
+      " pending_zenz_pending=", ZenzBool(pending_zenz_live_.pending),
+      " pending_zenz_gen=", pending_zenz_live_.generation,
+      " pending_context_class=", pending_zenz_live_.context_class,
+      " ", ZenzRedactedTextStats("pending_key", pending_zenz_live_.key),
+      " ", ZenzRedactedTextStats("pending_value",
+                                  pending_zenz_live_.mozc_value),
+      " ", ZenzRedactedTextStats("zenz_key", zenz_live_key_),
+      " ", ZenzRedactedTextStats("zenz_value", zenz_live_value_),
+      " state=", static_cast<int>(context_->state()),
+      " has_special_key=", ZenzBool(input_key.has_special_key()),
+      " special_key=",
+      input_key.has_special_key()
+          ? static_cast<int>(input_key.special_key())
+          : -1,
+      " has_key_code=", ZenzBool(input_key.has_key_code()),
+      " key_code=", input_key.has_key_code() ? input_key.key_code() : 0,
+      " has_key_string=", ZenzBool(input_key.has_key_string()),
+      " key_string_bytes=",
+      input_key.has_key_string() ? input_key.key_string().size() : 0,
+      " modifier_count=", input_key.modifier_keys_size(),
+      " has_mode=", ZenzBool(input_key.has_mode()),
+      " mode=", input_key.has_mode() ? static_cast<int>(input_key.mode()) : -1,
+      " input_style=", static_cast<int>(input_key.input_style())));
+
+  if (live_conversion_active_) {
+    // During live conversion, Backspace should edit the underlying
+    // composition instead of cancelling conversion.
+    if (IsPlainBackspaceKey(command->input().key())) {
+      DiscardPendingZenzFeedback("backspace_after_zenz");
+      ClearZenzLiveCorrectionState();
+      return Backspace(command);
+    }
+
+    // If a zenz correction is visible, Enter should commit the zenz value
+    // immediately. Do not route this through normal Commit(), because some client
+    // paths may promote the live conversion state before Commit() observes the
+    // zenz state.
+    if (key_command == keymap::ConversionState::COMMIT &&
+        HasVisibleZenzLiveCorrection()) {
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] commit key while zenz visible ",
+          ZenzRedactedTextStats("key", zenz_live_key_),
+          " ", ZenzRedactedTextStats("value", zenz_live_value_)));
+
+      if (!CommitZenzLiveCorrectionResult(command)) {
+        return false;
+      }
+
+      if (command_sequence.size() == 1) {
+        return true;
+      }
+
+      keymap::CommandSequence remaining_sequence(
+          command_sequence.begin() + 1, command_sequence.end());
+      return ExecuteCommandSequence(remaining_sequence, command);
+    }
+
+    // Explicit conversion operations such as Space, candidate movement, or Cancel
+    // promote live conversion back to normal conversion behavior.
+    if (key_command != keymap::ConversionState::INSERT_CHARACTER) {
+      if (key_command != keymap::ConversionState::COMMIT) {
+        if (key_command == keymap::ConversionState::CANCEL ||
+            key_command == keymap::ConversionState::CANCEL_AND_IME_OFF ||
+            key_command == keymap::ConversionState::UNDO) {
+          DiscardPendingZenzFeedback("cancel_after_zenz");
+        } else if (HasVisibleZenzLiveCorrection()) {
+          SetPendingZenzFeedbackRejected("explicit_conversion_after_zenz");
+        }
+        ClearZenzLiveCorrectionState();
+      }
+      live_conversion_active_ = false;
+      context_->mutable_converter()->SetCandidateListVisible(true);
+    }
+  }
+
+  return ExecuteCommandSequence(command_sequence, command);
 }
 
 void Session::UpdatePreferences(commands::Command* command) {
@@ -2319,6 +3053,28 @@ void Session::RecordZenzLiveCorrectionAccepted(
     return;
   }
 
+  const ZenzTextPrivacyDecision key_privacy =
+      EvaluateZenzLiveKeyPrivacy(key);
+  if (!key_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] skip accepted key_privacy reason=",
+        key_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("key", key)));
+    return;
+  }
+
+  const ZenzTextPrivacyDecision value_privacy =
+      EvaluateZenzLiveValuePrivacy(value);
+  if (!value_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] skip accepted value_privacy reason=",
+        value_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("value", value)));
+    return;
+  }
+
   const std::string context_class =
       BuildZenzFeedbackContextClass(left_context);
 
@@ -2346,6 +3102,28 @@ bool Session::MaybeLearnZenzCandidateToMozcHistory(
 
   if (context_->composer().GetInputFieldType() ==
       commands::Context::PASSWORD) {
+    return false;
+  }
+
+  const ZenzTextPrivacyDecision key_privacy =
+      EvaluateZenzLiveKeyPrivacy(key);
+  if (!key_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] skip mozc history key_privacy reason=",
+        key_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("key", key)));
+    return false;
+  }
+
+  const ZenzTextPrivacyDecision value_privacy =
+      EvaluateZenzLiveValuePrivacy(value);
+  if (!value_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] skip mozc history value_privacy reason=",
+        value_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("value", value)));
     return false;
   }
 
@@ -2392,6 +3170,28 @@ void Session::SetPendingZenzFeedbackAccepted(
     return;
   }
 
+  const ZenzTextPrivacyDecision key_privacy =
+      EvaluateZenzLiveKeyPrivacy(key);
+  if (!key_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] skip pending accepted key_privacy reason=",
+        key_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("key", key)));
+    return;
+  }
+
+  const ZenzTextPrivacyDecision value_privacy =
+      EvaluateZenzLiveValuePrivacy(value);
+  if (!value_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] skip pending accepted value_privacy reason=",
+        value_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("value", value)));
+    return;
+  }
+
   pending_zenz_feedback_.pending = true;
   pending_zenz_feedback_.action = PendingZenzFeedback::Action::kAccepted;
   pending_zenz_feedback_.key = std::string(key);
@@ -2413,6 +3213,28 @@ void Session::SetPendingZenzFeedbackRejected(absl::string_view reason) {
   }
 
   if (!HasVisibleZenzLiveCorrection()) {
+    return;
+  }
+
+  const ZenzTextPrivacyDecision key_privacy =
+      EvaluateZenzLiveKeyPrivacy(zenz_live_key_);
+  if (!key_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] skip pending rejected key_privacy reason=",
+        key_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("key", zenz_live_key_)));
+    return;
+  }
+
+  const ZenzTextPrivacyDecision value_privacy =
+      EvaluateZenzLiveValuePrivacy(zenz_live_value_);
+  if (!value_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] skip pending rejected value_privacy reason=",
+        value_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("value", zenz_live_value_)));
     return;
   }
 
@@ -2715,7 +3537,37 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     return false;
   }
 
-  if (ContainsAsciiAlphabet(live_conversion_key_)) {
+  // Single-segment feedback is handled by ZenzFeedbackCandidateRewriter in the
+  // converter rewriter chain, before UserSegmentHistoryRewriter.  Do not replay
+  // it again here as a session-level fast path; otherwise stale Zenz feedback
+  // can override a newer explicit user-history selection.
+  //
+  // Multi-segment live conversions cannot be safely represented by
+  // ZenzFeedbackCandidateRewriter without collapsing converter-owned segment
+  // boundaries.  Keep the fast path only for those full-phrase corrections.
+  if (live_conversion_preedit_output_.segment_size() <= 1) {
+    return false;
+  }
+
+  const ZenzTextPrivacyDecision key_privacy =
+      EvaluateZenzLiveKeyPrivacy(live_conversion_key_);
+  if (!key_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] fast path skip key_privacy reason=",
+        key_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("key", live_conversion_key_)));
+    return false;
+  }
+
+  const ZenzTextPrivacyDecision mozc_value_privacy =
+      EvaluateZenzLiveValuePrivacy(live_conversion_value_);
+  if (!mozc_value_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] fast path skip mozc_value_privacy reason=",
+        mozc_value_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("value", live_conversion_value_)));
     return false;
   }
 
@@ -2754,6 +3606,22 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
   for (const ZenzFeedbackCandidate& feedback_candidate :
        feedback_candidates) {
     const std::string& feedback_value = feedback_candidate.value;
+
+    const ZenzTextPrivacyDecision feedback_value_privacy =
+        EvaluateZenzLiveValuePrivacy(feedback_value);
+    if (!feedback_value_privacy.allow) {
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] fast path candidate rejected reason=value_privacy_",
+          feedback_value_privacy.reason,
+          " ",
+          ZenzRedactedTextStats("key", live_conversion_key_),
+          " ",
+          ZenzRedactedTextStats("value", feedback_value),
+          " context_class=", context_class,
+          " accepted_count=", feedback_candidate.accepted_count,
+          " rejected_count=", feedback_candidate.rejected_count));
+      continue;
+    }
 
     ZenzValidationInput validation_input;
     validation_input.key = live_conversion_key_;
@@ -2831,10 +3699,25 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
     return false;
   }
 
-  if (ContainsAsciiAlphabet(live_conversion_key_)) {
+  const ZenzTextPrivacyDecision key_privacy =
+      EvaluateZenzLiveKeyPrivacy(live_conversion_key_);
+  if (!key_privacy.allow) {
     ZenzDebugOutput(absl::StrCat(
-        "[zenz] skip ascii ",
+        "[zenz] skip key_privacy reason=",
+        key_privacy.reason,
+        " ",
         ZenzRedactedTextStats("key", live_conversion_key_)));
+    return false;
+  }
+
+  const ZenzTextPrivacyDecision mozc_value_privacy =
+      EvaluateZenzLiveValuePrivacy(live_conversion_value_);
+  if (!mozc_value_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz] skip mozc_value_privacy reason=",
+        mozc_value_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("value", live_conversion_value_)));
     return false;
   }
 
@@ -3287,6 +4170,52 @@ bool Session::ApplyZenzLiveCorrectionResult(
     command->mutable_output()->set_zenz_live_correction_pending(false);
     command->mutable_output()->set_zenz_live_correction_debug(
         validation.reason);
+    return true;
+  }
+
+  const ZenzTextPrivacyDecision key_privacy =
+      EvaluateZenzLiveKeyPrivacy(pending_zenz_live_.key);
+  if (!key_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz] validation rejected reason=key_privacy_",
+        key_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("key", pending_zenz_live_.key),
+        " ",
+        ZenzRedactedTextStats("mozc_value",
+                              pending_zenz_live_.mozc_value),
+        " context_class=", context_class));
+
+    CancelPendingZenzLiveCorrection();
+    Output(command);
+    command->mutable_output()->set_live_conversion(true);
+    command->mutable_output()->set_live_conversion_pending(false);
+    command->mutable_output()->set_zenz_live_correction_pending(false);
+    command->mutable_output()->set_zenz_live_correction_debug(
+        absl::StrCat("key_privacy_", key_privacy.reason));
+    return true;
+  }
+
+  const ZenzTextPrivacyDecision value_privacy =
+      EvaluateZenzLiveValuePrivacy(zenz_value);
+  if (!value_privacy.allow) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz] validation rejected reason=value_privacy_",
+        value_privacy.reason,
+        " ",
+        ZenzRedactedTextStats("value", zenz_value),
+        " ",
+        ZenzRedactedTextStats("mozc_value",
+                              pending_zenz_live_.mozc_value),
+        " context_class=", context_class));
+
+    CancelPendingZenzLiveCorrection();
+    Output(command);
+    command->mutable_output()->set_live_conversion(true);
+    command->mutable_output()->set_live_conversion_pending(false);
+    command->mutable_output()->set_zenz_live_correction_pending(false);
+    command->mutable_output()->set_zenz_live_correction_debug(
+        absl::StrCat("value_privacy_", value_privacy.reason));
     return true;
   }
 
@@ -5002,55 +5931,38 @@ bool IsValidDirectCommitTriggerKey(const config::Config& config,
            config::Config::DIRECT_COMMIT_CLOSE_BRACKET));
 }
 
-bool IsValidDirectCommitKey(const config::Config& config,
-                            const commands::KeyEvent& key_event,
-                            absl::string_view last_char) {
+bool IsValidDirectCommitChar(const config::Config& config,
+                             absl::string_view last_char) {
   return
-      (MatchesKeyEvent(key_event, static_cast<uint32_t>('.'),
-                       {".", "．", "。", "｡"}) &&
-       MatchesString(last_char, {".", "．", "。", "｡"}) &&
+      (MatchesString(last_char, {".", "．", "。", "｡"}) &&
        (config.direct_commit_key() &
         config::Config::DIRECT_COMMIT_KUTEN)) ||
 
-      (MatchesKeyEvent(key_event, static_cast<uint32_t>(','),
-                       {",", "，", "、", "､"}) &&
-       MatchesString(last_char, {",", "，", "、", "､"}) &&
+      (MatchesString(last_char, {",", "，", "、", "､"}) &&
        (config.direct_commit_key() &
         config::Config::DIRECT_COMMIT_TOUTEN)) ||
 
-      (MatchesKeyEvent(key_event, static_cast<uint32_t>('?'),
-                       {"?", "？"}) &&
-       MatchesString(last_char, {"?", "？"}) &&
+      (MatchesString(last_char, {"?", "？"}) &&
        (config.direct_commit_key() &
         config::Config::DIRECT_COMMIT_QUESTION_MARK)) ||
 
-      (MatchesKeyEvent(key_event, static_cast<uint32_t>('!'),
-                       {"!", "！"}) &&
-       MatchesString(last_char, {"!", "！"}) &&
+      (MatchesString(last_char, {"!", "！"}) &&
        (config.direct_commit_key() &
         config::Config::DIRECT_COMMIT_EXCLAMATION_MARK)) ||
 
-      (MatchesKeyEvent(key_event, static_cast<uint32_t>('('),
-                       {"(", "（"}) &&
-       MatchesString(last_char, {"(", "（"}) &&
+      (MatchesString(last_char, {"(", "（"}) &&
        (config.direct_commit_key() &
         config::Config::DIRECT_COMMIT_OPEN_PARENTHESIS)) ||
 
-      (MatchesKeyEvent(key_event, static_cast<uint32_t>(')'),
-                       {")", "）"}) &&
-       MatchesString(last_char, {")", "）"}) &&
+      (MatchesString(last_char, {")", "）"}) &&
        (config.direct_commit_key() &
         config::Config::DIRECT_COMMIT_CLOSE_PARENTHESIS)) ||
 
-      (MatchesKeyEvent(key_event, static_cast<uint32_t>('['),
-                       {"[", "［", "「"}) &&
-       MatchesString(last_char, {"[", "［", "「"}) &&
+      (MatchesString(last_char, {"[", "［", "「"}) &&
        (config.direct_commit_key() &
         config::Config::DIRECT_COMMIT_OPEN_BRACKET)) ||
 
-      (MatchesKeyEvent(key_event, static_cast<uint32_t>(']'),
-                       {"]", "］", "」"}) &&
-       MatchesString(last_char, {"]", "］", "」"}) &&
+      (MatchesString(last_char, {"]", "］", "」"}) &&
        (config.direct_commit_key() &
         config::Config::DIRECT_COMMIT_CLOSE_BRACKET));
 }
@@ -5189,7 +6101,7 @@ bool Session::CanDirectCommitAfterPunctuation(
     return false;
   }
 
-  return IsValidDirectCommitKey(config, key_event, last_char);
+  return IsValidDirectCommitChar(config, last_char);
 }
 
 void Session::UpdateTime() {

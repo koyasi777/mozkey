@@ -191,6 +191,70 @@ TEST_F(KeyMapTest, GetCommand) {
   }
 }
 
+TEST_F(KeyMapTest, GetCommandSequence) {
+  KeyMap<CompositionState> keymap;
+
+  commands::KeyEvent init_key_event;
+  init_key_event.set_special_key(commands::KeyEvent::ENTER);
+
+  EXPECT_TRUE(keymap.AddRule(
+      init_key_event, CompositionState::COMMIT,
+      CommandSequence{"Commit", "IMEOff"}));
+
+  commands::KeyEvent key_event;
+  key_event.set_special_key(commands::KeyEvent::ENTER);
+
+  CompositionState::Commands command;
+  EXPECT_TRUE(keymap.GetCommand(key_event, &command));
+  EXPECT_EQ(command, CompositionState::COMMIT);
+
+  CommandSequence sequence;
+  EXPECT_TRUE(keymap.GetCommandSequence(key_event, &sequence));
+  ASSERT_EQ(sequence.size(), 2);
+  EXPECT_EQ(sequence[0], "Commit");
+  EXPECT_EQ(sequence[1], "IMEOff");
+}
+
+TEST_F(KeyMapTest, AddCommandSequence) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer manager_peer(manager);
+
+  EXPECT_TRUE(manager_peer.AddCommand(
+      "Composition", "Ctrl Enter", "Convert|ConvertNext|Commit"));
+
+  commands::KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Enter", &key_event));
+
+  CompositionState::Commands first_command;
+  EXPECT_TRUE(manager.GetCommandComposition(key_event, &first_command));
+  EXPECT_EQ(first_command, CompositionState::CONVERT);
+
+  CommandSequence sequence;
+  EXPECT_TRUE(manager.GetCommandSequenceComposition(key_event, &sequence));
+  ASSERT_EQ(sequence.size(), 3);
+  EXPECT_EQ(sequence[0], "Convert");
+  EXPECT_EQ(sequence[1], "ConvertNext");
+  EXPECT_EQ(sequence[2], "Commit");
+}
+
+TEST_F(KeyMapTest, AddCommandSequenceRejectsInvalidFirstCommand) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer manager_peer(manager);
+
+  // ConvertNext is a Conversion-state command. It must not be accepted as the
+  // first command of a Composition-state binding.
+  EXPECT_FALSE(manager_peer.AddCommand(
+      "Composition", "Ctrl Enter", "ConvertNext|Commit"));
+}
+
+TEST_F(KeyMapTest, AddCommandSequenceRejectsUnknownLaterCommand) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer manager_peer(manager);
+
+  EXPECT_FALSE(manager_peer.AddCommand(
+      "Composition", "Ctrl Enter", "Convert|NoSuchCommand|Commit"));
+}
+
 TEST_F(KeyMapTest, GetCommandForKeyString) {
   KeyMap<PrecompositionState> keymap;
 

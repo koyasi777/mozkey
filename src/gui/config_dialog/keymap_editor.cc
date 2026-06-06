@@ -46,6 +46,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
@@ -100,6 +101,37 @@ enum {
   EXPORT_TO_FILE_INDEX = 3,
   MENU_SIZE = 4
 };
+
+std::vector<std::string> SplitCommandSequenceForEditor(
+    const std::string& command_sequence) {
+  std::vector<std::string> result;
+
+  for (absl::string_view token :
+       absl::StrSplit(command_sequence, '|', absl::SkipEmpty())) {
+    token = absl::StripAsciiWhitespace(token);
+    if (!token.empty()) {
+      result.push_back(std::string(token));
+    }
+  }
+
+  return result;
+}
+
+QString DisplayCommandSequenceForEditor(
+    const std::string& command_sequence,
+    const absl::flat_hash_map<std::string, std::string>&
+        localized_command_map) {
+  QStringList display_commands;
+
+  for (const std::string& raw_command :
+       SplitCommandSequenceForEditor(command_sequence)) {
+    const auto it = localized_command_map.find(raw_command);
+    display_commands << QString::fromStdString(
+        it != localized_command_map.end() ? it->second : raw_command);
+  }
+
+  return display_commands.join(QString::fromUtf8(" → "));
+}
 
 }  // namespace
 
@@ -164,6 +196,22 @@ class KeyMapEditorDialog::KeyMapValidator {
     return true;
   }
 
+  bool IsVisibleCommandSequence(const std::string& command_sequence) {
+    const std::vector<std::string> commands =
+        SplitCommandSequenceForEditor(command_sequence);
+    if (commands.empty()) {
+      return false;
+    }
+
+    for (const std::string& command : commands) {
+      if (!IsVisibleCommand(command)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   // Returns true if the key map entry is valid
   // invalid keymaps are not exported/imported.
   bool IsValidEntry(absl::Span<const std::string> fields) {
@@ -172,8 +220,11 @@ class KeyMapEditorDialog::KeyMapValidator {
     }
 
 #ifdef NDEBUG
-    if (fields[2] == kReportBugCommand) {
-      return false;
+    for (const std::string& command :
+         SplitCommandSequenceForEditor(fields[2])) {
+      if (command == kReportBugCommand) {
+        return false;
+      }
     }
 #endif  // NDEBUG
     return true;
@@ -190,7 +241,7 @@ class KeyMapEditorDialog::KeyMapValidator {
     if (!IsVisibleKey(key)) {
       return false;
     }
-    if (!IsVisibleCommand(command)) {
+    if (!IsVisibleCommandSequence(command)) {
       return false;
     }
 
@@ -250,7 +301,7 @@ KeyMapEditorDialog::KeyMapEditorDialog(QWidget *parent)
       actions_(MENU_SIZE),
       import_actions_(std::size(kKeyMaps)),
       status_delegate_(std::make_unique<ComboBoxDelegate>()),
-      commands_delegate_(std::make_unique<ComboBoxDelegate>()),
+      command_sequence_delegate_(std::make_unique<CommandSequenceDelegate>()),
       keybinding_delegate_(std::make_unique<KeyBindingEditorDelegate>()),
       validator_(std::make_unique<KeyMapValidator>()) {
   actions_[NEW_INDEX] = mutable_edit_menu()->addAction(tr("New entry"));
@@ -295,20 +346,31 @@ KeyMapEditorDialog::KeyMapEditorDialog(QWidget *parent)
 
   // Generate i18n command list.
   const QStringList &commands = loader.commands();
-  QStringList i18n_commands;
+  QStringList raw_commands;
+  QHash<QString, QString> raw_to_display_commands;
+
   for (size_t i = 0; i < commands.size(); ++i) {
-    const QString i18n_command = tr(commands[i].toStdString().data());
-    i18n_commands.append(i18n_command);
+    const QString raw_command = commands[i];
+    const QString i18n_command = tr(raw_command.toStdString().data());
+
+    raw_commands.append(raw_command);
+    raw_to_display_commands.insert(raw_command, i18n_command);
+
     normalized_command_map_.insert(
-        std::make_pair(i18n_command.toStdString(), commands[i].toStdString()));
+        std::make_pair(i18n_command.toStdString(), raw_command.toStdString()));
+    localized_command_map_.insert(
+        std::make_pair(raw_command.toStdString(), i18n_command.toStdString()));
   }
-  i18n_commands.sort();
-  commands_delegate_->SetItemList(i18n_commands);
+
+  raw_commands.sort();
+  command_sequence_delegate_->SetCommandList(raw_commands,
+                                             raw_to_display_commands);
 
   mutable_table_widget()->setItemDelegateForColumn(0, status_delegate_.get());
   mutable_table_widget()->setItemDelegateForColumn(1,
                                                    keybinding_delegate_.get());
-  mutable_table_widget()->setItemDelegateForColumn(2, commands_delegate_.get());
+  mutable_table_widget()->setItemDelegateForColumn(
+      2, command_sequence_delegate_.get());
 
   setWindowTitle(tr("[ProductName] keymap editor"));
   GuiUtil::ReplaceWidgetLabels(this);
@@ -380,7 +442,9 @@ bool KeyMapEditorDialog::LoadFromStream(std::istream *is) {
     QTableWidgetItem *status_item = new QTableWidgetItem(tr(status.c_str()));
     QTableWidgetItem *key_item =
         new QTableWidgetItem(QString::fromStdString(key));
-    QTableWidgetItem *command_item = new QTableWidgetItem(tr(command.c_str()));
+    QTableWidgetItem *command_item = new QTableWidgetItem(
+        DisplayCommandSequenceForEditor(command, localized_command_map_));
+    command_item->setData(Qt::UserRole, QString::fromStdString(command));
 
     mutable_table_widget()->insertRow(row);
     mutable_table_widget()->setItem(row, 0, status_item);
@@ -414,8 +478,24 @@ bool KeyMapEditorDialog::Update() {
         TableUtil::SafeGetItemText(mutable_table_widget(), i, 0).toStdString();
     const std::string &key =
         TableUtil::SafeGetItemText(mutable_table_widget(), i, 1).toStdString();
-    const std::string &i18n_command =
-        TableUtil::SafeGetItemText(mutable_table_widget(), i, 2).toStdString();
+    std::string command;
+    QTableWidgetItem *command_item = mutable_table_widget()->item(i, 2);
+    if (command_item != nullptr &&
+        command_item->data(Qt::UserRole).isValid() &&
+        !command_item->data(Qt::UserRole).toString().isEmpty()) {
+      command = command_item->data(Qt::UserRole).toString().toStdString();
+    } else {
+      const std::string i18n_command =
+          TableUtil::SafeGetItemText(mutable_table_widget(), i, 2)
+              .toStdString();
+
+      const auto command_it = normalized_command_map_.find(i18n_command);
+      if (command_it != normalized_command_map_.end()) {
+        command = command_it->second;
+      } else {
+        command = i18n_command;
+      }
+    }
 
     const auto status_it = normalized_status_map_.find(i18n_status);
     if (status_it == normalized_status_map_.end()) {
@@ -424,12 +504,10 @@ bool KeyMapEditorDialog::Update() {
     }
     const std::string &status = status_it->second;
 
-    const auto command_it = normalized_command_map_.find(i18n_command);
-    if (command_it == normalized_command_map_.end()) {
-      LOG(ERROR) << "Unsupported i18n command name:" << i18n_command;
+    if (!validator_->IsVisibleCommandSequence(command)) {
+      LOG(ERROR) << "Unsupported command sequence: " << command;
       continue;
     }
-    const std::string &command = command_it->second;
 
     if (!validator_->IsVisibleKey(key)) {
       QMessageBox::warning(

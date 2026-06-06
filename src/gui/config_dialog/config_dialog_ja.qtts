@@ -261,8 +261,8 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="817"/>
-        <source>Use dark mode for candidate window</source>
-        <translation>候補ウィンドウをダークモードにする</translation>
+        <source>Use dark mode for candidate and ruby windows</source>
+        <translation>候補・ルビ表示をダークモードにする</translation>
     </message>
     <message>
         <location filename="config_dialog.ui" line="809"/>
@@ -352,8 +352,13 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="1385"/>
-        <source>Check if [ProductName] is the default IME on startup</source>
-        <translation>起動時に [ProductName]が既定の IME であるか確認する</translation>
+        <source>Set as Windows default IME</source>
+        <translation>Windows の既定 IME に設定</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="1385"/>
+        <source>Restore previous setting</source>
+        <translation>以前の設定に戻す</translation>
     </message>
     <message>
         <location filename="config_dialog.ui" line="1395"/>
@@ -478,6 +483,54 @@
         <location filename="character_form_editor.cc" line="95"/>
         <source>Conversion</source>
         <translation>変換中文字列</translation>
+    </message>
+</context>
+<context>
+    <name>mozc::gui::CommandSequenceEditorDialog</name>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="48"/>
+        <source>Edit command sequence</source>
+        <translation>コマンド列を編集</translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="51"/>
+        <source>Filter commands</source>
+        <translation>コマンドを検索</translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="56"/>
+        <source>Add &gt;</source>
+        <translation>追加 &gt;</translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="57"/>
+        <source>&lt; Remove</source>
+        <translation>&lt; 削除</translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="58"/>
+        <source>Up</source>
+        <translation>上へ</translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="59"/>
+        <source>Down</source>
+        <translation>下へ</translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="60"/>
+        <source>Clear</source>
+        <translation>クリア</translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="63"/>
+        <source>Available commands</source>
+        <translation>利用可能なコマンド</translation>
+    </message>
+    <message>
+        <location filename="command_sequence_editor_dialog.cc" line="79"/>
+        <source>Command sequence</source>
+        <translation>コマンド列</translation>
     </message>
 </context>
 <context>
@@ -637,8 +690,8 @@
     </message>
     <message>
         <location filename="config_dialog.cc" line="406"/>
-        <source>Candidate window dark mode setting is enabled from new applications.</source>
-        <translation>候補ウィンドウのダークモード設定は新しいアプリケーションから有効になります。</translation>
+        <source>Candidate window and ruby overlay dark mode setting is enabled from new applications.</source>
+        <translation>候補・ルビ表示のダークモード設定は新しいアプリケーションから有効になります。</translation>
     </message>
     <message>
         <location filename="config_dialog.cc" line="732"/>
@@ -694,6 +747,50 @@
         <location filename="config_dialog.cc" line="201"/>
         <source>Apply</source>
         <translation>適用</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Failed to get %1 InputTip.</source>
+        <translation>%1 の InputTip を取得できませんでした。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Set %1 as the Windows default IME?
+
+The current Windows default IME override will be saved so it can be restored later.</source>
+        <translation>%1 を Windows の既定 IME に設定しますか？
+
+現在の Windows 既定 IME の上書き設定は保存され、あとで元に戻せます。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>%1 has been set as the Windows default IME.</source>
+        <translation>%1 を Windows の既定 IME に設定しました。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Failed to set %1 as the Windows default IME.</source>
+        <translation>%1 を Windows の既定 IME に設定できませんでした。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Restore the previous Windows default IME setting?</source>
+        <translation>以前の Windows 既定 IME 設定に戻しますか？</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>The previous Windows default IME setting has been restored.</source>
+        <translation>以前の Windows 既定 IME 設定に戻しました。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>No previous Windows default IME setting has been saved.</source>
+        <translation>以前の Windows 既定 IME 設定は保存されていません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Failed to restore the previous Windows default IME setting.</source>
+        <translation>以前の Windows 既定 IME 設定に戻せませんでした。</translation>
     </message>
 </context>
 <context>

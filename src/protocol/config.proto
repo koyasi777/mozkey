@@ -421,7 +421,7 @@ message Config {
   // Use mode indicator feature.
   optional bool use_mode_indicator = 120 [default = true];
 
-  // Use dark mode for candidate window on Windows.
+  // Use dark mode for candidate window and ruby overlay on Windows.
   optional bool use_dark_mode_candidate_window = 121 [default = false];
 
   // Customize preedit display attributes on Windows TSF.

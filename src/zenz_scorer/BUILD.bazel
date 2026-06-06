@@ -7,6 +7,7 @@ mozc_cc_binary(
     srcs = ["main.cc"],
     linkopts = [
         "Advapi32.lib",
+        "Bcrypt.lib",
         "Winhttp.lib",
     ],
     tags = MOZC_TAGS.WIN_ONLY,

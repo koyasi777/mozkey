@@ -1,107 +1,119 @@
-name: Build error
-description: Issues for building Mozc
+name: ビルドエラー / Build error
+description: Mozkey のビルドに失敗する場合の報告
 title: 'Build error: '
+labels: ['build']
 
 body:
   - type: markdown
     attributes:
       value: |
-        Thank you for your reporting.
+        ビルドエラーの報告ありがとうございます。
 
-        Checking the current CI status and build instructions may address your problem.
+        報告前に、可能であれば以下を確認してください。
 
-        | Linux | Windows | macOS | Android lib |
-        |:-----:|:-------:|:-----:|:-----------:|
-        | [![Linux](https://github.com/google/mozc/actions/workflows/linux.yaml/badge.svg)](https://github.com/google/mozc/actions/workflows/linux.yaml) | [![Windows](https://github.com/google/mozc/actions/workflows/windows.yaml/badge.svg)](https://github.com/google/mozc/actions/workflows/windows.yaml) | [![macOS](https://github.com/google/mozc/actions/workflows/macos.yaml/badge.svg)](https://github.com/google/mozc/actions/workflows/macos.yaml) | [![Android lib](https://github.com/google/mozc/actions/workflows/android.yaml/badge.svg)](https://github.com/google/mozc/actions/workflows/android.yaml) |
+        - このリポジトリの最新 CI 状態:
+          https://github.com/koyasi777/mozkey/actions
+        - このリポジトリの README / Release notes
+        - Mozc 共通のビルドシステムに関する問題の場合は、upstream Mozc のビルド手順
 
-        Build instructions:
-        * [Linux / Android-lib](https://github.com/google/mozc/blob/master/docs/build_mozc_in_docker.md)
-        * [macOS](https://github.com/google/mozc/blob/master/docs/build_mozc_in_osx.md)
-        * [Windows](https://github.com/google/mozc/blob/master/docs/build_mozc_in_windows.md)
+        upstream Mozc のビルド手順:
+        - Linux / Android-lib: https://github.com/google/mozc/blob/master/docs/build_mozc_in_docker.md
+        - macOS: https://github.com/google/mozc/blob/master/docs/build_mozc_in_osx.md
+        - Windows: https://github.com/google/mozc/blob/master/docs/build_mozc_in_windows.md
 
   - type: textarea
     id: description
     attributes:
-      label: Description
-      description: A clear and concise description of what the issue is.
+      label: 内容
+      description: どのようなビルドエラーが発生したかを説明してください。
     validations:
       required: true
 
   - type: input
-    id: commit_id
+    id: version
     attributes:
-      label: Commit ID
-      description: If this is not the latest commit, please try the latest commit before reporting.
-      placeholder: d50a8b9ae28c4fba265f734b38bc5ae392fe4d25
+      label: Mozkey のバージョンまたは commit ID
+      description: 可能であれば最新の commit / 最新リリースでも再現するか確認してください。
+      placeholder: '例: Mozkey v0.7.1 または d50a8b9ae28c4fba265f734b38bc5ae392fe4d25'
     validations:
       required: true
 
   - type: dropdown
     id: target
     attributes:
-      label: Build target
+      label: ビルド対象
       options:
+        - Windows installer
+        - Windows binaries
+        - macOS package
         - Linux
-        - macOS
-        - Windows
         - Android-lib
-        - Others (no guarantee)
+        - Other
     validations:
       required: true
 
   - type: dropdown
-    id: build_status
+    id: source
     attributes:
-      label: CI build status
-      description: Status of https://github.com/google/mozc#build-status
+      label: ビルド元
+      description: どのソースコードをビルドしましたか？
       options:
-        - passing
-        - failure
+        - koyasi777/mozkey main
+        - koyasi777/mozkey release tag
+        - my local branch
+        - upstream google/mozc
+        - other fork
     validations:
-      required: true
+      required: false
 
   - type: input
     id: os
     attributes:
-      label: OS version
-      placeholder: Ubuntu 24.04, macOS 15.1, etc
+      label: OS バージョン
+      placeholder: '例: Windows 11 24H2, Ubuntu 24.04, macOS 15.1'
     validations:
       required: true
 
   - type: textarea
     id: environment
     attributes:
-      label: Build environment
+      label: ビルド環境
       value: |
-        - Python version (optional): [e.g. 3.11, etc. 3.9+ is required]
-        - Qt6 version (optional): [e.g. 6.7.2, etc.]
-        - Compiler version (optional): [e.g. MSVC 2019, Xcode 14.1, etc.]
+        - Python version:
+        - Bazel / Bazelisk version:
+        - Visual Studio / MSVC version:
+        - Windows SDK version:
+        - Qt version:
+        - Other relevant tools:
     validations:
       required: false
 
   - type: textarea
     id: steps
     attributes:
-      label: Build commands
-      description: Steps of command lines to reproduce your error.
+      label: 実行したビルドコマンド
+      description: 実際に実行したコマンドをそのまま貼ってください。
       value: |
         1. git ...
         2. cd ...
         3. bazel ...
+        4. ...
     validations:
       required: true
 
   - type: textarea
     id: logs
     attributes:
-      label: Error logs
+      label: エラーログ
+      description: 関連するエラーログを貼ってください。最後の失敗行だけでなく、最初に出たエラーも含めてください。
+      render: shell
     validations:
       required: true
 
   - type: textarea
     id: context
     attributes:
-      label: Additional context
-      description: Add any other context about the problem here.
+      label: 補足情報
+      description: その他、調査に役立ちそうな情報があれば記載してください。
     validations:
       required: false
