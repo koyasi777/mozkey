@@ -616,14 +616,15 @@ HRESULT TipKeyeventHandler::OnModifierTap(TipTextService* text_service,
   Context mozc_context;
   FillMozcContextCommon(text_service, context, &mozc_context);
 
-  // The server recognizes a lone modifier toggle differently depending on the
-  // current state (see KeyEventHandler::HandleKey). OnModifierTap is only
-  // invoked (by the keyboard hook) when the tap will actually toggle in the
-  // current state, so deriving the edge from the open state is correct here:
+  // The server recognizes a lone modifier command differently depending on the
+  // current state (see KeyEventHandler::HandleKey). OnModifierTap is invoked
+  // (by the keyboard hook) only when the current state's keymap should process
+  // the tap, so deriving the edge from the open state is correct here:
   //   * While the IME is ON, an active-mode command (e.g. Commit|IMEOff) fires
   //     on the modifier *key-up* whose key matches the last key pressed.
-  //   * While the IME is OFF, a direct-mode force-activation command (IMEOn)
-  //     fires only on the modifier *key-down*.
+  //   * While the IME is OFF, a direct-mode command (e.g. IMEOn or the
+  //     same-state IMEOff indicator command) fires only on the modifier
+  //     *key-down*.
   // So drive a key-down when the IME is off and a key-up when it is on.
   const bool is_key_down = !open;
   InputState ime_state;

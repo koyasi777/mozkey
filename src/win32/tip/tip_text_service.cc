@@ -1124,6 +1124,10 @@ class TipTextServiceImpl
       if (KeyInfoUtil::ContainsKeyInformation(behavior.active_mode_ime_off_keys,
                                               key_info) ||
           KeyInfoUtil::ContainsKeyInformation(behavior.direct_mode_ime_on_keys,
+                                              key_info) ||
+          KeyInfoUtil::ContainsKeyInformation(behavior.active_mode_ime_on_keys,
+                                              key_info) ||
+          KeyInfoUtil::ContainsKeyInformation(behavior.direct_mode_ime_off_keys,
                                               key_info)) {
         return true;
       }
@@ -1196,29 +1200,39 @@ class TipTextServiceImpl
     if (!BuildAltKeyInformation(alt_vk, &key_info)) {
       return false;
     }
-    const bool is_off_key = KeyInfoUtil::ContainsKeyInformation(
+    const bool is_active_off_key = KeyInfoUtil::ContainsKeyInformation(
         behavior.active_mode_ime_off_keys, key_info);
-    const bool is_on_key = KeyInfoUtil::ContainsKeyInformation(
+    const bool is_direct_on_key = KeyInfoUtil::ContainsKeyInformation(
         behavior.direct_mode_ime_on_keys, key_info);
+    const bool is_active_on_key = KeyInfoUtil::ContainsKeyInformation(
+        behavior.active_mode_ime_on_keys, key_info);
+    const bool is_direct_off_key = KeyInfoUtil::ContainsKeyInformation(
+        behavior.direct_mode_ime_off_keys, key_info);
 
-    // Only consume the Alt tap when it will actually toggle the IME in the
-    // *current* state: an active-mode off key while the IME is on, or a
-    // direct-mode on key while the IME is off. In any other state this tap is a
-    // no-op, so let the Alt key keep its normal (menu) behavior instead of
-    // swallowing it. This is what keeps a configured Alt key from breaking the
-    // application menu in the state where it has no IME effect.
-    const bool open = TipStatus::IsOpen(self->thread_mgr_.get());
-    const bool will_toggle = (open && is_off_key) || (!open && is_on_key);
-    if (!will_toggle) {
+    // In an editable context, any Alt key explicitly assigned to an IME on/off
+    // command is reserved for the IME even when pressing it is a no-op in the
+    // current state. This prevents a configured right Alt from activating the
+    // application menu while IME is already on, and a configured left Alt from
+    // doing so while IME is already off. Alt still passes through when the key
+    // is not assigned to an IME command, or when the focus is not editable.
+    const bool is_active_mode_key = is_active_off_key || is_active_on_key;
+    const bool is_direct_mode_key = is_direct_on_key || is_direct_off_key;
+    const bool should_consume = is_active_mode_key || is_direct_mode_key;
+    if (!should_consume) {
       return false;
     }
 
-    // Hand the actual processing to the task window, which runs in the normal
-    // message loop where the server key event and an async edit session can be
-    // driven safely (the server keymap decides the command, e.g. Commit|IMEOff
-    // or IMEOn, based on the current composition/open state).
-    ::PostMessageW(self->task_window_handle_, kAltTapToggleMessage,
-                   static_cast<WPARAM>(alt_vk), 0);
+    const bool open = TipStatus::IsOpen(self->thread_mgr_.get());
+    const bool should_send_to_server =
+        open ? is_active_mode_key : is_direct_mode_key;
+    if (should_send_to_server) {
+      // Hand the actual processing to the task window, which runs in the normal
+      // message loop where the server key event and an async edit session can
+      // be driven safely (the server keymap decides the command, e.g.
+      // Commit|IMEOff or IMEOn, based on the current composition/open state).
+      ::PostMessageW(self->task_window_handle_, kAltTapToggleMessage,
+                     static_cast<WPARAM>(alt_vk), 0);
+    }
     return true;
   }
 
