@@ -5810,38 +5810,38 @@ TEST_F(UserHistoryPredictorTest, IsProperNounTest) {
 
   result.key = "やま";
   result.value = "山";
-  result.types = prediction::SINGLE_KANJI;
+  result.attributes = prediction::SINGLE_KANJI;
   EXPECT_TRUE(predictor_peer.IsProperNoun(req, result));
 
   result.key = "123";
   result.value = "123";
-  result.types = prediction::NUMBER;
+  result.attributes = prediction::NUMBER;
   EXPECT_TRUE(predictor_peer.IsProperNoun(req, result));
 
   result.key = "やました";
   result.value = "山下";
-  result.types = 0;
+  result.attributes = 0;
   result.lid = result.rid = modules->GetPosMatcher().GetLastNameId();
   EXPECT_TRUE(predictor_peer.IsProperNoun(req, result));
 
   // "たなか" is registered as proper noun.
   result.key = "たなか";
   result.value = "田中";
-  result.types = 0;
+  result.attributes = 0;
   result.lid = result.rid = 0;
   EXPECT_TRUE(predictor_peer.IsProperNoun(req, result));
 
   // "たなか" is registered as proper noun, but value must be Kanji.
   result.key = "たなか";
   result.value = "たなか";
-  result.types = 0;
+  result.attributes = 0;
   result.lid = result.rid = 0;
   EXPECT_FALSE(predictor_peer.IsProperNoun(req, result));
 
   // "じんるい" is registered as proper noun.
   result.key = "じんるい";
   result.value = "人類";
-  result.types = 0;
+  result.attributes = 0;
   result.lid = result.rid = 0;
   EXPECT_FALSE(predictor_peer.IsProperNoun(req, result));
 }
@@ -5997,7 +5997,8 @@ TEST_F(UserHistoryPredictorTest, PartialMatchTest) {
     EXPECT_FALSE(results.empty());  // Weak.
     EXPECT_EQ(results[0].value, "拓さん");
     EXPECT_EQ(results[0].key, "たくさん");
-    EXPECT_TRUE(results[0].types & prediction::WEAK_USER_HISTORY_PREDICTION);
+    EXPECT_TRUE(results[0].attributes &
+                prediction::WEAK_USER_HISTORY_PREDICTION);
     EXPECT_EQ("たくさん,拓さん,たく,拓", GetKeyValueWithBoundary(results[0]));
 
     // 3599 + 500(wcost) + {100, 0} < 5000(full_cost) -> OK
@@ -6007,7 +6008,8 @@ TEST_F(UserHistoryPredictorTest, PartialMatchTest) {
     EXPECT_FALSE(results.empty());  // Not weak.
     EXPECT_EQ(results[0].value, "拓さん");
     EXPECT_EQ(results[0].key, "たくさん");
-    EXPECT_FALSE(results[0].types & prediction::WEAK_USER_HISTORY_PREDICTION);
+    EXPECT_FALSE(results[0].attributes &
+                 prediction::WEAK_USER_HISTORY_PREDICTION);
     EXPECT_EQ("たくさん,拓さん,たく,拓", GetKeyValueWithBoundary(results[0]));
   }
 
@@ -6024,7 +6026,8 @@ TEST_F(UserHistoryPredictorTest, PartialMatchTest) {
     EXPECT_FALSE(results.empty());
     EXPECT_EQ(results[0].value, "拓の");
     EXPECT_EQ(results[0].key, "たくの");
-    EXPECT_FALSE(results[0].types & prediction::WEAK_USER_HISTORY_PREDICTION);
+    EXPECT_FALSE(results[0].attributes &
+                 prediction::WEAK_USER_HISTORY_PREDICTION);
     EXPECT_EQ("たくの,拓の,たく,拓", GetKeyValueWithBoundary(results[0]));
   }
 
@@ -6044,7 +6047,8 @@ TEST_F(UserHistoryPredictorTest, PartialMatchTest) {
     EXPECT_EQ(results.size(), 1);
     EXPECT_EQ(results[0].value, "拓の");  // Weak.
     EXPECT_EQ(results[0].key, "たくの");
-    EXPECT_TRUE(results[0].types & prediction::WEAK_USER_HISTORY_PREDICTION);
+    EXPECT_TRUE(results[0].attributes &
+                prediction::WEAK_USER_HISTORY_PREDICTION);
     EXPECT_EQ("たくの,拓の,たく,拓", GetKeyValueWithBoundary(results[0]));
   }
 }

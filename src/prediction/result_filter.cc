@@ -53,6 +53,8 @@
 
 namespace mozc::prediction::filter {
 
+using ::mozc::converter::Attribute;
+
 namespace {
 
 // Returns true if the |target| may be redundant result.
@@ -118,8 +120,7 @@ bool ResultFilter::ShouldRemove(const Result& result, int added_num) {
   }
 
   if (!auto_partial_suggestion_ &&
-      (result.candidate_attributes &
-       converter::Attribute::PARTIALLY_KEY_CONSUMED)) {
+      (result.attributes & Attribute::PARTIALLY_KEY_CONSUMED)) {
     return true;
   }
 
@@ -143,7 +144,8 @@ bool ResultFilter::ShouldRemove(const Result& result, int added_num) {
 
   // Don't suggest exactly the same candidate as key.
   // if |include_exact_key| is true, that's not the case.
-  if (!include_exact_key_ && !(result.types & PredictionType::REALTIME) &&
+  if (!include_exact_key_ &&
+      !(result.attributes & Attribute::REALTIME_CONVERSION) &&
       request_key_ == result.value) {
     return true;
   }
@@ -154,8 +156,7 @@ bool ResultFilter::ShouldRemove(const Result& result, int added_num) {
 
   // User input: "おーすとり" (len = 5)
   // key/value:  "おーすとりら" "オーストラリア" (miss match pos = 4)
-  if ((result.candidate_attributes &
-       converter::Attribute::SPELLING_CORRECTION) &&
+  if ((result.attributes & Attribute::SPELLING_CORRECTION) &&
       result.key != request_key_ &&
       request_key_len_ <=
           GetMissSpelledPosition(result.key, result.value) + 1) {
@@ -165,13 +166,14 @@ bool ResultFilter::ShouldRemove(const Result& result, int added_num) {
   const size_t lookup_key_len = Util::CharsLen(request_key_);
 
   if (suffix_nwp_transition_cost_threshold_ > 0 && lookup_key_len == 0 &&
-      history_rid_ != 0 && result.types & PredictionType::SUFFIX &&
+      history_rid_ != 0 && result.attributes & Attribute::SUFFIX_DICTIONARY &&
       connector_.GetTransitionCost(history_rid_, result.lid) >
           suffix_nwp_transition_cost_threshold_) {
     return true;
   }
 
-  if ((result.types & PredictionType::SUFFIX) && suffix_count_++ >= 20) {
+  if ((result.attributes & Attribute::SUFFIX_DICTIONARY) &&
+      suffix_count_++ >= 20) {
     // TODO(toshiyuki): Need refactoring for controlling suffix
     // prediction number after we will fix the appropriate number.
     return true;
@@ -193,7 +195,7 @@ bool ResultFilter::ShouldRemove(const Result& result, int added_num) {
     return true;
   }
 
-  if ((result.types & PredictionType::REALTIME) &&
+  if ((result.attributes & Attribute::REALTIME_CONVERSION) &&
       // Do not remove one-segment / on-char realtime candidates
       // example:
       // - "勝った" for the reading, "かった".
@@ -207,13 +209,13 @@ bool ResultFilter::ShouldRemove(const Result& result, int added_num) {
   constexpr int kTcMaxCount = 3;
   constexpr int kTcMaxRank = 10;
 
-  if ((result.types & PredictionType::TYPING_CORRECTION) &&
+  if ((result.attributes & Attribute::TYPING_CORRECTION) &&
       (tc_count_++ >= kTcMaxCount || added_num >= kTcMaxRank)) {
     return true;
   }
 
-  if ((result.types & PredictionType::PREFIX) &&
-      (result.candidate_attributes & converter::Attribute::TYPING_CORRECTION) &&
+  if ((result.attributes & Attribute::PARTIALLY_KEY_CONSUMED) &&
+      (result.attributes & Attribute::TYPING_CORRECTION) &&
       (prefix_tc_count_++ >= 3 || added_num >= 10)) {
     return true;
   }
@@ -293,7 +295,7 @@ void RemoveRedundantResults(std::vector<Result>* results) {
     // Traverse all remaining elements and check if each result is redundant.
     for (auto iter = min_iter; iter != max_iter;) {
       // We do not filter user dictionary word.
-      if (iter->candidate_attributes & converter::Attribute::USER_DICTIONARY) {
+      if (iter->attributes & Attribute::USER_DICTIONARY) {
         ++iter;
         continue;
       }

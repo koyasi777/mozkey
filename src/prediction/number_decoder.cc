@@ -52,6 +52,8 @@
 #include "request/conversion_request.h"
 
 namespace mozc::prediction {
+
+using ::mozc::converter::Attribute;
 namespace {
 
 using ::mozc::prediction::number_decoder_internal::Entry;
@@ -226,10 +228,10 @@ std::vector<prediction::Result> NumberDecoder::Decode(
     Result result;
     const bool is_arabic =
         Util::GetScriptType(decode_result.candidate) == Util::NUMBER;
-    result.types = PredictionType::NUMBER;
     result.key = request_key.substr(0, decode_result.consumed_key_byte_len);
     result.value = std::move(decode_result.candidate);
-    result.candidate_attributes |= converter::Attribute::NO_SUGGEST_LEARNING;
+    result.attributes |= Attribute::NUMBER;
+    result.attributes |= Attribute::NO_SUGGEST_LEARNING;
     // Heuristic cost:
     // Large digit number (1億, 1兆, etc) should have larger cost
     // 1000 ~= 500 * log(10)
@@ -237,8 +239,7 @@ std::vector<prediction::Result> NumberDecoder::Decode(
     result.lid = is_arabic ? number_id_ : kanji_number_id_;
     result.rid = is_arabic ? number_id_ : kanji_number_id_;
     if (decode_result.consumed_key_byte_len < request_key.size()) {
-      result.candidate_attributes |=
-          converter::Attribute::PARTIALLY_KEY_CONSUMED;
+      result.attributes |= Attribute::PARTIALLY_KEY_CONSUMED;
       result.consumed_key_size = Util::CharsLen(result.key);
     }
     results.emplace_back(std::move(result));

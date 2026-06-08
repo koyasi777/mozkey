@@ -249,7 +249,7 @@ TEST_F(NumberDecoderTest, Random) {
     for (const Result& result : decoder.Decode(request)) {
       EXPECT_TRUE(absl::StartsWith(key, result.key));
       if (result.key.size() < key.size()) {
-        EXPECT_TRUE(result.candidate_attributes &
+        EXPECT_TRUE(result.attributes &
                     converter::Attribute::PARTIALLY_KEY_CONSUMED);
         EXPECT_EQ(result.consumed_key_size, Util::CharsLen(result.key));
         EXPECT_GE(result.wcost, 1000);

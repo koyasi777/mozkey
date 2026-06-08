@@ -281,7 +281,7 @@ std::vector<Result> Predictor::PredictForMixedConversion(
 // static
 void Predictor::DemoteWeakUserHistory(absl::Span<Result> results) {
   auto is_weak = [](const Result& result) {
-    return result.types & prediction::WEAK_USER_HISTORY_PREDICTION;
+    return result.attributes & prediction::WEAK_USER_HISTORY_PREDICTION;
   };
 
   if (results.empty() || !is_weak(results.front())) {
@@ -305,7 +305,7 @@ std::vector<Result> Predictor::MixCandidates(
       user_history_results.front().key == dictionary_results.front().key &&
       user_history_results.front().value == dictionary_results.front().value) {
     Result& result = user_history_results.front();
-    result.candidate_attributes |= converter::Attribute::NO_DELETABLE;
+    result.attributes |= converter::Attribute::NO_DELETABLE;
   }
 
   std::vector<Result> results;

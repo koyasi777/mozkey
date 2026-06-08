@@ -29,6 +29,7 @@
 
 #include "prediction/result.h"
 
+#include <cstdint>
 #include <string>
 #include <tuple>
 
@@ -77,24 +78,26 @@ bool TiebreakLess(const Result& lhs, const Result& rhs) {
   if (lhs.key != rhs.key) {
     return lhs.key < rhs.key;
   }
-  // Prioritize the result with candidate_attributes.
-  if (lhs.candidate_attributes != rhs.candidate_attributes) {
-    if (lhs.candidate_attributes == 0) {
+  // Prioritize the result with candidate_attributes (behavioral part).
+  const uint32_t lhs_behavioral = lhs.GetBehavioralAttributes();
+  const uint32_t rhs_behavioral = rhs.GetBehavioralAttributes();
+  if (lhs_behavioral != rhs_behavioral) {
+    if (lhs_behavioral == 0) {
       return false;
     }
-    if (rhs.candidate_attributes == 0) {
+    if (rhs_behavioral == 0) {
       return true;
     }
-    return lhs.candidate_attributes < rhs.candidate_attributes;
+    return lhs_behavioral < rhs_behavioral;
   }
   // Then, use the rest of the fields.
-  return std::tie(lhs.wcost, lhs.cost, lhs.types, lhs.lid, lhs.rid,
+  return std::tie(lhs.wcost, lhs.cost, lhs.attributes, lhs.lid, lhs.rid,
                   lhs.consumed_key_size, lhs.penalty, lhs.cost_before_rescoring,
                   lhs.removed, lhs.typing_correction_score,
                   lhs.typing_correction_adjustment, lhs.post_correction_prob,
                   lhs.description, lhs.display_value,
                   lhs.inner_segment_boundary) <
-         std::tie(rhs.wcost, rhs.cost, rhs.types, rhs.lid, rhs.rid,
+         std::tie(rhs.wcost, rhs.cost, rhs.attributes, rhs.lid, rhs.rid,
                   rhs.consumed_key_size, rhs.penalty, rhs.cost_before_rescoring,
                   rhs.removed, rhs.typing_correction_score,
                   rhs.typing_correction_adjustment, rhs.post_correction_prob,
@@ -119,27 +122,16 @@ void Result::InitializeByTokenAndTypes(const Token& token,
 
 void Result::SetTypesAndTokenAttributes(PredictionTypes prediction_types,
                                         Token::AttributesBitfield token_attr) {
-  types = prediction_types;
-  candidate_attributes = 0;
-  if (types & TYPING_CORRECTION) {
-    candidate_attributes |= Attribute::TYPING_CORRECTION;
-  }
-  if (types & (REALTIME | REALTIME_TOP)) {
-    candidate_attributes |= Attribute::REALTIME_CONVERSION;
-  }
-  if (types & REALTIME_TOP) {
-    candidate_attributes |= Attribute::NO_VARIANTS_EXPANSION;
-  }
-  if (types & PREFIX) {
-    candidate_attributes |= Attribute::PARTIALLY_KEY_CONSUMED;
+  attributes = prediction_types;
+  if (attributes & Attribute::REALTIME_TOP) {
+    attributes |= Attribute::NO_VARIANTS_EXPANSION;
   }
   if (token_attr & Token::SPELLING_CORRECTION) {
-    candidate_attributes |= Attribute::SPELLING_CORRECTION;
+    attributes |= Attribute::SPELLING_CORRECTION;
   }
   if (token_attr & Token::USER_DICTIONARY) {
-    candidate_attributes |=
-        (Attribute::USER_DICTIONARY | Attribute::NO_MODIFICATION |
-         Attribute::NO_VARIANTS_EXPANSION);
+    attributes |= (Attribute::USER_DICTIONARY | Attribute::NO_MODIFICATION |
+                   Attribute::NO_VARIANTS_EXPANSION);
   }
 }
 
@@ -147,10 +139,10 @@ void PopulateTypeCorrectedQuery(
     const composer::TypeCorrectedQuery& typing_corrected_result,
     Result* absl_nonnull result) {
   if (typing_corrected_result.type & composer::TypeCorrectedQuery::CORRECTION) {
-    result->types |= TYPING_CORRECTION;
+    result->attributes |= TYPING_CORRECTION;
   }
   if (typing_corrected_result.type & composer::TypeCorrectedQuery::COMPLETION) {
-    result->types |= TYPING_COMPLETION;
+    result->attributes |= TYPING_COMPLETION;
   }
   result->typing_correction_score = typing_corrected_result.score;
   // bias = hyp_score - base_score, so larger is better.

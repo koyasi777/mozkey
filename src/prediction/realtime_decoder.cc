@@ -55,12 +55,14 @@
 namespace mozc::prediction {
 namespace {
 
+using ::mozc::converter::Attribute;
+
 static constexpr int kSuffixCacheSize = 256;
 
 // TODO(taku): Defines this function as a common utility function.
 Segments MakeSegments(const ConversionRequest& request) {
   converter::Segments segments;
-  const prediction::Result& result = request.history_result();
+  const Result& result = request.history_result();
 
   auto add_history_segment = [&](absl::string_view key, absl::string_view value,
                                  absl::string_view content_key,
@@ -106,10 +108,7 @@ std::optional<Result> ConversionSegmentsToResult(const Segments& segments) {
     absl::StrAppend(&result.key, candidate.key);
     result.wcost += candidate.wcost;
     result.cost += candidate.cost;
-    result.candidate_attributes |= candidate.attributes;
-    result.candidate_attributes |=
-        (candidate.attributes &
-         converter::Attribute::USER_SEGMENT_HISTORY_REWRITER);
+    result.attributes |= candidate.attributes;
     builder.Add(candidate.key.size(), candidate.value.size(),
                 candidate.content_key.size(), candidate.content_value.size());
   }
@@ -165,7 +164,7 @@ bool RealtimeDecoder::PushBackTopConversionResult(
   Result& result = result_opt.value();
   result.SetTypesAndTokenAttributes(REALTIME | REALTIME_TOP,
                                     dictionary::Token::NONE);
-  result.candidate_attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
+  result.attributes |= Attribute::NO_VARIANTS_EXPANSION;
 
   results->emplace_back(std::move(result));
 
@@ -228,18 +227,16 @@ std::vector<Result> RealtimeDecoder::Decode(
     result.rid = candidate.rid;
     result.inner_segment_boundary = candidate.inner_segment_boundary;
     result.SetTypesAndTokenAttributes(REALTIME, dictionary::Token::NONE);
-    result.candidate_attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
+    result.attributes |= Attribute::NO_VARIANTS_EXPANSION;
     if (candidate.key.size() < segment.key().size()) {
-      result.candidate_attributes |=
-          converter::Attribute::PARTIALLY_KEY_CONSUMED;
+      result.attributes |= Attribute::PARTIALLY_KEY_CONSUMED;
       result.consumed_key_size = Util::CharsLen(candidate.key);
     }
     // Kana expansion happens inside the decoder.
-    if (candidate.attributes &
-        converter::Attribute::KEY_EXPANDED_IN_DICTIONARY) {
-      result.types |= prediction::KEY_EXPANDED_IN_DICTIONARY;
+    if (candidate.attributes & Attribute::KEY_EXPANDED_IN_DICTIONARY) {
+      result.attributes |= KEY_EXPANDED_IN_DICTIONARY;
     }
-    result.candidate_attributes |= candidate.attributes;
+    result.attributes |= candidate.attributes;
     results.emplace_back(std::move(result));
   }
 
