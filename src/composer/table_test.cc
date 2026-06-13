@@ -1066,6 +1066,30 @@ TEST_F(TableTest, TableManager) {
     EXPECT_NE(table2->LookUp("a"), nullptr);
     EXPECT_NE(table2->LookUp("kk"), nullptr);
   }
+
+  {
+    commands::Request request;
+    request.set_special_romanji_table(Request::DEFAULT_TABLE);
+    config::Config config;
+    config.set_preedit_method(Config::ROMAN);
+    config.set_punctuation_method(Config::TOUTEN_KUTEN);
+    config.set_symbol_method(Config::CORNER_BRACKET_MIDDLE_DOT);
+
+    constexpr absl::string_view kRule = "mozctest\t[MOZC]\n";
+    config.set_custom_roman_table(kRule);
+    std::shared_ptr<const Table> custom_table =
+        table_manager.GetTable(request, config);
+    ASSERT_NE(custom_table, nullptr);
+    EXPECT_NE(custom_table->LookUp("mozctest"), nullptr);
+
+    config.clear_custom_roman_table();
+    std::shared_ptr<const Table> default_table =
+        table_manager.GetTable(request, config);
+    ASSERT_NE(default_table, nullptr);
+    EXPECT_NE(default_table, custom_table);
+    EXPECT_EQ(default_table->LookUp("mozctest"), nullptr);
+    EXPECT_EQ(table_manager.GetTable(request, config), default_table);
+  }
 }
 
 }  // namespace

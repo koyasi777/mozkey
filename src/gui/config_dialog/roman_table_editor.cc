@@ -34,6 +34,7 @@
 #include <QHeaderView>
 #include <QMenu>
 #include <QMessageBox>
+#include <QTableWidgetItem>
 #include <QToolTip>
 #include <QtGui>
 #include <istream>
@@ -112,7 +113,10 @@ QTableWidgetItem *CreateDisplayAmbiguousResultItem(
 }  // namespace
 
 RomanTableEditorDialog::RomanTableEditorDialog(QWidget *parent)
-    : GenericTableEditorDialog(parent, 4), actions_(MENU_SIZE) {
+    : GenericTableEditorDialog(parent, 4),
+      actions_(MENU_SIZE),
+      default_table_requested_(false),
+      loading_table_(false) {
   actions_[NEW_INDEX] = mutable_edit_menu()->addAction(tr("New entry"));
   actions_[REMOVE_INDEX] =
       mutable_edit_menu()->addAction(tr("Remove selected entries"));
@@ -134,6 +138,15 @@ RomanTableEditorDialog::RomanTableEditorDialog(QWidget *parent)
   headers << tr("Input") << tr("Output") << tr("Next input")
           << tr("途中一致でも表示");
   mutable_table_widget()->setHorizontalHeaderLabels(headers);
+
+  // Romaji table is an ordered list of conversion rules.  Sorting changes the
+  // serialized rule order and can change actual input behavior.
+  mutable_table_widget()->setSortingEnabled(false);
+  mutable_table_widget()->horizontalHeader()->setSortIndicatorShown(false);
+
+  QObject::connect(mutable_table_widget(), SIGNAL(itemChanged(QTableWidgetItem *)),
+                   this, SLOT(MarkRomanTableEdited(QTableWidgetItem *)));
+
   mutable_table_widget()->horizontalHeader()->viewport()->installEventFilter(this);
 
   resize(430, 350);
@@ -175,6 +188,9 @@ std::string RomanTableEditorDialog::GetDefaultRomanTable() {
 
 bool RomanTableEditorDialog::LoadFromStream(std::istream *is) {
   CHECK(is);
+  const bool was_loading_table = loading_table_;
+  loading_table_ = true;
+
   std::string line;
   mutable_table_widget()->setRowCount(0);
   mutable_table_widget()->verticalHeader()->hide();
@@ -225,6 +241,8 @@ bool RomanTableEditorDialog::LoadFromStream(std::istream *is) {
     }
   }
 
+  loading_table_ = was_loading_table;
+
   UpdateMenuStatus();
 
   return true;
@@ -235,6 +253,7 @@ bool RomanTableEditorDialog::LoadDefaultRomanTable() {
       ConfigFileStream::LegacyOpen(kRomanTableFile));
   CHECK(ifs);  // should never happen
   CHECK(LoadFromStream(ifs.get()));
+  default_table_requested_ = true;
   return true;
 }
 
@@ -313,6 +332,7 @@ void RomanTableEditorDialog::UpdateMenuStatus() {
 
 void RomanTableEditorDialog::OnEditMenuAction(QAction *action) {
   if (action == actions_[NEW_INDEX]) {
+    default_table_requested_ = false;
     AddNewItem();
     const int row = (mutable_table_widget()->currentRow() >= 0)
                         ? mutable_table_widget()->currentRow()
@@ -323,6 +343,7 @@ void RomanTableEditorDialog::OnEditMenuAction(QAction *action) {
           row, 3, CreateDisplayAmbiguousResultItem(false, std::string()));
     }
   } else if (action == actions_[REMOVE_INDEX]) {
+    default_table_requested_ = false;
     DeleteSelectedItems();
   } else if (action == actions_[IMPORT_FROM_FILE_INDEX] ||
              action == actions_[RESET_INDEX]) {  // import or reset
@@ -336,6 +357,7 @@ void RomanTableEditorDialog::OnEditMenuAction(QAction *action) {
     }
 
     if (action == actions_[IMPORT_FROM_FILE_INDEX]) {
+      default_table_requested_ = false;
       Import();
     } else if (action == actions_[RESET_INDEX]) {
       LoadDefaultRomanTable();
@@ -343,6 +365,15 @@ void RomanTableEditorDialog::OnEditMenuAction(QAction *action) {
   } else if (action == actions_[EXPORT_TO_FILE_INDEX]) {
     Export();
   }
+}
+
+
+void RomanTableEditorDialog::MarkRomanTableEdited(QTableWidgetItem *item) {
+  (void)item;
+  if (loading_table_) {
+    return;
+  }
+  default_table_requested_ = false;
 }
 
 bool RomanTableEditorDialog::eventFilter(QObject *obj, QEvent *event) {
@@ -381,7 +412,8 @@ bool RomanTableEditorDialog::Show(QWidget *parent,
   const bool result = (QDialog::Accepted == window.exec());
   new_roman_table->clear();
 
-  if (result && window.table() != window.GetDefaultRomanTable()) {
+  if (result && !window.default_table_requested_ &&
+      window.table() != window.GetDefaultRomanTable()) {
     *new_roman_table = window.table();
   }
 

@@ -47,7 +47,7 @@ class StringStorageInterface {
 
 class EncryptedStringStorage : public StringStorageInterface {
  public:
-  explicit EncryptedStringStorage(const absl::string_view filename)
+  explicit EncryptedStringStorage(absl::string_view filename)
       : filename_(filename) {}
   EncryptedStringStorage(const EncryptedStringStorage&) = delete;
   EncryptedStringStorage& operator=(const EncryptedStringStorage&) = delete;

@@ -197,7 +197,7 @@
     </message>
     <message>
         <source>PredictAndConvert</source>
-        <translation>予測変換</translation>
+        <translation>予測変換（候補内では次候補）</translation>
     </message>
     <message>
         <source>SegmentFocusFirst</source>
@@ -250,6 +250,10 @@
     <message>
         <source>Reconvert</source>
         <translation>再変換</translation>
+    </message>
+    <message>
+        <source>ReconvertSelectionOrInsertSpace</source>
+        <translation>選択文字列を再変換（未選択時は空白）</translation>
     </message>
     <message>
         <source>DeleteSelectedCandidate</source>

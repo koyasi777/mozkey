@@ -49,7 +49,7 @@ class CollocationUtil {
   // for example:
   // "一個" -> "個" (removes 'number' if |remove_number| is true)
   // "%％" -> "%%" (full width '%' to half width)
-  static void GetNormalizedScript(const absl::string_view str,
+  static void GetNormalizedScript(absl::string_view str,
                                   bool remove_number, std::string* output);
 
   // Returns true if given char is number including kanji.
@@ -57,7 +57,7 @@ class CollocationUtil {
 
  private:
   // Removes characters for normalizing.
-  static void RemoveExtraCharacters(const absl::string_view input,
+  static void RemoveExtraCharacters(absl::string_view input,
                                     bool remove_number, std::string* output);
 };
 

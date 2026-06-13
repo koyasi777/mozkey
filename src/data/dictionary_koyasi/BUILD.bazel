@@ -10,8 +10,9 @@ filegroup(
     srcs = glob(
         [
             "generated/profiled/dic-nico-pixiv-delta.txt",
-            "koyasi-syntax-guard.txt",
+            "generated/profiled/koyasi-syntax-guard.txt",
             "generated/profiled/mozcdic-ut-daily.txt",
+            "generated/profiled/mozcdic-ut-personal-names-daily.txt",
         ],
         allow_empty = True,
     ),

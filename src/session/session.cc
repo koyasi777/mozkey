@@ -47,6 +47,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "base/clock.h"
+#include "base/strings/unicode.h"
 #include "base/util.h"
 #include "composer/composer.h"
 #include "composer/key_event_util.h"
@@ -180,16 +181,21 @@ const size_t kMultipleUndoMaxSize = 10;
 constexpr uint32_t kDefaultLiveConversionDelayMillisec = 228;
 constexpr uint32_t kMaxLiveConversionDelayMillisec = 1000;
 
-// Do not run live conversion for a single-character composition.
+// Default minimum composition length before live conversion is allowed.
 // Single-character input is often a particle such as 「に」「を」「が」,
 // and converting it to a kanji such as 「二」 too eagerly is noisy.
-constexpr size_t kMinLiveConversionCompositionLength = 2;
+// The value is user-configurable via Config::live_conversion_min_key_length.
+constexpr uint32_t kDefaultLiveConversionMinKeyLength = 2;
+constexpr uint32_t kMinLiveConversionMinKeyLength = 1;
+constexpr uint32_t kMaxLiveConversionMinKeyLength = 20;
 
 constexpr uint32_t kDefaultZenzLiveCorrectionDelayMsec = 1000;
 constexpr uint32_t kDefaultZenzLiveCorrectionTimeoutMsec = 180;
 constexpr uint32_t kDefaultZenzLiveCorrectionPollMsec = 24;
 constexpr uint32_t kDefaultZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kDefaultZenzLiveCorrectionLeftContextLength = 24;
+constexpr uint32_t kDefaultZenzLiveCorrectionRightContextLength = 10;
+constexpr uint32_t kMaxZenzLiveCorrectionRightContextLength = 128;
 constexpr uint32_t kMaxZenzLiveCorrectionDelayMsec = 5000;
 constexpr uint32_t kMaxZenzLiveCorrectionTimeoutMsec = 1000;
 
@@ -207,6 +213,7 @@ bool IsLiveConversionTrailingDecorativeSymbol(char32_t c) {
     case 0x301C:  // 〜
     case 0x30FC:  // ー
     case 0x2015:  // ―
+    case 0x2025:  // ‥
     case 0x2026:  // …
     case 0x0021:  // !
     case 0xFF01:  // ！
@@ -224,9 +231,1128 @@ bool IsLiveConversionTrailingDecorativeSymbol(char32_t c) {
   }
 }
 
-bool ShouldSkipLiveConversionForCompositionKey(absl::string_view key) {
-  if (Util::CharsLen(key) < kMinLiveConversionCompositionLength) {
+enum class LiveConversionLeftBoundary {
+  kKnownBoundary,
+  kKnownNonBoundary,
+  kUnknown,
+};
+
+struct LiveConversionAtom {
+  absl::string_view text;
+  bool is_entire_composition = false;
+  LiveConversionLeftBoundary left_boundary =
+      LiveConversionLeftBoundary::kUnknown;
+};
+
+bool ContainsStringView(std::initializer_list<absl::string_view> values,
+                        absl::string_view target) {
+  for (absl::string_view value : values) {
+    if (value == target) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsLiveConversionAtomBoundaryChar(char32_t c) {
+  switch (c) {
+    case 0x0009:  // tab
+    case 0x000A:  // LF
+    case 0x000D:  // CR
+    case 0x0020:  // space
+    case 0x3000:  // ideographic space
+    case 0x002C:  // ,
+    case 0xFF0C:  // ，
+    case 0x3001:  // 、
+    case 0x002E:  // .
+    case 0xFF0E:  // ．
+    case 0x3002:  // 。
+    case 0x0021:  // !
+    case 0xFF01:  // ！
+    case 0x003F:  // ?
+    case 0xFF1F:  // ？
+    case 0x2025:  // ‥
+    case 0x2026:  // …
+    case 0x003A:  // :
+    case 0xFF1A:  // ：
+    case 0x003B:  // ;
+    case 0xFF1B:  // ；
+    case 0x0028:  // (
+    case 0xFF08:  // （
+    case 0x005B:  // [
+    case 0x007B:  // {
+    case 0x300C:  // 「
+    case 0x300D:  // 」
+    case 0x300E:  // 『
+    case 0x300F:  // 』
+    case 0x3010:  // 【
+    case 0x3011:  // 】
+    case 0x3014:  // 〔
+    case 0x3015:  // 〕
+    case 0x201C:  // “
+    case 0x201D:  // ”
+    case 0x2018:  // ‘
+    case 0x2019:  // ’
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsLiveConversionTrailingSentenceTailSymbol(char32_t c) {
+  switch (c) {
+    case 0x0009:  // tab
+    case 0x000A:  // LF
+    case 0x000D:  // CR
+    case 0x0020:  // space
+    case 0x3000:  // ideographic space
+    case 0x002C:  // ,
+    case 0xFF0C:  // ，
+    case 0x3001:  // 、
+    case 0x002E:  // .
+    case 0xFF0E:  // ．
+    case 0x3002:  // 。
+    case 0x0021:  // !
+    case 0xFF01:  // ！
+    case 0x003F:  // ?
+    case 0xFF1F:  // ？
+    case 0x2025:  // ‥
+    case 0x2026:  // …
+    case 0x003A:  // :
+    case 0xFF1A:  // ：
+    case 0x003B:  // ;
+    case 0xFF1B:  // ；
+    case 0x0029:  // )
+    case 0xFF09:  // ）
+    case 0x005D:  // ]
+    case 0x007D:  // }
+    case 0x300D:  // 」
+    case 0x300F:  // 』
+    case 0x3011:  // 】
+    case 0x3015:  // 〕
+    case 0x201D:  // ”
+    case 0x2019:  // ’
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsLiveConversionProlongationMark(char32_t c) {
+  switch (c) {
+    case 0x007E:  // ~
+    case 0xFF5E:  // ～
+    case 0x301C:  // 〜
+    case 0x30FC:  // ー
+    case 0x2015:  // ―
+      return true;
+    default:
+      return false;
+  }
+}
+
+absl::string_view StripTrailingLiveConversionSentenceTail(
+    absl::string_view key) {
+  absl::string_view core = key;
+
+  while (!core.empty()) {
+    absl::string_view rest;
+    char32_t last = 0;
+    if (!Util::SplitLastChar32(core, &rest, &last)) {
+      break;
+    }
+    if (!IsLiveConversionTrailingSentenceTailSymbol(last)) {
+      break;
+    }
+    core = rest;
+  }
+
+  return core;
+}
+
+absl::string_view StripTrailingLiveConversionProlongationMarks(
+    absl::string_view key) {
+  absl::string_view core = key;
+
+  while (!core.empty()) {
+    absl::string_view rest;
+    char32_t last = 0;
+    if (!Util::SplitLastChar32(core, &rest, &last)) {
+      break;
+    }
+    if (!IsLiveConversionProlongationMark(last)) {
+      break;
+    }
+    core = rest;
+  }
+
+  return core;
+}
+
+LiveConversionLeftBoundary GetLiveConversionCommittedLeftBoundary(
+    const ImeContext& context) {
+  if (!context.client_context().has_preceding_text()) {
+    return LiveConversionLeftBoundary::kUnknown;
+  }
+
+  const std::string& preceding_text =
+      context.client_context().preceding_text();
+  if (preceding_text.empty()) {
+    return LiveConversionLeftBoundary::kKnownBoundary;
+  }
+
+  absl::string_view rest;
+  char32_t last = 0;
+  if (!Util::SplitLastChar32(preceding_text, &rest, &last)) {
+    return LiveConversionLeftBoundary::kUnknown;
+  }
+
+  return IsLiveConversionAtomBoundaryChar(last)
+             ? LiveConversionLeftBoundary::kKnownBoundary
+             : LiveConversionLeftBoundary::kKnownNonBoundary;
+}
+
+LiveConversionAtom ExtractTrailingLiveConversionAtom(
+    absl::string_view core,
+    LiveConversionLeftBoundary committed_left_boundary) {
+  LiveConversionAtom atom;
+  atom.text = core;
+  atom.is_entire_composition = true;
+  atom.left_boundary = committed_left_boundary;
+
+  absl::string_view cursor = core;
+  while (!cursor.empty()) {
+    absl::string_view rest;
+    char32_t last = 0;
+    if (!Util::SplitLastChar32(cursor, &rest, &last)) {
+      break;
+    }
+
+    if (IsLiveConversionAtomBoundaryChar(last)) {
+      atom.text =
+          absl::string_view(core.data() + cursor.size(),
+                            core.size() - cursor.size());
+      atom.is_entire_composition = false;
+      atom.left_boundary = LiveConversionLeftBoundary::kKnownBoundary;
+      return atom;
+    }
+
+    cursor = rest;
+  }
+
+  return atom;
+}
+
+bool IsStrongExpressiveKanaAtom(absl::string_view atom) {
+  return ContainsStringView(
+      {
+          "あっ",
+          "えっ",
+          "おっ",
+          "はっ",
+          "へっ",
+          "ちっ",
+          "ちぇっ",
+          "ほっ",
+          "いてっ",
+          "ぎゃっ",
+          "ひゃっ",
+      },
+      atom);
+}
+
+bool IsBoundarySensitiveExpressiveKanaCoreAtom(absl::string_view atom) {
+  return ContainsStringView(
+      {
+          "ふん",
+          "くそ",
+          "よう",
+          "ふむ",
+          "はて",
+          "ふう",
+          "ほう",
+          "ほい",
+          "ほいほい",
+          "へい",
+          "てへ",
+          "くちゃ",
+          "くちょ",
+          "ぐちょ",
+          "ぐちょぐちょ",
+          "どろどろ",
+          "つるつる",
+          "はいはい",
+          "うん",
+          "うんうん",
+          "そうそう",
+          "いやいや",
+          "まあまあ",
+      },
+      atom);
+}
+
+constexpr size_t kMaxRepeatedEInterjectionChars = 30;
+
+bool IsRepeatedEInterjectionAtom(absl::string_view atom) {
+  size_t count = 0;
+
+  for (absl::string_view c : Utf8AsChars(atom)) {
+    if (c != "え" && c != "ぇ") {
+      return false;
+    }
+    ++count;
+    if (count > kMaxRepeatedEInterjectionChars) {
+      return false;
+    }
+  }
+
+  return count >= 2;
+}
+
+bool IsHoFamilyExpressiveProsodyAtom(absl::string_view atom) {
+  return ContainsStringView(
+      {
+          "ほー",
+          "ほ〜",
+          "ほ～",
+          "ほお",
+          "ほほう",
+          "ほほお",
+          "ほほー",
+          "ほほ〜",
+          "ほほ～",
+          "ほほーん",
+          "ほほ〜ん",
+          "ほほ～ん",
+          "ほっほ",
+          "ほっほう",
+          "ほっほお",
+          "ほっほー",
+          "ほっほ〜",
+          "ほっほ～",
+          "ほっほーん",
+          "ほっほ〜ん",
+          "ほっほ～ん",
+      },
+      atom);
+}
+
+constexpr size_t kMaxExpressiveSokuonCount = 10;
+constexpr size_t kMaxEvaluativeSlangPrefixChars = 4;
+
+bool StripRepeatedExpressiveSokuonTail(absl::string_view atom,
+                                       absl::string_view* core) {
+  size_t sokuon_count = 0;
+  absl::string_view cursor = atom;
+
+  while (!cursor.empty()) {
+    absl::string_view rest;
+    char32_t last = 0;
+    if (!Util::SplitLastChar32(cursor, &rest, &last)) {
+      return false;
+    }
+
+    if (last != U'っ') {
+      break;
+    }
+
+    ++sokuon_count;
+    if (sokuon_count > kMaxExpressiveSokuonCount) {
+      return false;
+    }
+
+    cursor = rest;
+  }
+
+  if (sokuon_count == 0 || cursor.empty()) {
+    return false;
+  }
+
+  *core = cursor;
+  return true;
+}
+
+bool IsBoundarySensitiveExpressiveKanaAtom(absl::string_view atom) {
+  if (IsBoundarySensitiveExpressiveKanaCoreAtom(atom)) {
     return true;
+  }
+
+  absl::string_view core;
+  if (!StripRepeatedExpressiveSokuonTail(atom, &core)) {
+    return false;
+  }
+
+  return IsBoundarySensitiveExpressiveKanaCoreAtom(core);
+}
+
+bool ConsumePrefixForLiveConversionMatcher(absl::string_view* text,
+                                           absl::string_view prefix) {
+  if (text->size() < prefix.size() ||
+      text->substr(0, prefix.size()) != prefix) {
+    return false;
+  }
+  *text = text->substr(prefix.size());
+  return true;
+}
+
+bool ConsumeAnyPrefixForLiveConversionMatcher(
+    absl::string_view* text,
+    std::initializer_list<absl::string_view> prefixes) {
+  for (absl::string_view prefix : prefixes) {
+    absl::string_view rest = *text;
+    if (ConsumePrefixForLiveConversionMatcher(&rest, prefix)) {
+      *text = rest;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsOnlyLiveConversionProlongationMarks(absl::string_view text) {
+  if (text.empty()) {
+    return false;
+  }
+
+  while (!text.empty()) {
+    absl::string_view rest;
+    char32_t last = 0;
+    if (!Util::SplitLastChar32(text, &rest, &last)) {
+      return false;
+    }
+    if (!IsLiveConversionProlongationMark(last)) {
+      return false;
+    }
+    text = rest;
+  }
+
+  return true;
+}
+
+bool IsLiveConversionProlongationMarksWithOptionalN(
+    absl::string_view text) {
+  if (text == "ん") {
+    return true;
+  }
+
+  absl::string_view rest;
+  char32_t last = 0;
+  if (!Util::SplitLastChar32(text, &rest, &last)) {
+    return false;
+  }
+
+  return last == U'ん' && IsOnlyLiveConversionProlongationMarks(rest);
+}
+
+bool IsLiveConversionProlongationMarksWithOptionalI(
+    absl::string_view text) {
+  if (text == "い") {
+    return true;
+  }
+
+  absl::string_view rest;
+  char32_t last = 0;
+  if (!Util::SplitLastChar32(text, &rest, &last)) {
+    return false;
+  }
+
+  return last == U'い' && IsOnlyLiveConversionProlongationMarks(rest);
+}
+
+bool ConsumeRepeatedExpressiveSokuon(absl::string_view* text) {
+  size_t sokuon_count = 0;
+
+  while (ConsumePrefixForLiveConversionMatcher(text, "っ")) {
+    ++sokuon_count;
+    if (sokuon_count > kMaxExpressiveSokuonCount) {
+      return false;
+    }
+  }
+
+  return sokuon_count > 0;
+}
+
+bool MatchesSokuonEndingMimeticAtom(absl::string_view atom,
+                                    absl::string_view stem) {
+  absl::string_view rest = atom;
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, stem)) {
+    return false;
+  }
+
+  if (!ConsumeRepeatedExpressiveSokuon(&rest)) {
+    return false;
+  }
+
+  if (rest.empty()) {
+    return true;
+  }
+
+  return IsOnlyLiveConversionProlongationMarks(rest);
+}
+
+bool IsSokuonEndingMimeticAtom(absl::string_view atom) {
+  return MatchesSokuonEndingMimeticAtom(atom, "しゃ") ||
+         MatchesSokuonEndingMimeticAtom(atom, "どろ") ||
+         MatchesSokuonEndingMimeticAtom(atom, "とろ") ||
+         MatchesSokuonEndingMimeticAtom(atom, "さわ") ||
+         MatchesSokuonEndingMimeticAtom(atom, "つる");
+}
+
+bool MatchesRepeatedSokuonPrefix(absl::string_view atom,
+                                 absl::string_view head) {
+  absl::string_view rest = atom;
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, head)) {
+    return false;
+  }
+
+  if (!ConsumeRepeatedExpressiveSokuon(&rest)) {
+    return false;
+  }
+
+  return rest.empty();
+}
+
+constexpr size_t kMaxCasualGreetingProlongedTailChars = 30;
+
+bool IsLiveConversionProlongationMarkText(absl::string_view text) {
+  absl::string_view rest;
+  char32_t c = 0;
+  return Util::SplitLastChar32(text, &rest, &c) &&
+         rest.empty() &&
+         IsLiveConversionProlongationMark(c);
+}
+
+bool IsCasualGreetingProlongedTail(absl::string_view text) {
+  size_t count = 0;
+
+  for (absl::string_view c : Utf8AsChars(text)) {
+    if (c != "い" && c != "ぃ" &&
+        !IsLiveConversionProlongationMarkText(c)) {
+      return false;
+    }
+    ++count;
+    if (count > kMaxCasualGreetingProlongedTailChars) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool IsPendingRomanSForCasualSsuGreeting(absl::string_view text) {
+  return text == "s" || text == "ss";
+}
+
+bool IsCasualGreetingProlongedTailWithPendingRomanS(
+    absl::string_view text) {
+  if (text.empty()) {
+    return false;
+  }
+
+  if (IsPendingRomanSForCasualSsuGreeting(text)) {
+    return true;
+  }
+
+  if (text.ends_with("ss")) {
+    return IsCasualGreetingProlongedTail(
+        text.substr(0, text.size() - 2));
+  }
+
+  if (text.ends_with("s")) {
+    return IsCasualGreetingProlongedTail(
+        text.substr(0, text.size() - 1));
+  }
+
+  return IsCasualGreetingProlongedTail(text);
+}
+
+bool MatchesCasualSsuGreetingAtom(absl::string_view atom,
+                                  absl::string_view head) {
+  absl::string_view rest = atom;
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, head)) {
+    return false;
+  }
+
+  const size_t sokuon_pos = rest.find("っ");
+  if (sokuon_pos == absl::string_view::npos) {
+    return false;
+  }
+
+  if (!IsCasualGreetingProlongedTail(rest.substr(0, sokuon_pos))) {
+    return false;
+  }
+
+  rest = rest.substr(sokuon_pos);
+
+  if (!ConsumeRepeatedExpressiveSokuon(&rest)) {
+    return false;
+  }
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, "す")) {
+    return false;
+  }
+
+  return rest.empty() || IsOnlyLiveConversionProlongationMarks(rest);
+}
+
+bool IsCasualSsuGreetingAtom(absl::string_view atom) {
+  return MatchesCasualSsuGreetingAtom(atom, "ち") ||
+         MatchesCasualSsuGreetingAtom(atom, "ちょ") ||
+         MatchesCasualSsuGreetingAtom(atom, "ちょり");
+}
+
+bool MatchesCasualSsuGreetingPrefixAtom(absl::string_view atom,
+                                        absl::string_view head,
+                                        bool allow_bare_head) {
+  absl::string_view rest = atom;
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, head)) {
+    return false;
+  }
+
+  if (allow_bare_head && rest.empty()) {
+    return true;
+  }
+
+  const size_t sokuon_pos = rest.find("っ");
+  if (sokuon_pos == absl::string_view::npos) {
+    return !rest.empty() &&
+           IsCasualGreetingProlongedTailWithPendingRomanS(rest);
+  }
+
+  if (!IsCasualGreetingProlongedTail(rest.substr(0, sokuon_pos))) {
+    return false;
+  }
+
+  rest = rest.substr(sokuon_pos);
+
+  if (!ConsumeRepeatedExpressiveSokuon(&rest)) {
+    return false;
+  }
+
+  return rest.empty() || IsPendingRomanSForCasualSsuGreeting(rest);
+}
+
+bool IsCasualSsuGreetingPrefixAtom(absl::string_view atom) {
+  return MatchesCasualSsuGreetingPrefixAtom(
+             atom, "ち", /*allow_bare_head=*/false) ||
+         MatchesCasualSsuGreetingPrefixAtom(
+             atom, "ちょ", /*allow_bare_head=*/true) ||
+         atom == "ちょr" ||
+         atom == "ちょri" ||
+         MatchesCasualSsuGreetingPrefixAtom(
+             atom, "ちょり", /*allow_bare_head=*/true);
+}
+
+enum class EvaluativeSlangTailType {
+  kNone,
+  kOptionalI,
+  kOptionalEe,
+  kRequiredIi,
+};
+
+struct RepeatedSokuonStemPattern {
+  absl::string_view head;
+  absl::string_view body;
+  EvaluativeSlangTailType tail_type;
+};
+
+constexpr size_t kMaxEvaluativeSlangVowelTailChars = 30;
+
+bool IsRepeatedKanaVowelTail(absl::string_view text,
+                             absl::string_view large,
+                             absl::string_view small_kana) {
+  size_t count = 0;
+
+  for (absl::string_view c : Utf8AsChars(text)) {
+    if (c != large && c != small_kana) {
+      return false;
+    }
+    ++count;
+    if (count > kMaxEvaluativeSlangVowelTailChars) {
+      return false;
+    }
+  }
+
+  return count > 0;
+}
+
+bool MatchesEvaluativeSlangTail(absl::string_view rest,
+                                EvaluativeSlangTailType tail_type) {
+  switch (tail_type) {
+    case EvaluativeSlangTailType::kNone:
+      return rest.empty();
+
+    case EvaluativeSlangTailType::kOptionalI:
+      return rest.empty() || rest == "い";
+
+    case EvaluativeSlangTailType::kOptionalEe:
+      return rest.empty() || rest == "ー" ||
+             IsRepeatedKanaVowelTail(rest, "え", "ぇ");
+
+    case EvaluativeSlangTailType::kRequiredIi:
+      return rest == "ー" || IsRepeatedKanaVowelTail(rest, "い", "ぃ");
+  }
+
+  return false;
+}
+
+bool MatchesRepeatedSokuonStemPattern(
+    absl::string_view atom,
+    const RepeatedSokuonStemPattern& pattern) {
+  absl::string_view rest = atom;
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, pattern.head)) {
+    return false;
+  }
+
+  if (!ConsumeRepeatedExpressiveSokuon(&rest)) {
+    return false;
+  }
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, pattern.body)) {
+    return false;
+  }
+
+  return MatchesEvaluativeSlangTail(rest, pattern.tail_type);
+}
+
+const RepeatedSokuonStemPattern kEvaluativeSlangPatterns[] = {
+    // やばい / やべぇ
+    {"や", "ば", EvaluativeSlangTailType::kOptionalI},
+    {"や", "べ", EvaluativeSlangTailType::kOptionalEe},
+
+    // すごい / すげぇ / 少ない口語形 / 酸っぱい口語形
+    {"す", "ご", EvaluativeSlangTailType::kOptionalI},
+    {"す", "げ", EvaluativeSlangTailType::kOptionalEe},
+    {"す", "くな", EvaluativeSlangTailType::kOptionalI},
+    {"す", "くね", EvaluativeSlangTailType::kOptionalEe},
+    {"す", "ぱ", EvaluativeSlangTailType::kNone},
+    {"す", "ぺ", EvaluativeSlangTailType::kOptionalEe},
+
+    // 怖い / 強い / 辛い
+    {"こ", "わ", EvaluativeSlangTailType::kOptionalI},
+    {"つ", "よ", EvaluativeSlangTailType::kOptionalI},
+    {"つ", "ら", EvaluativeSlangTailType::kOptionalI},
+    {"つ", "れ", EvaluativeSlangTailType::kOptionalEe},
+
+    // でかい / 長い / 高い / 高ぇ
+    {"で", "か", EvaluativeSlangTailType::kOptionalI},
+    {"な", "が", EvaluativeSlangTailType::kOptionalI},
+    {"た", "か", EvaluativeSlangTailType::kOptionalI},
+    {"た", "け", EvaluativeSlangTailType::kOptionalEe},
+
+    // 小さい / 小っちゃい / 小せぇ
+    {"ち", "さ", EvaluativeSlangTailType::kOptionalI},
+    {"ち", "ちゃ", EvaluativeSlangTailType::kOptionalI},
+    {"ち", "せ", EvaluativeSlangTailType::kOptionalEe},
+
+    // 低い / 広い
+    {"ひ", "く", EvaluativeSlangTailType::kOptionalI},
+    {"ひ", "ろ", EvaluativeSlangTailType::kOptionalI},
+
+    // 寒い / 寒ぃ
+    {"さ", "む", EvaluativeSlangTailType::kOptionalI},
+    {"さ", "み", EvaluativeSlangTailType::kRequiredIi},
+
+    // 暑い / 熱い / あっちぃ
+    {"あ", "つ", EvaluativeSlangTailType::kOptionalI},
+    {"あ", "ち", EvaluativeSlangTailType::kRequiredIi},
+
+    // うまい / うめぇ / うざい / うぜぇ / 薄い
+    {"う", "ま", EvaluativeSlangTailType::kOptionalI},
+    {"う", "め", EvaluativeSlangTailType::kOptionalEe},
+    {"う", "ざ", EvaluativeSlangTailType::kOptionalI},
+    {"う", "ぜ", EvaluativeSlangTailType::kOptionalEe},
+    {"う", "す", EvaluativeSlangTailType::kOptionalI},
+
+    // 軽い
+    {"か", "る", EvaluativeSlangTailType::kOptionalI},
+
+    // きつい / きちぃ / きもい / きれい
+    {"き", "つ", EvaluativeSlangTailType::kOptionalI},
+    {"き", "ち", EvaluativeSlangTailType::kRequiredIi},
+    {"き", "も", EvaluativeSlangTailType::kOptionalI},
+    {"き", "れい", EvaluativeSlangTailType::kNone},
+
+    // だるい / だりぃ / ださい / だせぇ
+    {"だ", "る", EvaluativeSlangTailType::kOptionalI},
+    {"だ", "り", EvaluativeSlangTailType::kRequiredIi},
+    {"だ", "さ", EvaluativeSlangTailType::kOptionalI},
+    {"だ", "せ", EvaluativeSlangTailType::kOptionalEe},
+
+    // えぐい
+    {"え", "ぐ", EvaluativeSlangTailType::kOptionalI},
+
+    // 臭い / くせぇ / 黒い
+    {"く", "さ", EvaluativeSlangTailType::kOptionalI},
+    {"く", "せ", EvaluativeSlangTailType::kOptionalEe},
+    {"く", "ろ", EvaluativeSlangTailType::kOptionalI},
+
+    // まぶしい
+    {"ま", "ぶし", EvaluativeSlangTailType::kOptionalI},
+
+    // 重い / 遅い / 早い
+    {"お", "も", EvaluativeSlangTailType::kOptionalI},
+    {"お", "そ", EvaluativeSlangTailType::kOptionalI},
+    {"は", "や", EvaluativeSlangTailType::kOptionalI},
+
+    // めっちゃ / もっと
+    {"め", "ちゃ", EvaluativeSlangTailType::kNone},
+    {"も", "と", EvaluativeSlangTailType::kNone},
+
+    // 眠い / 細い / 狭い / 短い / 白い
+    {"ね", "む", EvaluativeSlangTailType::kOptionalI},
+    {"ほ", "そ", EvaluativeSlangTailType::kOptionalI},
+    {"せ", "ま", EvaluativeSlangTailType::kOptionalI},
+    {"み", "じか", EvaluativeSlangTailType::kOptionalI},
+    {"し", "ろ", EvaluativeSlangTailType::kOptionalI},
+};
+
+bool IsEvaluativeSlangAdjectiveAtom(absl::string_view atom) {
+  for (const RepeatedSokuonStemPattern& pattern :
+       kEvaluativeSlangPatterns) {
+    if (MatchesRepeatedSokuonStemPattern(atom, pattern)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool IsEvaluativeSlangAdjectivePrefixAtom(absl::string_view atom) {
+  for (const RepeatedSokuonStemPattern& pattern :
+       kEvaluativeSlangPatterns) {
+    if (MatchesRepeatedSokuonPrefix(atom, pattern.head)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool MatchesUsoOrKusoFamilyExpressiveProsodyAtom(
+    absl::string_view atom,
+    absl::string_view head,
+    bool allow_n_tail) {
+  absl::string_view rest = atom;
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, head)) {
+    return false;
+  }
+
+  if (!ConsumeRepeatedExpressiveSokuon(&rest)) {
+    return false;
+  }
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, "そ")) {
+    return false;
+  }
+
+  if (rest.empty()) {
+    return true;
+  }
+
+  if (IsOnlyLiveConversionProlongationMarks(rest)) {
+    return true;
+  }
+
+  if (allow_n_tail &&
+      IsLiveConversionProlongationMarksWithOptionalN(rest)) {
+    return true;
+  }
+
+  return false;
+}
+
+bool IsUsoOrKusoFamilyExpressiveProsodyAtom(absl::string_view atom) {
+  // Match 「うっそ」「うっっそ」「うっそー」「うっそん」 etc.
+  // Do not match bare 「うそ」 or 「うっそう」 because 「嘘」 and 「鬱蒼」
+  // are useful live-conversion targets.
+  if (MatchesUsoOrKusoFamilyExpressiveProsodyAtom(
+          atom, "う", /*allow_n_tail=*/true)) {
+    return true;
+  }
+
+  // Match 「くっそ」「くっっそ」「くっそー」 etc.  Keep bare 「くそ」
+  // in the boundary-sensitive lexical list, and do not match 「くそう」.
+  return MatchesUsoOrKusoFamilyExpressiveProsodyAtom(
+      atom, "く", /*allow_n_tail=*/false);
+}
+
+bool IsUsoOrKusoFamilyExpressiveProsodyPrefixAtom(
+    absl::string_view atom) {
+  return MatchesRepeatedSokuonPrefix(atom, "う") ||
+         MatchesRepeatedSokuonPrefix(atom, "く");
+}
+
+bool MatchesUhyoFamilyExpressiveProsodyAtom(absl::string_view atom) {
+  absl::string_view rest = atom;
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, "う")) {
+    return false;
+  }
+
+  // Accept both 「うひょ」/「うひゃ」 and emphasized forms such as
+  // 「うっひょ」, 「うっひゃ」, 「うっっひょ」 and 「うっっひゃ」.
+  if (!ConsumeAnyPrefixForLiveConversionMatcher(&rest, {"ひょ", "ひゃ"})) {
+    if (!ConsumeRepeatedExpressiveSokuon(&rest)) {
+      return false;
+    }
+    if (!ConsumeAnyPrefixForLiveConversionMatcher(&rest, {"ひょ", "ひゃ"})) {
+      return false;
+    }
+  }
+
+  if (rest.empty()) {
+    return true;
+  }
+
+  if (IsOnlyLiveConversionProlongationMarks(rest)) {
+    return true;
+  }
+
+  if (IsLiveConversionProlongationMarksWithOptionalN(rest)) {
+    return true;
+  }
+
+  if (IsLiveConversionProlongationMarksWithOptionalI(rest)) {
+    return true;
+  }
+
+  return false;
+}
+
+bool IsUhyoFamilyExpressiveProsodyAtom(absl::string_view atom) {
+  return MatchesUhyoFamilyExpressiveProsodyAtom(atom);
+}
+
+bool IsUhyoFamilyExpressiveProsodyPrefixAtom(absl::string_view atom) {
+  absl::string_view rest = atom;
+
+  if (!ConsumePrefixForLiveConversionMatcher(&rest, "う")) {
+    return false;
+  }
+
+  if (rest == "ひ") {
+    return true;
+  }
+
+  if (!ConsumeRepeatedExpressiveSokuon(&rest)) {
+    return false;
+  }
+
+  return rest == "ひ";
+}
+
+bool FindEvaluativeSlangAdjectiveOrPrefixSuffix(
+    absl::string_view text,
+    absl::string_view* suffix) {
+  size_t offset = 0;
+  for (absl::string_view c : Utf8AsChars(text)) {
+    const absl::string_view candidate = text.substr(offset);
+    if (IsEvaluativeSlangAdjectiveAtom(candidate) ||
+        IsEvaluativeSlangAdjectivePrefixAtom(candidate)) {
+      *suffix = candidate;
+      return true;
+    }
+    offset += c.size();
+  }
+
+  return false;
+}
+
+bool HasShortPrefixBeforeSuffix(absl::string_view text,
+                                absl::string_view suffix,
+                                size_t max_prefix_chars) {
+  if (suffix.data() < text.data() ||
+      suffix.data() + suffix.size() > text.data() + text.size()) {
+    return false;
+  }
+
+  const size_t prefix_bytes = suffix.data() - text.data();
+  return Util::CharsLen(text.substr(0, prefix_bytes)) <= max_prefix_chars;
+}
+
+bool ShouldHoldEvaluativeSlangAdjectiveForLiveConversion(
+    const LiveConversionAtom& atom,
+    absl::string_view lexical_core) {
+  if (IsEvaluativeSlangAdjectiveAtom(atom.text) ||
+      IsEvaluativeSlangAdjectivePrefixAtom(atom.text)) {
+    // Evaluative slang such as 「やっば」「なっがい」 is often typed after
+    // already-committed context, e.g. 「これ」 + 「やっば」.  Keep the atom
+    // as kana when the whole current composition is the slang atom, or when
+    // it appears after a clear in-composition boundary.
+    return atom.is_entire_composition ||
+           atom.left_boundary == LiveConversionLeftBoundary::kKnownBoundary;
+  }
+
+  absl::string_view suffix;
+  if (!FindEvaluativeSlangAdjectiveOrPrefixSuffix(lexical_core, &suffix)) {
+    return false;
+  }
+
+  // Also protect short colloquial phrases such as 「これやっば」 and
+  // 「まじでなっがい」, including their typing prefixes such as 「これやっ」.
+  // Avoid suppressing live conversion for long sentences whose tail merely
+  // happens to be evaluative slang.
+  return HasShortPrefixBeforeSuffix(
+      lexical_core, suffix, kMaxEvaluativeSlangPrefixChars);
+}
+
+bool CanHoldLowAmbiguityExpressiveAtom(const LiveConversionAtom& atom) {
+  return atom.is_entire_composition ||
+         atom.left_boundary == LiveConversionLeftBoundary::kKnownBoundary;
+}
+
+bool CanHoldBoundarySensitiveExpressiveAtom(const LiveConversionAtom& atom) {
+  if (atom.left_boundary == LiveConversionLeftBoundary::kKnownNonBoundary) {
+    return false;
+  }
+
+  return atom.is_entire_composition ||
+         atom.left_boundary == LiveConversionLeftBoundary::kKnownBoundary;
+}
+
+bool ShouldHoldExpressiveKanaAtomForLiveConversion(
+    const LiveConversionAtom& atom,
+    absl::string_view expressive_core) {
+  if (atom.text.empty()) {
+    return false;
+  }
+
+  if (IsHoFamilyExpressiveProsodyAtom(atom.text) ||
+      IsUhyoFamilyExpressiveProsodyAtom(atom.text) ||
+      IsUhyoFamilyExpressiveProsodyPrefixAtom(atom.text) ||
+      IsUsoOrKusoFamilyExpressiveProsodyAtom(atom.text) ||
+      IsUsoOrKusoFamilyExpressiveProsodyPrefixAtom(atom.text) ||
+      IsCasualSsuGreetingAtom(atom.text) ||
+      IsCasualSsuGreetingPrefixAtom(atom.text)) {
+    return CanHoldLowAmbiguityExpressiveAtom(atom);
+  }
+
+  const absl::string_view lexical_atom =
+      StripTrailingLiveConversionProlongationMarks(atom.text);
+  const absl::string_view lexical_core =
+      StripTrailingLiveConversionProlongationMarks(expressive_core);
+
+  if (!lexical_atom.empty() &&
+      Util::IsScriptType(lexical_atom, Util::HIRAGANA)) {
+    if (IsRepeatedEInterjectionAtom(lexical_atom)) {
+      return CanHoldLowAmbiguityExpressiveAtom(atom);
+    }
+
+    if (IsStrongExpressiveKanaAtom(lexical_atom)) {
+      return CanHoldLowAmbiguityExpressiveAtom(atom);
+    }
+
+    if (IsSokuonEndingMimeticAtom(lexical_atom)) {
+      return CanHoldBoundarySensitiveExpressiveAtom(atom);
+    }
+
+    if (IsBoundarySensitiveExpressiveKanaAtom(lexical_atom)) {
+      return CanHoldBoundarySensitiveExpressiveAtom(atom);
+    }
+  }
+
+  if (!lexical_core.empty() &&
+      Util::IsScriptType(lexical_core, Util::HIRAGANA) &&
+      ShouldHoldEvaluativeSlangAdjectiveForLiveConversion(atom,
+                                                          lexical_core)) {
+    return true;
+  }
+
+  return false;
+}
+
+bool FindEvaluativeSlangAdjectivePrefixSuffix(
+    absl::string_view text,
+    absl::string_view* suffix) {
+  size_t offset = 0;
+  for (absl::string_view c : Utf8AsChars(text)) {
+    const absl::string_view candidate = text.substr(offset);
+    if (IsEvaluativeSlangAdjectivePrefixAtom(candidate)) {
+      *suffix = candidate;
+      return true;
+    }
+    offset += c.size();
+  }
+
+  return false;
+}
+
+bool ShouldHoldEvaluativeSlangAdjectivePrefixForLiveConversion(
+    const LiveConversionAtom& atom,
+    absl::string_view lexical_core) {
+  if (IsEvaluativeSlangAdjectivePrefixAtom(atom.text)) {
+    return atom.is_entire_composition ||
+           atom.left_boundary == LiveConversionLeftBoundary::kKnownBoundary;
+  }
+
+  absl::string_view suffix;
+  if (!FindEvaluativeSlangAdjectivePrefixSuffix(lexical_core, &suffix)) {
+    return false;
+  }
+
+  // Protect short colloquial phrase prefixes such as 「これやっ」 or
+  // 「まじでなっ」, but let completed forms like 「これやっば」 reach the
+  // converter so user history and user dictionary preferences can apply.
+  return HasShortPrefixBeforeSuffix(
+      lexical_core, suffix, kMaxEvaluativeSlangPrefixChars);
+}
+
+bool ShouldHoldExpressiveKanaTypingPrefixForLiveConversion(
+    const LiveConversionAtom& atom,
+    absl::string_view expressive_core) {
+  if (atom.text.empty()) {
+    return false;
+  }
+
+  if (IsUhyoFamilyExpressiveProsodyPrefixAtom(atom.text) ||
+      IsUsoOrKusoFamilyExpressiveProsodyPrefixAtom(atom.text) ||
+      IsCasualSsuGreetingPrefixAtom(atom.text)) {
+    return CanHoldLowAmbiguityExpressiveAtom(atom);
+  }
+
+  const absl::string_view lexical_atom =
+      StripTrailingLiveConversionProlongationMarks(atom.text);
+  const absl::string_view lexical_core =
+      StripTrailingLiveConversionProlongationMarks(expressive_core);
+
+  if (!lexical_atom.empty() &&
+      Util::IsScriptType(lexical_atom, Util::HIRAGANA) &&
+      ShouldHoldEvaluativeSlangAdjectivePrefixForLiveConversion(
+          atom, lexical_core)) {
+    return true;
+  }
+
+  return false;
+}
+
+bool ShouldSkipLiveConversionForCompositionKey(
+    absl::string_view key,
+    LiveConversionLeftBoundary committed_left_boundary,
+    size_t min_key_length) {
+  if (Util::CharsLen(key) < min_key_length) {
+    return true;
+  }
+
+  // Keep only unfinished expressive typing prefixes out of live conversion.
+  // Completed expressive words should reach the converter so that normal
+  // dictionary ranking, user history, and user dictionary entries can decide
+  // between hiragana and katakana spellings.
+  const absl::string_view expressive_core =
+      StripTrailingLiveConversionSentenceTail(key);
+  if (!expressive_core.empty()) {
+    const LiveConversionAtom atom =
+        ExtractTrailingLiveConversionAtom(expressive_core,
+                                          committed_left_boundary);
+    if (ShouldHoldExpressiveKanaTypingPrefixForLiveConversion(
+            atom, expressive_core)) {
+      return true;
+    }
   }
 
   absl::string_view core = key;
@@ -256,7 +1382,7 @@ bool ShouldSkipLiveConversionForCompositionKey(absl::string_view key) {
 
   // "え~", "へー", "ん？" should stay as kana while typing.
   // But longer readings such as "きょう~" may still be live-converted.
-  if (Util::CharsLen(core) >= kMinLiveConversionCompositionLength) {
+  if (Util::CharsLen(core) >= min_key_length) {
     return false;
   }
 
@@ -269,6 +1395,16 @@ uint32_t GetLiveConversionDelayMillisec(const config::Config& config) {
   }
   return std::min(config.live_conversion_delay_msec(),
                   kMaxLiveConversionDelayMillisec);
+}
+
+size_t GetLiveConversionMinKeyLength(const config::Config& config) {
+  const uint32_t value = config.has_live_conversion_min_key_length()
+                             ? config.live_conversion_min_key_length()
+                             : kDefaultLiveConversionMinKeyLength;
+  return static_cast<size_t>(
+      std::clamp(value,
+                 kMinLiveConversionMinKeyLength,
+                 kMaxLiveConversionMinKeyLength));
 }
 
 uint32_t GetZenzLiveCorrectionDelayMsec(const config::Config& config) {
@@ -300,6 +1436,20 @@ uint32_t GetZenzLiveCorrectionLeftContextLength(
     return kDefaultZenzLiveCorrectionLeftContextLength;
   }
   return config.zenz_live_correction_left_context_length();
+}
+
+uint32_t GetZenzLiveCorrectionRightContextLength(
+    const config::Config& config) {
+  if (!config.use_zenz_live_correction_right_context()) {
+    return 0;
+  }
+
+  const uint32_t length =
+      config.has_zenz_live_correction_right_context_length()
+          ? config.zenz_live_correction_right_context_length()
+          : kDefaultZenzLiveCorrectionRightContextLength;
+  return std::min<uint32_t>(length,
+                            kMaxZenzLiveCorrectionRightContextLength);
 }
 
 bool UseZenzFeedbackLearning(const config::Config& config) {
@@ -901,6 +2051,56 @@ void AddPreeditSegment(absl::string_view key,
   segment->set_value(std::string(value));
   segment->set_value_length(Util::CharsLen(value));
 }
+void RestorePreeditSegmentKeysForSymbolStyle(
+    absl::string_view symbol_style_source,
+    commands::Preedit* preedit) {
+  if (symbol_style_source.empty() || preedit == nullptr ||
+      preedit->segment_size() == 0) {
+    return;
+  }
+
+  // Restore only display keys.  The converter-owned internal key, candidate
+  // value, and feedback key remain unchanged.  Multi-segment preedit is handled
+  // by restoring the concatenated display key and then distributing it back by
+  // the original segment key character lengths.  This is safe for wave-dash
+  // restoration because ASCII '~', FULLWIDTH TILDE '～', and WAVE DASH '〜' are
+  // all single Unicode scalar values.
+  std::string full_key;
+  std::string full_value;
+  std::vector<size_t> segment_key_char_lengths;
+  segment_key_char_lengths.reserve(preedit->segment_size());
+
+  for (int i = 0; i < preedit->segment_size(); ++i) {
+    const commands::Preedit::Segment& segment = preedit->segment(i);
+    const absl::string_view segment_key =
+        segment.has_key() && !segment.key().empty()
+            ? absl::string_view(segment.key())
+            : absl::string_view(segment.value());
+
+    full_key.append(segment_key.data(), segment_key.size());
+    full_value.append(segment.value());
+    segment_key_char_lengths.push_back(Util::CharsLen(segment_key));
+  }
+
+  const std::string restored_key =
+      ZenzOutputValidator::RestoreUserVisibleSymbolStyle(
+          symbol_style_source, full_value, full_key);
+
+  if (restored_key == full_key ||
+      Util::CharsLen(restored_key) != Util::CharsLen(full_key)) {
+    return;
+  }
+
+  size_t offset = 0;
+  for (int i = 0; i < preedit->segment_size(); ++i) {
+    const size_t segment_chars = segment_key_char_lengths[i];
+    preedit->mutable_segment(i)->set_key(
+        std::string(Util::Utf8SubString(restored_key,
+                                        offset,
+                                        segment_chars)));
+    offset += segment_chars;
+  }
+}
 
 bool IsPlainBackspaceKey(const commands::KeyEvent& key) {
   return key.has_special_key() &&
@@ -935,6 +2135,67 @@ bool IsPendingDirectCommitLearningDiscardKey(
     default:
       return false;
   }
+}
+
+bool ShouldCommitLiveConversionBeforeShiftAsciiInput(
+    const config::Config& config,
+    const composer::Composer& composer,
+    const commands::KeyEvent& key_event) {
+  if (config.shift_key_mode_switch() !=
+      config::Config::ASCII_INPUT_MODE) {
+    return false;
+  }
+
+  if (key_event.input_style() != commands::KeyEvent::FOLLOW_MODE) {
+    return false;
+  }
+
+  if (key_event.has_special_key()) {
+    return false;
+  }
+
+  if (composer.GetInputFieldType() == commands::Context::PASSWORD) {
+    return false;
+  }
+
+  const transliteration::TransliterationType input_mode =
+      composer.GetInputMode();
+  if (input_mode == transliteration::HALF_ASCII ||
+      input_mode == transliteration::FULL_ASCII) {
+    return false;
+  }
+
+  const size_t length = composer.GetLength();
+  if (length == 0 || length != composer.GetCursor()) {
+    return false;
+  }
+
+  std::string input;
+  if (!key_event.key_string().empty()) {
+    if (key_event.key_string().size() != 1) {
+      return false;
+    }
+    input = key_event.key_string();
+  } else if (key_event.has_key_code()) {
+    if (key_event.key_code() > 0x7f) {
+      return false;
+    }
+    input.push_back(static_cast<char>(key_event.key_code()));
+  } else {
+    return false;
+  }
+
+  const uint32_t modifiers = KeyEventUtil::GetModifiers(key_event);
+  if (KeyEventUtil::HasCtrl(modifiers) ||
+      KeyEventUtil::HasAlt(modifiers)) {
+    return false;
+  }
+
+  const bool caps_locked = KeyEventUtil::HasCaps(modifiers);
+  const char key = input[0];
+
+  return (!caps_locked && ('A' <= key && key <= 'Z')) ||
+         (caps_locked && ('a' <= key && key <= 'z'));
 }
 
 void ExtractPreeditKeyAndValue(const commands::Preedit& preedit,
@@ -1097,6 +2358,42 @@ ImeContext::State GetEffectiveStateForTestSendKey(const commands::KeyEvent& key,
     return ImeContext::DIRECT;
   }
   return state;
+}
+
+void MergeCommandResult(const commands::Result& step_result,
+                        commands::Result* accumulated_result) {
+  if (!accumulated_result->has_key() && !accumulated_result->has_value()) {
+    *accumulated_result = step_result;
+    return;
+  }
+
+  if (step_result.has_key()) {
+    accumulated_result->set_key(
+        absl::StrCat(accumulated_result->key(), step_result.key()));
+  }
+  if (step_result.has_value()) {
+    accumulated_result->set_value(
+        absl::StrCat(accumulated_result->value(), step_result.value()));
+  }
+}
+
+void AccumulateCommandOutput(const commands::Output& step_output,
+                             bool* consumed,
+                             bool* has_accumulated_result,
+                             commands::Result* accumulated_result,
+                             commands::Output* final_output) {
+  *consumed = *consumed || step_output.consumed();
+  *final_output = step_output;
+
+  if (step_output.has_result()) {
+    MergeCommandResult(step_output.result(), accumulated_result);
+    *has_accumulated_result = true;
+  }
+
+  final_output->set_consumed(*consumed);
+  if (*has_accumulated_result) {
+    *final_output->mutable_result() = *accumulated_result;
+  }
 }
 
 }  // namespace
@@ -1300,6 +2597,14 @@ bool Session::SendCommand(commands::Command* command) {
       result = ApplyZenzLiveCorrection(command);
       break;
 
+    case commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE:
+      // This command is a client-side callback command.  It should normally be
+      // handled by the TSF client from Output::Callback.  If it reaches the
+      // server through SendCommand unexpectedly, consume it without changing the
+      // current composition.
+      result = DoNothing(command);
+      break;
+
     case commands::SessionCommand::REQUEST_NWP: {
       ConversionPreferences conversion_preferences =
           context_->converter().conversion_preferences();
@@ -1392,6 +2697,7 @@ bool Session::TestSendKey(commands::Command* command) {
     // the inconsistency between TestSendKey and SendKey.
     switch (key_command) {
       case keymap::PrecompositionState::INSERT_SPACE:
+      case keymap::PrecompositionState::RECONVERT_SELECTION_OR_INSERT_SPACE:
         if (!IsFullWidthInsertSpace(command->input()) && IsPureSpaceKey(key)) {
           return EchoBackAndClearUndoContext(command);
         }
@@ -1516,28 +2822,28 @@ bool Session::UpdateComposition(commands::Command* command) {
 bool Session::ExecuteCommandSequence(
     const keymap::CommandSequence& command_sequence,
     commands::Command* command) {
+  return ExecuteCommandSequenceWithInitialOutput(command_sequence, nullptr,
+                                                 command);
+}
+
+bool Session::ExecuteCommandSequenceWithInitialOutput(
+    const keymap::CommandSequence& command_sequence,
+    const commands::Output* initial_output,
+    commands::Command* command) {
   bool executed = false;
   bool consumed = false;
   bool has_accumulated_result = false;
   commands::Result accumulated_result;
   commands::Output final_output;
 
-  const auto merge_result = [](const commands::Result& step_result,
-                               commands::Result* accumulated_result) {
-    if (!accumulated_result->has_key() && !accumulated_result->has_value()) {
-      *accumulated_result = step_result;
-      return;
-    }
-
-    if (step_result.has_key()) {
-      accumulated_result->set_key(
-          absl::StrCat(accumulated_result->key(), step_result.key()));
-    }
-    if (step_result.has_value()) {
-      accumulated_result->set_value(
-          absl::StrCat(accumulated_result->value(), step_result.value()));
-    }
-  };
+  if (initial_output != nullptr) {
+    AccumulateCommandOutput(*initial_output,
+                            &consumed,
+                            &has_accumulated_result,
+                            &accumulated_result,
+                            &final_output);
+    executed = true;
+  }
 
   for (const std::string& command_name : command_sequence) {
     if (command_name.empty()) {
@@ -1562,19 +2868,11 @@ bool Session::ExecuteCommandSequence(
     executed = true;
 
     const commands::Output step_output = command->output();
-    consumed = consumed || step_output.consumed();
-
-    final_output = step_output;
-
-    if (step_output.has_result()) {
-      merge_result(step_output.result(), &accumulated_result);
-      has_accumulated_result = true;
-    }
-
-    final_output.set_consumed(consumed);
-    if (has_accumulated_result) {
-      *final_output.mutable_result() = accumulated_result;
-    }
+    AccumulateCommandOutput(step_output,
+                            &consumed,
+                            &has_accumulated_result,
+                            &accumulated_result,
+                            &final_output);
   }
 
   if (!executed) {
@@ -1721,6 +3019,8 @@ bool Session::ExecutePrecompositionCommand(
       return EchoBackAndClearUndoContext(command);
     case keymap::PrecompositionState::RECONVERT:
       return RequestConvertReverse(command);
+    case keymap::PrecompositionState::RECONVERT_SELECTION_OR_INSERT_SPACE:
+      return RequestReconvertSelectionOrInsertSpace(command);
 
     case keymap::PrecompositionState::IME_ACTION:
       return ImeAction(command);
@@ -2158,13 +3458,49 @@ bool Session::SendKeyConversionState(commands::Command* command) {
         return true;
       }
 
+      const commands::Output zenz_commit_output = command->output();
+
       keymap::CommandSequence remaining_sequence(
           command_sequence.begin() + 1, command_sequence.end());
-      return ExecuteCommandSequence(remaining_sequence, command);
+      return ExecuteCommandSequenceWithInitialOutput(
+          remaining_sequence, &zenz_commit_output, command);
+    }
+
+    // While a zenz correction is visible, the first plain Space should peel off
+    // only the speculative correction layer and return to the stable Mozc live
+    // conversion result.  The next Space can then enter normal candidate
+    // navigation as usual.  Other candidate-navigation keys keep their explicit
+    // navigation semantics.
+    if (key_command == keymap::ConversionState::CONVERT_NEXT &&
+        IsPureSpaceKey(input_key) &&
+        HasVisibleZenzLiveCorrection()) {
+      return RevertZenzLiveCorrectionToLiveConversion(command);
+    }
+
+    // A prediction key such as Tab should focus prediction candidates even while
+    // live conversion is active.  Do this before the generic live-conversion
+    // promotion below, otherwise PredictAndConvert() would see an ordinary
+    // CONVERSION state and fall back to ConvertNext().  Other conversion
+    // commands still follow their existing keymap-defined conversion path.
+    if (key_command == keymap::ConversionState::PREDICT_AND_CONVERT) {
+      if (!PredictAndConvertFromLiveConversion(command)) {
+        return false;
+      }
+
+      if (command_sequence.size() == 1) {
+        return true;
+      }
+
+      const commands::Output prediction_output = command->output();
+      keymap::CommandSequence remaining_sequence(
+          command_sequence.begin() + 1, command_sequence.end());
+      return ExecuteCommandSequenceWithInitialOutput(
+          remaining_sequence, &prediction_output, command);
     }
 
     // Explicit conversion operations such as Space, candidate movement, or Cancel
-    // promote live conversion back to normal conversion behavior.
+    // promote live conversion back to normal conversion behavior.  When a visible
+    // zenz layer exists, plain Space is consumed above to peel off that layer first.
     if (key_command != keymap::ConversionState::INSERT_CHARACTER) {
       if (key_command != keymap::ConversionState::COMMIT) {
         if (key_command == keymap::ConversionState::CANCEL ||
@@ -2432,6 +3768,26 @@ bool Session::RequestConvertReverse(commands::Command* command) {
   return true;
 }
 
+bool Session::RequestReconvertSelectionOrInsertSpace(
+    commands::Command* command) {
+  if (context_->state() != ImeContext::PRECOMPOSITION) {
+    return DoNothing(command);
+  }
+
+  // Build the normal InsertSpace output first.  The TSF client will apply this
+  // output only when the application has no selected text.  When selected text
+  // exists, the callback is handled before the fallback output is applied.
+  if (!InsertSpace(command)) {
+    return false;
+  }
+
+  commands::SessionCommand* session_command =
+      command->mutable_output()->mutable_callback()->mutable_session_command();
+  session_command->set_type(
+      commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE);
+  return true;
+}
+
 bool Session::ConvertReverse(commands::Command* command) {
   if (context_->state() != ImeContext::PRECOMPOSITION &&
       context_->state() != ImeContext::DIRECT) {
@@ -2685,6 +4041,8 @@ void Session::CancelPendingLiveConversion() {
   live_conversion_pending_ = false;
   pending_live_conversion_generation_ = 0;
   pending_live_conversion_key_.clear();
+  pending_live_conversion_input_.Clear();
+  pending_live_conversion_suggestion_candidate_window_.Clear();
   CancelPendingZenzLiveCorrection();
 }
 
@@ -2695,6 +4053,9 @@ void Session::ClearLiveConversionState() {
   live_conversion_pending_ = false;
   pending_live_conversion_generation_ = 0;
   pending_live_conversion_key_.clear();
+  pending_live_conversion_input_.Clear();
+  pending_live_conversion_suggestion_candidate_window_.Clear();
+  live_conversion_suggestion_candidate_window_.Clear();
 
   live_conversion_key_.clear();
   live_conversion_preedit_.clear();
@@ -2740,7 +4101,10 @@ bool Session::MaybeStartLiveConversion(commands::Command* command) {
   const std::string live_conversion_key =
       context_->composer().GetQueryForConversion();
 
-  if (ShouldSkipLiveConversionForCompositionKey(live_conversion_key) ||
+  if (ShouldSkipLiveConversionForCompositionKey(
+          live_conversion_key,
+          GetLiveConversionCommittedLeftBoundary(*context_),
+          GetLiveConversionMinKeyLength(context_->GetConfig())) ||
       length != context_->composer().GetCursor()) {
     return false;
   }
@@ -2750,9 +4114,26 @@ bool Session::MaybeStartLiveConversion(commands::Command* command) {
   const std::string live_conversion_preedit =
       context_->composer().GetStringForPreedit();
 
+  // Delayed live-conversion callbacks are SEND_COMMAND inputs and may not carry
+  // the same request_suggestion/context data as the original SEND_KEY input.
+  // Keep the original input for passive suggestion generation so the suggestion
+  // window does not disappear when the delayed live conversion materializes.
+  const bool use_pending_live_conversion_input =
+      live_conversion_pending_ &&
+      pending_live_conversion_key_ == live_conversion_key &&
+      pending_live_conversion_input_.type() != commands::Input::NONE;
+  const commands::Input live_conversion_suggestion_input =
+      use_pending_live_conversion_input ? pending_live_conversion_input_
+                                        : command->input();
+  const commands::CandidateWindow
+      pending_live_conversion_suggestion_candidate_window =
+          pending_live_conversion_suggestion_candidate_window_;
+
   live_conversion_pending_ = false;
   pending_live_conversion_generation_ = 0;
   pending_live_conversion_key_.clear();
+  pending_live_conversion_input_.Clear();
+  pending_live_conversion_suggestion_candidate_window_.Clear();
 
   if (!context_->mutable_converter()->Convert(context_->composer())) {
     OutputComposition(command);
@@ -2767,6 +4148,13 @@ bool Session::MaybeStartLiveConversion(commands::Command* command) {
   context_->mutable_converter()->SetCandidateListVisible(true);
 
   Output(command);
+
+  if (command->output().has_preedit()) {
+    RestorePreeditSegmentKeysForSymbolStyle(
+        live_conversion_preedit,
+        command->mutable_output()->mutable_preedit());
+  }
+
   command->mutable_output()->set_live_conversion(true);
   command->mutable_output()->set_live_conversion_pending(false);
 
@@ -2791,6 +4179,14 @@ bool Session::MaybeStartLiveConversion(commands::Command* command) {
     return true;
   }
 
+  if (!AttachLiveConversionSuggestionCandidateWindow(
+          live_conversion_suggestion_input, command->mutable_output()) &&
+      pending_live_conversion_suggestion_candidate_window.candidate_size() > 0) {
+    live_conversion_suggestion_candidate_window_ =
+        pending_live_conversion_suggestion_candidate_window;
+    *command->mutable_output()->mutable_candidate_window() =
+        live_conversion_suggestion_candidate_window_;
+  }
   MaybeScheduleZenzLiveCorrection(command);
   return true;
 }
@@ -2809,6 +4205,13 @@ bool Session::OutputPendingLiveConversion(commands::Command* command) const {
   // In that case, raw pending display is expected and should still be debounced.
   if (!has_stable_live_conversion) {
     OutputComposition(command);
+
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          raw_preedit,
+          command->mutable_output()->mutable_preedit());
+    }
+
     commands::Output* output = command->mutable_output();
     output->clear_candidate_window();
     output->set_live_conversion(true);
@@ -2851,6 +4254,8 @@ bool Session::OutputPendingLiveConversion(commands::Command* command) const {
                       commands::Preedit::Segment::UNDERLINE,
                       preedit);
   }
+
+  RestorePreeditSegmentKeysForSymbolStyle(raw_preedit, preedit);
 
   preedit->set_cursor(Util::CharsLen(live_conversion_value_) +
                       Util::CharsLen(suffix_value));
@@ -2899,8 +4304,12 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
   const size_t length = context_->composer().GetLength();
   const std::string key = context_->composer().GetQueryForConversion();
 
-  if (ShouldSkipLiveConversionForCompositionKey(key) ||
+  if (ShouldSkipLiveConversionForCompositionKey(
+          key,
+          GetLiveConversionCommittedLeftBoundary(*context_),
+          GetLiveConversionMinKeyLength(context_->GetConfig())) ||
       length != context_->composer().GetCursor()) {
+    CancelPendingLiveConversion();
     return false;
   }
 
@@ -2914,6 +4323,8 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
   live_conversion_pending_ = true;
   pending_live_conversion_generation_ = live_conversion_generation_;
   pending_live_conversion_key_ = key;
+  pending_live_conversion_input_ = command->input();
+  pending_live_conversion_suggestion_candidate_window_.Clear();
 
   if (!OutputPendingLiveConversion(command)) {
     // Avoid showing raw hiragana fallback. If pending display cannot be built
@@ -2921,6 +4332,11 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
     return MaybeStartLiveConversion(command);
   }
 
+  if (AttachLiveConversionSuggestionCandidateWindow(command->input(),
+                                                    command->mutable_output())) {
+    pending_live_conversion_suggestion_candidate_window_ =
+        command->output().candidate_window();
+  }
   AttachDelayedLiveConversionCallback(command);
 
   return true;
@@ -2934,13 +4350,26 @@ bool Session::IgnoreStaleDelayedLiveConversion(commands::Command* command) {
   // composer still has text.
   if (live_conversion_pending_) {
     OutputPendingLiveConversion(command);
+    AttachCachedLiveConversionSuggestionCandidateWindow(
+        command->mutable_output());
     return true;
   }
 
   if (live_conversion_active_ && context_->state() == ImeContext::CONVERSION) {
     Output(command);
+
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          live_conversion_preedit_.empty()
+              ? live_conversion_key_
+              : live_conversion_preedit_,
+          command->mutable_output()->mutable_preedit());
+    }
+
     command->mutable_output()->set_live_conversion(true);
     command->mutable_output()->set_live_conversion_pending(false);
+    AttachCachedLiveConversionSuggestionCandidateWindow(
+        command->mutable_output());
     return true;
   }
 
@@ -2979,9 +4408,14 @@ bool Session::ApplyDelayedLiveConversion(commands::Command* command) {
   }
 
   const size_t length = context_->composer().GetLength();
-  if (ShouldSkipLiveConversionForCompositionKey(current_key) ||
+  if (ShouldSkipLiveConversionForCompositionKey(
+          current_key,
+          GetLiveConversionCommittedLeftBoundary(*context_),
+          GetLiveConversionMinKeyLength(context_->GetConfig())) ||
       length != context_->composer().GetCursor()) {
-    return IgnoreStaleDelayedLiveConversion(command);
+    CancelPendingLiveConversion();
+    OutputFromState(command);
+    return true;
   }
 
   return MaybeStartLiveConversion(command);
@@ -2999,7 +4433,10 @@ bool Session::FlushPendingLiveConversion() {
 
   const std::string current_key = context_->composer().GetQueryForConversion();
   if (current_key != pending_live_conversion_key_ ||
-      ShouldSkipLiveConversionForCompositionKey(current_key)) {
+      ShouldSkipLiveConversionForCompositionKey(
+          current_key,
+          GetLiveConversionCommittedLeftBoundary(*context_),
+          GetLiveConversionMinKeyLength(context_->GetConfig()))) {
     CancelPendingLiveConversion();
     return false;
   }
@@ -3026,6 +4463,35 @@ std::string Session::ExtractZenzLeftContext(uint32_t max_chars) const {
 
   return std::string(
     Util::Utf8SubString(preceding_text, len - max_chars, max_chars));
+}
+
+std::string Session::ExtractZenzRightContext(uint32_t max_chars) const {
+  if (max_chars == 0) {
+    return "";
+  }
+
+  if (!context_->client_context().has_following_text()) {
+    return "";
+  }
+
+  const std::string& following_text =
+      context_->client_context().following_text();
+
+  // Right context should describe the continuation of the current line.
+  // Do not let text from following lines leak into the Zenz prompt, because
+  // multi-line editors often expose the rest of the document as following_text.
+  const size_t line_break_pos = following_text.find_first_of("\r\n");
+  const std::string current_line =
+      line_break_pos == std::string::npos
+          ? following_text
+          : following_text.substr(0, line_break_pos);
+
+  const size_t len = Util::CharsLen(current_line);
+  if (len <= max_chars) {
+    return current_line;
+  }
+
+  return std::string(Util::Utf8SubString(current_line, 0, max_chars));
 }
 
 std::string Session::BuildZenzFeedbackContextClass(
@@ -3498,6 +4964,7 @@ void Session::ClearZenzLiveCorrectionState() {
 
   zenz_live_visible_generation_ = 0;
   zenz_live_key_.clear();
+  zenz_live_display_key_.clear();
   zenz_live_value_.clear();
   zenz_live_mozc_value_.clear();
   zenz_live_context_class_.clear();
@@ -3652,6 +5119,9 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
 
     zenz_live_visible_generation_ = zenz_live_generation_;
     zenz_live_key_ = live_conversion_key_;
+    zenz_live_display_key_ = live_conversion_preedit_.empty()
+                                 ? live_conversion_key_
+                                 : live_conversion_preedit_;
     zenz_live_value_ = feedback_value;
     zenz_live_mozc_value_ = live_conversion_value_;
     zenz_live_context_class_ = context_class;
@@ -3728,6 +5198,8 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
 
   const uint32_t left_context_len =
       GetZenzLiveCorrectionLeftContextLength(config);
+  const uint32_t right_context_len =
+      GetZenzLiveCorrectionRightContextLength(config);
 
   const std::string raw_left_context =
       ExtractZenzLeftContext(left_context_len);
@@ -3740,17 +5212,40 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
           ? context_result.sanitized_context
           : std::string();
 
+  const std::string raw_right_context =
+      ExtractZenzRightContext(right_context_len);
+  const ZenzContextSanitizationResult right_context_result =
+      zenz_context_sanitizer_.SanitizeForZenz(
+          raw_right_context, right_context_len);
+
+  const std::string right_context_for_prompt =
+      right_context_result.allowed_for_prompt
+          ? right_context_result.sanitized_context
+          : std::string();
+
+  ZenzPromptOptions prompt_options;
+  prompt_options.left_context = left_context_for_prompt;
+  prompt_options.right_context = right_context_for_prompt;
+  prompt_options.profile = config.zenz_live_correction_profile();
+  prompt_options.topic = config.zenz_live_correction_topic();
+  prompt_options.style = config.zenz_live_correction_style();
+  prompt_options.settings = config.zenz_live_correction_settings();
+
   ZenzPromptBuilder prompt_builder;
   const std::string prompt =
-      prompt_builder.Build(left_context_for_prompt, live_conversion_key_);
+      prompt_builder.Build(live_conversion_key_, prompt_options);
 
   ++zenz_live_generation_;
 
   pending_zenz_live_.generation = zenz_live_generation_;
   pending_zenz_live_.key = live_conversion_key_;
   pending_zenz_live_.left_context = left_context_for_prompt;
+  pending_zenz_live_.right_context = right_context_for_prompt;
   pending_zenz_live_.context_class = context_result.context_class;
   pending_zenz_live_.mozc_value = live_conversion_value_;
+  pending_zenz_live_.symbol_style_source =
+      live_conversion_preedit_.empty() ? live_conversion_key_
+                                       : live_conversion_preedit_;
   pending_zenz_live_.prompt = prompt;
   pending_zenz_live_.issued_at = Clock::GetAbslTime();
   pending_zenz_live_.pending = true;
@@ -3763,7 +5258,22 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
       " ", ZenzRedactedTextStats("mozc_value", live_conversion_value_),
       " context_class=", context_result.context_class,
       " context_allowed=", ZenzBool(context_result.allowed_for_prompt),
-      " context_reason=", context_result.reason));
+      " context_reason=", context_result.reason,
+      " right_context_allowed=",
+      ZenzBool(right_context_result.allowed_for_prompt),
+      " right_context_reason=", right_context_result.reason));
+
+  const uint32_t delay_msec = GetZenzLiveCorrectionDelayMsec(config);
+  if (delay_msec == 0) {
+    ZenzDebugOutput("[zenz] start immediately");
+    // The current command already contains the freshly generated live
+    // conversion output from MaybeStartLiveConversion().  Do not call
+    // Output() again in the same key-event path, because PopOutput() is
+    // destructive and a second output refresh can momentarily duplicate the
+    // composition text on some TSF clients.
+    return AdvancePendingZenzLiveCorrection(
+        command, /*refresh_output_on_submit=*/false);
+  }
 
   AttachZenzLiveCorrectionStartCallback(command);
   command->mutable_output()->set_zenz_live_correction_pending(true);
@@ -3943,10 +5453,20 @@ bool Session::OutputCurrentLiveConversionWithZenzPending(
 
   if (live_conversion_active_ && context_->state() == ImeContext::CONVERSION) {
     Output(command);
+
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          live_conversion_preedit_.empty()
+              ? live_conversion_key_
+              : live_conversion_preedit_,
+          command->mutable_output()->mutable_preedit());
+    }
+
     commands::Output* output = command->mutable_output();
     output->set_live_conversion(true);
     output->set_live_conversion_pending(false);
     output->set_zenz_live_correction_pending(true);
+    AttachCachedLiveConversionSuggestionCandidateWindow(output);
     return true;
   }
 
@@ -3962,6 +5482,14 @@ bool Session::OutputCurrentLiveConversionAfterZenzStop(
   if (live_conversion_active_ && context_->state() == ImeContext::CONVERSION) {
     Output(command);
 
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          live_conversion_preedit_.empty()
+              ? live_conversion_key_
+              : live_conversion_preedit_,
+          command->mutable_output()->mutable_preedit());
+    }
+
     commands::Output* output = command->mutable_output();
     output->set_live_conversion(true);
     output->set_live_conversion_pending(false);
@@ -3969,6 +5497,7 @@ bool Session::OutputCurrentLiveConversionAfterZenzStop(
     if (!debug.empty()) {
       output->set_zenz_live_correction_debug(std::string(debug));
     }
+    AttachCachedLiveConversionSuggestionCandidateWindow(output);
     return true;
   }
 
@@ -3996,6 +5525,15 @@ bool Session::ApplyZenzLiveCorrection(commands::Command* command) {
     ZenzDebugOutput("[zenz] stale zenz callback");
     return IgnoreStaleDelayedLiveConversion(command);
   }
+
+  return AdvancePendingZenzLiveCorrection(
+      command, /*refresh_output_on_submit=*/true);
+}
+
+bool Session::AdvancePendingZenzLiveCorrection(
+    commands::Command* command,
+    const bool refresh_output_on_submit) {
+  command->mutable_output()->set_consumed(true);
 
   const config::Config& config = context_->GetConfig();
   const absl::Time now = Clock::GetAbslTime();
@@ -4030,11 +5568,22 @@ bool Session::ApplyZenzLiveCorrection(commands::Command* command) {
                                     pending_zenz_live_.mozc_value),
         " context_class=", pending_zenz_live_.context_class,
         " ", ZenzRedactedTextStats("context",
-                                    pending_zenz_live_.left_context)));
+                                    pending_zenz_live_.left_context),
+        " ", ZenzRedactedTextStats("right_context",
+                                    pending_zenz_live_.right_context)));
 
     EnsureZenzLiveCorrector()->Submit(std::move(request));
 
-    const bool result = OutputCurrentLiveConversionWithZenzPending(command);
+    bool result = true;
+    if (refresh_output_on_submit) {
+      result = OutputCurrentLiveConversionWithZenzPending(command);
+    } else {
+      commands::Output* output = command->mutable_output();
+      output->set_live_conversion(true);
+      output->set_live_conversion_pending(false);
+      output->set_zenz_live_correction_pending(true);
+      AttachCachedLiveConversionSuggestionCandidateWindow(output);
+    }
     AttachZenzLiveCorrectionPollCallback(command);
     return result;
   }
@@ -4117,6 +5666,15 @@ bool Session::ApplyZenzLiveCorrectionResult(
 
     CancelPendingZenzLiveCorrection();
     Output(command);
+
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          live_conversion_preedit_.empty()
+              ? live_conversion_key_
+              : live_conversion_preedit_,
+          command->mutable_output()->mutable_preedit());
+    }
+
     command->mutable_output()->set_live_conversion(true);
     command->mutable_output()->set_live_conversion_pending(false);
     command->mutable_output()->set_zenz_live_correction_pending(false);
@@ -4135,6 +5693,30 @@ bool Session::ApplyZenzLiveCorrectionResult(
     ZenzDebugOutput(absl::StrCat(
         "[zenz] stripped left_context prefix ",
         ZenzRedactedTextStats("value", zenz_value),
+        " context_class=", pending_zenz_live_.context_class));
+  }
+
+  const absl::string_view zenz_symbol_style_source =
+      pending_zenz_live_.symbol_style_source.empty()
+          ? pending_zenz_live_.key
+          : pending_zenz_live_.symbol_style_source;
+
+  const std::string zenz_value_before_symbol_restore = zenz_value;
+  zenz_value = ZenzOutputValidator::RestoreUserVisibleSymbolStyle(
+      zenz_symbol_style_source, pending_zenz_live_.mozc_value, zenz_value);
+
+  const std::string zenz_display_key =
+      ZenzOutputValidator::RestoreUserVisibleSymbolStyle(
+          zenz_symbol_style_source,
+          pending_zenz_live_.mozc_value,
+          pending_zenz_live_.key);
+
+  if (zenz_value != zenz_value_before_symbol_restore) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz] restored symbol style ",
+        ZenzRedactedTextStats("value", zenz_value),
+        " ", ZenzRedactedTextStats("raw_value",
+                                   zenz_value_before_symbol_restore),
         " context_class=", pending_zenz_live_.context_class));
   }
 
@@ -4165,6 +5747,15 @@ bool Session::ApplyZenzLiveCorrectionResult(
 
     CancelPendingZenzLiveCorrection();
     Output(command);
+
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          live_conversion_preedit_.empty()
+              ? live_conversion_key_
+              : live_conversion_preedit_,
+          command->mutable_output()->mutable_preedit());
+    }
+
     command->mutable_output()->set_live_conversion(true);
     command->mutable_output()->set_live_conversion_pending(false);
     command->mutable_output()->set_zenz_live_correction_pending(false);
@@ -4188,6 +5779,15 @@ bool Session::ApplyZenzLiveCorrectionResult(
 
     CancelPendingZenzLiveCorrection();
     Output(command);
+
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          live_conversion_preedit_.empty()
+              ? live_conversion_key_
+              : live_conversion_preedit_,
+          command->mutable_output()->mutable_preedit());
+    }
+
     command->mutable_output()->set_live_conversion(true);
     command->mutable_output()->set_live_conversion_pending(false);
     command->mutable_output()->set_zenz_live_correction_pending(false);
@@ -4211,6 +5811,15 @@ bool Session::ApplyZenzLiveCorrectionResult(
 
     CancelPendingZenzLiveCorrection();
     Output(command);
+
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          live_conversion_preedit_.empty()
+              ? live_conversion_key_
+              : live_conversion_preedit_,
+          command->mutable_output()->mutable_preedit());
+    }
+
     command->mutable_output()->set_live_conversion(true);
     command->mutable_output()->set_live_conversion_pending(false);
     command->mutable_output()->set_zenz_live_correction_pending(false);
@@ -4257,6 +5866,7 @@ bool Session::ApplyZenzLiveCorrectionResult(
 
   zenz_live_visible_generation_ = pending_zenz_live_.generation;
   zenz_live_key_ = pending_zenz_live_.key;
+  zenz_live_display_key_ = zenz_display_key;
   zenz_live_value_ = zenz_value;
   zenz_live_mozc_value_ = pending_zenz_live_.mozc_value;
   zenz_live_context_class_ = context_class.empty() ? "empty" : context_class;
@@ -4281,8 +5891,11 @@ bool Session::OutputZenzLiveCorrection(
   commands::Preedit* preedit = output->mutable_preedit();
   preedit->Clear();
 
+  const absl::string_view display_key =
+      zenz_live_display_key_.empty() ? zenz_live_key_ : zenz_live_display_key_;
+
   AddPreeditSegment(
-      zenz_live_key_,
+      display_key,
       value,
       commands::Preedit::Segment::HIGHLIGHT,
       preedit);
@@ -4299,6 +5912,52 @@ bool Session::OutputZenzLiveCorrection(
   // as user acceptance. Acceptance must be recorded only when the user commits
   // the visible zenz result.
   zenz_live_preedit_output_ = *preedit;
+
+  AttachCachedLiveConversionSuggestionCandidateWindow(output);
+  return true;
+}
+
+bool Session::RevertZenzLiveCorrectionToLiveConversion(
+    commands::Command* command) {
+  if (!HasVisibleZenzLiveCorrection()) {
+    return false;
+  }
+
+  ZenzDebugOutput(absl::StrCat(
+      "[zenz-feedback] revert zenz correction to mozc live conversion ",
+      ZenzRedactedTextStats("key", zenz_live_key_),
+      " ", ZenzRedactedTextStats("zenz_value", zenz_live_value_),
+      " ", ZenzRedactedTextStats("mozc_value", zenz_live_mozc_value_),
+      " visible_generation=", zenz_live_visible_generation_));
+
+  SetPendingZenzFeedbackRejected("space_revert_zenz_to_mozc");
+
+  const commands::Preedit live_preedit = live_conversion_preedit_output_;
+  ClearZenzLiveCorrectionState();
+
+  command->mutable_output()->set_consumed(true);
+  OutputMode(command);
+
+  commands::Output* output = command->mutable_output();
+  output->clear_candidate_window();
+  output->set_live_conversion(true);
+  output->set_live_conversion_pending(false);
+  output->set_zenz_live_correction_pending(false);
+  output->set_zenz_live_correction_applied(false);
+
+  if (live_preedit.segment_size() > 0) {
+    *output->mutable_preedit() = live_preedit;
+    output->mutable_preedit()->set_cursor(
+        Util::CharsLen(live_conversion_value_));
+  } else {
+    Output(command);
+    output->clear_candidate_window();
+    output->set_live_conversion(true);
+    output->set_live_conversion_pending(false);
+    output->set_zenz_live_correction_pending(false);
+    output->set_zenz_live_correction_applied(false);
+  }
+
   return true;
 }
 
@@ -4473,10 +6132,19 @@ bool Session::InsertCharacter(commands::Command* command) {
       return CommitPendingLiveConversionDisplayDirectly(command);
     }
 
-    // Defensive fallback. The pre-insert predicate accepted the key as a direct
-    // commit trigger, so this path should normally not be reached. Avoid inserting
-    // the same key twice.
+    // The physical key looked like a direct-commit trigger before insertion,
+    // but the romaji table may have turned it into a different character.
+    // Example: "v." -> "…" or "v," -> "‥".
+    //
+    // In that case, do not fall back to raw composition, because it discards
+    // the stable converted prefix shown by live conversion, e.g. "今日は".
+    // Treat it as ordinary continued composition and schedule live conversion
+    // for the updated preedit.
     CancelPendingLiveConversion();
+    if (MaybeScheduleLiveConversion(command)) {
+      return true;
+    }
+
     OutputComposition(command);
     return true;
   }
@@ -4497,6 +6165,34 @@ bool Session::InsertCharacter(commands::Command* command) {
   const std::string zenz_value_before_edit = zenz_live_value_;
   const std::string zenz_context_class_before_edit =
       zenz_live_context_class_.empty() ? "empty" : zenz_live_context_class_;
+
+  if ((live_conversion_active_ || live_conversion_pending_) &&
+      ShouldCommitLiveConversionBeforeShiftAsciiInput(
+          context_->GetConfig(), context_->composer(), key)) {
+    if (had_visible_zenz_correction) {
+      CommitZenzLiveCorrectionResult(command);
+    } else if (live_conversion_active_) {
+      const std::string live_key =
+          live_conversion_key_.empty()
+              ? context_->composer().GetQueryForConversion()
+              : live_conversion_key_;
+      const std::string live_value =
+          live_conversion_value_.empty()
+              ? context_->composer().GetStringForSubmission()
+              : live_conversion_value_;
+
+      ClearLiveConversionState();
+      CommitStringDirectly(live_key, live_value, command);
+    } else if (live_conversion_pending_) {
+      CommitPendingLiveConversionDisplayDirectly(command);
+    }
+
+    context_->mutable_composer()->InsertCharacterKeyEvent(key);
+    ClearUndoContext();
+    SetSessionState(ImeContext::COMPOSITION, context_.get());
+    OutputComposition(command);
+    return true;
+  }
 
   // If the current conversion was started by live conversion, ordinary
   // character input should continue editing the composition.  So cancel
@@ -5076,6 +6772,102 @@ bool Session::Suggest(const commands::Input& input) {
 
   return context_->mutable_converter()->Suggest(context_->composer(),
                                                 input.context());
+}
+
+bool Session::AttachLiveConversionSuggestionCandidateWindow(
+    const commands::Input& input, commands::Output* output) {
+  DCHECK(output);
+
+  // Output() from live conversion may contain the real CONVERSION candidate
+  // window.  Only the passive SUGGESTION window built below is allowed to
+  // remain on live-conversion output; otherwise the renderer would show the
+  // ordinary conversion candidate list without an explicit Space/Down action.
+  live_conversion_suggestion_candidate_window_.Clear();
+  output->clear_candidate_window();
+
+  if (SuppressSuggestion(input)) {
+    return false;
+  }
+
+  // Live conversion intentionally keeps the real converter in CONVERSION state
+  // so that Space/Down can enter the normal conversion candidate list with a
+  // single key press.  EngineConverter::Suggest(), however, is defined only for
+  // COMPOSITION/SUGGESTION states and resets converter state while generating
+  // candidates.  Build the passive suggestion window on a cloned context and
+  // copy only candidate_window to the live-conversion output.  The real
+  // converter state, live_conversion_active_, selected segment, and Zenz state
+  // are left untouched.
+  ImeContext suggestion_context(*context_);
+  if (suggestion_context.converter().IsActive()) {
+    suggestion_context.mutable_converter()->Cancel();
+  }
+  suggestion_context.set_state(ImeContext::COMPOSITION);
+
+  bool has_suggestion = false;
+  if (input.has_request_suggestion() &&
+      input.type() == commands::Input::SEND_KEY) {
+    ConversionPreferences conversion_preferences =
+        suggestion_context.converter().conversion_preferences();
+    conversion_preferences.request_suggestion = input.request_suggestion();
+    has_suggestion =
+        suggestion_context.mutable_converter()->SuggestWithPreferences(
+            suggestion_context.composer(), input.context(),
+            conversion_preferences);
+  } else {
+    has_suggestion = suggestion_context.mutable_converter()->Suggest(
+        suggestion_context.composer(), input.context());
+  }
+
+  if (!has_suggestion) {
+    return false;
+  }
+
+  commands::Output suggestion_output;
+  suggestion_context.mutable_converter()->PopOutput(
+      suggestion_context.composer(), &suggestion_output);
+
+  if (!suggestion_output.has_candidate_window() ||
+      suggestion_output.candidate_window().candidate_size() == 0) {
+    return false;
+  }
+
+  live_conversion_suggestion_candidate_window_ =
+      suggestion_output.candidate_window();
+  *output->mutable_candidate_window() =
+      live_conversion_suggestion_candidate_window_;
+  return true;
+}
+
+bool Session::AttachCachedLiveConversionSuggestionCandidateWindow(
+    commands::Output* output) const {
+  DCHECK(output);
+
+  output->clear_candidate_window();
+
+  const commands::CandidateWindow* candidate_window = nullptr;
+  if (live_conversion_suggestion_candidate_window_.has_category() &&
+      live_conversion_suggestion_candidate_window_.category() ==
+          commands::SUGGESTION &&
+      live_conversion_suggestion_candidate_window_.candidate_size() > 0 &&
+      !live_conversion_suggestion_candidate_window_.has_focused_index()) {
+    candidate_window = &live_conversion_suggestion_candidate_window_;
+  } else if (
+      pending_live_conversion_suggestion_candidate_window_.has_category() &&
+      pending_live_conversion_suggestion_candidate_window_.category() ==
+          commands::SUGGESTION &&
+      pending_live_conversion_suggestion_candidate_window_.candidate_size() >
+          0 &&
+      !pending_live_conversion_suggestion_candidate_window_
+           .has_focused_index()) {
+    candidate_window = &pending_live_conversion_suggestion_candidate_window_;
+  }
+
+  if (candidate_window == nullptr) {
+    return false;
+  }
+
+  *output->mutable_candidate_window() = *candidate_window;
+  return true;
 }
 
 bool Session::ConvertToTransliteration(
@@ -5776,6 +7568,39 @@ bool Session::ConvertCancel(commands::Command* command) {
   if (Suggest(command->input())) {
     Output(command);
   } else {
+    OutputComposition(command);
+  }
+  return true;
+}
+
+bool Session::PredictAndConvertFromLiveConversion(commands::Command* command) {
+  DCHECK(command);
+
+  CancelPendingLiveConversion();
+  command->mutable_output()->set_consumed(true);
+
+  if (context_->state() != ImeContext::CONVERSION || !live_conversion_active_) {
+    return PredictAndConvert(command);
+  }
+
+  // Selecting prediction candidates is an explicit user override of the
+  // currently visible live conversion result.  If a zenz correction is visible,
+  // remember it as rejected before removing the speculative layer.
+  if (HasVisibleZenzLiveCorrection()) {
+    SetPendingZenzFeedbackRejected("predict_after_zenz");
+  }
+  ClearZenzLiveCorrectionState();
+
+  live_conversion_active_ = false;
+  if (context_->mutable_converter()->Predict(context_->composer())) {
+    SetSessionState(ImeContext::CONVERSION, context_.get());
+    Output(command);
+  } else {
+    // EngineConverter::Predict() resets its internal state on a first-prediction
+    // failure.  Keep Session and EngineConverter aligned and fall back to the
+    // same composition output that ordinary PredictAndConvert() uses on failure.
+    ClearLiveConversionState();
+    SetSessionState(ImeContext::COMPOSITION, context_.get());
     OutputComposition(command);
   }
   return true;

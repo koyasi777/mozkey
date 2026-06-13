@@ -30,6 +30,8 @@
 #ifndef MOZC_RENDERER_RENDERER_STYLE_HANDLER_H_
 #define MOZC_RENDERER_RENDERER_STYLE_HANDLER_H_
 
+#include <string>
+
 #include "protocol/renderer_style.pb.h"
 
 namespace mozc {
@@ -50,6 +52,10 @@ class RendererStyleHandler {
   // Applies candidate window theme options to the given style.
   static void ApplyCandidateWindowTheme(bool use_dark_mode,
                                         RendererStyle* style);
+
+  // Applies candidate/ruby font options to the given style.
+  static void ApplyCandidateRubyFont(const std::string& font_name,
+                                     RendererStyle* style);
 };
 
 }  // namespace renderer

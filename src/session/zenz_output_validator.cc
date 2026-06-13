@@ -1,9 +1,11 @@
 #include "session/zenz_output_validator.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/match.h"
 #include "base/util.h"
@@ -83,7 +85,146 @@ bool DecodeOneUtf8(absl::string_view input, size_t* index, char32_t* cp) {
   return false;
 }
 
+struct Utf8CharForSymbolRestore {
+  char32_t cp = 0;
+  std::string bytes;
+};
+
+bool IsAsciiTilde(char32_t cp) { return cp == 0x007E; }
+
+bool IsJapaneseWaveDash(char32_t cp) {
+  return cp == 0xFF5E ||  // FULLWIDTH TILDE: ～
+         cp == 0x301C;    // WAVE DASH: 〜
+}
+
+std::vector<Utf8CharForSymbolRestore> SplitUtf8ForSymbolRestore(
+    absl::string_view text) {
+  std::vector<Utf8CharForSymbolRestore> chars;
+  size_t index = 0;
+  while (index < text.size()) {
+    const size_t begin = index;
+    char32_t cp = 0;
+    if (!DecodeOneUtf8(text, &index, &cp)) {
+      return {};
+    }
+    chars.push_back({cp, std::string(text.substr(begin, index - begin))});
+  }
+  return chars;
+}
+
+int CountCodePoint(absl::string_view text, char32_t target) {
+  int count = 0;
+  size_t index = 0;
+  while (index < text.size()) {
+    char32_t cp = 0;
+    if (!DecodeOneUtf8(text, &index, &cp)) {
+      return 0;
+    }
+    if (cp == target) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+int CountJapaneseWaveDashFamily(absl::string_view text) {
+  return CountCodePoint(text, 0xFF5E) + CountCodePoint(text, 0x301C);
+}
+
+int CountAsciiTilde(absl::string_view text) {
+  return CountCodePoint(text, 0x007E);
+}
+
+std::string FirstJapaneseWaveDashBytes(absl::string_view text) {
+  const std::vector<Utf8CharForSymbolRestore> chars =
+      SplitUtf8ForSymbolRestore(text);
+  for (const Utf8CharForSymbolRestore& ch : chars) {
+    if (IsJapaneseWaveDash(ch.cp)) {
+      return ch.bytes;
+    }
+  }
+  return {};
+}
+
 }  // namespace
+
+std::string ZenzOutputValidator::RestoreUserVisibleSymbolStyle(
+    absl::string_view key,
+    absl::string_view mozc_value,
+    absl::string_view zenz_value) {
+  const int key_wave_dash_count = CountJapaneseWaveDashFamily(key);
+  const int mozc_wave_dash_count = CountJapaneseWaveDashFamily(mozc_value);
+
+  // Prefer `key` because the caller passes raw-preedit-derived text here for
+  // live correction.  `mozc_value` may already contain an ASCII tilde due to
+  // converter or feedback influence, and must not cancel restoration of the
+  // user-entered Japanese wave dash style.
+  absl::string_view style_source;
+  if (key_wave_dash_count > 0) {
+    style_source = key;
+  } else if (mozc_wave_dash_count > 0) {
+    style_source = mozc_value;
+  } else {
+    return std::string(zenz_value);
+  }
+
+  const int source_wave_dash_count =
+      CountJapaneseWaveDashFamily(style_source);
+  const int zenz_wave_dash_count = CountJapaneseWaveDashFamily(zenz_value);
+  const int missing_wave_dash_count =
+      source_wave_dash_count - zenz_wave_dash_count;
+  if (missing_wave_dash_count <= 0) {
+    return std::string(zenz_value);
+  }
+
+  const int source_ascii_tilde_count = CountAsciiTilde(style_source);
+  const int zenz_ascii_tilde_count = CountAsciiTilde(zenz_value);
+  int replacement_budget = std::min(
+      missing_wave_dash_count, zenz_ascii_tilde_count - source_ascii_tilde_count);
+  if (replacement_budget <= 0) {
+    return std::string(zenz_value);
+  }
+
+  const std::vector<Utf8CharForSymbolRestore> source_chars =
+      SplitUtf8ForSymbolRestore(style_source);
+  const std::vector<Utf8CharForSymbolRestore> zenz_chars =
+      SplitUtf8ForSymbolRestore(zenz_value);
+  if (source_chars.empty() || zenz_chars.empty()) {
+    return std::string(zenz_value);
+  }
+
+  const std::string default_replacement =
+      FirstJapaneseWaveDashBytes(style_source);
+  if (default_replacement.empty()) {
+    return std::string(zenz_value);
+  }
+
+  std::string restored;
+  restored.reserve(zenz_value.size());
+  for (size_t i = 0; i < zenz_chars.size(); ++i) {
+    const Utf8CharForSymbolRestore& ch = zenz_chars[i];
+    const bool positional_restore =
+        i < source_chars.size() && IsJapaneseWaveDash(source_chars[i].cp);
+
+    // If the source did not contain ASCII tilde at all, any extra ASCII tilde
+    // returned by Zenz is highly likely to be a normalized Japanese wave dash.
+    // If the source did contain ASCII tilde, avoid broad fallback replacement
+    // and only restore exact character positions to preserve intentional ASCII.
+    const bool safe_fallback_restore = source_ascii_tilde_count == 0;
+
+    if (replacement_budget > 0 && IsAsciiTilde(ch.cp) &&
+        (positional_restore || safe_fallback_restore)) {
+      restored.append(positional_restore ? source_chars[i].bytes
+                                         : default_replacement);
+      --replacement_budget;
+      continue;
+    }
+
+    restored.append(ch.bytes);
+  }
+
+  return restored;
+}
 
 bool ZenzOutputValidator::ContainsSpecialToken(absl::string_view text) {
   if (absl::StrContains(text, "<s>") ||

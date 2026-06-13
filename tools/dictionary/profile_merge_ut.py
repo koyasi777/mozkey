@@ -35,7 +35,14 @@ class Stats:
     demoted_short_reading_1: int = 0
     demoted_short_reading_2: int = 0
     demoted_short_reading_3: int = 0
+    demoted_short_reading_4: int = 0
+    floored_short_reading_1: int = 0
+    floored_short_reading_2: int = 0
+    floored_short_reading_3: int = 0
+    floored_short_reading_4: int = 0
     demoted_ascii_value: int = 0
+    demoted_symbol_or_punctuation_value: int = 0
+    demoted_short_kana_only_value: int = 0
     demoted_grammar_like_reading: int = 0
     demoted_orthographic_variant: int = 0
     demoted_long_tail_proper_like: int = 0
@@ -201,6 +208,27 @@ def is_ascii_value(text: str) -> bool:
     return all(ord(ch) < 128 for ch in text)
 
 
+def has_symbol_or_punctuation(text: str) -> bool:
+    for ch in text:
+        category = unicodedata.category(ch)
+        if category.startswith("P") or category.startswith("S"):
+            return True
+    return False
+
+
+def is_kana_only_value(text: str) -> bool:
+    if not text:
+        return False
+
+    for ch in text:
+        name = unicodedata.name(ch, "")
+        if "HIRAGANA" in name or "KATAKANA" in name:
+            continue
+        return False
+
+    return True
+
+
 def is_compact_japanese_value(text: str) -> bool:
     if not text:
         return False
@@ -285,19 +313,46 @@ def adjust_cost(entry: Entry, profile: str, stats: Stats) -> Entry:
     if profile == "daily":
         cost_floor = 7800
 
+        short_reading_floor = 0
+
         if key_len == 1:
             cost += 2500
+            short_reading_floor = 12000
             stats.demoted_short_reading_1 += 1
         elif key_len == 2:
             cost += 1200
+            short_reading_floor = 10000
             stats.demoted_short_reading_2 += 1
         elif key_len == 3:
             cost += 500
+            short_reading_floor = 9200
             stats.demoted_short_reading_3 += 1
+        elif key_len == 4:
+            short_reading_floor = 8600
+            stats.demoted_short_reading_4 += 1
+
+        if short_reading_floor and cost < short_reading_floor:
+            cost = short_reading_floor
+            if key_len == 1:
+                stats.floored_short_reading_1 += 1
+            elif key_len == 2:
+                stats.floored_short_reading_2 += 1
+            elif key_len == 3:
+                stats.floored_short_reading_3 += 1
+            elif key_len == 4:
+                stats.floored_short_reading_4 += 1
 
         if is_ascii_value(entry.value):
             cost += 800
             stats.demoted_ascii_value += 1
+
+        if has_symbol_or_punctuation(entry.value):
+            cost += 1500
+            stats.demoted_symbol_or_punctuation_value += 1
+
+        if key_len <= 4 and is_kana_only_value(entry.value):
+            cost += 1200
+            stats.demoted_short_kana_only_value += 1
 
         # Generated daily entries whose readings look like ordinary grammar
         # should not beat natural sentence parses by default.
@@ -439,7 +494,14 @@ def print_stats(input_path: pathlib.Path, output_path: pathlib.Path, profile: st
     print(f"  short reading len 1:         {stats.demoted_short_reading_1}")
     print(f"  short reading len 2:         {stats.demoted_short_reading_2}")
     print(f"  short reading len 3:         {stats.demoted_short_reading_3}")
+    print(f"  short reading len 4:         {stats.demoted_short_reading_4}")
+    print(f"  short reading floor len 1:   {stats.floored_short_reading_1}")
+    print(f"  short reading floor len 2:   {stats.floored_short_reading_2}")
+    print(f"  short reading floor len 3:   {stats.floored_short_reading_3}")
+    print(f"  short reading floor len 4:   {stats.floored_short_reading_4}")
     print(f"  ascii value:                 {stats.demoted_ascii_value}")
+    print(f"  symbol/punctuation value:    {stats.demoted_symbol_or_punctuation_value}")
+    print(f"  short kana-only value:       {stats.demoted_short_kana_only_value}")
     print(f"  cost floor:                  {stats.applied_cost_floor}")
     print(f"  grammar-like reading:        {stats.demoted_grammar_like_reading}")
     print(f"  orthographic variant:        {stats.demoted_orthographic_variant}")

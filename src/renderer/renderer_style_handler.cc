@@ -29,6 +29,11 @@
 
 #include "renderer/renderer_style_handler.h"
 
+#include <string>
+
+#include "absl/log/check.h"
+#include "absl/strings/string_view.h"
+#include "base/protobuf/text_format.h"
 #include "base/singleton.h"
 #include "protocol/renderer_style.pb.h"
 
@@ -36,33 +41,32 @@ namespace mozc {
 namespace renderer {
 namespace {
 
+// absl::string_view kStyleTextProto is defined in renderer_style.inc.
+#include "renderer/renderer_style.inc"
+
 void SetColor(RendererStyle::RGBAColor* color, int r, int g, int b) {
   color->set_r(r);
   color->set_g(g);
   color->set_b(b);
 }
 
-RendererStyle::TextStyle* GetTextStyle(RendererStyle* style, int index) {
-  while (style->text_styles_size() <= index) {
-    style->add_text_styles();
-  }
-  return style->mutable_text_styles(index);
-}
-
 void ApplyLightCandidateWindowTheme(RendererStyle* style) {
   SetColor(style->mutable_border_color(), 0x96, 0x96, 0x96);
 
-  RendererStyle::TextStyle* shortcut_style = GetTextStyle(style, 0);
-  SetColor(shortcut_style->mutable_foreground_color(), 0x77, 0x77, 0x77);
-  SetColor(shortcut_style->mutable_background_color(), 0xf3, 0xf4, 0xff);
+  SetColor(style->mutable_shortcut_style()->mutable_foreground_color(),
+           0x77, 0x77, 0x77);
+  SetColor(style->mutable_shortcut_style()->mutable_background_color(),
+           0xf3, 0xf4, 0xff);
 
-  RendererStyle::TextStyle* candidate_style = GetTextStyle(style, 2);
-  SetColor(candidate_style->mutable_foreground_color(), 0x00, 0x00, 0x00);
-  SetColor(candidate_style->mutable_background_color(), 0xff, 0xff, 0xff);
+  SetColor(style->mutable_candidate_style()->mutable_foreground_color(),
+           0x00, 0x00, 0x00);
+  SetColor(style->mutable_candidate_style()->mutable_background_color(),
+           0xff, 0xff, 0xff);
 
-  RendererStyle::TextStyle* description_style = GetTextStyle(style, 3);
-  SetColor(description_style->mutable_foreground_color(), 0x88, 0x88, 0x88);
-  SetColor(description_style->mutable_background_color(), 0xff, 0xff, 0xff);
+  SetColor(style->mutable_description_style()->mutable_foreground_color(),
+           0x88, 0x88, 0x88);
+  SetColor(style->mutable_description_style()->mutable_background_color(),
+           0xff, 0xff, 0xff);
 
   SetColor(style->mutable_footer_style()->mutable_foreground_color(),
            0x4c, 0x4c, 0x4c);
@@ -103,17 +107,20 @@ void ApplyLightCandidateWindowTheme(RendererStyle* style) {
 void ApplyDarkCandidateWindowTheme(RendererStyle* style) {
   SetColor(style->mutable_border_color(), 0x32, 0x38, 0x40);
 
-  RendererStyle::TextStyle* shortcut_style = GetTextStyle(style, 0);
-  SetColor(shortcut_style->mutable_foreground_color(), 0x96, 0xa0, 0xaa);
-  SetColor(shortcut_style->mutable_background_color(), 0x18, 0x1b, 0x20);
+  SetColor(style->mutable_shortcut_style()->mutable_foreground_color(),
+           0x96, 0xa0, 0xaa);
+  SetColor(style->mutable_shortcut_style()->mutable_background_color(),
+           0x18, 0x1b, 0x20);
 
-  RendererStyle::TextStyle* candidate_style = GetTextStyle(style, 2);
-  SetColor(candidate_style->mutable_foreground_color(), 0xe6, 0xed, 0xf3);
-  SetColor(candidate_style->mutable_background_color(), 0x18, 0x1b, 0x20);
+  SetColor(style->mutable_candidate_style()->mutable_foreground_color(),
+           0xe6, 0xed, 0xf3);
+  SetColor(style->mutable_candidate_style()->mutable_background_color(),
+           0x18, 0x1b, 0x20);
 
-  RendererStyle::TextStyle* description_style = GetTextStyle(style, 3);
-  SetColor(description_style->mutable_foreground_color(), 0x8b, 0x94, 0x9e);
-  SetColor(description_style->mutable_background_color(), 0x18, 0x1b, 0x20);
+  SetColor(style->mutable_description_style()->mutable_foreground_color(),
+           0x8b, 0x94, 0x9e);
+  SetColor(style->mutable_description_style()->mutable_background_color(),
+           0x18, 0x1b, 0x20);
 
   SetColor(style->mutable_footer_style()->mutable_foreground_color(),
            0xb7, 0xc0, 0xc9);
@@ -155,6 +162,7 @@ class RendererStyleHandlerImpl {
  public:
   RendererStyleHandlerImpl();
   ~RendererStyleHandlerImpl() = default;
+
   bool GetRendererStyle(RendererStyle* style);
   bool SetRendererStyle(const RendererStyle& style);
   void GetDefaultRendererStyle(RendererStyle* style);
@@ -168,119 +176,26 @@ RendererStyleHandlerImpl* GetRendererStyleHandlerImpl() {
 }
 
 RendererStyleHandlerImpl::RendererStyleHandlerImpl() {
-  RendererStyle style;
-  GetDefaultRendererStyle(&style);
-  SetRendererStyle(style);
+  GetDefaultRendererStyle(&style_);
 }
 
 bool RendererStyleHandlerImpl::GetRendererStyle(RendererStyle* style) {
-  *style = this->style_;
+  if (style == nullptr) {
+    return false;
+  }
+  *style = style_;
   return true;
 }
+
 bool RendererStyleHandlerImpl::SetRendererStyle(const RendererStyle& style) {
   style_ = style;
   return true;
 }
+
 void RendererStyleHandlerImpl::GetDefaultRendererStyle(RendererStyle* style) {
-  // TODO(horo): Change to read from human-readable ASCII format protobuf.
+  CHECK(style != nullptr);
   style->Clear();
-  style->set_window_border(1);
-  style->set_scrollbar_width(4);
-  style->set_row_rect_padding(0);
-  style->mutable_border_color()->set_r(0x96);
-  style->mutable_border_color()->set_g(0x96);
-  style->mutable_border_color()->set_b(0x96);
-
-  RendererStyle::TextStyle* shortcutStyle = style->add_text_styles();
-  shortcutStyle->set_font_size(12);
-  shortcutStyle->mutable_foreground_color()->set_r(0x77);
-  shortcutStyle->mutable_foreground_color()->set_g(0x77);
-  shortcutStyle->mutable_foreground_color()->set_b(0x77);
-  shortcutStyle->mutable_background_color()->set_r(0xf3);
-  shortcutStyle->mutable_background_color()->set_g(0xf4);
-  shortcutStyle->mutable_background_color()->set_b(0xff);
-  shortcutStyle->set_left_padding(6);
-  shortcutStyle->set_right_padding(6);
-
-  RendererStyle::TextStyle* gap1Style = style->add_text_styles();
-  gap1Style->set_font_size(12);
-
-  RendererStyle::TextStyle* candidateStyle = style->add_text_styles();
-  candidateStyle->set_font_size(15);
-
-  RendererStyle::TextStyle* descriptionStyle = style->add_text_styles();
-  descriptionStyle->set_font_size(11);
-  descriptionStyle->mutable_foreground_color()->set_r(0x88);
-  descriptionStyle->mutable_foreground_color()->set_g(0x88);
-  descriptionStyle->mutable_foreground_color()->set_b(0x88);
-  descriptionStyle->set_right_padding(10);
-
-  // We want to ensure that the candidate window is at least wide
-  // enough to render "そのほかの文字種  " as a candidate.
-  style->set_column_minimum_width_string("そのほかの文字種  ");
-
-  style->mutable_footer_style()->set_font_size(12);
-  style->mutable_footer_style()->set_left_padding(6);
-  style->mutable_footer_style()->set_right_padding(6);
-
-  RendererStyle::TextStyle* footer_sub_label_style =
-      style->mutable_footer_sub_label_style();
-  footer_sub_label_style->set_font_size(9);
-  footer_sub_label_style->mutable_foreground_color()->set_r(167);
-  footer_sub_label_style->mutable_foreground_color()->set_g(167);
-  footer_sub_label_style->mutable_foreground_color()->set_b(167);
-  footer_sub_label_style->set_left_padding(6);
-  footer_sub_label_style->set_right_padding(6);
-
-  RendererStyle::RGBAColor* color = style->add_footer_border_colors();
-  color->set_r(96);
-  color->set_g(96);
-  color->set_b(96);
-
-  style->mutable_footer_top_color()->set_r(0xff);
-  style->mutable_footer_top_color()->set_g(0xff);
-  style->mutable_footer_top_color()->set_b(0xff);
-
-  style->mutable_footer_bottom_color()->set_r(0xee);
-  style->mutable_footer_bottom_color()->set_g(0xee);
-  style->mutable_footer_bottom_color()->set_b(0xee);
-
-  style->set_logo_file_name("candidate_window_logo.tiff");
-
-  style->mutable_focused_background_color()->set_r(0xd1);
-  style->mutable_focused_background_color()->set_g(0xea);
-  style->mutable_focused_background_color()->set_b(0xff);
-
-  style->mutable_focused_border_color()->set_r(0x7f);
-  style->mutable_focused_border_color()->set_g(0xac);
-  style->mutable_focused_border_color()->set_b(0xdd);
-
-  style->mutable_scrollbar_background_color()->set_r(0xe0);
-  style->mutable_scrollbar_background_color()->set_g(0xe0);
-  style->mutable_scrollbar_background_color()->set_b(0xe0);
-
-  style->mutable_scrollbar_indicator_color()->set_r(0x75);
-  style->mutable_scrollbar_indicator_color()->set_g(0x90);
-  style->mutable_scrollbar_indicator_color()->set_b(0xb8);
-
-  RendererStyle::InfolistStyle* infostyle = style->mutable_infolist_style();
-  infostyle->set_caption_string("用例");
-  infostyle->set_caption_height(20);
-  infostyle->set_caption_padding(1);
-  infostyle->mutable_caption_style()->set_font_size(12);
-  infostyle->mutable_caption_style()->set_left_padding(2);
-  infostyle->mutable_caption_background_color()->set_r(0xec);
-  infostyle->mutable_caption_background_color()->set_g(0xf0);
-  infostyle->mutable_caption_background_color()->set_b(0xfa);
-
-  infostyle->set_window_border(1);
-  infostyle->set_row_rect_padding(2);
-  infostyle->set_window_width(300);
-  infostyle->mutable_title_style()->set_font_size(15);
-  infostyle->mutable_title_style()->set_left_padding(5);
-  infostyle->mutable_description_style()->set_font_size(12);
-  infostyle->mutable_description_style()->set_left_padding(15);
-
+  CHECK(mozc::protobuf::TextFormat::ParseFromString(kStyleTextProto, style));
   ApplyLightCandidateWindowTheme(style);
 }
 
@@ -289,20 +204,40 @@ void RendererStyleHandlerImpl::GetDefaultRendererStyle(RendererStyle* style) {
 bool RendererStyleHandler::GetRendererStyle(RendererStyle* style) {
   return GetRendererStyleHandlerImpl()->GetRendererStyle(style);
 }
+
 bool RendererStyleHandler::SetRendererStyle(const RendererStyle& style) {
   return GetRendererStyleHandlerImpl()->SetRendererStyle(style);
 }
+
 void RendererStyleHandler::GetDefaultRendererStyle(RendererStyle* style) {
   return GetRendererStyleHandlerImpl()->GetDefaultRendererStyle(style);
 }
 
 void RendererStyleHandler::ApplyCandidateWindowTheme(bool use_dark_mode,
                                                      RendererStyle* style) {
+  if (style == nullptr) {
+    return;
+  }
   if (use_dark_mode) {
     ApplyDarkCandidateWindowTheme(style);
   } else {
     ApplyLightCandidateWindowTheme(style);
   }
+}
+
+void RendererStyleHandler::ApplyCandidateRubyFont(
+    const std::string& font_name, RendererStyle* style) {
+  if (style == nullptr || font_name.empty()) {
+    return;
+  }
+
+  style->mutable_candidate_style()->set_font_name(font_name);
+  style->mutable_description_style()->set_font_name(font_name);
+
+  RendererStyle::InfolistStyle* infostyle = style->mutable_infolist_style();
+  infostyle->mutable_caption_style()->set_font_name(font_name);
+  infostyle->mutable_title_style()->set_font_name(font_name);
+  infostyle->mutable_description_style()->set_font_name(font_name);
 }
 
 }  // namespace renderer

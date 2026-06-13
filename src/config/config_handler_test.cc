@@ -70,6 +70,18 @@ class ConfigHandlerTest : public testing::TestWithTempUserProfile {
   std::string default_config_filename_;
 };
 
+void SetMozkeyInputDefaultsForTesting(Config* config) {
+  config->set_use_live_conversion(true);
+  config->set_use_direct_commit(true);
+  config->set_direct_commit_key(
+      Config::DIRECT_COMMIT_KUTEN |
+      Config::DIRECT_COMMIT_TOUTEN |
+      Config::DIRECT_COMMIT_QUESTION_MARK |
+      Config::DIRECT_COMMIT_EXCLAMATION_MARK |
+      Config::DIRECT_COMMIT_OPEN_BRACKET |
+      Config::DIRECT_COMMIT_CLOSE_BRACKET);
+}
+
 TEST_F(ConfigHandlerTest, SetConfig) {
   Config input;
   Config output;
@@ -87,29 +99,58 @@ TEST_F(ConfigHandlerTest, SetConfig) {
 #ifndef NDEBUG
   input.set_verbose_level(2);
 #endif  // NDEBUG
+  Config expected = input;
+  SetMozkeyInputDefaultsForTesting(&expected);
+
   ConfigHandler::SetConfig(input);
   output = ConfigHandler::GetCopiedConfig();
   config::Config output2 = ConfigHandler::GetCopiedConfig();
-  input.clear_general_config();
+  expected.clear_general_config();
   output.clear_general_config();
   output2.clear_general_config();
-  EXPECT_EQ(absl::StrCat(output), absl::StrCat(input));
-  EXPECT_EQ(absl::StrCat(output2), absl::StrCat(input));
+  EXPECT_EQ(absl::StrCat(output), absl::StrCat(expected));
+  EXPECT_EQ(absl::StrCat(output2), absl::StrCat(expected));
 
   ConfigHandler::GetDefaultConfig(&input);
   input.set_incognito_mode(false);
 #ifndef NDEBUG
   input.set_verbose_level(0);
 #endif  // NDEBUG
+  expected = input;
+  SetMozkeyInputDefaultsForTesting(&expected);
+
   ConfigHandler::SetConfig(input);
   output = ConfigHandler::GetCopiedConfig();
   output2 = ConfigHandler::GetCopiedConfig();
 
-  input.clear_general_config();
+  expected.clear_general_config();
   output.clear_general_config();
   output2.clear_general_config();
-  EXPECT_EQ(absl::StrCat(output), absl::StrCat(input));
-  EXPECT_EQ(absl::StrCat(output2), absl::StrCat(input));
+  EXPECT_EQ(absl::StrCat(output), absl::StrCat(expected));
+  EXPECT_EQ(absl::StrCat(output2), absl::StrCat(expected));
+}
+
+TEST_F(ConfigHandlerTest, NormalizeMozkeyInputDefaults) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "mozc_config_test_tmp");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+  ConfigHandler::Reload();
+
+  const Config output = ConfigHandler::GetCopiedConfig();
+
+  EXPECT_TRUE(output.use_live_conversion());
+  EXPECT_EQ(output.live_conversion_min_key_length(), 2);
+  EXPECT_TRUE(output.use_direct_commit());
+  EXPECT_EQ(
+      output.direct_commit_key(),
+      Config::DIRECT_COMMIT_KUTEN |
+          Config::DIRECT_COMMIT_TOUTEN |
+          Config::DIRECT_COMMIT_QUESTION_MARK |
+          Config::DIRECT_COMMIT_EXCLAMATION_MARK |
+          Config::DIRECT_COMMIT_OPEN_BRACKET |
+          Config::DIRECT_COMMIT_CLOSE_BRACKET);
 }
 
 TEST_F(ConfigHandlerTest, SetMetadata) {
@@ -243,6 +284,8 @@ TEST_F(ConfigHandlerTest, GetDefaultConfig) {
 #else   // __APPLE__ || OS_CHROMEOS
   EXPECT_EQ(output.session_keymap(), Config::MSIME);
 #endif  // __APPLE__ || OS_CHROMEOS
+
+  EXPECT_EQ(output.live_conversion_min_key_length(), 2);
   EXPECT_EQ(output.character_form_rules_size(), 13);
 
   struct TestCase {

@@ -31,15 +31,19 @@
 #include "gui/config_dialog/config_dialog.h"
 
 #include <QAbstractItemView>
+#include <QComboBox>
+#include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileDialog>
+#include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
@@ -103,6 +107,127 @@ void Connect(const QList<T *> &objects, const char *signal,
     QObject::connect(*itr, signal, receiver, slot);
   }
 }
+
+int FindComboBoxItemByData(QComboBox *combo_box, const QString &data) {
+  if (combo_box == nullptr) {
+    return -1;
+  }
+
+  for (int i = 0; i < combo_box->count(); ++i) {
+    if (combo_box->itemData(i).toString().compare(
+            data, Qt::CaseInsensitive) == 0) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+void AddComboBoxFontItemIfMissing(QComboBox *combo_box,
+                                  const QString &font_name) {
+  if (combo_box == nullptr || font_name.isEmpty()) {
+    return;
+  }
+
+  if (FindComboBoxItemByData(combo_box, font_name) < 0) {
+    combo_box->addItem(font_name, font_name);
+  }
+}
+
+void SetComboBoxCurrentFontNameOrAdd(QComboBox *combo_box,
+                                     const QString &font_name) {
+  if (combo_box == nullptr) {
+    return;
+  }
+
+  if (font_name.isEmpty()) {
+    const int default_index = FindComboBoxItemByData(combo_box, QString());
+    if (default_index >= 0) {
+      combo_box->setCurrentIndex(default_index);
+    }
+    return;
+  }
+
+  int index = FindComboBoxItemByData(combo_box, font_name);
+  if (index < 0) {
+    combo_box->addItem(font_name, font_name);
+    index = combo_box->count() - 1;
+  }
+
+  combo_box->setCurrentIndex(index);
+}
+
+bool FontFamilyExists(const QStringList &families, const QString &family) {
+  return families.contains(family, Qt::CaseInsensitive);
+}
+
+void InitializeCandidateRubyFontComboBox(QComboBox *combo_box) {
+  if (combo_box == nullptr) {
+    return;
+  }
+
+  combo_box->clear();
+
+  combo_box->setSizeAdjustPolicy(
+      QComboBox::AdjustToMinimumContentsLengthWithIcon);
+  combo_box->setMinimumContentsLength(18);
+  combo_box->setMinimumWidth(180);
+  combo_box->setMaximumWidth(280);
+
+  // Empty data means the platform/default font.
+  combo_box->addItem(
+      QCoreApplication::translate("ConfigDialog", "Default"),
+      QString());
+
+  QFontDatabase font_database;
+  const QStringList all_families = font_database.families();
+  const QStringList japanese_families =
+      font_database.families(QFontDatabase::Japanese);
+
+  QStringList font_families;
+
+  for (const QString &family : japanese_families) {
+    // Skip vertical font aliases such as "@Yu Gothic".
+    if (family.startsWith(QLatin1Char('@'))) {
+      continue;
+    }
+    if (!FontFamilyExists(font_families, family)) {
+      font_families.append(family);
+    }
+  }
+
+  // Some Japanese UI fonts may not be returned by the Japanese writing-system
+  // query on every environment.  Add known useful families if they exist, then
+  // sort the final list so users can find fonts by name.
+  const QStringList supplemental_families = {
+      QString::fromUtf8("BIZ UDPGothic"),
+      QString::fromUtf8("BIZ UDGothic"),
+      QString::fromUtf8("Meiryo"),
+      QString::fromUtf8("Meiryo UI"),
+      QString::fromUtf8("MS Gothic"),
+      QString::fromUtf8("MS PGothic"),
+      QString::fromUtf8("Noto Sans CJK JP"),
+      QString::fromUtf8("Noto Sans JP"),
+      QString::fromUtf8("Yu Gothic"),
+      QString::fromUtf8("Yu Gothic UI"),
+  };
+
+  for (const QString &family : supplemental_families) {
+    if (FontFamilyExists(all_families, family) &&
+        !FontFamilyExists(font_families, family)) {
+      font_families.append(family);
+    }
+  }
+
+  font_families.sort(Qt::CaseInsensitive);
+
+  for (const QString &family : font_families) {
+    AddComboBoxFontItemIfMissing(combo_box, family);
+  }
+
+  combo_box->setCurrentIndex(0);
+}
+
 }  // namespace
 
 namespace mozc {
@@ -116,10 +241,12 @@ void NotifyDisplayAttributeUpdate();
 
 ConfigDialog::ConfigDialog()
     : client_(client::ClientFactory::NewClient()),
+      initial_ime_hot_key_disabled_(false),
+      initial_startup_enabled_(false),
+      suppress_apply_button_update_(true),
       initial_preedit_method_(0),
       initial_use_keyboard_to_change_preedit_method_(false),
-      initial_use_mode_indicator_(true),
-      initial_use_dark_mode_candidate_window_(false) {
+      initial_use_mode_indicator_(true) {
   setupUi(this);
 
   // QScrollArea has its own viewport, and the viewport may paint a different
@@ -190,6 +317,10 @@ ConfigDialog::ConfigDialog()
   liveConversionDelaySpinBox->setSuffix(QString::fromUtf8(" ms"));
   liveConversionDelaySpinBox->setSpecialValueText(QString::fromUtf8("即時"));
 
+  liveConversionMinKeyLengthSpinBox->setRange(1, 20);
+  liveConversionMinKeyLengthSpinBox->setSingleStep(1);
+  liveConversionMinKeyLengthSpinBox->setSuffix(QString::fromUtf8(" 文字"));
+
   zenzLiveCorrectionDelaySpinBox->setRange(0, 5000);
   zenzLiveCorrectionDelaySpinBox->setSingleStep(100);
   zenzLiveCorrectionDelaySpinBox->setSuffix(QString::fromUtf8(" ms"));
@@ -198,6 +329,18 @@ ConfigDialog::ConfigDialog()
   zenzLiveCorrectionMinKeyLengthSpinBox->setRange(2, 20);
   zenzLiveCorrectionMinKeyLengthSpinBox->setSingleStep(1);
   zenzLiveCorrectionMinKeyLengthSpinBox->setSuffix(QString::fromUtf8(" 文字"));
+
+  zenzLiveCorrectionProfileLineEdit->setMaxLength(128);
+  zenzLiveCorrectionTopicLineEdit->setMaxLength(128);
+  zenzLiveCorrectionStyleLineEdit->setMaxLength(128);
+  zenzLiveCorrectionSettingsLineEdit->setMaxLength(128);
+
+  zenzLiveCorrectionRightContextLengthSpinBox->setRange(0, 128);
+  zenzLiveCorrectionRightContextLengthSpinBox->setSingleStep(1);
+  zenzLiveCorrectionRightContextLengthSpinBox->setSuffix(
+      QString::fromUtf8(" 文字"));
+  zenzLiveCorrectionRightContextLengthSpinBox->setSpecialValueText(
+      QString::fromUtf8("使わない"));
 
   punctuationsSettingComboBox->addItem(QString::fromUtf8("、。"));
   punctuationsSettingComboBox->addItem(QString::fromUtf8("，．"));
@@ -267,8 +410,11 @@ ConfigDialog::ConfigDialog()
   // Mode indicator is available only on Windows.
   useModeIndicator->hide();
 
-  // Candidate window dark mode is available only on Windows.
+  // Candidate/ruby appearance options are available only on Windows.
   useDarkModeCandidateWindow->hide();
+  candidateRubyFontLabel->hide();
+  candidateRubyFontComboBox->hide();
+  showLiveConversionRubyWindow->hide();
 
   // Preedit display color customization is available only on Windows TSF.
   preeditDisplayColorGroupBox->hide();
@@ -305,6 +451,9 @@ ConfigDialog::ConfigDialog()
                    SLOT(SelectLiveConversionSetting(int)));
   QObject::connect(zenzLiveCorrectionCheckBox, SIGNAL(stateChanged(int)), this,
                    SLOT(SelectZenzLiveCorrectionSetting(int)));
+  QObject::connect(zenzLiveCorrectionRightContextCheckBox,
+                   SIGNAL(stateChanged(int)), this,
+                   SLOT(SelectZenzRightContextSetting(int)));
   QObject::connect(useAutoConversion, SIGNAL(stateChanged(int)), this,
                    SLOT(SelectAutoConversionSetting(int)));
   QObject::connect(useDirectCommit, SIGNAL(stateChanged(int)), this,
@@ -348,14 +497,16 @@ ConfigDialog::ConfigDialog()
   QObject::connect(targetPreeditUnderlineColorCheckBox, SIGNAL(toggled(bool)),
                    targetPreeditUnderlineColorButton, SLOT(setEnabled(bool)));
 
-  // Event handlers to enable 'Apply' button.
-  Connect(findChildren<QPushButton *>(), SIGNAL(clicked()), this,
+  InitializeCandidateRubyFontComboBox(candidateRubyFontComboBox);
+
+  // Event handlers to update 'Apply' button state.
+  Connect(findChildren<QCheckBox *>(), SIGNAL(stateChanged(int)), this,
           SLOT(EnableApplyButton()));
-  Connect(findChildren<QCheckBox *>(), SIGNAL(clicked()), this,
+  Connect(findChildren<QComboBox *>(), SIGNAL(currentIndexChanged(int)), this,
           SLOT(EnableApplyButton()));
-  Connect(findChildren<QComboBox *>(), SIGNAL(activated(int)), this,
+  Connect(findChildren<QSpinBox *>(), SIGNAL(valueChanged(int)), this,
           SLOT(EnableApplyButton()));
-  Connect(findChildren<QSpinBox *>(), SIGNAL(editingFinished()), this,
+  Connect(findChildren<QLineEdit *>(), SIGNAL(textEdited(QString)), this,
           SLOT(EnableApplyButton()));
   // 'Apply' button is disabled on launching.
   configDialogButtonBox->button(QDialogButtonBox::Apply)->setEnabled(false);
@@ -400,6 +551,9 @@ ConfigDialog::ConfigDialog()
   IMEHotKeyDisabledCheckBox->setVisible(false);
 #endif  // _WIN32
 
+  RecordCurrentStateAsApplied();
+  suppress_apply_button_update_ = false;
+  EnableApplyButton();
 }
 
 bool ConfigDialog::SetConfig(const config::Config &config) {
@@ -436,18 +590,16 @@ void ConfigDialog::Reload() {
     QMessageBox::critical(this, windowTitle(),
                           tr("Failed to get current config values."));
   }
-  ConvertFromProto(config);
 
-  SelectLiveConversionSetting(
-      static_cast<int>(liveConversionCheckBox->isChecked()));
-  SelectAutoConversionSetting(static_cast<int>(useAutoConversion->isChecked()));
-  SelectDirectCommitSetting(static_cast<int>(useDirectCommit->isChecked()));
+  const bool was_suppressed = suppress_apply_button_update_;
+  suppress_apply_button_update_ = true;
+  ConvertFromProto(config);
+  UpdateDependentControls();
+  suppress_apply_button_update_ = was_suppressed;
   initial_preedit_method_ = static_cast<int>(config.preedit_method());
   initial_use_keyboard_to_change_preedit_method_ =
       config.use_keyboard_to_change_preedit_method();
   initial_use_mode_indicator_ = config.use_mode_indicator();
-  initial_use_dark_mode_candidate_window_ =
-      config.use_dark_mode_candidate_window();
 
   initial_use_custom_preedit_text_color_ =
       config.use_custom_preedit_text_color();
@@ -496,10 +648,6 @@ bool ConfigDialog::Update() {
 
   const bool use_mode_indicator_changed =
       (initial_use_mode_indicator_ != config.use_mode_indicator());
-
-  const bool use_dark_mode_candidate_window_changed =
-      (initial_use_dark_mode_candidate_window_ !=
-       config.use_dark_mode_candidate_window());
 
   const bool preedit_display_color_changed =
       initial_use_custom_preedit_text_color_ !=
@@ -550,15 +698,6 @@ bool ConfigDialog::Update() {
     initial_use_mode_indicator_ = config.use_mode_indicator();
   }
 
-  if (use_dark_mode_candidate_window_changed) {
-    QMessageBox::information(
-        this, windowTitle(),
-        tr("Candidate window and ruby overlay dark mode setting is enabled from"
-           " new applications."));
-    initial_use_dark_mode_candidate_window_ =
-        config.use_dark_mode_candidate_window();
-  }
-
   if (preedit_display_color_changed) {
     NotifyDisplayAttributeUpdate();
 
@@ -596,6 +735,7 @@ bool ConfigDialog::Update() {
     // in almost all cases.
     // TODO(taku): better to show dialog?
     LOG(ERROR) << "Failed to update IME HotKey status";
+    return false;
   }
 #endif  // _WIN32
 
@@ -610,6 +750,10 @@ bool ConfigDialog::Update() {
     }
   }
 #endif  // __APPLE__
+
+  base_config_ = config;
+  RecordCurrentStateAsApplied();
+  EnableApplyButton();
 
   return true;
 }
@@ -641,11 +785,16 @@ static constexpr int kPreeditMethodSize = 2;
 
 constexpr uint32_t kDefaultLiveConversionDelayMsec = 228;
 constexpr uint32_t kMaxLiveConversionDelayMsec = 1000;
+constexpr uint32_t kDefaultLiveConversionMinKeyLength = 2;
+constexpr uint32_t kMinLiveConversionMinKeyLength = 1;
+constexpr uint32_t kMaxLiveConversionMinKeyLength = 20;
 constexpr uint32_t kDefaultZenzLiveCorrectionDelayMsec = 1000;
 constexpr uint32_t kMaxZenzLiveCorrectionDelayMsec = 5000;
 constexpr uint32_t kDefaultZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kMinZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kMaxZenzLiveCorrectionMinKeyLength = 20;
+constexpr uint32_t kDefaultZenzLiveCorrectionRightContextLength = 10;
+constexpr uint32_t kMaxZenzLiveCorrectionRightContextLength = 128;
 
 constexpr uint32_t kDefaultInputPreeditTextColor = 0xff5000;
 constexpr uint32_t kDefaultInputPreeditBackgroundColor = 0xffffcc;
@@ -1327,6 +1476,19 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
                      0u,
                      kMaxLiveConversionDelayMsec)));
 
+  const uint32_t live_conversion_min_key_length =
+      config.has_live_conversion_min_key_length()
+          ? config.live_conversion_min_key_length()
+          : kDefaultLiveConversionMinKeyLength;
+  liveConversionMinKeyLengthSpinBox->setValue(
+      static_cast<int>(
+          std::clamp(live_conversion_min_key_length,
+                     kMinLiveConversionMinKeyLength,
+                     kMaxLiveConversionMinKeyLength)));
+
+  SET_CHECKBOX(showLiveConversionRubyWindow,
+               show_live_conversion_ruby_window);
+
   SET_CHECKBOX(zenzLiveCorrectionCheckBox, use_zenz_live_correction);
 
   const uint32_t zenz_live_correction_delay_msec =
@@ -1348,6 +1510,30 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
           std::clamp(zenz_live_correction_min_key_length,
                      kMinZenzLiveCorrectionMinKeyLength,
                      kMaxZenzLiveCorrectionMinKeyLength)));
+
+  zenzLiveCorrectionProfileLineEdit->setText(
+      ToQString(config.zenz_live_correction_profile()));
+  zenzLiveCorrectionTopicLineEdit->setText(
+      ToQString(config.zenz_live_correction_topic()));
+  zenzLiveCorrectionStyleLineEdit->setText(
+      ToQString(config.zenz_live_correction_style()));
+  zenzLiveCorrectionSettingsLineEdit->setText(
+      ToQString(config.zenz_live_correction_settings()));
+
+  SET_CHECKBOX(zenzLiveCorrectionRightContextCheckBox,
+               use_zenz_live_correction_right_context);
+  const uint32_t zenz_live_correction_right_context_length =
+      config.has_zenz_live_correction_right_context_length()
+          ? config.zenz_live_correction_right_context_length()
+          : kDefaultZenzLiveCorrectionRightContextLength;
+  zenzLiveCorrectionRightContextLengthSpinBox->setValue(
+      static_cast<int>(
+          std::clamp(zenz_live_correction_right_context_length,
+                     0u,
+                     kMaxZenzLiveCorrectionRightContextLength)));
+
+  SelectZenzLiveCorrectionSetting(
+      static_cast<int>(zenzLiveCorrectionCheckBox->isChecked()));
 
   SET_CHECKBOX(zenzFeedbackLearningCheckBox, use_zenz_feedback_learning);
 
@@ -1397,6 +1583,10 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   SET_CHECKBOX(useModeIndicator, use_mode_indicator);
 
   SET_CHECKBOX(useDarkModeCandidateWindow, use_dark_mode_candidate_window);
+
+  SetComboBoxCurrentFontNameOrAdd(
+      candidateRubyFontComboBox,
+      QString::fromUtf8(config.candidate_ruby_font_name().c_str()));
 
   SET_CHECKBOX(inputPreeditTextColorCheckBox, use_custom_preedit_text_color);
   SetColorButton(inputPreeditTextColorButton, config.preedit_text_color());
@@ -1508,6 +1698,10 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   GET_CHECKBOX(liveConversionCheckBox, use_live_conversion);
   config->set_live_conversion_delay_msec(
       static_cast<uint32_t>(liveConversionDelaySpinBox->value()));
+  config->set_live_conversion_min_key_length(
+      static_cast<uint32_t>(liveConversionMinKeyLengthSpinBox->value()));
+  GET_CHECKBOX(showLiveConversionRubyWindow,
+               show_live_conversion_ruby_window);
 
   GET_CHECKBOX(zenzLiveCorrectionCheckBox, use_zenz_live_correction);
   config->set_zenz_live_correction_delay_msec(
@@ -1515,6 +1709,19 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   config->set_zenz_live_correction_min_key_length(
       static_cast<uint32_t>(
           zenzLiveCorrectionMinKeyLengthSpinBox->value()));
+  config->set_zenz_live_correction_profile(
+      zenzLiveCorrectionProfileLineEdit->text().toUtf8().constData());
+  config->set_zenz_live_correction_topic(
+      zenzLiveCorrectionTopicLineEdit->text().toUtf8().constData());
+  config->set_zenz_live_correction_style(
+      zenzLiveCorrectionStyleLineEdit->text().toUtf8().constData());
+  config->set_zenz_live_correction_settings(
+      zenzLiveCorrectionSettingsLineEdit->text().toUtf8().constData());
+  GET_CHECKBOX(zenzLiveCorrectionRightContextCheckBox,
+               use_zenz_live_correction_right_context);
+  config->set_zenz_live_correction_right_context_length(
+      static_cast<uint32_t>(
+          zenzLiveCorrectionRightContextLengthSpinBox->value()));
 
   GET_CHECKBOX(zenzFeedbackLearningCheckBox, use_zenz_feedback_learning);
 
@@ -1525,6 +1732,14 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   GET_CHECKBOX(useModeIndicator, use_mode_indicator);
 
   GET_CHECKBOX(useDarkModeCandidateWindow, use_dark_mode_candidate_window);
+
+  const QString font_name =
+      candidateRubyFontComboBox->currentData().toString().trimmed();
+  if (!font_name.isEmpty()) {
+    config->set_candidate_ruby_font_name(font_name.toUtf8().constData());
+  } else {
+    config->clear_candidate_ruby_font_name();
+  }
 
   GET_CHECKBOX(inputPreeditTextColorCheckBox,
               use_custom_preedit_text_color);
@@ -1765,6 +1980,7 @@ void ConfigDialog::EditKeymap() {
     custom_keymap_table_ = output;
     // set keymapSettingComboBox to "Custom keymap"
     keymapSettingComboBox->setCurrentIndex(0);
+    EnableApplyButton();
   }
 }
 
@@ -1772,6 +1988,7 @@ void ConfigDialog::EditRomanTable() {
   std::string output;
   if (gui::RomanTableEditorDialog::Show(this, custom_roman_table_, &output)) {
     custom_roman_table_ = output;
+    EnableApplyButton();
   }
 }
 
@@ -1785,6 +2002,9 @@ void ConfigDialog::SelectLiveConversionSetting(int state) {
 
   liveConversionDelayLabel->setEnabled(enabled);
   liveConversionDelaySpinBox->setEnabled(enabled);
+  liveConversionMinKeyLengthLabel->setEnabled(enabled);
+  liveConversionMinKeyLengthSpinBox->setEnabled(enabled);
+  showLiveConversionRubyWindow->setEnabled(enabled);
 
   zenzLiveCorrectionCheckBox->setEnabled(enabled);
   SelectZenzLiveCorrectionSetting(
@@ -1799,7 +2019,29 @@ void ConfigDialog::SelectZenzLiveCorrectionSetting(int state) {
   zenzLiveCorrectionDelaySpinBox->setEnabled(enabled);
   zenzLiveCorrectionMinKeyLengthLabel->setEnabled(enabled);
   zenzLiveCorrectionMinKeyLengthSpinBox->setEnabled(enabled);
+  zenzLiveCorrectionProfileLabel->setEnabled(enabled);
+  zenzLiveCorrectionProfileLineEdit->setEnabled(enabled);
+  zenzLiveCorrectionTopicLabel->setEnabled(enabled);
+  zenzLiveCorrectionTopicLineEdit->setEnabled(enabled);
+  zenzLiveCorrectionStyleLabel->setEnabled(enabled);
+  zenzLiveCorrectionStyleLineEdit->setEnabled(enabled);
+  zenzLiveCorrectionSettingsLabel->setEnabled(enabled);
+  zenzLiveCorrectionSettingsLineEdit->setEnabled(enabled);
+  zenzLiveCorrectionRightContextCheckBox->setEnabled(enabled);
+  SelectZenzRightContextSetting(
+      enabled ? static_cast<int>(
+                    zenzLiveCorrectionRightContextCheckBox->isChecked())
+              : 0);
   zenzFeedbackLearningCheckBox->setEnabled(enabled);
+}
+
+void ConfigDialog::SelectZenzRightContextSetting(int state) {
+  const bool enabled = liveConversionCheckBox->isChecked() &&
+                       zenzLiveCorrectionCheckBox->isChecked() &&
+                       static_cast<bool>(state);
+
+  zenzLiveCorrectionRightContextLengthLabel->setEnabled(enabled);
+  zenzLiveCorrectionRightContextLengthSpinBox->setEnabled(enabled);
 }
 
 void ConfigDialog::SelectAutoConversionSetting(int state) {
@@ -1858,7 +2100,12 @@ void ConfigDialog::ResetToDefaults() {
                             QMessageBox::Cancel)) {
     // TODO(taku): remove the dependency to config::ConfigHandler
     // nice to have GET_DEFAULT_CONFIG command
+    const bool was_suppressed = suppress_apply_button_update_;
+    suppress_apply_button_update_ = true;
     ConvertFromProto(config::ConfigHandler::DefaultConfig());
+    UpdateDependentControls();
+    suppress_apply_button_update_ = was_suppressed;
+    EnableApplyButton();
   }
 }
 
@@ -1936,8 +2183,62 @@ void ConfigDialog::RestorePreviousDefaultImeSetting() {
 #endif  // _WIN32
 }
 
+void ConfigDialog::UpdateDependentControls() {
+  SelectInputModeSetting(inputModeComboBox->currentIndex());
+  SelectLiveConversionSetting(
+      static_cast<int>(liveConversionCheckBox->isChecked()));
+  SelectAutoConversionSetting(static_cast<int>(useAutoConversion->isChecked()));
+  SelectDirectCommitSetting(static_cast<int>(useDirectCommit->isChecked()));
+  SelectSuggestionSetting(
+      static_cast<int>(historySuggestCheckBox->isChecked() ||
+                       dictionarySuggestCheckBox->isChecked() ||
+                       realtimeConversionCheckBox->isChecked()));
+}
+
+void ConfigDialog::RecordCurrentStateAsApplied() {
+  ConvertToProto(&last_applied_config_);
+
+#ifdef _WIN32
+  initial_ime_hot_key_disabled_ = IMEHotKeyDisabledCheckBox->isChecked();
+#endif  // _WIN32
+
+#ifdef __APPLE__
+  initial_startup_enabled_ = startupCheckBox->isChecked();
+#endif  // __APPLE__
+}
+
+bool ConfigDialog::IsModified() const {
+  config::Config current_config;
+  ConvertToProto(&current_config);
+
+  if (current_config.SerializeAsString() !=
+      last_applied_config_.SerializeAsString()) {
+    return true;
+  }
+
+#ifdef _WIN32
+  if (IMEHotKeyDisabledCheckBox->isChecked() !=
+      initial_ime_hot_key_disabled_) {
+    return true;
+  }
+#endif  // _WIN32
+
+#ifdef __APPLE__
+  if (startupCheckBox->isChecked() != initial_startup_enabled_) {
+    return true;
+  }
+#endif  // __APPLE__
+
+  return false;
+}
+
 void ConfigDialog::EnableApplyButton() {
-  configDialogButtonBox->button(QDialogButtonBox::Apply)->setEnabled(true);
+  if (suppress_apply_button_update_) {
+    return;
+  }
+
+  configDialogButtonBox->button(QDialogButtonBox::Apply)
+      ->setEnabled(IsModified());
 }
 
 // Catch MouseButtonRelease event to toggle the CheckBoxes

@@ -45,8 +45,11 @@ FUNCTION_PHRASE_GUARDS = (
     ("では", "では", "で", "は"),
     ("とは", "とは", "と", "は"),
     ("にも", "にも", "に", "も"),
+    ("にまで", "にまで", "に", "まで"),
     ("でも", "でも", "で", "も"),
     ("よりも", "よりも", "より", "も"),
+    ("までに", "までに", "まで", "に"),
+    ("までも", "までも", "まで", "も"),
     ("について", "について", "に", "て"),
     ("として", "として", "と", "て"),
 )
@@ -62,6 +65,42 @@ SEEDED_PREFIX_GUARDS = (
 
     # Secondary useful variant.
     ("にわける", "に別ける", "に", "わける"),
+
+    # Fix:
+    #   になったりします -> 担ったりします
+    # Keep the grammar boundary between the particle に and なったり...
+    ("になったり", "になったり", "に", "なったり"),
+    ("になったりする", "になったりする", "に", "なったりする"),
+    ("になったりします", "になったりします", "に", "なったりします"),
+    ("になったりして", "になったりして", "に", "なったりして"),
+    ("になったりした", "になったりした", "に", "なったりした"),
+
+    # Fix:
+    #   になってしまいます -> 担ってしまいます
+    # Keep the grammar boundary between the particle に and the auxiliary-like
+    # なってしま... sequence.  Do not add bare になって here; it can legitimately
+    # compete with 担って.  Guard only longer constructions where the functional
+    # phrase reading is much more likely.
+    ("になってしま", "になってしま", "に", "なってしま"),
+    ("になってしまう", "になってしまう", "に", "なってしまう"),
+    ("になってしまい", "になってしまい", "に", "なってしまい"),
+    ("になってしまいます", "になってしまいます", "に", "なってしまいます"),
+    ("になってしまいました", "になってしまいました", "に", "なってしまいました"),
+    ("になってしまっ", "になってしまっ", "に", "なってしまっ"),
+    ("になってしまった", "になってしまった", "に", "なってしまった"),
+    ("になってしまって", "になってしまって", "に", "なってしまって"),
+    ("になってしまえば", "になってしまえば", "に", "なってしまえば"),
+    ("になってしまわ", "になってしまわ", "に", "なってしまわ"),
+    ("になってしまわない", "になってしまわない", "に", "なってしまわない"),
+    ("になってしまわず", "になってしまわず", "に", "なってしまわず"),
+
+    # Colloquial contraction of になってしま...
+    ("になっちゃ", "になっちゃ", "に", "なっちゃ"),
+    ("になっちゃう", "になっちゃう", "に", "なっちゃう"),
+    ("になっちゃい", "になっちゃい", "に", "なっちゃい"),
+    ("になっちゃいます", "になっちゃいます", "に", "なっちゃいます"),
+    ("になっちゃった", "になっちゃった", "に", "なっちゃった"),
+    ("になっちゃって", "になっちゃって", "に", "なっちゃって"),
 )
 
 SEEDED_FIXED_GUARDS = (
@@ -82,6 +121,393 @@ SEEDED_FIXED_GUARDS = (
     # Fix:
     # もとにもどして -> 下に戻して
     ("もとにもどして", "元に戻して", "に", "もどして"),
+
+    # Fix:
+    # とうちたいのに -> 統治体の二
+    ("とうちたいのに", "と打ちたいのに", "と", "のに"),
+
+    # Fix:
+    # したほうが... -> 下ほうが... / 下方が...
+    # 方が is a formal-noun + case-particle construction following a verbal
+    # expression.  Guard this grammar boundary once, so it can connect to many
+    # following predicates such as いい, 悪い, 早い, 自然, 安全, and マシ.
+    # Do not make bare した too cheap; keep the rescue at the longer
+    # functional boundary.
+    ("したほうが", "した方が", "した", "が"),
+
+    # Fix:
+    # したにもかかわらず -> 下にもかかわらず
+    # にもかかわらず is a concessive functional expression.  In this full
+    # sequence, verbal した is overwhelmingly more natural than noun 下.
+    ("したにもかかわらず", "したにもかかわらず", "した", "ず"),
+)
+
+DIRECT_FIXED_GUARDS = (
+    # Idiom rescue:
+    # 肌身離さず is a fixed idiomatic expression.  This is not a broad
+    # syntax-boundary guard; keep it explicit so generation remains
+    # reproducible without depending on whether component entries exist.
+    ("はだみはなさ", 1851, 1851, 3600, "肌身離さ", "direct_idiom_guard"),
+    ("はだみはなさず", 1851, 1851, 3600, "肌身離さず", "direct_idiom_guard"),
+
+)
+
+# Direct kana entries for completed expressive words.
+#
+# These entries are intentionally dictionary candidates, not session-level
+# live-conversion suppressors.  This lets the default output rescue natural
+# hiragana forms while still allowing user history / user dictionary entries
+# such as ウッソ, クッソ, ヤッバ, etc. to win after explicit selection.
+#
+# Use conservative costs close to the existing hiragana mimetic rescue entries:
+# cheap enough to beat pathological kanji segmentation, but not so cheap that
+# user-learned katakana spellings become unreachable.
+DEFAULT_EXPRESSIVE_KANA_GUARD_COSTS = (
+    (12, 12, 4300),
+    (1841, 1841, 6200),
+)
+
+# These forms strongly compete with common katakana loanword candidates such as
+# エッグ.  Keep them as dictionary candidates, not session suppressions, but make
+# the default hiragana rescue slightly stronger than the generic expressive
+# kana guards.
+STRONG_EXPRESSIVE_KANA_GUARD_COSTS = (
+    (12, 12, 3600),
+    (1841, 1841, 5600),
+)
+
+# Some expressive spellings compete with very strong ordinary dictionary
+# entries after the converter normalizes or approximates repeated small っ.
+# Keep these as dictionary candidates rather than session suppressions, but make
+# the kana rescue strong enough to beat the ordinary homophone path.
+EXTRA_STRONG_EXPRESSIVE_KANA_GUARD_COSTS = (
+    (12, 12, 2600),
+    (1841, 1841, 4600),
+)
+
+EXPRESSIVE_KANA_COST_OVERRIDES = {
+    "えっぐ": STRONG_EXPRESSIVE_KANA_GUARD_COSTS,
+    "えっっぐ": STRONG_EXPRESSIVE_KANA_GUARD_COSTS,
+    "えっぐい": STRONG_EXPRESSIVE_KANA_GUARD_COSTS,
+    "えっっぐい": STRONG_EXPRESSIVE_KANA_GUARD_COSTS,
+
+    # Do not add bare あっか because it strongly conflicts with 悪化.  Only the
+    # explicitly emphasized double-促音 spelling is rescued here.
+    "あっっか": EXTRA_STRONG_EXPRESSIVE_KANA_GUARD_COSTS,
+}
+
+
+def make_direct_expressive_kana_guards(*surface_groups):
+    surfaces = []
+    seen = set()
+    for group in surface_groups:
+        for surface in group:
+            if surface in seen:
+                continue
+            seen.add(surface)
+            surfaces.append(surface)
+
+    guards = []
+    for surface in surfaces:
+        for lid, rid, cost in EXPRESSIVE_KANA_COST_OVERRIDES.get(
+            surface, DEFAULT_EXPRESSIVE_KANA_GUARD_COSTS
+        ):
+            guards.append(
+                (surface, lid, rid, cost, surface, "direct_expressive_kana_guard")
+            )
+    return tuple(guards)
+
+
+# Short utterances and particles are intentionally kept as plain dictionary
+# candidates here, not as hard session-level suppressions.  Some of these are
+# short and ambiguous, but adding a kana candidate is still less invasive than
+# preventing the converter, user history, and user dictionary from participating.
+EXPRESSIVE_KANA_SHORT_UTTERANCE_SURFACES = (
+    "ふん",
+    "ふんっ",
+    "ふんっっ",
+    "ふんっっっー",
+    "ふむ",
+    "ふむっ",
+    "はて",
+    "ほう",
+    "ほうっっ",
+    "ちっ",
+    "ちぇっ",
+    "くそ",
+    "よう",
+    "ほっ",
+    "ふう",
+    "いてっ",
+    "ぎゃっ",
+    "ひゃっ",
+    "はいはい",
+    "ほい",
+    "ほいっ",
+    "ほいっっ",
+    "ほいほい",
+    "ほいほいっ",
+    "へい",
+    "へいっ",
+    "へいっっ",
+    "しゃっ",
+    "しゃっっ",
+    "しゃっー",
+    "てへ",
+    "てへっ",
+    "てへっっ",
+    "ええ",
+    "えぇ",
+    "ぇぇ",
+    "えぇぇ",
+    "えぇー",
+)
+
+
+EXPRESSIVE_KANA_MIMETIC_SURFACES = (
+    "くちゃ",
+    "くちょ",
+    "ぐちょ",
+    "ぐちょっ",
+    "ぐちょっっ",
+    "ぐちょぐちょ",
+    "ぐちょぐちょっ",
+    "ぐちょっと",
+    "どろっ",
+    "どろっっ",
+    "どろっー",
+    "どろどろ",
+    "どろどろっ",
+    "とろっ",
+    "とろっっ",
+    "とろっー",
+    "さわっ",
+    "さわっっ",
+    "さわっー",
+    "つるっ",
+    "つるっっ",
+    "つるっー",
+    "つるつる",
+    "つるつるっ",
+)
+
+
+EXPRESSIVE_KANA_CASUAL_GREETING_SURFACES = (
+    "ちっす",
+    "ちっっす",
+    "ちーっす",
+    "ちぃーっす",
+    "ちぃーーっす",
+    "ちーっすー",
+    "ちょっす",
+    "ちょーっす",
+    "ちょーっすー",
+    "ちょりっす",
+    "ちょりーっす",
+    "ちょりーっすー",
+)
+
+
+EXPRESSIVE_KANA_UHYO_UHYA_SURFACES = (
+    "うひょ",
+    "うひょー",
+    "うひょーん",
+    "うっひょ",
+    "うっひょー",
+    "うっひょーん",
+    "うっっひょ",
+    "うっっひょーん",
+    "うひゃ",
+    "うひゃー",
+    "うひゃ～",
+    "うひゃーん",
+    "うっひゃ",
+    "うっひゃー",
+    "うっひゃーん",
+    "うっっひゃ",
+    "うっっひゃーん",
+    "ほほう",
+    "ほっほーん",
+)
+
+
+EXPRESSIVE_KANA_USO_KUSO_SURFACES = (
+    "うっそ",
+    "うっそー",
+    "うっそん",
+    "うっっそ",
+    "うっっっそーん",
+    "くっそ",
+    "くっそー",
+    "くっっそ",
+    "くっっっそー",
+)
+
+
+EXPRESSIVE_KANA_EVALUATIVE_SLANG_SURFACES = (
+    "やっば",
+    "やっっばい",
+    "やっべぇ",
+    "やっっべー",
+    "すっご",
+    "すっっごい",
+    "すっげぇ",
+    "すっっげー",
+    "すっくな",
+    "すっっくない",
+    "すっくね",
+    "すっっくねぇ",
+    "すっくねえ",
+    "すっくねー",
+    "すっぱ",
+    "すっっぱ",
+    "すっっっぱ",
+    "すっぱー",
+    "すっっぱー",
+    "すっぺぇ",
+    "すっっぺー",
+    "こっわ",
+    "こっっわい",
+    "つっよ",
+    "つっっよい",
+    "つっら",
+    "つっっらい",
+    "つっれぇ",
+    "つっっれー",
+    "でっか",
+    "でっっかい",
+    "なっが",
+    "なっっがい",
+    "たっか",
+    "たっっかい",
+    "たっけぇ",
+    "たっっけー",
+    "ちっさ",
+    "ちっっさい",
+    "ちっちゃ",
+    "ちっっちゃい",
+    "ちっせぇ",
+    "ちっっせー",
+    "ひっく",
+    "ひっっくい",
+    "ひっろ",
+    "ひっっろい",
+    "さっむ",
+    "さっっむい",
+    "さっみぃ",
+    "さっみい",
+    "さっっみー",
+    "さっっみい",
+    "あっつ",
+    "あっっつい",
+    "あっちぃ",
+    "あっちい",
+    "あっっちー",
+    "あっっちい",
+    "あっっか",
+    "うっま",
+    "うっっまい",
+    "うっめぇ",
+    "うっっめー",
+    "うっざ",
+    "うっっざい",
+    "うっぜぇ",
+    "うっっぜー",
+    "うっす",
+    "うっっすい",
+    "かっる",
+    "かっっるい",
+    "きっつ",
+    "きっっつい",
+    "きっちぃ",
+    "きっっちー",
+    "きっも",
+    "きっっもい",
+    "きっれい",
+    "きっっれい",
+    "だっる",
+    "だっっるい",
+    "だっりぃ",
+    "だっっりー",
+    "だっさ",
+    "だっっさい",
+    "だっせぇ",
+    "だっっせー",
+    "えっぐ",
+    "えっっぐ",
+    "えっぐい",
+    "えっっぐい",
+    "くっさ",
+    "くっっさい",
+    "くっせ",
+    "くっっせ",
+    "くっせぇ",
+    "くっっせー",
+    "くっろ",
+    "くっっろい",
+    "まっぶし",
+    "まっっぶしい",
+    "おっも",
+    "おっっもい",
+    "おっそ",
+    "おっっそい",
+    "はっや",
+    "はっっやい",
+    "めっちゃ",
+    "めっっちゃ",
+    "もっと",
+    "もっっと",
+    "もっっっと",
+    "もっとー",
+    "もっっとー",
+    "ねっむ",
+    "ねっっむい",
+    "ほっそ",
+    "ほっっそい",
+    "せっま",
+    "せっっまい",
+    "みっじか",
+    "みっっじかい",
+    "しっろ",
+    "しっっろい",
+)
+
+
+# Surprise / wonder interjections such as ほえー and ほぇ～.
+#
+# Do not add bare ほえ here because it can compete with 吠え.  Add only clearly
+# expressive forms with vowel reduction, prolongation, or decorative tails.
+#
+# Keep both ～ U+FF5E and 〜 U+301C variants.  They are visually similar but can
+# appear through different input paths, and direct guards are written as literal
+# dictionary entries.
+EXPRESSIVE_KANA_HOE_SURFACES = (
+    "ほえー",
+    "ほえ～",
+    "ほぇ",
+    "ほぇー",
+    "ほぇ～",
+    "ほえぇ",
+    "ほえぇー",
+    "ほえぇ～",
+    "ほぇぇ",
+    "ほぇぇー",
+    "ほぇぇ～",
+    "ほえ〜",
+    "ほぇ〜",
+    "ほえぇ〜",
+    "ほぇぇ〜",
+)
+
+
+DIRECT_EXPRESSIVE_KANA_GUARDS = make_direct_expressive_kana_guards(
+    EXPRESSIVE_KANA_SHORT_UTTERANCE_SURFACES,
+    EXPRESSIVE_KANA_MIMETIC_SURFACES,
+    EXPRESSIVE_KANA_CASUAL_GREETING_SURFACES,
+    EXPRESSIVE_KANA_UHYO_UHYA_SURFACES,
+    EXPRESSIVE_KANA_USO_KUSO_SURFACES,
+    EXPRESSIVE_KANA_EVALUATIVE_SLANG_SURFACES,
+    EXPRESSIVE_KANA_HOE_SURFACES,
 )
 
 DANGEROUS_READING_SUFFIXES = (
@@ -418,6 +844,54 @@ def make_seeded_fixed_guard(
     )
 
 
+def make_direct_fixed_guard(
+    key: str,
+    lid: int,
+    rid: int,
+    cost: int,
+    value: str,
+    reason: str,
+) -> GuardEntry:
+    return GuardEntry(
+        key=key,
+        lid=lid,
+        rid=rid,
+        cost=cost,
+        value=value,
+        reason=reason,
+        source_key=key,
+        source_value=value,
+        collision_value="",
+    )
+
+
+SEEDED_PREFIX_GUARD_COST_OVERRIDES = {
+    # These guards compete with strong ordinary verb candidates such as
+    # 担ってしまいます. Keep the left id inherited from the particle に so the
+    # guard still prefers noun/adjectival contexts before に, but make the guard
+    # cost strong enough to beat the content-verb path in 名詞 + になってしま...
+    # constructions.
+    "になってしま": 2400,
+    "になってしまう": 2400,
+    "になってしまい": 2400,
+    "になってしまいます": 2400,
+    "になってしまいました": 2400,
+    "になってしまっ": 2400,
+    "になってしまった": 2400,
+    "になってしまって": 2400,
+    "になってしまえば": 2400,
+    "になってしまわ": 2400,
+    "になってしまわない": 2400,
+    "になってしまわず": 2400,
+    "になっちゃ": 2400,
+    "になっちゃう": 2400,
+    "になっちゃい": 2400,
+    "になっちゃいます": 2400,
+    "になっちゃった": 2400,
+    "になっちゃって": 2400,
+}
+
+
 def generate_guards(
     entries: list[Entry],
     max_source_cost: int,
@@ -537,7 +1011,9 @@ def generate_guards(
             source_key=source_key,
             prefix_entry=prefix_entry,
             fallback_right_entry=fallback_right_entry,
-            guard_cost=prefix_guard_cost,
+            guard_cost=SEEDED_PREFIX_GUARD_COST_OVERRIDES.get(
+                key, prefix_guard_cost
+            ),
         )
 
         signature = (guard.key, guard.lid, guard.rid, guard.value)
@@ -573,6 +1049,25 @@ def generate_guards(
         seen.add(signature)
         guards.append(guard)
         stats["seeded_fixed_guards"] += 1
+
+    for key, lid, rid, cost, value, reason in (
+        DIRECT_FIXED_GUARDS + DIRECT_EXPRESSIVE_KANA_GUARDS
+    ):
+        guard = make_direct_fixed_guard(
+            key=key,
+            lid=lid,
+            rid=rid,
+            cost=cost,
+            value=value,
+            reason=reason,
+        )
+        signature = (guard.key, guard.lid, guard.rid, guard.value)
+        if signature in seen:
+            stats["duplicate_guard"] += 1
+            continue
+        seen.add(signature)
+        guards.append(guard)
+        stats[reason] += 1
 
     guards.sort(key=lambda e: (e.key, e.value, e.lid, e.rid, e.cost))
 

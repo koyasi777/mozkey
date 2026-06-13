@@ -282,12 +282,22 @@ bool SessionHandlerTool::EvalCommandInternal(commands::Input* input,
   // command.
   if (result && allow_callback && command.output().has_callback() &&
       command.output().callback().has_session_command()) {
-    commands::Input input2;
-    input2.set_type(commands::Input::SEND_COMMAND);
-    *input2.mutable_command() = command.output().callback().session_command();
-    input2.mutable_command()->set_text(callback_text_);
-    // Disallow further recursion.
-    result = EvalCommandInternal(&input2, output, false);
+    const commands::SessionCommand& callback_command =
+        command.output().callback().session_command();
+
+    // RECONVERT_SELECTION_OR_INSERT_SPACE is handled by TSF because it needs
+    // application-side selected text.  Do not replay it as a server-side
+    // SEND_COMMAND here; otherwise the fallback InsertSpace output would be
+    // overwritten.
+    if (callback_command.type() !=
+        commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE) {
+      commands::Input input2;
+      input2.set_type(commands::Input::SEND_COMMAND);
+      *input2.mutable_command() = callback_command;
+      input2.mutable_command()->set_text(callback_text_);
+      // Disallow further recursion.
+      result = EvalCommandInternal(&input2, output, false);
+    }
   }
   callback_text_.clear();
   return result;

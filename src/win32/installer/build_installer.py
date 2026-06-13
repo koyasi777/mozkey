@@ -122,7 +122,6 @@ def run_wix4(args) -> None:
   # architectures, so just using 'x64' should be fine here.
   vs_env = vs_util.get_vs_env_vars('x64', vcvarsall_hint)
   redist_root = pathlib.Path(vs_env['VCTOOLSREDISTDIR']).resolve()
-
   # The CRT redist subfolder is named after the platform toolset, not the
   # MSVC compiler version: VS 2022 ships 'Microsoft.VC143.CRT' (toolset v143,
   # MSVC 14.3x/14.4x) while VS 2026 ships 'Microsoft.VC145.CRT' (toolset
@@ -134,7 +133,6 @@ def run_wix4(args) -> None:
       'Microsoft.VC145.CRT' if vc_tools_minor >= 50 else 'Microsoft.VC143.CRT'
   )
   redist_64bit = redist_root.joinpath(arch).joinpath(crt_subdir)
-
   version_file = pathlib.Path(args.version_file).resolve()
   version = mozc_version.MozcVersion(version_file)
   credit_file = pathlib.Path(args.credit_file).resolve()

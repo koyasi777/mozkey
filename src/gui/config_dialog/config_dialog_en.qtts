@@ -125,6 +125,41 @@
         <translation></translation>
     </message>
     <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Candidate/ruby font</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>ライブ変換を開始する最小文字数です。1 にすると 1 文字目からライブ変換します。</source>
+        <translation>Minimum number of characters required before live conversion starts. Set to 1 to start live conversion from the first character.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>ライブ変換開始の最小文字数</source>
+        <translation>Minimum number of characters to start live conversion</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>ライブ変換を開始する最小文字数です。短くすると変換開始は早くなりますが、1 文字の助詞などが漢字化されやすくなります。</source>
+        <translation>Minimum number of characters required before live conversion starts. Lower values start conversion earlier, but single-character particles may be converted to kanji more eagerly.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Show ruby window during live conversion</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Shows the typed reading near the candidate window during live conversion.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Default</source>
+        <translation></translation>
+    </message>
+    <message>
         <location filename="config_dialog.ui" line="809"/>
         <source>Suggest</source>
         <translation></translation>
@@ -694,11 +729,6 @@
         <translation></translation>
     </message>
     <message>
-        <location filename="config_dialog.cc" line="406"/>
-        <source>Candidate window and ruby overlay dark mode setting is enabled from new applications.</source>
-        <translation></translation>
-    </message>
-    <message>
         <location filename="config_dialog.cc" line="407"/>
         <source>Failed to update config</source>
         <translation></translation>
@@ -765,6 +795,137 @@ The current Windows default IME override will be saved so it can be restored lat
         <location filename="config_dialog.cc" line="0"/>
         <source>Failed to restore the previous Windows default IME setting.</source>
         <translation></translation>
+    </message>
+
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>ライブ変換</source>
+        <translation>Live conversion</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz ライブ補正</source>
+        <translation>Zenz live correction</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 条件フィールド</source>
+        <translation>Zenz condition fields</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 学習</source>
+        <translation>Zenz feedback learning</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</source>
+        <translation>Passes this as U+EE03 profile to the Zenzai v3/v3.2 prompt.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz profile</source>
+        <translation>Zenz profile</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</source>
+        <translation>Example: Japanese user writing technical documents. Empty values are not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書を書く日本語ユーザー</source>
+        <translation>Example: Japanese user writing technical documents</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>Passes this as U+EE04 topic to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz topic</source>
+        <translation>Zenz topic</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: Mozc、Rust、会計、法律。空欄なら送信しません。</source>
+        <translation>Example: Mozc, Rust, accounting, law. Empty values are not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: Mozc</source>
+        <translation>Example: Mozc</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>Passes this as U+EE05 style to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz style</source>
+        <translation>Zenz style</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</source>
+        <translation>Example: technical writing, business, colloquial, plain style. Empty values are not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書</source>
+        <translation>Example: technical writing</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>Passes this as U+EE06 settings to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz settings</source>
+        <translation>Zenz settings</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 専門用語を優先。空欄なら送信しません。</source>
+        <translation>Example: prioritize technical terms. Empty values are not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 専門用語を優先</source>
+        <translation>Example: prioritize technical terms</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</source>
+        <translation>When the client supplies text on the right side of the caret, include it as U+EE07 right context in the Zenzai v3.2 prompt.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈を使用する</source>
+        <translation>Use Zenz right context</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈として使う最大文字数です。</source>
+        <translation>Maximum number of characters to use as Zenz right context.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈長</source>
+        <translation>Zenz right context length</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</source>
+        <translation>Used only when text on the right side of the caret is available. 0 characters means it is not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>使わない</source>
+        <translation>Do not use</translation>
     </message>
 </context>
 <context>

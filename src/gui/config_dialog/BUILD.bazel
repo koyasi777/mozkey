@@ -203,6 +203,12 @@ mozc_cc_qt_library(
         ":uic_generic_table_editor",
         ":uic_keybinding_editor",
     ],
+    # Add uic generated headers to additional_compiler_inputs to track changes to the .ui files.
+    additional_compiler_inputs = [
+        ":uic_config_dialog",
+        ":uic_generic_table_editor",
+        ":uic_keybinding_editor",
+    ],
     deps = [
         ":combobox_delegate",
         "//base:config_file_stream",

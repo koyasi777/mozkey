@@ -118,6 +118,11 @@ class Session {
   // ConvertReverse keybinding is called.
   bool RequestConvertReverse(mozc::commands::Command* command);
 
+  // Generates the normal InsertSpace fallback output and attaches a callback
+  // asking the TSF client to reconvert selected application text, if any.
+  bool RequestReconvertSelectionOrInsertSpace(
+      mozc::commands::Command* command);
+
   // Begins reverse conversion for the given session.  This function
   // is called when the CONVERT_REVERSE SessionCommand is called.
   bool ConvertReverse(mozc::commands::Command* command);
@@ -298,6 +303,21 @@ class Session {
   // Reading at the time when the current delayed live conversion was scheduled.
   std::string pending_live_conversion_key_;
 
+  // Original SEND_KEY input that scheduled the current delayed live conversion.
+  // Delayed APPLY_LIVE_CONVERSION callbacks are SEND_COMMAND inputs, so this is
+  // reused to keep passive suggestion generation consistent after the delay.
+  commands::Input pending_live_conversion_input_;
+
+  // Passive suggestion window generated for the current delayed live conversion.
+  // It is reused if the delayed callback cannot regenerate suggestions, which
+  // prevents the visible suggestion window from disappearing at materialization.
+  commands::CandidateWindow pending_live_conversion_suggestion_candidate_window_;
+
+  // Passive suggestion window currently associated with live conversion output.
+  // Some delayed callbacks re-render live conversion without regenerating
+  // suggestions; this cache keeps the passive suggestion window stable there.
+  commands::CandidateWindow live_conversion_suggestion_candidate_window_;
+
   // The reading used for the latest successful live conversion.
   std::string live_conversion_key_;
 
@@ -319,8 +339,10 @@ class Session {
     uint32_t generation = 0;
     std::string key;
     std::string left_context;
+    std::string right_context;
     std::string context_class;
     std::string mozc_value;
+    std::string symbol_style_source;
     std::string prompt;
     absl::Time issued_at;
     bool pending = false;
@@ -365,6 +387,7 @@ class Session {
 
   uint32_t zenz_live_visible_generation_ = 0;
   std::string zenz_live_key_;
+  std::string zenz_live_display_key_;
   std::string zenz_live_value_;
   std::string zenz_live_mozc_value_;
   std::string zenz_live_context_class_;
@@ -467,6 +490,20 @@ class Session {
   void CancelPendingLiveConversion();
   void ClearLiveConversionState();
   void CancelLiveConversionForEditing();
+  // Starts prediction candidate selection from a live-conversion-backed
+  // CONVERSION state.  Other conversion keys keep following their existing
+  // keymap-defined conversion path, while Tab-style prediction keys focus
+  // prediction candidates.
+  bool PredictAndConvertFromLiveConversion(mozc::commands::Command* command);
+  // Adds a non-focused suggestion candidate window to live-conversion output
+  // without mutating the real converter state.  This keeps live conversion as a
+  // CONVERSION state for normal conversion keys while still showing passive
+  // suggestions.
+  bool AttachLiveConversionSuggestionCandidateWindow(
+      const mozc::commands::Input& input,
+      mozc::commands::Output* output);
+  bool AttachCachedLiveConversionSuggestionCandidateWindow(
+      mozc::commands::Output* output) const;
   bool CommitLiveConversionResult(mozc::commands::Command* command);
   bool CommitPendingLiveConversionDisplayDirectly(
       mozc::commands::Command* command);
@@ -483,6 +520,9 @@ class Session {
   void AttachZenzLiveCorrectionPollCallback(
       mozc::commands::Command* command) const;
   bool ApplyZenzLiveCorrection(mozc::commands::Command* command);
+  bool AdvancePendingZenzLiveCorrection(
+      mozc::commands::Command* command,
+      bool refresh_output_on_submit);
   bool IsCurrentZenzLiveCorrectionCallback(
       const mozc::commands::Command& command) const;
   bool OutputCurrentLiveConversionWithZenzPending(
@@ -496,6 +536,8 @@ class Session {
       mozc::commands::Command* command);
   bool OutputZenzLiveCorrection(
       absl::string_view value,
+      mozc::commands::Command* command);
+  bool RevertZenzLiveCorrectionToLiveConversion(
       mozc::commands::Command* command);
   bool CommitZenzLiveCorrectionResult(mozc::commands::Command* command);
 
@@ -536,6 +578,7 @@ class Session {
   void CancelPendingZenzLiveCorrection();
   void ClearZenzLiveCorrectionState();
   std::string ExtractZenzLeftContext(uint32_t max_chars) const;
+  std::string ExtractZenzRightContext(uint32_t max_chars) const;
 
   // Fill command's output according to the current state.
   void OutputFromState(mozc::commands::Command* command);
@@ -546,6 +589,11 @@ class Session {
 
   bool ExecuteCommandSequence(
       const mozc::keymap::CommandSequence& command_sequence,
+      mozc::commands::Command* command);
+
+  bool ExecuteCommandSequenceWithInitialOutput(
+      const mozc::keymap::CommandSequence& command_sequence,
+      const mozc::commands::Output* initial_output,
       mozc::commands::Command* command);
 
   bool ExecuteDirectInputCommand(

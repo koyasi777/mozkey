@@ -85,11 +85,14 @@ std::string ConstructServiceName(bool for_testing) {
 void UpdateRendererStyleFromConfig() {
   config::ConfigHandler::Reload();
 
+  const auto shared_config = config::ConfigHandler::GetSharedConfig();
+
   RendererStyle style;
   RendererStyleHandler::GetDefaultRendererStyle(&style);
   RendererStyleHandler::ApplyCandidateWindowTheme(
-      config::ConfigHandler::GetSharedConfig()->use_dark_mode_candidate_window(),
-      &style);
+      shared_config->use_dark_mode_candidate_window(), &style);
+  RendererStyleHandler::ApplyCandidateRubyFont(
+      shared_config->candidate_ruby_font_name(), &style);
   RendererStyleHandler::SetRendererStyle(style);
 }
 

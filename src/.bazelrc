@@ -82,3 +82,6 @@ build:win_universal_installer --//:win_universal_installer
 build:android_env --copt "-DOS_ANDROID"
 build:android_env --build_tag_filters=-noandroid
 test:android_env  --test_tag_filters=-noandroid
+
+## SFrame relocation errors workaround for GCC 15+ and LLD 19+
+build:no_sframe --copt="-Wa,--gsframe=no" --host_copt="-Wa,--gsframe=no"

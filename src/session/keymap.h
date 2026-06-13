@@ -88,6 +88,7 @@ struct PrecompositionState {
     REVERT,  // revert last operation (preedit still remains)
     UNDO,    // undo last operation (preedit is restored)
     RECONVERT,
+    RECONVERT_SELECTION_OR_INSERT_SPACE,
 
     // For ZeroQuerySuggestion
     CANCEL,                   // Back to Composition status.

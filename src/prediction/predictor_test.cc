@@ -148,6 +148,8 @@ class MockPredictor : public PredictorInterface {
   ~MockPredictor() override = default;
   MOCK_METHOD(std::vector<Result>, Predict, (const ConversionRequest& request),
               (const, override));
+  MOCK_METHOD(std::vector<Result>, Convert, (const ConversionRequest& request),
+              (const, override));
   MOCK_METHOD(absl::string_view, GetPredictorName, (), (const, override));
 };
 
@@ -157,7 +159,6 @@ class PredictorTestPeer : public testing::TestPeer<Predictor> {
  public:
   explicit PredictorTestPeer(Predictor& predictor)
       : testing::TestPeer<Predictor>(predictor) {}
-  PEER_METHOD(PromoteTopDictionaryResult);
   PEER_STATIC_METHOD(DemoteWeakUserHistory);
 };
 
@@ -383,6 +384,42 @@ TEST_F(PredictorTest, DisableAllSuggestion) {
   EXPECT_TRUE(pred2->predict_called());
 }
 
+TEST_F(PredictorTest, Convert_NotConvertRequest) {
+  auto predictor1 = std::make_unique<MockPredictor>();
+  auto predictor2 = std::make_unique<MockPredictor>();
+
+  EXPECT_CALL(*predictor1, Convert(_)).Times(0);
+  EXPECT_CALL(*predictor2, Convert(_)).Times(0);
+
+  auto predictor = std::make_unique<Predictor>(*modules_, std::move(predictor1),
+                                               std::move(predictor2));
+  const ConversionRequest convreq =
+      CreateConversionRequest(ConversionRequest::SUGGESTION);
+  EXPECT_TRUE(predictor->Convert(convreq).empty());
+}
+
+TEST_F(PredictorTest, Convert_ConvertRequest) {
+  auto predictor1 = std::make_unique<MockPredictor>();
+  auto predictor2 = std::make_unique<MockPredictor>();
+
+  std::vector<Result> expected_results(1);
+  expected_results[0].value = "conversion_result";
+
+  EXPECT_CALL(*predictor1, Convert(_)).Times(0);
+  EXPECT_CALL(*predictor2, Convert(_))
+      .Times(1)
+      .WillOnce(Return(expected_results));
+
+  auto predictor = std::make_unique<Predictor>(*modules_, std::move(predictor1),
+                                               std::move(predictor2));
+  const ConversionRequest convreq =
+      CreateConversionRequest(ConversionRequest::CONVERSION);
+
+  std::vector<Result> results = predictor->Convert(convreq);
+  ASSERT_EQ(results.size(), 1);
+  EXPECT_EQ(results[0].value, "conversion_result");
+}
+
 TEST_F(MixedDecodingPredictorTest, FillPos) {
   auto mock_dictionary_predictor = std::make_unique<MockPredictor>();
   auto mock_history_predictor = std::make_unique<MockPredictor>();
@@ -505,56 +542,6 @@ TEST_F(MixedDecodingPredictorTest, MixCandidates) {
     // swapped.
     EXPECT_EQ(mixed_results[0].value, "dic_value");
     EXPECT_EQ(mixed_results[1].value, "history_value");
-  }
-}
-
-TEST_F(MixedDecodingPredictorTest, PromoteTopDictionaryResultTest) {
-  auto predictor1 = std::make_unique<NullPredictor>(true);
-  auto predictor2 = std::make_unique<NullPredictor>(true);
-  auto predictor = std::make_unique<Predictor>(*modules_, std::move(predictor1),
-                                               std::move(predictor2));
-  const uint16_t general_noun_id = modules_->GetPosMatcher().GetGeneralNounId();
-  const uint16_t proper_noun_id = modules_->GetPosMatcher().GetUniqueNounId();
-
-  PredictorTestPeer peer(*predictor);
-
-  {
-    request_->mutable_decoder_experiment_params()->set_candidate_mixing_mode(1);
-    request_->mutable_decoder_experiment_params()
-        ->set_candidate_mixing_min_post_correction_prob(0.5);
-
-    ConversionRequest convreq =
-        CreateConversionRequest(ConversionRequest::SUGGESTION);
-    std::vector<Result> predictor_results(2), history_results(2);
-
-    history_results[0].key = "こうかい";
-    history_results[0].value = "後悔";
-
-    predictor_results[0].key = "こうかい";
-    predictor_results[0].value = "公開";
-    predictor_results[0].types |= prediction::POST_CORRECTION;
-    predictor_results[0].post_correction_prob = 0.9;
-
-    // dictionary results must contain the top history result to
-    // evaluate the POS id (not a proper noun).
-    predictor_results[1].key = "こうかい";
-    predictor_results[1].value = "後悔";
-    predictor_results[1].lid = general_noun_id;
-    predictor_results[1].rid = general_noun_id;
-
-    EXPECT_TRUE(peer.PromoteTopDictionaryResult(convreq, history_results,
-                                                predictor_results));
-
-    // Low probability
-    predictor_results[0].post_correction_prob = 0.1;
-    EXPECT_FALSE(peer.PromoteTopDictionaryResult(convreq, history_results,
-                                                 predictor_results));
-
-    // history top is proper noun.
-    predictor_results[0].post_correction_prob = 0.9;
-    predictor_results[1].lid = proper_noun_id;
-    EXPECT_FALSE(peer.PromoteTopDictionaryResult(convreq, history_results,
-                                                 predictor_results));
   }
 }
 

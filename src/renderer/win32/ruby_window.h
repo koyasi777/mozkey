@@ -46,15 +46,20 @@ class RubyWindow
   LRESULT OnPaint(UINT msg_id, WPARAM wparam, LPARAM lparam, BOOL& handled);
 
   void DoPaint(HDC dc);
+  void ResetFont();
   void UpdateFont(HDC dc);
   SIZE MeasureText() const;
   bool BuildReadingText(const commands::RendererCommand& command,
                         std::string* reading) const;
   bool GetBasePosition(const commands::RendererCommand& command,
-                       POINT* point,
-                       int* line_height) const;
+                       POINT* point, int* line_height) const;
 
   HFONT font_ = nullptr;
+  std::wstring font_face_name_;
+  int font_height_ = 0;
+  int font_weight_ = 0;
+  int font_dpi_y_ = 0;
+
   std::wstring text_;
   SIZE window_size_ = {};
 };

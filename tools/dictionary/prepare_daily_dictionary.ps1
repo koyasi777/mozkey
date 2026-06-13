@@ -27,6 +27,10 @@ if (-not $SkipDownload) {
     Write-Host ""
     Write-Host "Step 2: Import nico/pixiv dictionary..."
     & (Join-Path $RepoRoot "tools\dictionary\import_nico_pixiv.ps1")
+
+    Write-Host ""
+    Write-Host "Step 2b: Import personal names dictionary..."
+    & (Join-Path $RepoRoot "tools\dictionary\import_personal_names.ps1")
 } else {
     Write-Host "Skipping downloads."
 }
@@ -41,9 +45,12 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "Step 4: Convert nico/pixiv delta..."
 python (Join-Path $RepoRoot "tools\dictionary\convert_nico_pixiv.py")
-if ($LASTEXITCODE -ne 0) {
-    throw "convert_nico_pixiv.py failed."
-}
+if ($LASTEXITCODE -ne 0) { throw "convert_nico_pixiv.py failed." }
+
+Write-Host ""
+Write-Host "Step 4b: Profile personal names dictionary..."
+python (Join-Path $RepoRoot "tools\dictionary\profile_personal_names.py")
+if ($LASTEXITCODE -ne 0) { throw "profile_personal_names.py failed." }
 
 Write-Host ""
 Write-Host "Step 5: Check daily profile..."

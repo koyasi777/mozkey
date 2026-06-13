@@ -346,11 +346,12 @@ void InfolistWindow::UpdateLayout(
     const commands::CandidateWindow& candidate_window) {
   *candidate_window_ = candidate_window;
 
-  // If we detect any change of font parameters, update text renderer
-  if (metrics_changed_) {
-    text_renderer_->OnThemeChanged();
-    metrics_changed_ = false;
-  }
+  // InfolistWindow caches both RendererStyle and TextRenderer.  Mozkey's
+  // candidate/ruby font setting updates RendererStyle without sending
+  // WM_SETTINGCHANGE, so refresh them whenever the infolist layout is updated.
+  GetScaledRendererStyle(style_.get(), dpi_);
+  text_renderer_->OnThemeChanged();
+  metrics_changed_ = false;
 }
 
 void InfolistWindow::SetSendCommandInterface(

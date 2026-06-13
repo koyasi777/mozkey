@@ -608,6 +608,9 @@ void KeyMapManager::InitCommandData() {
   RegisterPrecompositionCommand("Revert", PrecompositionState::REVERT);
   RegisterPrecompositionCommand("Undo", PrecompositionState::UNDO);
   RegisterPrecompositionCommand("Reconvert", PrecompositionState::RECONVERT);
+  RegisterPrecompositionCommand(
+      "ReconvertSelectionOrInsertSpace",
+      PrecompositionState::RECONVERT_SELECTION_OR_INSERT_SPACE);
 
   RegisterPrecompositionCommand("Cancel", PrecompositionState::CANCEL);
   RegisterPrecompositionCommand("CancelAndIMEOff",

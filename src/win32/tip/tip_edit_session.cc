@@ -333,6 +333,36 @@ bool OnSessionCommandAsync(TipTextService* text_service, ITfContext* context,
   return SUCCEEDED(hr) && SUCCEEDED(edit_session_result);
 }
 
+bool TurnOnImeForReconversionFallback(TipTextService* text_service,
+                                      ITfContext* context) {
+  if (context == nullptr) {
+    return false;
+  }
+
+  const bool open = text_service->GetThreadContext()
+                        ->GetInputModeManager()
+                        ->GetEffectiveOpenClose();
+  if (open) {
+    return true;
+  }
+
+  TipPrivateContext* private_context = text_service->GetPrivateContext(context);
+  if (!private_context) {
+    // This is an unmanaged context. Keep the historical local/UI update
+    // behavior, because there is no Mozc session to synchronize.
+    return OnUpdateOnOffModeAsync(text_service, context, true);
+  }
+
+  Output output;
+  SessionCommand command;
+  command.set_type(SessionCommand::TURN_ON_IME);
+  if (!private_context->GetClient()->SendCommand(command, &output)) {
+    return false;
+  }
+  return TipEditSession::OnOutputReceivedSync(text_service, context,
+                                              std::move(output));
+}
+
 bool TurnOnImeAndTryToReconvertFromIme(TipTextService* text_service,
                                        ITfContext* context) {
   if (context == nullptr) {
@@ -343,7 +373,10 @@ bool TurnOnImeAndTryToReconvertFromIme(TipTextService* text_service,
   bool need_async_edit_session = false;
   if (!TipSurroundingText::PrepareForReconversionFromIme(
           text_service, context, &info, &need_async_edit_session)) {
-    return false;
+    // Some TSF clients do not expose enough surrounding text for reconversion.
+    // In direct mode, Henkan should still behave as an IME-on key rather than
+    // doing nothing.
+    return TurnOnImeForReconversionFallback(text_service, context);
   }
 
   // Currently this is not supported.
@@ -353,16 +386,10 @@ bool TurnOnImeAndTryToReconvertFromIme(TipTextService* text_service,
 
   std::string text_utf8 = WideToUtf8(info.selected_text);
   if (text_utf8.empty()) {
-    const bool open = text_service->GetThreadContext()
-                          ->GetInputModeManager()
-                          ->GetEffectiveOpenClose();
-    if (open) {
-      return true;
-    }
-    // Currently Mozc server will not turn on IME when |text_utf8| is empty but
-    // people expect IME will be turned on even when the reconversion does
-    // nothing.  b/4225148.
-    return OnUpdateOnOffModeAsync(text_service, context, true);
+    // When reconversion is requested without selected text in direct mode,
+    // behave as an IME-on key. This must go through the normal session path so
+    // the Mozc server state and TSF open/close compartment stay synchronized.
+    return TurnOnImeForReconversionFallback(text_service, context);
   }
 
   TipPrivateContext* private_context = text_service->GetPrivateContext(context);
@@ -394,6 +421,69 @@ bool TurnOnImeAndTryToReconvertFromIme(TipTextService* text_service,
     return TipEditSession::OnOutputReceivedSync(text_service, context,
                                                 std::move(output));
   }
+}
+
+bool ReconvertSelectionOrKeepFallbackOutput(TipTextService* text_service,
+                                            ITfContext* context,
+                                            Output* fallback_output) {
+  if (context == nullptr || fallback_output == nullptr) {
+    return false;
+  }
+
+  TipSurroundingTextInfo info;
+  bool need_async_edit_session = false;
+  if (!TipSurroundingText::PrepareForReconversionFromIme(
+          text_service, context, &info, &need_async_edit_session)) {
+    // Some TSF clients do not expose enough surrounding text for reconversion.
+    // In that case, reconversion is unavailable, so keep the server-generated
+    // fallback InsertSpace output instead of consuming Space and doing nothing.
+    fallback_output->clear_callback();
+    return false;
+  }
+
+  if (info.in_composition) {
+    // This command is only intended for the precomposition state.  Be
+    // conservative if a composition is unexpectedly found.
+    return true;
+  }
+
+  const std::string text_utf8 = WideToUtf8(info.selected_text);
+  if (text_utf8.empty()) {
+    // No selected application text.  Keep and apply the fallback InsertSpace
+    // output that the server already generated.
+    fallback_output->clear_callback();
+    return false;
+  }
+
+  TipPrivateContext* private_context = text_service->GetPrivateContext(context);
+  if (!private_context) {
+    // This is an unmanaged context.  Consume the key rather than applying the
+    // fallback and potentially replacing selected application text.
+    return true;
+  }
+
+  Output output;
+  {
+    SessionCommand command;
+    command.set_type(SessionCommand::CONVERT_REVERSE);
+    command.set_text(text_utf8);
+    if (!private_context->GetClient()->SendCommand(command, &output)) {
+      return true;
+    }
+  }
+
+  if (output.has_callback() && output.callback().has_session_command() &&
+      output.callback().session_command().has_type()) {
+    // Do not allow recursive callbacks.
+    return true;
+  }
+
+  if (need_async_edit_session) {
+    return TipEditSession::OnOutputReceivedAsync(text_service, context,
+                                                 std::move(output));
+  }
+  return TipEditSession::OnOutputReceivedSync(text_service, context,
+                                              std::move(output));
 }
 
 bool UndoCommint(TipTextService* text_service, ITfContext* context) {
@@ -531,6 +621,12 @@ bool OnOutputReceivedImpl(TipTextService* text_service,
       switch (type) {
         case SessionCommand::CONVERT_REVERSE:
           return TurnOnImeAndTryToReconvertFromIme(text_service, context);
+        case SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE:
+          if (ReconvertSelectionOrKeepFallbackOutput(text_service, context,
+                                                     &new_output)) {
+            return true;
+          }
+          break;
         case SessionCommand::UNDO:
           return UndoCommint(text_service, context);
         default:

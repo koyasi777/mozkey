@@ -44,6 +44,14 @@ $AdditionalRequiredFiles = @()
 if ($Profile -eq "daily") {
     $AdditionalRequiredFiles += Join-Path $RepoRoot "src\data\dictionary_koyasi\generated\profiled\dic-nico-pixiv-delta.txt"
     $AdditionalRequiredFiles += Join-Path $RepoRoot "src\data\dictionary_koyasi\generated\profiled\koyasi-syntax-guard.txt"
+    $AdditionalRequiredFiles += Join-Path $RepoRoot "src\data\dictionary_koyasi\generated\profiled\mozcdic-ut-personal-names-daily.txt"
+}
+
+if ($AdditionalRequiredFiles.Count -gt 0) {
+    Write-Host "Additional required files:"
+    foreach ($AdditionalRequiredFile in $AdditionalRequiredFiles) {
+        Write-Host "  $AdditionalRequiredFile"
+    }
 }
 
 foreach ($AdditionalRequiredFile in $AdditionalRequiredFiles) {
@@ -52,9 +60,11 @@ foreach ($AdditionalRequiredFile in $AdditionalRequiredFiles) {
         Write-Host "Additional required dictionary file does not exist:"
         Write-Host "  $AdditionalRequiredFile"
         Write-Host ""
-        Write-Host "Generate it with:"
-        Write-Host "  .\tools\dictionary\import_nico_pixiv.ps1"
-        Write-Host "  python tools/dictionary/convert_nico_pixiv.py"
+        Write-Host "Generate all daily auxiliary dictionary files with:"
+        Write-Host "  .\tools\dictionary\prepare_daily_dictionary.ps1"
+        Write-Host ""
+        Write-Host "If downloads already exist, run:"
+        Write-Host "  .\tools\dictionary\prepare_daily_dictionary.ps1 -SkipDownload"
         throw "Cannot switch to profile '$Profile' because an additional dictionary file is missing."
     }
 }

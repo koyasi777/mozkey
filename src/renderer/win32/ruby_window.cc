@@ -4,7 +4,9 @@
 #include <string>
 
 #include "base/win32/wide_char.h"
+#include "config/config_handler.h"
 #include "protocol/commands.pb.h"
+#include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_style_handler.h"
 
@@ -27,8 +29,6 @@ constexpr BYTE kWindowAlpha = 228;
 
 // Keep the overlay close to the preedit, but do not let it cover the glyphs.
 constexpr int kFallbackLineHeight = 22;
-
-constexpr size_t kCandidateTextStyleIndex = 2;
 
 struct RubyWindowTheme {
   COLORREF background_color;
@@ -60,20 +60,46 @@ RubyWindowTheme GetRubyWindowTheme() {
     theme.border_color = ToColorRef(style.border_color());
   }
 
-  if (style.text_styles_size() > kCandidateTextStyleIndex) {
-    const RendererStyle::TextStyle& candidate_style =
-        style.text_styles(kCandidateTextStyleIndex);
+  const RendererStyle::TextStyle& candidate_style = style.candidate_style();
 
-    if (candidate_style.has_background_color()) {
-      theme.background_color = ToColorRef(candidate_style.background_color());
-    }
+  if (candidate_style.has_background_color()) {
+    theme.background_color = ToColorRef(candidate_style.background_color());
+  }
 
-    if (candidate_style.has_foreground_color()) {
-      theme.text_color = ToColorRef(candidate_style.foreground_color());
-    }
+  if (candidate_style.has_foreground_color()) {
+    theme.text_color = ToColorRef(candidate_style.foreground_color());
   }
 
   return theme;
+}
+
+bool IsLiveConversionRubyWindowEnabled() {
+  const auto config = config::ConfigHandler::GetSharedConfig();
+  return config == nullptr || config->show_live_conversion_ruby_window();
+}
+
+std::wstring GetRubyWindowFontFaceName() {
+  RendererStyle style;
+  if (!RendererStyleHandler::GetRendererStyle(&style)) {
+    return L"Yu Gothic UI";
+  }
+
+  const RendererStyle::TextStyle& candidate_style = style.candidate_style();
+  if (!candidate_style.has_font_name() || candidate_style.font_name().empty()) {
+    return L"Yu Gothic UI";
+  }
+
+  const std::wstring font_name =
+      mozc::win32::Utf8ToWide(candidate_style.font_name());
+  if (font_name.empty()) {
+    return L"Yu Gothic UI";
+  }
+
+  if (font_name.front() == L'@' || font_name.size() >= LF_FACESIZE) {
+    return L"Yu Gothic UI";
+  }
+
+  return font_name;
 }
 
 std::wstring ToWide(const std::string& text) {
@@ -116,10 +142,7 @@ int GetPreeditWidth(const commands::RendererCommand& command) {
 RubyWindow::RubyWindow() = default;
 
 RubyWindow::~RubyWindow() {
-  if (font_ != nullptr) {
-    ::DeleteObject(font_);
-    font_ = nullptr;
-  }
+  ResetFont();
 }
 
 void RubyWindow::Initialize() {
@@ -229,22 +252,60 @@ bool RubyWindow::GetBasePosition(const commands::RendererCommand& command,
   return false;
 }
 
-void RubyWindow::UpdateFont(HDC dc) {
+void RubyWindow::ResetFont() {
   if (font_ != nullptr) {
+    ::DeleteObject(font_);
+    font_ = nullptr;
+  }
+
+  font_face_name_.clear();
+  font_height_ = 0;
+  font_weight_ = 0;
+  font_dpi_y_ = 0;
+}
+
+void RubyWindow::UpdateFont(HDC dc) {
+  const int dpi_y = ::GetDeviceCaps(dc, LOGPIXELSY);
+
+  const std::wstring font_name = GetRubyWindowFontFaceName();
+  const int font_height = -MulDiv(kFontPointSize, dpi_y, 72);
+  const int font_weight = FW_SEMIBOLD;
+
+  if (font_ != nullptr &&
+      font_dpi_y_ == dpi_y &&
+      font_height_ == font_height &&
+      font_weight_ == font_weight &&
+      font_face_name_ == font_name) {
     return;
   }
 
-  const int dpi_y = ::GetDeviceCaps(dc, LOGPIXELSY);
+  ResetFont();
 
   LOGFONTW logfont = {};
-  logfont.lfHeight = -MulDiv(kFontPointSize, dpi_y, 72);
-  logfont.lfWeight = FW_SEMIBOLD;
+  logfont.lfHeight = font_height;
+  logfont.lfWeight = font_weight;
   logfont.lfQuality = CLEARTYPE_QUALITY;
   logfont.lfCharSet = DEFAULT_CHARSET;
   logfont.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-  wcscpy_s(logfont.lfFaceName, L"Yu Gothic UI");
+  wcscpy_s(logfont.lfFaceName, font_name.c_str());
 
   font_ = ::CreateFontIndirectW(&logfont);
+
+  std::wstring actual_font_name = font_name;
+  if (font_ == nullptr && font_name != L"Yu Gothic UI") {
+    wcscpy_s(logfont.lfFaceName, L"Yu Gothic UI");
+    font_ = ::CreateFontIndirectW(&logfont);
+    actual_font_name = L"Yu Gothic UI";
+  }
+
+  if (font_ == nullptr) {
+    return;
+  }
+
+  font_face_name_ = actual_font_name;
+  font_height_ = font_height;
+  font_weight_ = font_weight;
+  font_dpi_y_ = dpi_y;
 }
 
 SIZE RubyWindow::MeasureText() const {
@@ -263,6 +324,11 @@ SIZE RubyWindow::MeasureText() const {
   ::GetTextExtentPoint32W(dc, text_.data(), static_cast<int>(text_.size()),
                           &size);
 
+  TEXTMETRICW text_metric = {};
+  if (::GetTextMetricsW(dc, &text_metric)) {
+    size.cy = std::max<LONG>(size.cy, text_metric.tmHeight);
+  }
+
   if (old_font != nullptr) {
     ::SelectObject(dc, old_font);
   }
@@ -276,6 +342,11 @@ SIZE RubyWindow::MeasureText() const {
 
 void RubyWindow::OnUpdate(const commands::RendererCommand& command) {
   if (!command.visible()) {
+    Hide();
+    return;
+  }
+
+  if (!IsLiveConversionRubyWindowEnabled()) {
     Hide();
     return;
   }

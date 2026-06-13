@@ -310,7 +310,7 @@ class PasswordManagerImpl {
 
   static bool RemovePassword() {
     absl::MutexLock l(g_mutex);
-    return DefaultPasswordManager::RemovePassword();
+    return DefaultPasswordManager().RemovePassword();
   }
 
  private:

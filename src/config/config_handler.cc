@@ -145,6 +145,24 @@ void NormalizeConfig(Config* config) {
       !config->has_use_emoji_conversion()) {
     config->set_use_emoji_conversion(true);
   }
+
+  if (!config->has_use_live_conversion()) {
+    config->set_use_live_conversion(true);
+  }
+
+  if (!config->has_use_direct_commit()) {
+    config->set_use_direct_commit(true);
+  }
+
+  if (!config->has_direct_commit_key()) {
+    config->set_direct_commit_key(
+        Config::DIRECT_COMMIT_KUTEN |
+        Config::DIRECT_COMMIT_TOUTEN |
+        Config::DIRECT_COMMIT_QUESTION_MARK |
+        Config::DIRECT_COMMIT_EXCLAMATION_MARK |
+        Config::DIRECT_COMMIT_OPEN_BRACKET |
+        Config::DIRECT_COMMIT_CLOSE_BRACKET);
+  }
 }
 
 class ConfigHandlerImpl final {

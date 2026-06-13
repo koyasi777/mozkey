@@ -249,7 +249,7 @@ OK:	こうじょ	控除	Conversion Expected 19	扣除	2.28.5000
 OK:	りゅうこうごたいしょう	流行語大賞	Conversion Expected	流行語大賞	2.28.5000
 OK:	たんろくでんち	単６電池	Conversion Expected 2	単6電池	2.29.5268
 OK:	もうご	もう五	Conversion Expected 9	妄語	2.28.5029
-OK:	おんじゅ	飲酒	Conversion Expected 9	飲酒	3.33.6141
+OK:	おんじゅ	オンジュ	Conversion Expected 9	飲酒	3.33.6149
 OK:	ふもうご	不妄語	Conversion Expected 9	不妄語	2.28.5000
 FAILED:	ふおんじゅ	不穏樹	Conversion Expected 9	不飲酒	2.30.5618
 OK:	ぜんざいさん	全財産	Conversion Expected	全財産	2.28.5000

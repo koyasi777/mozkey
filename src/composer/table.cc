@@ -106,6 +106,16 @@ constexpr char k50KeysHiraganaTableFile[] = "system://50keys-hiragana.tsv";
 
 constexpr char kNewChunkPrefix[] = "\t";
 
+uint64_t GetCustomRomanTableFingerprint(
+    const commands::Request& request, const config::Config& config) {
+  if (request.special_romanji_table() != commands::Request::DEFAULT_TABLE ||
+      config.preedit_method() != config::Config::ROMAN ||
+      !config.has_custom_roman_table() || config.custom_roman_table().empty()) {
+    return 0;
+  }
+  return CityFingerprint(config.custom_roman_table());
+}
+
 }  // namespace
 
 // ========================================
@@ -577,37 +587,22 @@ std::shared_ptr<const Table> Table::GetSharedDefaultTable() {
 // ========================================
 // TableContainer
 // ========================================
-TableManager::TableManager()
-    : custom_roman_table_fingerprint_(CityFingerprint("")) {}
+TableManager::TableManager() = default;
 
 std::shared_ptr<const Table> TableManager::GetTable(
     const mozc::commands::Request& request,
     const mozc::config::Config& config) {
-  // calculate the hash depending on the request and the config
-  const size_t hash =
-      absl::HashOf(request.special_romanji_table(), config.preedit_method(),
-                   config.punctuation_method(), config.symbol_method());
-
-  // When custom_roman_table is set, force to create new table.
-  bool update_custom_roman_table = false;
-  if ((config.preedit_method() == config::Config::ROMAN) &&
-      config.has_custom_roman_table() && !config.custom_roman_table().empty()) {
-    const uint64_t custom_roman_table_fingerprint =
-        CityFingerprint(config.custom_roman_table());
-    if (custom_roman_table_fingerprint != custom_roman_table_fingerprint_) {
-      update_custom_roman_table = true;
-      custom_roman_table_fingerprint_ = custom_roman_table_fingerprint;
-    }
-  }
+  // calculate the hash depending on the request and the config.
+  // custom_roman_table must be part of the cache key.  Otherwise, clearing a
+  // previously saved custom table can keep returning the stale custom Table.
+  const size_t hash = absl::HashOf(
+      request.special_romanji_table(), config.preedit_method(),
+      config.punctuation_method(), config.symbol_method(),
+      GetCustomRomanTableFingerprint(request, config));
 
   if (const auto iterator = table_map_.find(hash);
       iterator != table_map_.end()) {
-    if (update_custom_roman_table) {
-      // Delete the previous table to update the table.
-      table_map_.erase(iterator);
-    } else {
-      return iterator->second;
-    }
+    return iterator->second;
   }
 
   auto table = std::make_shared<Table>();

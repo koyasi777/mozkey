@@ -323,6 +323,11 @@ message Config {
   // If this value is 0, live conversion is applied immediately.
   optional uint32 live_conversion_delay_msec = 70 [default = 228];
 
+  // Minimum reading length in Unicode characters before live conversion is
+  // allowed.  The default keeps single-character particles such as 「に」,
+  // 「を」, and 「が」 from being converted too eagerly while typing.
+  optional uint32 live_conversion_min_key_length = 71 [default = 2];
+
   // Experimental: use asynchronous zenz live correction after normal live
   // conversion. This is intentionally default-off until the feature is verified.
   optional bool use_zenz_live_correction = 1003 [default = false];
@@ -357,6 +362,21 @@ message Config {
   // This stores only local TSV data and never sends feedback outside the machine.
   // Raw left context is not stored.
   optional bool use_zenz_feedback_learning = 1011 [default = false];
+
+  // Zenzai v3/v3.2 condition fields. Empty values are omitted from the prompt.
+  // These are not chat prompts; they are mapped to zenz special-token fields:
+  // U+EE03 profile, U+EE04 topic, U+EE05 style, U+EE06 settings.
+  optional string zenz_live_correction_profile = 1012 [default = ""];
+  optional string zenz_live_correction_topic = 1013 [default = ""];
+  optional string zenz_live_correction_style = 1014 [default = ""];
+  optional string zenz_live_correction_settings = 1015 [default = ""];
+
+  // Zenzai v3.2 right-context support. The actual text is taken from
+  // commands::Context::following_text when the client supplies it.
+  optional bool use_zenz_live_correction_right_context = 1016
+      [default = true];
+  optional uint32 zenz_live_correction_right_context_length = 1017
+      [default = 24];
 
   //////////////////////////////////////////////////////////////
   //
@@ -446,6 +466,13 @@ message Config {
 
   optional bool use_custom_preedit_target_underline_color = 132 [default = false];
   optional uint32 preedit_target_underline_color = 133 [default = 0x0066ff];
+
+  // Font family name for candidate and ruby windows on Windows.
+  // Empty string means the platform/default font.
+  optional string candidate_ruby_font_name = 134 [default = ""];
+
+  // Show ruby window during live conversion on Windows.
+  optional bool show_live_conversion_ruby_window = 135 [default = true];
 
   //////////////////////////////////////////////////////////////
   //

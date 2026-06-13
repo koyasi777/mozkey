@@ -44,6 +44,7 @@
 #include "absl/strings/str_replace.h"
 #include "base/file_stream.h"
 #include "base/file_util.h"
+#include "config/config_handler.h"
 #include "engine/engine_interface.h"
 #include "engine/mock_data_engine_factory.h"
 #include "protocol/commands.pb.h"
@@ -56,6 +57,23 @@
 ABSL_DECLARE_FLAG(bool, use_history_rewriter);
 
 namespace mozc {
+namespace {
+
+void SetLegacyInputDefaultsForScenarioTest() {
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+
+  // Scenario files are golden tests for the traditional Mozc session behavior.
+  // Keep live conversion and punctuation/symbol direct commit disabled unless a
+  // scenario explicitly opts into those features.
+  config.set_use_live_conversion(false);
+  config.set_use_direct_commit(false);
+  config.set_direct_commit_key(0);
+
+  config::ConfigHandler::SetConfig(config);
+}
+
+}  // namespace
 
 using ::mozc::session::SessionHandlerInterpreter;
 using ::mozc::session::testing::SessionHandlerTestBase;
@@ -66,15 +84,19 @@ class SessionHandlerScenarioTestBase : public SessionHandlerTestBase {
  protected:
   void SetUp() override {
     flagsaver_ = std::make_unique<absl::FlagSaver>();
+
     // Make sure to include history rewriter for testing.
     absl::SetFlag(&FLAGS_use_history_rewriter, true);
+
     // Note that singleton Config instance is backed up and restored
     // by SessionHandlerTestBase's SetUp and TearDown methods.
     SessionHandlerTestBase::SetUp();
+
+    SetLegacyInputDefaultsForScenarioTest();
+
     std::unique_ptr<EngineInterface> engine =
         MockDataEngineFactory::Create().value();
     handler_ = std::make_unique<SessionHandlerInterpreter>(std::move(engine));
-
   }
 
   void TearDown() override {

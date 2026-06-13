@@ -305,12 +305,12 @@ class AtomicSharedPtr {
   AtomicSharedPtr& operator=(const AtomicSharedPtr&) = delete;
 
   std::shared_ptr<T> load() const ABSL_LOCKS_EXCLUDED(mutex_) {
-    absl::MutexLock guard( mutex_ );
+    absl::MutexLock guard(mutex_);
     return ptr_;
   }
 
   void store(std::shared_ptr<T> ptr) ABSL_LOCKS_EXCLUDED(mutex_) {
-    absl::MutexLock guard( mutex_ );
+    absl::MutexLock guard(mutex_);
     ptr_ = std::move(ptr);
   }
 
@@ -349,7 +349,7 @@ class ABSL_LOCKABLE RecursiveMutex {
  public:
   ~RecursiveMutex() {
     // when lock/unlock are constantly called, these conditions must be true.
-    DCHECK_EQ(owner_.load(std::memory_order_acquire), 0);
+    DCHECK_EQ(owner_.load(std::memory_order_relaxed), 0);
     DCHECK_EQ(recursion_depth_, 0);
   }
 
@@ -357,23 +357,18 @@ class ABSL_LOCKABLE RecursiveMutex {
     const uint32_t current_tid = GetTID();
 
     // Check if the `current_tid` is the owner
-    if (owner_.load(std::memory_order_acquire) == current_tid) {
+    if (owner_.load(std::memory_order_relaxed) == current_tid) {
       // Since the owner is guaranteed to be the current thread,
       // recursion_depth_ can be safely incremented without a lock.
       ++recursion_depth_;
       return;
     }
 
-    // Wait until no one is the owner (owner_ == 0).
-    mutex_.LockWhen(absl::Condition(
-        +[](std::atomic<uint32_t>* owner) {
-          return owner->load(std::memory_order_relaxed) == 0;
-        },
-        &owner_));
+    mutex_.lock();
 
     // Acquiring the lock, and set the owner and recursion_depth_.
     DCHECK_EQ(recursion_depth_, 0);
-    owner_.store(current_tid, std::memory_order_release);
+    owner_.store(current_tid, std::memory_order_relaxed);
     recursion_depth_ = 1;
   }
 
@@ -387,22 +382,17 @@ class ABSL_LOCKABLE RecursiveMutex {
 
     // Depth reached 0, so clear the owner and release the internal Mutex so
     // other thread can start the task.
-    owner_.store(0, std::memory_order_release);
+    owner_.store(0, std::memory_order_relaxed);
     mutex_.unlock();
   }
 
   // Returns true if the mute is owned by the current thread.
   bool owns_lock() const {
-    return owner_.load(std::memory_order_acquire) == GetTID();
+    return owner_.load(std::memory_order_relaxed) == GetTID();
   }
 
-  // Upper case versions are deprecated in absl::Mutex too.
-  // They are not compatible with std::lock_guard<>/std::unique_lock<>.
-  inline void Lock() ABSL_EXCLUSIVE_LOCK_FUNCTION() { lock(); }
-  inline void Unlock() ABSL_UNLOCK_FUNCTION() { unlock(); }
-
  private:
-  static inline uint32_t GetTID() {
+  static uint32_t GetTID() {
     // NOLINTBEGIN(abseil-no-internal-dependencies)
     // Abseil's cached version is 100 times faster.
     // Since `pid_t` is not used in all architectures, use uint32_t.
@@ -411,10 +401,8 @@ class ABSL_LOCKABLE RecursiveMutex {
   }
 
   absl::Mutex mutex_;
-  std::atomic<uint32_t> owner_{0};
-  // Accessed only by the thread indicated by owner_, so atomicity is
-  // unnecessary.
-  int recursion_depth_ = 0;
+  std::atomic<uint32_t> owner_{0};  // Written under mutex_.
+  int recursion_depth_ = 0;         // Read and written under mutex_.
 };
 
 }  // namespace mozc

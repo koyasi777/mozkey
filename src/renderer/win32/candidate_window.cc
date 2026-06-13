@@ -84,8 +84,6 @@ using ::mozc::renderer::RendererStyle;
 // ------------------------------------------------------------------------
 // Utility functions
 // ------------------------------------------------------------------------
-constexpr size_t kShortcutTextStyleIndex = 0;
-constexpr size_t kCandidateTextStyleIndex = 2;
 
 CRect ToCRect(const Rect& rect) {
   return CRect(rect.Left(), rect.Top(), rect.Right(), rect.Bottom());
@@ -108,7 +106,7 @@ COLORREF GetFrameColor(const RendererStyle& style) {
 
 COLORREF GetShortcutBackgroundColor(const RendererStyle& style) {
   return ToColorRef(
-      style.text_styles(kShortcutTextStyleIndex).background_color());
+      style.shortcut_style().background_color());
 }
 
 COLORREF GetSelectedRowBackgroundColor(const RendererStyle& style) {
@@ -117,7 +115,7 @@ COLORREF GetSelectedRowBackgroundColor(const RendererStyle& style) {
 
 COLORREF GetDefaultBackgroundColor(const RendererStyle& style) {
   return ToColorRef(
-      style.text_styles(kCandidateTextStyleIndex).background_color());
+      style.candidate_style().background_color());
 }
 
 COLORREF GetSelectedRowFrameColor(const RendererStyle& style) {

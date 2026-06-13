@@ -669,7 +669,7 @@
          <x>0</x>
          <y>0</y>
          <width>485</width>
-         <height>895</height>
+         <height>1428</height>
         </rect>
        </property>
        <widget class="QWidget" name="horizontalLayoutWidget_2">
@@ -710,11 +710,190 @@
           <x>30</x>
           <y>40</y>
           <width>441</width>
-          <height>350</height>
+          <height>868</height>
          </rect>
         </property>
         <layout class="QGridLayout" name="gridLayout_9">
-         <item row="7" column="0" colspan="8">
+         <item row="9" column="0" colspan="8">
+          <widget class="QWidget" name="liveConversionSectionWidget">
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>60</height>
+            </size>
+           </property>
+           <layout class="QHBoxLayout" name="horizontalLayout_liveConversionSection">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>20</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>16</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="liveConversionSectionLabel">
+              <property name="text">
+               <string>ライブ変換</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="Line" name="liveConversionSectionLine">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="orientation">
+               <enum>Qt::Orientation::Horizontal</enum>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+
+         <item row="14" column="0" colspan="8">
+          <widget class="QWidget" name="zenzLiveCorrectionSectionWidget">
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>60</height>
+            </size>
+           </property>
+           <layout class="QHBoxLayout" name="horizontalLayout_zenzLiveCorrectionSection">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>20</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>16</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="zenzLiveCorrectionSectionLabel">
+              <property name="text">
+               <string>Zenz ライブ補正</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="Line" name="zenzLiveCorrectionSectionLine">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="orientation">
+               <enum>Qt::Orientation::Horizontal</enum>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+
+         <item row="18" column="0" colspan="8">
+          <widget class="QWidget" name="zenzConditionFieldsSectionWidget">
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>60</height>
+            </size>
+           </property>
+           <layout class="QHBoxLayout" name="horizontalLayout_zenzConditionFieldsSection">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>20</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>16</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="zenzConditionFieldsSectionLabel">
+              <property name="text">
+               <string>Zenz 条件フィールド</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="Line" name="zenzConditionFieldsSectionLine">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="orientation">
+               <enum>Qt::Orientation::Horizontal</enum>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+
+         <item row="25" column="0" colspan="8">
+          <widget class="QWidget" name="zenzFeedbackLearningSectionWidget">
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>60</height>
+            </size>
+           </property>
+           <layout class="QHBoxLayout" name="horizontalLayout_zenzFeedbackLearningSection">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>20</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>16</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="zenzFeedbackLearningSectionLabel">
+              <property name="text">
+               <string>Zenz 学習</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="Line" name="zenzFeedbackLearningSectionLine">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="orientation">
+               <enum>Qt::Orientation::Horizontal</enum>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item row="8" column="0" colspan="8">
           <widget class="QCheckBox" name="autoSwitchCompositionMode">
            <property name="text">
             <string>Automatically switch to halfwidth</string>
@@ -722,7 +901,7 @@
           </widget>
          </item>
 
-         <item row="8" column="0" colspan="8">
+         <item row="10" column="0" colspan="8">
           <widget class="QCheckBox" name="liveConversionCheckBox">
            <property name="toolTip">
             <string>入力中の未確定文字列を、文字が入力されるたびに自動で変換します。</string>
@@ -733,7 +912,7 @@
           </widget>
          </item>
 
-         <item row="9" column="0" colspan="3">
+         <item row="11" column="0" colspan="3">
           <widget class="QLabel" name="liveConversionDelayLabel">
            <property name="toolTip">
             <string>文字入力後、ライブ変換を開始するまでの待ち時間です。0 ms にすると即時変換します。</string>
@@ -743,7 +922,7 @@
            </property>
           </widget>
          </item>
-         <item row="9" column="3" colspan="5">
+         <item row="11" column="3" colspan="5">
           <widget class="QSpinBox" name="liveConversionDelaySpinBox">
            <property name="toolTip">
             <string>文字入力後、ライブ変換を開始するまでの待ち時間です。0 ms にすると即時変換します。</string>
@@ -765,6 +944,50 @@
            </property>
            <property name="specialValueText">
             <string>即時</string>
+           </property>
+          </widget>
+         </item>
+
+         <item row="12" column="0" colspan="3">
+          <widget class="QLabel" name="liveConversionMinKeyLengthLabel">
+           <property name="toolTip">
+            <string>ライブ変換を開始する最小文字数です。1 にすると 1 文字目からライブ変換します。</string>
+           </property>
+           <property name="text">
+            <string>ライブ変換開始の最小文字数</string>
+           </property>
+          </widget>
+         </item>
+         <item row="12" column="3" colspan="5">
+          <widget class="QSpinBox" name="liveConversionMinKeyLengthSpinBox">
+           <property name="toolTip">
+            <string>ライブ変換を開始する最小文字数です。短くすると変換開始は早くなりますが、1 文字の助詞などが漢字化されやすくなります。</string>
+           </property>
+           <property name="minimum">
+            <number>1</number>
+           </property>
+           <property name="maximum">
+            <number>20</number>
+           </property>
+           <property name="singleStep">
+            <number>1</number>
+           </property>
+           <property name="value">
+            <number>2</number>
+           </property>
+           <property name="suffix">
+            <string> 文字</string>
+           </property>
+          </widget>
+         </item>
+
+         <item row="13" column="0" colspan="8">
+          <widget class="QCheckBox" name="showLiveConversionRubyWindow">
+           <property name="toolTip">
+            <string>Shows the typed reading near the candidate window during live conversion.</string>
+           </property>
+           <property name="text">
+            <string>Show ruby window during live conversion</string>
            </property>
           </widget>
          </item>
@@ -1004,7 +1227,38 @@
           </widget>
          </item>
 
-         <item row="10" column="0" colspan="8">
+         <item row="7" column="0" colspan="3">
+          <widget class="QLabel" name="candidateRubyFontLabel">
+           <property name="text">
+            <string>Candidate/ruby font</string>
+           </property>
+          </widget>
+         </item>
+
+         <item row="7" column="3" colspan="5">
+          <widget class="QComboBox" name="candidateRubyFontComboBox">
+           <property name="minimumSize">
+            <size>
+             <width>180</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>280</width>
+             <height>16777215</height>
+            </size>
+           </property>
+           <property name="sizeAdjustPolicy">
+            <enum>QComboBox::AdjustToMinimumContentsLengthWithIcon</enum>
+           </property>
+           <property name="minimumContentsLength">
+            <number>18</number>
+           </property>
+          </widget>
+         </item>
+
+         <item row="15" column="0" colspan="8">
           <widget class="QCheckBox" name="zenzLiveCorrectionCheckBox">
            <property name="toolTip">
             <string>ライブ変換結果に対して、ローカルの Zenz モデルで文脈補正を行います。</string>
@@ -1015,20 +1269,20 @@
           </widget>
          </item>
 
-         <item row="11" column="0" colspan="3">
+         <item row="16" column="0" colspan="3">
           <widget class="QLabel" name="zenzLiveCorrectionDelayLabel">
            <property name="toolTip">
-            <string>ライブ変換後、Zenz 推論を開始するまでの待ち時間です。</string>
+            <string>ライブ変換後、Zenz 補正を開始するまでの待ち時間です。</string>
            </property>
            <property name="text">
-            <string>Zenz 推論開始の遅延</string>
+            <string>Zenz 補正開始の遅延</string>
            </property>
           </widget>
          </item>
-         <item row="11" column="3" colspan="5">
+         <item row="16" column="3" colspan="5">
           <widget class="QSpinBox" name="zenzLiveCorrectionDelaySpinBox">
            <property name="toolTip">
-            <string>ライブ変換後、Zenz 推論を開始するまでの待ち時間です。0 ms にすると即時推論します。</string>
+            <string>ライブ変換後、Zenz 補正を開始するまでの待ち時間です。0 ms にすると即時補正します。</string>
            </property>
            <property name="minimum">
             <number>0</number>
@@ -1050,20 +1304,20 @@
            </property>
           </widget>
          </item>
-         <item row="12" column="0" colspan="3">
+         <item row="17" column="0" colspan="3">
           <widget class="QLabel" name="zenzLiveCorrectionMinKeyLengthLabel">
            <property name="toolTip">
-            <string>Zenz 推論を許可する最小読み長です。短くすると補正機会は増えますが、誤補正も増える可能性があります。</string>
+            <string>Zenz 補正を開始する最小文字数です。短くすると補正機会は増えますが、誤補正も増える可能性があります。</string>
            </property>
            <property name="text">
-            <string>Zenz 最小読み長</string>
+            <string>Zenz 補正開始の最小文字数</string>
            </property>
           </widget>
          </item>
-         <item row="12" column="3" colspan="5">
+         <item row="17" column="3" colspan="5">
           <widget class="QSpinBox" name="zenzLiveCorrectionMinKeyLengthSpinBox">
            <property name="toolTip">
-            <string>Zenz 推論を許可する最小読み長です。</string>
+            <string>Zenz 補正を開始する最小文字数です。</string>
            </property>
            <property name="minimum">
             <number>2</number>
@@ -1083,7 +1337,150 @@
           </widget>
          </item>
 
-         <item row="13" column="0" colspan="8">
+
+         <item row="19" column="0" colspan="3">
+          <widget class="QLabel" name="zenzLiveCorrectionProfileLabel">
+           <property name="toolTip">
+            <string>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</string>
+           </property>
+           <property name="text">
+            <string>Zenz profile</string>
+           </property>
+          </widget>
+         </item>
+         <item row="19" column="3" colspan="5">
+          <widget class="QLineEdit" name="zenzLiveCorrectionProfileLineEdit">
+           <property name="toolTip">
+            <string>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</string>
+           </property>
+           <property name="maxLength">
+            <number>128</number>
+           </property>
+           <property name="placeholderText">
+            <string>例: 技術文書を書く日本語ユーザー</string>
+           </property>
+          </widget>
+         </item>
+
+         <item row="20" column="0" colspan="3">
+          <widget class="QLabel" name="zenzLiveCorrectionTopicLabel">
+           <property name="toolTip">
+            <string>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</string>
+           </property>
+           <property name="text">
+            <string>Zenz topic</string>
+           </property>
+          </widget>
+         </item>
+         <item row="20" column="3" colspan="5">
+          <widget class="QLineEdit" name="zenzLiveCorrectionTopicLineEdit">
+           <property name="toolTip">
+            <string>例: Mozc、Rust、会計、法律。空欄なら送信しません。</string>
+           </property>
+           <property name="maxLength">
+            <number>128</number>
+           </property>
+           <property name="placeholderText">
+            <string>例: Mozc</string>
+           </property>
+          </widget>
+         </item>
+
+         <item row="21" column="0" colspan="3">
+          <widget class="QLabel" name="zenzLiveCorrectionStyleLabel">
+           <property name="toolTip">
+            <string>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</string>
+           </property>
+           <property name="text">
+            <string>Zenz style</string>
+           </property>
+          </widget>
+         </item>
+         <item row="21" column="3" colspan="5">
+          <widget class="QLineEdit" name="zenzLiveCorrectionStyleLineEdit">
+           <property name="toolTip">
+            <string>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</string>
+           </property>
+           <property name="maxLength">
+            <number>128</number>
+           </property>
+           <property name="placeholderText">
+            <string>例: 技術文書</string>
+           </property>
+          </widget>
+         </item>
+
+         <item row="22" column="0" colspan="3">
+          <widget class="QLabel" name="zenzLiveCorrectionSettingsLabel">
+           <property name="toolTip">
+            <string>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</string>
+           </property>
+           <property name="text">
+            <string>Zenz settings</string>
+           </property>
+          </widget>
+         </item>
+         <item row="22" column="3" colspan="5">
+          <widget class="QLineEdit" name="zenzLiveCorrectionSettingsLineEdit">
+           <property name="toolTip">
+            <string>例: 専門用語を優先。空欄なら送信しません。</string>
+           </property>
+           <property name="maxLength">
+            <number>128</number>
+           </property>
+           <property name="placeholderText">
+            <string>例: 専門用語を優先</string>
+           </property>
+          </widget>
+         </item>
+
+         <item row="23" column="0" colspan="8">
+          <widget class="QCheckBox" name="zenzLiveCorrectionRightContextCheckBox">
+           <property name="toolTip">
+            <string>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</string>
+           </property>
+           <property name="text">
+            <string>Zenz 右文脈を使用する</string>
+           </property>
+          </widget>
+         </item>
+
+         <item row="24" column="0" colspan="3">
+          <widget class="QLabel" name="zenzLiveCorrectionRightContextLengthLabel">
+           <property name="toolTip">
+            <string>Zenz 右文脈として使う最大文字数です。</string>
+           </property>
+           <property name="text">
+            <string>Zenz 右文脈長</string>
+           </property>
+          </widget>
+         </item>
+         <item row="24" column="3" colspan="5">
+          <widget class="QSpinBox" name="zenzLiveCorrectionRightContextLengthSpinBox">
+           <property name="toolTip">
+            <string>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</string>
+           </property>
+           <property name="minimum">
+            <number>0</number>
+           </property>
+           <property name="maximum">
+            <number>128</number>
+           </property>
+           <property name="singleStep">
+            <number>1</number>
+           </property>
+           <property name="value">
+            <number>24</number>
+           </property>
+           <property name="suffix">
+            <string> 文字</string>
+           </property>
+           <property name="specialValueText">
+            <string>使わない</string>
+           </property>
+          </widget>
+         </item>
+         <item row="26" column="0" colspan="8">
           <widget class="QCheckBox" name="zenzFeedbackLearningCheckBox">
            <property name="toolTip">
             <string>Zenz 補正結果の採用/却下をローカル TSV に記録し、次回以降の補正判断に使用します。</string>
@@ -1094,14 +1491,14 @@
           </widget>
          </item>
 
-         <item row="14" column="0" colspan="3">
+         <item row="27" column="0" colspan="3">
           <widget class="QLabel" name="zenzFeedbackDataLabel">
            <property name="text">
             <string>Zenz 学習データ</string>
            </property>
           </widget>
          </item>
-         <item row="14" column="3" colspan="5">
+         <item row="27" column="3" colspan="5">
           <widget class="QPushButton" name="editZenzFeedbackButton">
            <property name="toolTip">
             <string>Zenz 学習データを安全な管理画面で表示し、インポート、エクスポート、エントリ削除を行います。</string>
@@ -1117,7 +1514,7 @@
         <property name="geometry">
          <rect>
           <x>20</x>
-          <y>410</y>
+          <y>943</y>
           <width>461</width>
           <height>21</height>
          </rect>
@@ -1149,7 +1546,7 @@
         <property name="geometry">
          <rect>
           <x>30</x>
-          <y>440</y>
+          <y>973</y>
           <width>441</width>
           <height>141</height>
          </rect>
@@ -1159,7 +1556,7 @@
         <property name="geometry">
          <rect>
           <x>30</x>
-          <y>605</y>
+          <y>1138</y>
           <width>441</width>
           <height>270</height>
          </rect>
@@ -2353,12 +2750,21 @@
   <tabstop>useJapaneseLayout</tabstop>
   <tabstop>useModeIndicator</tabstop>
   <tabstop>useDarkModeCandidateWindow</tabstop>
+  <tabstop>candidateRubyFontComboBox</tabstop>
   <tabstop>autoSwitchCompositionMode</tabstop>
   <tabstop>liveConversionCheckBox</tabstop>
   <tabstop>liveConversionDelaySpinBox</tabstop>
+  <tabstop>liveConversionMinKeyLengthSpinBox</tabstop>
+  <tabstop>showLiveConversionRubyWindow</tabstop>
   <tabstop>zenzLiveCorrectionCheckBox</tabstop>
   <tabstop>zenzLiveCorrectionDelaySpinBox</tabstop>
   <tabstop>zenzLiveCorrectionMinKeyLengthSpinBox</tabstop>
+  <tabstop>zenzLiveCorrectionProfileLineEdit</tabstop>
+  <tabstop>zenzLiveCorrectionTopicLineEdit</tabstop>
+  <tabstop>zenzLiveCorrectionStyleLineEdit</tabstop>
+  <tabstop>zenzLiveCorrectionSettingsLineEdit</tabstop>
+  <tabstop>zenzLiveCorrectionRightContextCheckBox</tabstop>
+  <tabstop>zenzLiveCorrectionRightContextLengthSpinBox</tabstop>
   <tabstop>zenzFeedbackLearningCheckBox</tabstop>
   <tabstop>editZenzFeedbackButton</tabstop>
   <tabstop>characterFormEditor</tabstop>

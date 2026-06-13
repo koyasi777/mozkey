@@ -32,6 +32,7 @@
 
 #include <QAbstractButton>
 #include <QEvent>
+#include <QTableWidgetItem>
 #include <QWidget>
 #include <istream>
 #include <string>
@@ -56,6 +57,9 @@ class RomanTableEditorDialog : public GenericTableEditorDialog {
   void UpdateMenuStatus() override;
   void OnEditMenuAction(QAction *action) override;
 
+ private slots:
+  void MarkRomanTableEdited(QTableWidgetItem *item);
+
  protected:
   QLatin1String GetDefaultFilename() const override {
     return QLatin1String("romantable.txt");
@@ -71,6 +75,8 @@ class RomanTableEditorDialog : public GenericTableEditorDialog {
  private:
   absl::FixedArray<QAction *> actions_;
   QString dialog_title_;
+  bool default_table_requested_;
+  bool loading_table_;
 };
 
 }  // namespace gui

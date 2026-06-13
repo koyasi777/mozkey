@@ -43,6 +43,9 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 通常の 64-bit Windows では、Releases にある最新の `Mozkey_v*_x64.msi` を使用してください。
 - 本 fork のリリースは個人用の experimental build として公開しています。
 - Zenz 同梱版は、ローカル推論 runtime と GGUF model を含むため、従来の offline MSI よりファイルサイズが大きくなります。
+- Windows 向けリリース MSI には、ローカル生成した `daily` system dictionary profile を同梱する場合があります。
+- `daily` profile には、Mozc 標準辞書に加えて、merge-ut-dictionaries、dic-nico-intersection-pixiv、mozcdic-ut-personal-names、Mozkey syntax / expressive kana guard dictionary 由来の生成辞書が含まれます。
+- 外部辞書・同梱 runtime・model の出典とライセンス note については [Third-party notices](THIRD_PARTY_NOTICES.md) を参照してください。
 
 > [!WARNING]
 > このビルドは google/mozc の公式配布物ではありません。
@@ -62,31 +65,36 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 変換確定直後に Backspace や Cancel キーで取り消した場合のユーザー履歴学習の扱いを改善
 - 句読点・記号の単打確定でも、直前の通常変換確定による学習を次の実テキスト入力まで保留し、Backspace / Escape / Revert / Reset / Undo / IME off などで取り消せるようにした
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
-- ライブ変換は設定画面から ON/OFF と変換開始までの遅延時間を変更可能
+- ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
-- 1文字だけの未確定文字列では、助詞などの誤変換を避けるためライブ変換を実行しない
+- デフォルトでは 1 文字だけの未確定文字列で、助詞などの誤変換を避けるためライブ変換を実行しない
 - `え~`、`えー`、`ん？` のような「かな1文字 + 装飾的な末尾記号」でも、短すぎる漢字化を避けるためライブ変換を抑制
+- 感嘆詞・口語評価語・くだけた挨拶の入力途中ではライブ変換のちらつきを抑えつつ、完成した `うっそ`、`くっそ`、`やっば`、`すっげぇ`、`めっちゃ`、`ちっす`、`ちょりっす`、`ほえ～`、`ほぇ～`、`ほっほーん` などは生成辞書候補として自然なかな表記を救出
 - 確定済みの左文脈や直前の文節、限定的な右文脈を参照し、`mainにマージしました`、`githubには`、`2名しかいない`、`追記したい`、`山梨県立美術館`、`滋賀方面` のような文脈で、助詞・複合機能語・機能表現・接尾的な語構成・地名接尾構成が同音漢字候補に負ける挙動を抑制
 - キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
 - 複数コマンドは `Commit|IMEOff` のような形式で保存され、設定画面では `Commit → IMEOff` のように編集可能
+- MS-IME 風キー設定では、確定済み文字列を選択した状態で Space を押すと再変換し、未選択時は従来どおり空白を入力
 - Windows 版で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を個別キーとして設定画面から割り当て可能
 - Windows 版で IMEOn / IMEOff に割り当てたキーを押した場合、すでに同じ状態でも IME モードインジケータを表示
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
 - Windows 版の候補ウィンドウ/ルビ表示にダークモード切り替えを追加
+- Windows 版の候補ウィンドウ・用例ウィンドウ・ライブ変換中のルビ表示に使うフォントを設定画面から変更可能
+- ライブ変換中のルビ表示を設定画面から ON/OFF 可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能
 - Windows 版の候補ウィンドウや IME 切り替えインジケータの配色・余白・角丸などの見た目を調整
 - Windows 版の IME 切り替えインジケータが、Windows のライト / ダークテーマに合わせて表示されるように改善
 - system dictionary 強化用の追加辞書生成パイプラインを追加
 - merge-ut-dictionaries 由来の地名・SudachiDict 系語彙を system dictionary に取り込めるようにした
 - dic-nico-intersection-pixiv 由来のネット・サブカル系固有名詞を、既存辞書との差分として daily 辞書に追加可能
-- 文節区切り崩れを抑えるための syntax guard 辞書を daily 辞書生成パイプラインに追加
+- mozcdic-ut-personal-names 由来の人名辞書を、既存辞書や nico/pixiv delta との重複を除いた弱い daily 辞書として追加可能
+- 文節区切り崩れを抑えるための syntax guard 辞書を daily 辞書生成パイプラインに追加し、`と打ちたいのに`、`に分ける`、`した方が`、`したにもかかわらず`、`にまで`、`までに`、`までも`、`肌身離さず` などの高影響な経路を保護
 - 大規模な生成辞書は Git に含めず、ローカルで再生成して Bazel の辞書入力へ切り替える運用に
 - `には` や `してたの` のような自然な機能語かな列が、`二は` や `して他の` のような 1 文字漢字候補に過剰変換される挙動を抑制
 - `にじ` のような 2 文字ひらがな入力で、`に|じ` のような短すぎる文節分割が全体候補を隠す挙動を抑制
 - llama.cpp ベースのローカル Zenz live correction pipeline を追加
 - Zenz 補正は `mozc_server` から named pipe 経由で `mozc_zenz_scorer.exe` に依頼し、`llama-server.exe` の localhost endpoint でローカル推論
-- Zenz 推論開始までの遅延時間を設定画面から変更可能。デフォルトは 1000 ms
-- Zenz 推論を許可する最小読み長を設定画面から変更可能
+- Zenz 補正開始までの遅延時間を設定画面から変更可能。デフォルトは 1000 ms
+- Zenz 補正開始の最小文字数を設定画面から変更可能
 - Zenz 補正結果のローカル feedback learning を追加。設定画面から ON/OFF 可能
 - Zenz feedback は、Zenz 補正結果が表示されただけでは保存されません。Enter や句読点・記号の単打確定などで表示中の Zenz 結果が明示的に確定された場合だけ、accepted feedback の候補として保留されます。
 - 保留された accepted feedback は、次の実テキスト入力まで Backspace / Escape / Revert / Undo / IME off などで取り消されなかった場合にローカル TSV へ保存
@@ -165,21 +173,37 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 ライブ変換を有効にすると、スペースキーを押さなくても、入力中の未確定文字列が自動で変換されます。
 
-入力途中の不要な中間変換表示を抑えるため、この fork では文字入力後に短い設定可能なデバウンス時間を挟んでからライブ変換を実行します。`に`、`を`、`が` のような助詞として使われやすい入力を誤って漢字化しないように、1文字だけの未確定文字列ではライブ変換を行いません。
+入力途中の不要な中間変換表示を抑えるため、この fork では文字入力後に短い設定可能なデバウンス時間を挟んでからライブ変換を実行します。`に`、`を`、`が` のような助詞として使われやすい入力を誤って漢字化しないように、デフォルトでは 1 文字だけの未確定文字列ではライブ変換を行いません。ライブ変換を開始する最小文字数は設定画面から変更できます。
 
 また、`え~`、`えー`、`ん？` のように、かな1文字の後ろに装飾的な記号だけが続く場合もライブ変換を抑制します。これにより、入力途中の `え~` が `絵～` のように短すぎる漢字候補へ変換される挙動を避けます。
+
+さらに、短い感嘆詞、口語的な評価語、くだけた挨拶などでは、入力途中の prefix や pending roman suffix によるライブ変換のちらつきを抑えます。一方で、完成した表現は session 側でライブ変換を止めず、converter と辞書候補に渡します。
+
+完成した expressive kana については、生成辞書に自然なかな候補を追加します。これにより初期状態では不自然な漢字分割に寄りにくくしつつ、ユーザーが `ウッソ`、`クッソ`、`ヤッバ`、`チッス`、`ホェ～` などのカタカナ表記を明示的に選んだ場合には、ユーザー履歴やユーザー辞書による表記選好が反映される余地を残します。
+
+対象には、たとえば以下のような入力が含まれます。
+
+- `うっそ`、`くっそ`、`やっば`、`やっべぇ`
+- `すっご`、`すっげぇ`、`めっちゃ`
+- `ちっす`、`ちょっす`、`ちょりっす`
+- `うひょ`、`うひゃ`、`ほほう`、`ほっほーん`
+- `ほえー`、`ほえ～`、`ほぇ`、`ほぇー`、`ほぇ～`
+
+これらは通常変換そのものを禁止するものではありません。完成した表現は通常の変換候補として扱われるため、Space 変換やユーザー履歴による候補順位の調整も従来どおり有効です。
 
 たとえば:
 
 - `kyouha` と入力
 - デバウンス時間の経過後、Space を押す前に未確定文字列が `今日は` のように表示される
 - 続けて文字を入力しても途中の変換結果は確定されず、同じ未確定文字列として再変換される
+- ローマ字テーブルで `v. -> …` や `v, -> ‥` のような省略記号を入力する場合も、直前まで表示されていたライブ変換結果を保ったまま入力を継続する
+- Shift による英字入力へ移る場合は、表示中のライブ変換結果を先に確定してから英字入力を開始する
 - Backspace / Delete では、削除後の状態をすぐにライブ変換結果へ反映する
 - Enter で現在のライブ変換結果を確定する
 
 ライブ変換中は、変換後の文字を表示しながら元の読みも分かるように、未確定文字の上付近に Mozc 独自のルビ風 overlay window を表示します。
 
-ライブ変換は設定画面から ON/OFF を切り替えられます。また、変換開始までの遅延時間も設定画面から変更できます。
+ライブ変換は設定画面から ON/OFF を切り替えられます。また、変換開始までの遅延時間と、ライブ変換を開始する最小文字数も設定画面から変更できます。
 
 ### Zenz ライブ補正
 
@@ -187,7 +211,7 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
-Zenz 補正は設定可能なデバウンス時間の後に実行されます。デフォルトは 1000 ms です。Zenz 結果が返る前に入力内容が変わった場合、古い結果は generation / key の検査により破棄されます。
+Zenz 補正は設定可能なデバウンス時間の後に実行されます。デフォルトは 1000 ms です。また、Zenz 補正を開始する最小文字数も設定画面から変更できます。Zenz 結果が返る前に入力内容が変わった場合、古い結果は generation / key の検査により破棄されます。
 
 Zenz 出力は表示前に検証されます。空出力、短すぎる入力、Mozc 結果と同一の出力、長すぎる出力、不正な文字列、安全でない可能性のある文字列は拒否されます。拒否された場合は、通常の Mozc ライブ変換結果をそのまま表示します。
 
@@ -206,6 +230,20 @@ accepted feedback の再利用方法は、単文節と複数文節で異なり�
 `sensitive_like` context で得られた feedback は、通常文脈への候補 promotion には使いません。
 
 Zenz 学習データは設定画面から管理できます。管理画面では、学習済みエントリを読み取り専用 table で表示し、検索、インポート、エクスポート、選択項目削除、全削除を行えます。ユーザーが TSV ファイルを直接編集する必要はありません。
+
+
+#### Zenzai v3/v3.2 条件フィールド
+
+Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿って、追加の条件フィールドを設定できます。これらは ChatGPT の system prompt ではなく、Zenzai が学習時に見ている条件付き入力形式に対応する短いヒントです。
+
+- `profile`: `U+EE03` profile として、書き手や用途の短い説明を渡します。
+- `topic`: `U+EE04` topic として、現在の話題を渡します。experimental なフィールドです。
+- `style`: `U+EE05` style として、文体や用途を渡します。experimental なフィールドです。
+- `settings`: `U+EE06` settings として、変換方針の短いヒントを渡します。experimental なフィールドです。
+- 右文脈: クライアントからカーソル右側テキストが渡された場合、`U+EE07` right context として Zenzai v3.2 の prompt に含めます。
+
+`profile`、`topic`、`style`、`settings` は空欄なら prompt に含めません。右文脈はユーザーが固定文を入力する欄ではなく、対応クライアントから `following_text` が渡された場合だけ自動で使われます。
+
 
 ### 確定済み左文脈を使った変換補正
 
@@ -284,6 +322,14 @@ Zenz 学習データは設定画面から管理できます。管理画面では
 
 設定ファイル上では、複数コマンドは `Commit|IMEOff` や `Convert|ConvertNext` のように `|` 区切りで保存されます。設定画面では `Commit → IMEOff` のように表示され、コマンドの追加、削除、並べ替えができます。
 
+### 選択文字列の Space 再変換（Windows / MS-IME 風キー設定）
+
+Windows 版の MS-IME 風キー設定では、確定済みテキストを範囲選択した状態で Space を押すと、その選択文字列を再変換します。何も選択していない場合は、従来どおり空白を入力します。
+
+この挙動は、キー設定画面では「選択文字列を再変換（未選択時は空白）」というコマンドとして表示されます。Space キーを無条件に横取りするものではなく、MS-IME 風キー設定で「入力文字なし」の Space にこのコマンドが割り当てられている場合だけ有効です。ユーザーが Space の割り当てを変更している場合は、そのキー設定が優先されます。
+
+既存のカスタムキー設定を使っている場合は、MS-IME 風キー設定を選び直すか、キー設定画面で「入力文字なし」の Space に「選択文字列を再変換（未選択時は空白）」を手動で割り当てることで有効にできます。
+
 ### 左右 Shift / Ctrl の個別キー割り当て（Windows）
 
 Windows 版では、キー設定エディタ上で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を別々のキーとして扱えます。
@@ -315,11 +361,15 @@ Windows 版では、設定画面の「その他の設定」→「既定の IME�
 
 すでに Mozkey が既定 IME として設定されている場合や、未復元のバックアップが残っている場合は、変更前の復元点を上書きしないようにしています。
 
-### Windows 候補ウィンドウと IME インジケータの表示テーマ
+### Windows 候補ウィンドウ・ルビ表示・IME インジケータの外観設定
 
 Windows 版では、設定画面から候補ウィンドウの通常テーマとダークテーマを切り替えられます。
 
 ダークテーマでは配色だけでなく、余白、角丸、フッター表示なども調整し、候補ウィンドウ全体の見た目をよりモダンにしています。
+
+候補ウィンドウ、用例ウィンドウ、ライブ変換中のルビ表示に使うフォントも設定画面から変更できます。既定フォントに戻すこともでき、選択したフォントを候補表示に適用できない場合は、候補ウィンドウが消えないように既定フォントへフォールバックします。
+
+ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。
 
 IME 切り替えインジケータは Windows のライト / ダークテーマに追従し、現在の入力モードを確認しやすいように配色を切り替えます。
 
@@ -350,11 +400,19 @@ daily local 辞書は主に以下を元に生成できます。
 - dic-nico-intersection-pixiv
   - 固有名詞、ネットスラング、作品名、キャラクター名、サブカル系語彙
   - 生成済み daily 辞書または Mozc 標準辞書に既に存在する key/value は除外
-- Koyasi syntax guard 辞書
+  - 末尾に `☆`、`★`、`♡`、`♪`、`※` などの装飾記号が付く表記は daily 変換ではノイズになりやすいため除外
+- mozcdic-ut-personal-names
+  - 人名・芸名・活動名などを含む人名辞書
+  - 生成済み daily 辞書、nico/pixiv delta、Mozc 標準辞書に既に存在する key/value は除外
+  - 短すぎる読み、長いカタカナ塊、グループ名風表記、ASCII 表記、記号を含む表記などは除外または弱める
+- Mozkey syntax / expressive kana guard 辞書
   - 文節区切り崩れの影響が大きいケースだけを小さな生成辞書として補強
-  - 例: `と打ちたいのに` や `に分ける` のような文法的に自然な経路を保護
+  - 例: `と打ちたいのに`、`に分ける`、`した方が`、`したにもかかわらず`、`にまで`、`までに`、`までも`、`肌身離さず`、`になってしまいます`、`になっちゃいます` のような経路を保護
+  - 例: `うっそ`、`くっそ`、`やっば`、`ちっす`、`ほえ～`、`ほぇ～` のような完成済み expressive kana を自然なかな候補として補強
 
 巨大な生成辞書ファイルは、このリポジトリには commit しません。`src/data/dictionary_koyasi/generated/` 以下にローカル生成します。
+
+リリース MSI には、ローカル生成した `daily` system dictionary profile を同梱する場合があります。外部辞書の出典とライセンス note は [Third-party notices](THIRD_PARTY_NOTICES.md) および [Koyasi Dictionary Data](src/data/dictionary_koyasi/README.md) を参照してください。
 
 強化辞書を有効にした状態で package build する前に、daily 辞書をローカルで再生成してください。
 
@@ -364,7 +422,9 @@ daily local 辞書は主に以下を元に生成できます。
 
 詳細:
 
-- [Koyasi Dictionary Data](src/data/dictionary_koyasi/README.md)
+* [Koyasi Dictionary Data](src/data/dictionary_koyasi/README.md)
+* [Third-party notices](THIRD_PARTY_NOTICES.md)
+
 
 Note
 ----
@@ -455,6 +515,9 @@ Windows MSI packages are available from [Releases](https://github.com/koyasi777/
 - For the Zenz-bundled build, choose an MSI whose file name contains `zenz` or `zenz_offline`.
 - Releases from this fork are published as personal experimental builds.
 - Zenz-bundled builds are larger than the traditional offline MSI because they include a local inference runtime and a GGUF model.
+- Windows release MSI packages may include the locally generated `daily` system dictionary profile.
+- The `daily` profile is generated from the Mozc base dictionaries, merge-ut-dictionaries, dic-nico-intersection-pixiv, mozcdic-ut-personal-names, and the Mozkey syntax / expressive kana guard dictionary.
+- See [Third-party notices](THIRD_PARTY_NOTICES.md) for source and license notes for bundled runtimes, model files, and generated dictionary data.
 
 > [!WARNING]
 > This build is not an official google/mozc distribution.
@@ -479,31 +542,36 @@ Main features added in this fork
 - Improves user-history learning behavior when a committed conversion is immediately corrected with Backspace or Cancel
 - Keeps learning caused by direct-commit punctuations/symbols pending until the next real text input, and allows it to be reverted by Backspace, Escape, Revert, Reset, Undo, or IME off
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
-- Allows enabling/disabling live conversion and configuring its debounce delay from the config dialog
+- Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
-- Suppresses live conversion for one-character compositions to avoid over-converting particles
+- By default, suppresses live conversion for one-character compositions to avoid over-converting particles
 - Suppresses live conversion for very short kana compositions with decorative trailing symbols such as `え~`, `えー`, or `ん？`
+- Suppresses live-conversion flicker for unfinished expressive kana prefixes, while completed expressive forms such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん` are rescued as generated dictionary candidates
 - Uses committed left context, previous segments, and limited right context to reduce unnatural homophone results in cases such as `mainにマージしました`, `githubには`, `2名しかいない`, `追記したい`, `山梨県立美術館`, and `滋賀方面`
 - Allows assigning multiple commands to a single key binding as an ordered command sequence
 - Stores command sequences as `Commit|IMEOff` and shows them in the keymap editor as `Commit → IMEOff`
+- In the MS-IME style keymap, pressing Space while committed text is selected reconverts that selection; with no selection, Space still inserts a normal space
 - Allows assigning left/right Shift and left/right Ctrl separately on Windows
 - Shows the IME mode indicator even when a key assigned to IMEOn or IMEOff is pressed while Mozc is already in that state
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Adds a dark-mode switch for the Windows candidate window
+- Allows changing the font used for the Windows candidate window, infolist window, and live-conversion ruby display from the config dialog
+- Allows enabling or disabling the ruby display shown during live conversion from the config dialog
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog
 - Adjusts the appearance of the Windows candidate window and IME mode indicator, including colors, spacing, rounded corners, and layout
 - Makes the Windows IME mode indicator follow the Windows light/dark theme
 - Adds an enhanced system dictionary generation pipeline
 - Allows incorporating place names and SudachiDict-derived vocabulary from merge-ut-dictionaries into the system dictionary
 - Allows adding internet/subculture proper nouns from dic-nico-intersection-pixiv as daily-dictionary differences
-- Adds a syntax guard dictionary generation pipeline to reduce high-impact segmentation failures
+- Allows adding a weak personal-name dictionary from mozcdic-ut-personal-names after removing entries already covered by the generated daily dictionary, nico/pixiv delta dictionary, or base Mozc dictionaries
+- Adds a syntax guard dictionary generation pipeline to reduce high-impact segmentation failures, including guarded paths such as `と打ちたいのに`, `に分ける`, `した方が`, `したにもかかわらず`, `にまで`, `までに`, `までも`, and `肌身離さず`
 - Keeps large generated dictionary files out of Git and switches Bazel dictionary inputs to locally generated files
 - Reduces over-conversion of natural functional kana sequences such as `には` and `してたの`
 - Reduces cases where short two-character hiragana inputs such as `にじ` are split too aggressively
 - Adds a local Zenz live correction pipeline based on llama.cpp
 - Sends Zenz correction requests from `mozc_server` to `mozc_zenz_scorer.exe` through a named pipe, and performs local inference through the localhost endpoint of `llama-server.exe`
-- Allows configuring the Zenz inference debounce delay from the config dialog. The default is 1000 ms
-- Allows configuring the minimum reading length for Zenz inference
+- Allows configuring the Zenz correction debounce delay from the config dialog. The default is 1000 ms
+- Allows configuring the minimum number of characters to start Zenz correction
 - Adds optional local feedback learning for Zenz correction results
 - Does not store Zenz feedback just because a Zenz correction was displayed. A visible Zenz result becomes pending accepted feedback only when the user explicitly commits it, such as with Enter or a direct-commit punctuation/symbol
 - Writes pending accepted feedback to the local TSV only if it is not canceled by Backspace, Escape, Revert, Undo, IME off, or similar correction actions before the next real text input
@@ -548,21 +616,29 @@ while valid longer rules such as `ctnnr` and `ctnnc` still work.
 
 With live conversion enabled, Mozc automatically converts the current composition without committing it immediately.
 
-To reduce distracting intermediate conversions, this fork applies live conversion after a short configurable debounce delay instead of converting every character immediately. Single-character compositions are not live-converted, because they are often particles such as `に`, `を`, or `が`.
+To reduce distracting intermediate conversions, this fork applies live conversion after a short configurable debounce delay instead of converting every character immediately. By default, single-character compositions are not live-converted, because they are often particles such as `に`, `を`, or `が`. The minimum number of characters required to start live conversion can be changed from the config dialog.
 
 Live conversion is also suppressed for very short kana compositions followed only by decorative trailing symbols, such as `え~`, `えー`, or `ん？`. This avoids noisy intermediate conversions such as `え~` becoming `絵～` while the user is still typing.
+
+For short expressive kana utterances, colloquial evaluative forms, and casual greetings, this fork suppresses live-conversion flicker only while the user is still typing an unfinished prefix or a pending roman suffix. Completed expressions are allowed to reach the normal converter.
+
+For completed expressive forms, the generated dictionary adds natural kana candidates such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん`. This avoids pathological kanji segmentation by default while still allowing explicit user selections, user history, and user dictionary entries such as `ウッソ`, `クッソ`, `ヤッバ`, `チッス`, or `ホェ～` to influence future ranking.
+
+This does not disable normal conversion. Pressing Space still invokes ordinary conversion candidates, and completed expressive words remain ordinary converter candidates.
 
 For example:
 
 - Type `kyouha`
 - After the debounce delay, the preedit can be shown as `今日は` before pressing Space
 - Typing more characters keeps the same uncommitted composition and schedules another live conversion
+- Romaji-table ellipsis rules such as `v. -> …` or `v, -> ‥` keep the visible live-converted prefix instead of falling back to raw kana
+- When Shift-based ASCII input starts, the visible live conversion result is committed first, and then ASCII input begins
 - Pressing Backspace or Delete updates the live conversion result immediately
 - Pressing Enter commits the current live conversion result
 
 During live conversion, this fork shows a small ruby-like overlay window above the preedit text so that the original reading remains visible while the converted text is shown.
 
-The live conversion feature can be enabled or disabled from the config dialog. The debounce delay can also be configured there.
+The live conversion feature can be enabled or disabled from the config dialog. The debounce delay and the minimum number of characters required to start live conversion can also be configured there.
 
 ### Zenz live correction
 
@@ -577,8 +653,9 @@ that it does not rely on a fixed endpoint, and internal requests include
 protection against accidental or stale local endpoint mismatches.
 
 Zenz correction is delayed by a configurable debounce interval. The default
-delay is 1000 ms. If the current composition changes before the Zenz result
-arrives, the old result is discarded by generation/key checks.
+delay is 1000 ms. The minimum number of characters required to start Zenz
+correction can also be configured. If the current composition changes before
+the Zenz result arrives, the old result is discarded by generation/key checks.
 
 Zenz output is validated before display. Outputs that are empty, too short,
 identical to the Mozc result, too long, malformed, or likely to contain unsafe
@@ -623,6 +700,19 @@ Zenz feedback data can be managed from the config dialog. The management dialog
 shows learned entries in a read-only table and supports search, import, export,
 single-entry deletion, and full deletion. This avoids requiring users to edit the
 TSV file directly.
+
+
+#### Zenzai v3/v3.2 condition fields
+
+Zenz live correction can pass additional condition fields using the special-token format expected by Zenzai v3/v3.2. These fields are not ChatGPT-style system prompts; they are short hints mapped to the conditional input format used by the Zenzai model.
+
+- `profile`: passed as `U+EE03` profile for a short description of the writer or use case.
+- `topic`: passed as `U+EE04` topic. This field is experimental.
+- `style`: passed as `U+EE05` style. This field is experimental.
+- `settings`: passed as `U+EE06` settings. This field is experimental.
+- Right context: when the client supplies text on the right side of the caret, it is passed as `U+EE07` right context for Zenzai v3.2.
+
+Empty `profile`, `topic`, `style`, and `settings` fields are omitted from the prompt. Right context is not a fixed user-entered phrase; it is used automatically only when the client supplies `following_text`.
 
 ### Context-aware conversion after committed text
 
@@ -711,6 +801,14 @@ Commands are executed from left to right. If the input state changes during the 
 
 In exported keymap files, command sequences are stored with `|`, such as `Commit|IMEOff` or `Convert|ConvertNext`. In the keymap editor UI, they are displayed with arrows, such as `Commit → IMEOff`.
 
+### Space reconversion for selected text (Windows / MS-IME style keymap)
+
+In the Windows MS-IME style keymap, pressing Space while committed application text is selected reconverts that selected text. When no text is selected, the same key keeps the normal behavior and inserts a space.
+
+In the keymap editor, this command is shown as `Reconvert selected text, or insert space if no text is selected`. It does not unconditionally intercept the Space key; it is enabled only when the MS-IME style keymap assigns this command to Space in the precomposition state. If the user has customized the Space key binding, that custom keymap takes precedence.
+
+Users with an existing custom keymap can enable this behavior by selecting the MS-IME style keymap again or by manually assigning `Reconvert selected text, or insert space if no text is selected` to Space in the precomposition state.
+
 ### Independent left/right Shift and Ctrl key bindings (Windows)
 
 On Windows, left/right Shift and left/right Ctrl can be configured as separate keys in the keybinding editor.
@@ -744,11 +842,15 @@ Before changing the setting, Mozkey saves the previous Windows default input met
 
 If Mozkey is already the default IME, or if an active restore point already exists, Mozkey does not overwrite the previous restore point.
 
-### Windows candidate window and IME indicator themes
+### Windows candidate window, ruby display, and IME indicator appearance
 
 On Windows, the candidate window can be switched between the default light theme and a dark theme from the config dialog.
 
 The dark theme also adjusts the candidate window appearance, including colors, spacing, rounded corners, and footer visibility, to make it look more modern.
+
+The font used for the candidate window, infolist window, and live-conversion ruby display can also be changed from the config dialog. The setting can be reset to the default font, and the renderer falls back to the default font if the selected font cannot be used reliably for candidate rendering.
+
+The ruby display shown during live conversion can be enabled or disabled from the config dialog.
 
 The IME mode indicator follows the Windows light/dark theme and changes its colors to keep the current input mode easy to recognize.
 
@@ -780,12 +882,20 @@ The daily local dictionary can be generated from:
 - dic-nico-intersection-pixiv
   - additional proper nouns, internet slang, works, characters, and subculture terms
   - entries already covered by the generated daily dictionary or the base Mozc dictionaries are skipped
-- Koyasi syntax guard dictionary
+  - values ending with decorative symbols such as `☆`, `★`, `♡`, `♪`, or `※` are rejected because they tend to be noisy in daily conversion
+- mozcdic-ut-personal-names
+  - personal names, stage names, and activity names
+  - entries already covered by the generated daily dictionary, nico/pixiv delta dictionary, or base Mozc dictionaries are skipped
+  - risky short readings, long katakana-like names, group-like names, ASCII values, and punctuation-heavy values are filtered or demoted
+- Mozkey syntax / expressive kana guard dictionary
   - small generated guard entries for high-impact segmentation failures
-  - for example, protecting grammar-like paths such as `と打ちたいのに` and `に分ける`
+  - for example, protecting paths such as `と打ちたいのに`, `に分ける`, `した方が`, `したにもかかわらず`, `にまで`, `までに`, `までも`, `肌身離さず`, `になってしまいます`, and `になっちゃいます`
+  - also adds natural kana candidates for completed expressive forms such as `うっそ`, `くっそ`, `やっば`, `ちっす`, `ほえ～`, `ほぇ～`, and `ほっほーん`
 
 Large generated dictionary files are not committed to this repository.
 They are generated locally under `src/data/dictionary_koyasi/generated/`.
+
+Windows release MSI packages may include the locally generated `daily` system dictionary profile. See [Third-party notices](THIRD_PARTY_NOTICES.md) and [Koyasi Dictionary Data](src/data/dictionary_koyasi/README.md) for source and license notes.
 
 Before building a package with the enhanced dictionary enabled, regenerate the daily dictionary locally:
 
@@ -795,7 +905,8 @@ Before building a package with the enhanced dictionary enabled, regenerate the d
 
 See:
 
-- [Koyasi Dictionary Data](src/data/dictionary_koyasi/README.md)
+* [Koyasi Dictionary Data](src/data/dictionary_koyasi/README.md)
+* [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 Note
 ----

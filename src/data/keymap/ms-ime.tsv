@@ -153,7 +153,7 @@ Precomposition	OFF	IMEOff
 Precomposition	ON	IMEOn
 Precomposition	Shift Muhenkan	ToggleAlphanumericMode
 Precomposition	Shift Space	InsertAlternateSpace
-Precomposition	Space	InsertSpace
+Precomposition	Space	ReconvertSelectionOrInsertSpace
 Prediction	Ctrl Delete	DeleteSelectedCandidate
 Suggestion	Down	PredictAndConvert
 Suggestion	Shift Enter	CommitFirstSuggestion

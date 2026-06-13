@@ -652,7 +652,7 @@ However, on Emacs 24, y offset returned by `posn-at-point' is relative to
 the text area excluding the header line, while y offset taken by
 `posn-at-x-y' is relative to the buffer area including the header line.
 This asymmetry is by design according to GNU Emacs team.
-On Emacs 27, the tab line was added. The tab line behaves like the header
+On Emacs 27, the tab line was added.  The tab line behaves like the header
 line on Emacs 24.
 
 This function fixes the asymmetry between them on Emacs 24 and later versions.

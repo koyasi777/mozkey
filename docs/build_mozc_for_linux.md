@@ -130,6 +130,16 @@ configurations. Try the following command to
 bazelisk clean --expunge
 ```
 
+### Troubleshooting: Linker error `relocation refers to a discarded section`
+
+If you encounter linker errors related to `.sframe` sections (e.g., `relocation
+refers to a discarded section` when using GCC 15+ and LLD 19+ in non-release
+builds), you can append `--config no_sframe` to disable SFrame generation:
+
+```sh
+bazelisk build package --config no_sframe
+```
+
 ### How to customize installation locations
 
 Here is a table of contents in `mozc.zip` and their actual build target names.

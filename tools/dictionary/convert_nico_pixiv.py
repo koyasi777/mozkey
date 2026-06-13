@@ -124,6 +124,15 @@ PHRASE_MARKER_CHARS = set(
     "※"
 )
 
+TRAILING_DECORATIVE_SYMBOLS = set(
+    "☆★"
+    "◇◆□■△▲▽▼"
+    "○●◎"
+    "♡♥"
+    "♪♫"
+    "※"
+)
+
 
 def repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parents[2]
@@ -163,6 +172,10 @@ def is_katakana_text(s: str) -> bool:
 
 def has_phrase_marker(s: str) -> bool:
     return any(ch in PHRASE_MARKER_CHARS for ch in s)
+
+
+def has_trailing_decorative_symbol(s: str) -> bool:
+    return bool(s) and s[-1] in TRAILING_DECORATIVE_SYMBOLS
 
 
 def has_symbol_or_punctuation(s: str) -> bool:
@@ -360,6 +373,9 @@ def reject_reason(entry: UserEntry) -> str | None:
 
     if is_symbol_only(entry.value):
         return "symbol_only"
+
+    if has_trailing_decorative_symbol(entry.value):
+        return "trailing_decorative_symbol"
 
     return None
 
