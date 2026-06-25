@@ -85,3 +85,10 @@ regression	そうむてき	双務的	Conversion Expected
 regression	かこつ	仮骨	Conversion Expected
 regression	ねんのため	念のため	Conversion Expected 3
 regression	えらんだかさ	選んだ傘	Conversion Expected
+regression	そういういみなの	そういう意味なの	Conversion Expected
+regression	おさとうとおす	お砂糖とお酢	Conversion Expected
+regression	こちらいえにつきました	こちら家に着きました	Conversion Expected
+regression	あのたなにあります	あの棚にあります	Conversion Expected
+regression	せいをだす	精を出す	Conversion Expected
+regression	びーるはいた	ビール吐いた	Conversion Expected
+regression	くつはいた	靴履いた	Conversion Expected

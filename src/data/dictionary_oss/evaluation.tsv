@@ -585,3 +585,10 @@ FAILED:	そうむてき	総務的	Conversion Expected	双務的	3.33.6089
 FAILED:	かこつ	過去つ	Conversion Expected	仮骨	3.33.6089
 OK:	ねんのため	念の為	Conversion Expected 3	念のため	3.33.6089
 FAILED:	えらんだかさ	選ん高さ	Conversion Expected	選んだ傘	3.33.6133
+FAILED:	そういういみなの	そういう諱の	Conversion Expected	そういう意味なの	3.33.6239
+FAILED:	おさとうとおす	お砂糖と押す	Conversion Expected	お砂糖とお酢	3.33.6239
+FAILED:	こちらいえにつきました	こちら言えにつきました	Conversion Expected	こちら家に着きました	3.33.6239
+FAILED:	あのたなにあります	あの店にあります	Conversion Expected	あの棚にあります	3.33.6239
+FAILED:	せいをだす	性を出す	Conversion Expected	精を出す	3.33.6239
+FAILED:	びーるはいた	ビールはいた	Conversion Expected	ビール吐いた	3.33.6239
+FAILED:	くつはいた	靴はいた	Conversion Expected	靴履いた	3.33.6239
