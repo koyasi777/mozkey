@@ -592,3 +592,11 @@ FAILED:	あのたなにあります	あの店にあります	Conversion Expected
 FAILED:	せいをだす	性を出す	Conversion Expected	精を出す	3.33.6239
 FAILED:	びーるはいた	ビールはいた	Conversion Expected	ビール吐いた	3.33.6239
 FAILED:	くつはいた	靴はいた	Conversion Expected	靴履いた	3.33.6239
+FAILED:	ともだちのしんちょうをはかる	友達の身長を図る	Conversion Expected	友達の身長を測る	3.34.6239
+OK:	きのうのゆうしょくはてんぷらだった	昨日の夕食は天ぷらだった	Conversion Expected	昨日の夕食は天ぷらだった	3.34.6239
+FAILED:	いえにはやくかえる	家に早く変える	Conversion Expected	家に早く帰る	3.34.6239
+FAILED:	てんきがいいからせんたくしよう	天気がいいから選択しよう	Conversion Expected	天気がいいから洗濯しよう	3.34.6239
+FAILED:	あめがふるかもしれない	雨がフルかもしれない	Conversion Expected	雨が降るかもしれない	3.34.6239
+FAILED:	きのうはどのくらいねましたか	機能はどのくらい寝ましたか	Conversion Expected	昨日はどのくらい寝ましたか	3.34.6239
+OK:	こんどのしゅじゅつはいつですか	今度の手術はいつですか	Conversion Expected	今度の手術はいつですか	3.34.6239
+FAILED:	けんかをしてしまったのであやまりたい	喧嘩をしてしまったので誤りたい	Conversion Expected	喧嘩をしてしまったので謝りたい	3.34.6239

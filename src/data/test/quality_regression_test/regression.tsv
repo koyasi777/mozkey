@@ -92,3 +92,11 @@ regression	あのたなにあります	あの棚にあります	Conversion Expec
 regression	せいをだす	精を出す	Conversion Expected
 regression	びーるはいた	ビール吐いた	Conversion Expected
 regression	くつはいた	靴履いた	Conversion Expected
+regression	ともだちのしんちょうをはかる	友達の身長を測る	Conversion Expected
+regression	きのうのゆうしょくはてんぷらだった	昨日の夕食は天ぷらだった	Conversion Expected
+regression	いえにはやくかえる	家に早く帰る	Conversion Expected
+regression	てんきがいいからせんたくしよう	天気がいいから洗濯しよう	Conversion Expected
+regression	あめがふるかもしれない	雨が降るかもしれない	Conversion Expected
+regression	きのうはどのくらいねましたか	昨日はどのくらい寝ましたか	Conversion Expected
+regression	こんどのしゅじゅつはいつですか	今度の手術はいつですか	Conversion Expected
+regression	けんかをしてしまったのであやまりたい	喧嘩をしてしまったので謝りたい	Conversion Expected
