@@ -30,7 +30,6 @@
 #ifndef MOZC_REWRITER_SYMBOL_REWRITER_H_
 #define MOZC_REWRITER_SYMBOL_REWRITER_H_
 
-#include <cstddef>
 #include <memory>
 #include <optional>
 
