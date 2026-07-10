@@ -29,7 +29,13 @@
 
 #include "gui/dictionary_tool/dictionary_content_table_widget.h"
 
+#include <QHeaderView>
+#include <QScrollBar>
 #include <QtGui>
+
+#ifdef __APPLE__
+#include <algorithm>
+#endif  // __APPLE__
 
 namespace mozc::gui {
 
@@ -44,33 +50,33 @@ void DictionaryContentTableWidget::paintEvent(QPaintEvent *event) {
     return;
   }
 
-  // TODO(taku): we don't want to use the fixed size, because
-  // the row height would change according to the users' environment
-  constexpr int kDefaultHeight = 19;
-
-  QRect rect;
-  int alternate_index = 0;
-  if (rowCount() == 0) {
-    rect.setRect(0, 0, 1, kDefaultHeight);
-    alternate_index = 1;
-  } else {
-    QTableWidgetItem *last_item = item(rowCount() - 1, 0);
-    if (last_item == nullptr) {
-      return;
-    }
-    rect = visualItemRect(last_item);
-    alternate_index = rowCount();
+  const int row_height = rowCount() > 0 ? rowHeight(0)
+                         : verticalHeader()->defaultSectionSize();
+  if (row_height <= 0) [[unlikely]] {
+    // If row_height is not available, do not paint the alternate color.
+    return;
   }
 
-  int start_offset = rect.y() + rect.height();
+  int row_y = 0;
+  if (rowCount() > 0) {
+    // rowViewportPosition() returns the Y-coordinate of the row directly on the
+    // viewport, automatically accounting for the vertical scrollbar offset.
+    const int last_row_bottom = rowViewportPosition(rowCount() - 1)
+                                + rowHeight(rowCount() - 1);
+    row_y = std::max(0, last_row_bottom);
+  }
+
+  bool is_odd = rowCount() % 2 == 1;
   QPainter painter(viewport());
-  while (start_offset < height()) {
-    if (alternate_index % 2 == 1) {
-      QRect draw_rect(0, start_offset, width(), rect.height());
-      painter.fillRect(draw_rect, QPalette().color(QPalette::AlternateBase));
+  const QColor alternate_color =
+      viewport()->palette().color(QPalette::Active, QPalette::AlternateBase);
+  while (row_y < height()) {
+    if (is_odd) {
+      QRect draw_rect(0, row_y, width(), row_height);
+      painter.fillRect(draw_rect, alternate_color);
     }
-    start_offset += rect.height();
-    ++alternate_index;
+    row_y += row_height;
+    is_odd = !is_odd;
   }
 #endif  // __APPLE__
 }
