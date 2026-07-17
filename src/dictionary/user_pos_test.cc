@@ -209,6 +209,20 @@ TEST_F(UserPosTest, GetStringPosType) {
             "抑制単語");
 }
 
+TEST_F(UserPosTest, GetCostFromPosTypeWithPenalty) {
+  // When cost is explicitly defined (> 0) in user_pos.def, cost + cost_penalty
+  // is returned. NOUN cost is 2500. With penalty 346: 2500 + 346 = 2846.
+  EXPECT_EQ(
+      UserPos::GetCostFromPosType(user_dictionary::UserDictionary::NOUN, 346),
+      2846);
+
+  // When cost is 0 in user_pos.def (e.g. verbs/adjectives), default cost 5000
+  // is returned without penalty.
+  EXPECT_EQ(UserPos::GetCostFromPosType(
+                user_dictionary::UserDictionary::WA_GROUP1_VERB, 346),
+            5000);
+}
+
 TEST_F(UserPosTest, PosTypeRoundTrip) {
   const std::vector<std::string> pos_list = user_pos_.GetPosList();
   for (absl::string_view pos : pos_list) {

@@ -195,13 +195,21 @@ absl::string_view UserPos::GetStringPosType(
 
 // static
 uint16_t UserPos::GetCostFromPosType(
-    user_dictionary::UserDictionary::PosType pos_type) {
+    user_dictionary::UserDictionary::PosType pos_type, int cost_penalty) {
   int cost = 0;
   if (user_dictionary::UserDictionary::PosType_IsValid(pos_type)) {
     cost = kPosTypeStringTable[pos_type].second;
   }
-  static constexpr uint16_t kDefaultCost = 5000;
-  return cost > 0 ? cost : kDefaultCost;
+  if (cost == 0) {
+    // When cost is 0 in user_pos.def (e.g. verbs/adjectives), a large default
+    // cost is used. In this case, no extra entry count penalty needs to be
+    // added.
+    static constexpr uint16_t kDefaultCost = 5000;
+    return kDefaultCost;
+  }
+  // Cost is explicitly defined in user_pos.def (> 0). Apply entry count
+  // cost_penalty.
+  return cost + cost_penalty;
 }
 
 // static
