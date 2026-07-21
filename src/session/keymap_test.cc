@@ -354,6 +354,37 @@ TEST_F(KeyMapTest, GetCommand_overlay) {
   }
 }
 
+TEST_F(KeyMapTest, GetCommand_cycleSegmentationOverlay) {
+  config::Config default_config;
+  default_config.set_session_keymap(config::Config::MSIME);
+  KeyMapManager default_manager(default_config);
+  commands::KeyEvent key_event;
+  KeyParser::ParseKey("Ctrl Shift Space", &key_event);
+  ConversionState::Commands default_command;
+  EXPECT_TRUE(
+      default_manager.GetCommandConversion(key_event, &default_command));
+  EXPECT_EQ(default_command, ConversionState::INSERT_FULL_SPACE);
+
+  config::Config config;
+  config.set_session_keymap(config::Config::MSIME);
+  config.add_overlay_keymaps(config::Config::OVERLAY_CYCLE_SEGMENTATION);
+  KeyMapManager manager(config);
+
+  ConversionState::Commands command;
+  EXPECT_TRUE(manager.GetCommandConversion(key_event, &command));
+  EXPECT_EQ(command, ConversionState::CYCLE_SEGMENTATION);
+
+  // The opt-in overlay must not replace the existing full-space bindings in
+  // composition and precomposition states.
+  CompositionState::Commands composition_command;
+  EXPECT_TRUE(manager.GetCommandComposition(key_event, &composition_command));
+  EXPECT_EQ(composition_command, CompositionState::INSERT_FULL_SPACE);
+  PrecompositionState::Commands precomposition_command;
+  EXPECT_TRUE(manager.GetCommandPrecomposition(key_event,
+                                                &precomposition_command));
+  EXPECT_EQ(precomposition_command, PrecompositionState::INSERT_FULL_SPACE);
+}
+
 TEST_F(KeyMapTest, GetKeyMapFileName) {
   EXPECT_STREQ("system://atok.tsv",
                KeyMapManager::GetKeyMapFileName(config::Config::ATOK));
@@ -367,6 +398,9 @@ TEST_F(KeyMapTest, GetKeyMapFileName) {
                KeyMapManager::GetKeyMapFileName(config::Config::CHROMEOS));
   EXPECT_STREQ("user://keymap.tsv",
                KeyMapManager::GetKeyMapFileName(config::Config::CUSTOM));
+  EXPECT_STREQ("system://overlay_cycle_segmentation.tsv",
+               KeyMapManager::GetKeyMapFileName(
+                   config::Config::OVERLAY_CYCLE_SEGMENTATION));
 }
 
 TEST_F(KeyMapTest, DefaultKeyBindings) {
@@ -544,6 +578,9 @@ TEST_F(KeyMapTest, GetName) {
     EXPECT_TRUE(manager.GetNameFromCommandConversion(
         ConversionState::INSERT_CHARACTER, &name));
     EXPECT_EQ(name, "InsertCharacter");
+    EXPECT_TRUE(manager.GetNameFromCommandConversion(
+        ConversionState::CYCLE_SEGMENTATION, &name));
+    EXPECT_EQ(name, "CycleSegmentation");
 
     if (isCompositionModeXCommandSupported()) {
       EXPECT_TRUE(manager.GetNameFromCommandConversion(
@@ -675,6 +712,7 @@ TEST_F(KeyMapTest, ConversionStateSupportsCompositionModeCommandStrings) {
   EXPECT_FALSE(names.contains("InputModeFullKatakana"));
   EXPECT_FALSE(names.contains("InputModeHalfAlphanumeric"));
   EXPECT_FALSE(names.contains("InputModeFullAlphanumeric"));
+  EXPECT_TRUE(names.contains("CycleSegmentation"));
 }
 
 TEST_F(KeyMapTest, ParseCompositionModeCommandStringsForDirectState) {

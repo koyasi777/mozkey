@@ -1473,6 +1473,110 @@ TEST_F(EngineConverterTest, ResizeSegmentsFailedInSwitchKanaType) {
   EXPECT_TRUE(converter.SwitchKanaType(*composer_));
 }
 
+TEST_F(EngineConverterTest, CycleSegmentationKeepsReadingAndFocus) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  Segments segments;
+  AddSegmentWithSingleCandidate(&segments, "あい", "あい");
+  AddSegmentWithSingleCandidate(&segments, "うえ", "うえ");
+  composer_->InsertCharacterPreedit("あいうえ");
+  FillT13Ns(&segments, composer_.get());
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  EXPECT_TRUE(converter.Convert(*composer_));
+  converter.SegmentFocusRight();
+  EXPECT_EQ(GetSegmentIndex(converter), 1);
+
+  static constexpr std::array<uint8_t, 2> kExpectedSizes = {1, 3};
+  static constexpr absl::Span<const uint8_t> kExpectedSizesSpan =
+      kExpectedSizes;
+  EXPECT_CALL(*mock_converter,
+              ResizeSegments(_, _, 0, kExpectedSizesSpan))
+      .WillOnce(Invoke([this](Segments* resized_segments,
+                              const ConversionRequest&, size_t,
+                              absl::Span<const uint8_t>) {
+        resized_segments->clear_conversion_segments();
+        AddSegmentWithSingleCandidate(resized_segments, "あ", "あ");
+        AddSegmentWithSingleCandidate(resized_segments, "いうえ", "いうえ");
+        FillT13Ns(resized_segments, composer_.get());
+        return true;
+      }));
+
+  EXPECT_TRUE(converter.CycleSegmentation(*composer_));
+  ASSERT_EQ(GetSegments(converter).conversion_segments_size(), 2);
+  EXPECT_EQ(GetSegments(converter).conversion_segment(0).key(), "あ");
+  EXPECT_EQ(GetSegments(converter).conversion_segment(1).key(), "いうえ");
+  EXPECT_EQ(GetSegmentIndex(converter), 1);
+
+  std::string reading;
+  GetPreedit(converter, 0, 2, &reading);
+  EXPECT_EQ(reading, "あいうえ");
+}
+
+TEST_F(EngineConverterTest, CycleSegmentationVisitsAlternativesAndWraps) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  Segments segments;
+  AddSegmentWithSingleCandidate(&segments, "あい", "あい");
+  AddSegmentWithSingleCandidate(&segments, "うえ", "うえ");
+  composer_->InsertCharacterPreedit("あいうえ");
+  FillT13Ns(&segments, composer_.get());
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  EXPECT_TRUE(converter.Convert(*composer_));
+  converter.SegmentFocusRight();
+  EXPECT_EQ(GetSegmentIndex(converter), 1);
+
+  std::vector<std::vector<uint8_t>> observed_sizes;
+  ON_CALL(*mock_converter, ResizeSegments(_, _, 0, _))
+      .WillByDefault(Invoke([this, &observed_sizes](
+                                Segments* resized_segments,
+                                const ConversionRequest&, size_t,
+                                absl::Span<const uint8_t> sizes) {
+        observed_sizes.emplace_back(sizes.begin(), sizes.end());
+        resized_segments->clear_conversion_segments();
+        const std::string key = "あいうえ";
+        size_t offset = 0;
+        for (const uint8_t size : sizes) {
+          const std::string segment_key =
+              std::string(Util::Utf8SubString(key, offset, size));
+          AddSegmentWithSingleCandidate(resized_segments, segment_key,
+                                        segment_key);
+          offset += size;
+        }
+        FillT13Ns(resized_segments, composer_.get());
+        return true;
+      }));
+
+  const std::vector<std::vector<uint8_t>> expected_sizes = {
+      {1, 3}, {3, 1}, {2, 1, 1}, {1, 1, 2}, {4}, {2, 2}};
+  const std::vector<size_t> expected_focus_indices = {1, 0, 1, 2, 0, 1};
+  for (size_t i = 0; i < expected_sizes.size(); ++i) {
+    EXPECT_TRUE(converter.CycleSegmentation(*composer_));
+    ASSERT_FALSE(observed_sizes.empty());
+    EXPECT_EQ(observed_sizes.back(), expected_sizes[i]);
+    EXPECT_EQ(GetSegmentIndex(converter), expected_focus_indices[i]);
+  }
+
+  ASSERT_EQ(GetSegments(converter).conversion_segments_size(), 2);
+  EXPECT_EQ(GetSegments(converter).conversion_segment(0).key(), "あい");
+  EXPECT_EQ(GetSegments(converter).conversion_segment(1).key(), "うえ");
+
+  // Cycling is preview-only.  No normal conversion learning call is made
+  // until the user explicitly commits the resulting segmentation.
+  EXPECT_CALL(*mock_converter, CommitSegmentValue(_, _, _))
+      .Times(2)
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_converter, FinishConversion(_, _))
+      .WillOnce(Invoke([](const ConversionRequest&, Segments* committed) {
+        committed->clear_conversion_segments();
+      }));
+  converter.Commit(*composer_, Context::default_instance());
+}
+
 TEST_F(EngineConverterTest, CommitFirstSegment) {
   auto mock_converter = std::make_shared<MockConverter>();
   EngineConverter converter(mock_converter, request_, config_);

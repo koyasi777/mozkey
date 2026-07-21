@@ -18,8 +18,10 @@ Shortcut keys are configurable from the preferences dialog GUI.
     +   default keymap for ChromeOS, similar with the Windows style.
 *   mobile.tsv
     +   Keymap for mobile input.
-*   overlay_kenkan_muhenkan_to_ime_on_off.tsv
+*   overlay_henkan_muhenkan_to_ime_on_off.tsv
     +   Subset of keymap for special purpose.
+*   overlay_cycle_segmentation.tsv
+    +   Opt-in Conversion shortcut for cycling alternative segmentations.
 
 ## Commands
 

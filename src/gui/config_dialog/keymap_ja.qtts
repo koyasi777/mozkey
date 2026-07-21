@@ -104,6 +104,10 @@
         <translation>学習を使わずに変換</translation>
     </message>
     <message>
+        <source>CycleSegmentation</source>
+        <translation>別の文節構成を巡回</translation>
+    </message>
+    <message>
         <source>Delete</source>
         <translation>右の文字を削除</translation>
     </message>

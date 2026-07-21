@@ -46,6 +46,18 @@ There are three predefined keymaps
 
 Full customization is also available.
 
+Mozkey IbG also provides an opt-in keymap overlay named
+`OVERLAY_CYCLE_SEGMENTATION`. When enabled, it assigns `Ctrl+Shift+Space` to
+`CycleSegmentation` in Conversion mode only; Composition and Precomposition
+keep their existing full-space shortcut.
+
+With a fully custom keymap, the same binding can be written as:
+
+```tsv
+status	key	command
+Conversion	Ctrl Shift Space	CycleSegmentation
+```
+
 ### Input modes
 
 *   Direct: Mode to type Latin characters without IME.

@@ -194,6 +194,7 @@ class Session {
   bool SegmentFocusLeftEdge(mozc::commands::Command* command);
   bool SegmentWidthExpand(mozc::commands::Command* command);
   bool SegmentWidthShrink(mozc::commands::Command* command);
+  bool CycleSegmentation(mozc::commands::Command* command);
 
   // Selects the transliteration candidate.  If the current state is
   // composition, candidates will be generated with only translitaration

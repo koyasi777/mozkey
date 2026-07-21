@@ -257,6 +257,12 @@ class EngineConverterInterface {
   virtual void SegmentWidthExpand(const composer::Composer& composer) = 0;
   virtual void SegmentWidthShrink(const composer::Composer& composer) = 0;
 
+  // Cycles through alternative segmentations while keeping the composition
+  // reading unchanged.
+  virtual bool CycleSegmentation(const composer::Composer& composer) {
+    return false;
+  }
+
   // Move the focus of candidates.
   virtual void CandidateNext(const composer::Composer& composer) = 0;
   virtual void CandidateNextPage() = 0;

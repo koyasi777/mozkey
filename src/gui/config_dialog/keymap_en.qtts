@@ -104,6 +104,10 @@
         <translation>Convert without using history</translation>
     </message>
     <message>
+        <source>CycleSegmentation</source>
+        <translation>Cycle segmentation</translation>
+    </message>
+    <message>
         <source>Delete</source>
         <translation>Delete (erase character after cursor)</translation>
     </message>

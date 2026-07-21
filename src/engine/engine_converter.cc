@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -73,6 +74,144 @@ namespace {
 
 using ::mozc::commands::Request;
 using ::mozc::config::Config;
+
+using SegmentSizes = std::vector<uint8_t>;
+// Keep candidate construction bounded for unusually long compositions until
+// the converter exposes a lattice-backed N-best segmentation API.
+constexpr size_t kMaxSegmentationCandidates = 256;
+
+void AddSegmentationCandidate(const SegmentSizes& base,
+                              SegmentSizes candidate,
+                              std::vector<SegmentSizes>* candidates) {
+  if (candidate.empty() || candidate == base ||
+      std::any_of(candidate.begin(), candidate.end(),
+                  [](uint8_t size) { return size == 0; })) {
+    return;
+  }
+  if (candidates->size() >= kMaxSegmentationCandidates) {
+    return;
+  }
+  if (std::find(candidates->begin(), candidates->end(), candidate) ==
+      candidates->end()) {
+    candidates->push_back(std::move(candidate));
+  }
+}
+
+SegmentSizes SizesFromBoundaries(const std::vector<size_t>& boundaries) {
+  SegmentSizes sizes;
+  if (boundaries.size() < 2) {
+    return sizes;
+  }
+  sizes.reserve(boundaries.size() - 1);
+  for (size_t i = 1; i < boundaries.size(); ++i) {
+    const size_t size = boundaries[i] - boundaries[i - 1];
+    if (size == 0 || size > std::numeric_limits<uint8_t>::max()) {
+      return {};
+    }
+    sizes.push_back(static_cast<uint8_t>(size));
+  }
+  return sizes;
+}
+
+std::vector<SegmentSizes> BuildSegmentationCandidates(
+    const SegmentSizes& base, size_t focus_segment) {
+  std::vector<SegmentSizes> candidates;
+  if (base.empty()) {
+    return candidates;
+  }
+
+  std::vector<size_t> boundaries(base.size() + 1);
+  for (size_t i = 0; i < base.size(); ++i) {
+    boundaries[i + 1] = boundaries[i] + base[i];
+  }
+
+  // Prefer alternatives adjacent to the focused segment.  This keeps the
+  // first key press local and makes the command behave predictably on long
+  // readings while still allowing later presses to visit other boundaries.
+  std::vector<size_t> segment_order;
+  if (focus_segment >= base.size()) {
+    focus_segment = base.size() - 1;
+  }
+  segment_order.push_back(focus_segment);
+  for (size_t distance = 1; distance < base.size(); ++distance) {
+    if (focus_segment >= distance) {
+      segment_order.push_back(focus_segment - distance);
+    }
+    if (focus_segment + distance < base.size()) {
+      segment_order.push_back(focus_segment + distance);
+    }
+  }
+
+  // Try moving an existing internal boundary to every valid reading position.
+  // Boundary index N is the boundary between segments N - 1 and N; index 0
+  // and the final index are the immutable reading edges.  Positions nearest
+  // to the current boundary are visited first.
+  std::vector<size_t> boundary_order;
+  for (size_t distance = 0; distance < base.size(); ++distance) {
+    if (focus_segment >= distance + 1) {
+      boundary_order.push_back(focus_segment - distance);
+    }
+    if (focus_segment + distance + 1 < base.size()) {
+      boundary_order.push_back(focus_segment + distance + 1);
+    }
+  }
+  for (const size_t boundary_index : boundary_order) {
+    const size_t current = boundaries[boundary_index];
+    const size_t lower = boundaries[boundary_index - 1] + 1;
+    const size_t upper = boundaries[boundary_index + 1] - 1;
+    const size_t left_distance = current - lower;
+    const size_t right_distance = upper - current;
+    for (size_t distance = 1;
+         distance <= left_distance || distance <= right_distance; ++distance) {
+      if (distance <= left_distance) {
+        std::vector<size_t> moved_boundaries = boundaries;
+        moved_boundaries[boundary_index] = current - distance;
+        AddSegmentationCandidate(base, SizesFromBoundaries(moved_boundaries),
+                                 &candidates);
+      }
+      if (distance <= right_distance) {
+        std::vector<size_t> moved_boundaries = boundaries;
+        moved_boundaries[boundary_index] = current + distance;
+        AddSegmentationCandidate(base, SizesFromBoundaries(moved_boundaries),
+                                 &candidates);
+      }
+    }
+  }
+
+  // Try splitting each segment at every internal reading position.  The
+  // nearest focused segment is considered first; this covers cases such as
+  // "はいしゃ" -> "は|いしゃ" without changing the reading.
+  for (const size_t segment_index : segment_order) {
+    if (base[segment_index] < 2) {
+      continue;
+    }
+    for (size_t split = 1; split < base[segment_index]; ++split) {
+      SegmentSizes split_sizes = base;
+      split_sizes[segment_index] = static_cast<uint8_t>(split);
+      split_sizes.insert(split_sizes.begin() + segment_index + 1,
+                         static_cast<uint8_t>(base[segment_index] - split));
+      AddSegmentationCandidate(base, std::move(split_sizes), &candidates);
+    }
+  }
+
+  // Finally try removing each existing boundary (merging adjacent segments).
+  for (const size_t segment_index : segment_order) {
+    if (segment_index + 1 >= base.size()) {
+      continue;
+    }
+    SegmentSizes merged_sizes = base;
+    const size_t merged = merged_sizes[segment_index] +
+                          merged_sizes[segment_index + 1];
+    if (merged > std::numeric_limits<uint8_t>::max()) {
+      continue;
+    }
+    merged_sizes[segment_index] = static_cast<uint8_t>(merged);
+    merged_sizes.erase(merged_sizes.begin() + segment_index + 1);
+    AddSegmentationCandidate(base, std::move(merged_sizes), &candidates);
+  }
+
+  return candidates;
+}
 
 #if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
 std::wstring Utf8ToWideForDebug(absl::string_view s) {
@@ -187,6 +326,8 @@ bool EngineConverter::ConvertWithPreferences(
     const composer::Composer& composer,
     const ConversionPreferences& preferences) {
   DCHECK(CheckState(COMPOSITION | SUGGESTION | CONVERSION));
+
+  ResetSegmentationCycle();
 
   DCHECK(request_);
   DCHECK(config_);
@@ -1229,6 +1370,7 @@ void EngineConverter::SegmentFocusInternal(size_t index) {
   if (CheckState(PREDICTION)) {
     return;  // Do nothing.
   }
+  ResetSegmentationCycle();
   ResetResult();
 
   if (segment_index_ == index) {
@@ -1270,6 +1412,7 @@ void EngineConverter::SegmentFocusLeftEdge() { SegmentFocusInternal(0); }
 void EngineConverter::ResizeSegmentWidth(const composer::Composer& composer,
                                          int delta) {
   DCHECK(CheckState(PREDICTION | CONVERSION));
+  ResetSegmentationCycle();
   candidate_list_visible_ = false;
   if (CheckState(PREDICTION)) {
     return;  // Do nothing.
@@ -1305,6 +1448,60 @@ void EngineConverter::SegmentWidthExpand(const composer::Composer& composer) {
 
 void EngineConverter::SegmentWidthShrink(const composer::Composer& composer) {
   ResizeSegmentWidth(composer, -1);
+}
+
+bool EngineConverter::CycleSegmentation(const composer::Composer& composer) {
+  if (!CheckState(CONVERSION) || segments_.conversion_segments_size() == 0) {
+    return false;
+  }
+
+  SegmentSizes current_sizes;
+  current_sizes.reserve(segments_.conversion_segments_size());
+  size_t current_focus_position = 0;
+  for (size_t i = 0; i < segments_.conversion_segments_size(); ++i) {
+    if (i < segment_index_) {
+      current_focus_position += segments_.conversion_segment(i).key_len();
+    }
+    const size_t key_len = segments_.conversion_segment(i).key_len();
+    if (key_len == 0 || key_len > std::numeric_limits<uint8_t>::max()) {
+      return false;
+    }
+    current_sizes.push_back(static_cast<uint8_t>(key_len));
+  }
+
+  if (cycle_segmentation_current_sizes_ != current_sizes) {
+    ResetSegmentationCycle();
+    cycle_segmentation_base_sizes_ = current_sizes;
+    cycle_segmentation_current_sizes_ = current_sizes;
+    cycle_segmentation_focus_position_ = current_focus_position;
+    cycle_segmentation_candidates_ =
+        BuildSegmentationCandidates(current_sizes, segment_index_);
+  }
+
+  const size_t focus_position = cycle_segmentation_focus_position_;
+
+  while (cycle_segmentation_candidate_index_ <
+         cycle_segmentation_candidates_.size()) {
+    const SegmentSizes& candidate =
+        cycle_segmentation_candidates_[cycle_segmentation_candidate_index_++];
+    if (ApplySegmentation(composer, candidate, focus_position)) {
+      cycle_segmentation_current_sizes_ = candidate;
+      return true;
+    }
+  }
+
+  // Once every distinct alternative has been tried, return to the original
+  // segmentation.  This makes repeated presses a finite cycle and ensures
+  // that the original path is not lost when all alternatives are rejected.
+  if (current_sizes != cycle_segmentation_base_sizes_ &&
+      ApplySegmentation(composer, cycle_segmentation_base_sizes_,
+                        focus_position)) {
+    ResetSegmentationCycle();
+    return true;
+  }
+
+  ResetSegmentationCycle();
+  return false;
 }
 
 void EngineConverter::CandidateNext(const composer::Composer& composer) {
@@ -1564,6 +1761,89 @@ void EngineConverter::ResetState() {
   candidate_list_.Clear();
   selected_candidate_indices_.clear();
   incognito_segments_.Clear();
+  ResetSegmentationCycle();
+}
+
+bool EngineConverter::ApplySegmentation(
+    const composer::Composer& composer, const SegmentSizes& segment_sizes,
+    size_t focus_position) {
+  if (segment_sizes.empty()) {
+    return false;
+  }
+
+  size_t total_size = 0;
+  for (const uint8_t size : segment_sizes) {
+    if (size == 0) {
+      return false;
+    }
+    total_size += size;
+  }
+
+  size_t current_total_size = 0;
+  std::string current_key;
+  for (const Segment& segment : segments_.conversion_segments()) {
+    current_total_size += segment.key_len();
+    absl::StrAppend(&current_key, segment.key());
+  }
+  if (total_size != current_total_size) {
+    return false;
+  }
+
+  DCHECK(request_);
+  DCHECK(config_);
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder()
+          .SetComposer(composer)
+          .SetRequestView(*request_)
+          .SetConfigView(*config_)
+          .SetProjectDictionary(PinnedProjectDictionary())
+          .Build();
+
+  Segments resized_segments = segments_;
+  if (!converter_->ResizeSegments(&resized_segments, conversion_request, 0,
+                                  segment_sizes)) {
+    return false;
+  }
+  if (resized_segments.conversion_segments_size() != segment_sizes.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < segment_sizes.size(); ++i) {
+    if (resized_segments.conversion_segment(i).key_len() != segment_sizes[i]) {
+      return false;
+    }
+  }
+  std::string resized_key;
+  for (const Segment& segment : resized_segments.conversion_segments()) {
+    absl::StrAppend(&resized_key, segment.key());
+  }
+  if (resized_key != current_key) {
+    return false;
+  }
+
+  segments_ = resized_segments;
+  segment_index_ = segments_.conversion_segments_size() - 1;
+  for (size_t i = 0; i < segments_.conversion_segments_size(); ++i) {
+    const size_t end = segments_.conversion_segment(i).key_len();
+    if (focus_position < end) {
+      segment_index_ = i;
+      break;
+    }
+    focus_position -= end;
+  }
+
+  candidate_list_visible_ = false;
+  ResetResult();
+  InitializeSelectedCandidateIndices();
+  UpdateCandidateList();
+  return true;
+}
+
+void EngineConverter::ResetSegmentationCycle() {
+  cycle_segmentation_base_sizes_.clear();
+  cycle_segmentation_current_sizes_.clear();
+  cycle_segmentation_candidates_.clear();
+  cycle_segmentation_candidate_index_ = 0;
+  cycle_segmentation_focus_position_ = 0;
 }
 
 void EngineConverter::SegmentFocus() {

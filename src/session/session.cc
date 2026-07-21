@@ -4157,6 +4157,9 @@ bool Session::ExecuteConversionCommand(
     case keymap::ConversionState::SEGMENT_WIDTH_SHRINK:
       return SegmentWidthShrink(command);
 
+    case keymap::ConversionState::CYCLE_SEGMENTATION:
+      return CycleSegmentation(command);
+
     case keymap::ConversionState::CANCEL:
       return ConvertCancel(command);
 
@@ -9174,6 +9177,22 @@ bool Session::SegmentWidthShrink(commands::Command* command) {
   }
   command->mutable_output()->set_consumed(true);
   context_->mutable_converter()->SegmentWidthShrink(context_->composer());
+  Output(command);
+  return true;
+}
+
+bool Session::CycleSegmentation(commands::Command* command) {
+  if (!(context_->state() & (ImeContext::CONVERSION))) {
+    return DoNothing(command);
+  }
+  if (IsGrimodexSecureInput()) {
+    return DoNothing(command);
+  }
+
+  CancelPendingLiveConversion();
+  ClearLiveConversionState();
+  command->mutable_output()->set_consumed(true);
+  context_->mutable_converter()->CycleSegmentation(context_->composer());
   Output(command);
   return true;
 }

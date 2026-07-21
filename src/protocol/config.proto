@@ -130,6 +130,8 @@ message Config {
     MOBILE = 4;
     CHROMEOS = 5;
     OVERLAY_HENKAN_MUHENKAN_TO_IME_ON_OFF = 100;
+    // Opt-in IbG shortcut for cycling alternative conversion segmentations.
+    OVERLAY_CYCLE_SEGMENTATION = 101;
     OVERLAY_FOR_TEST = 10000;
   }
   optional SessionKeymap session_keymap = 41 [default = NONE];

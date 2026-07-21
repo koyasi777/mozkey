@@ -67,6 +67,8 @@ static constexpr char kMobileKeyMapFile[] = "system://mobile.tsv";
 static constexpr char kChromeOsKeyMapFile[] = "system://chromeos.tsv";
 static constexpr char kOverlayHenkanMuhenkanToImeOnOffKeyMapFile[] =
     "system://overlay_henkan_muhenkan_to_ime_on_off.tsv";
+static constexpr char kOverlayCycleSegmentationKeyMapFile[] =
+    "system://overlay_cycle_segmentation.tsv";
 
 static constexpr char kCommandStringCompositionModeHiragana[] =
     "CompositionModeHiragana";
@@ -240,6 +242,8 @@ const char* KeyMapManager::GetKeyMapFileName(
       return kCustomKeyMapFile;
     case config::Config::OVERLAY_HENKAN_MUHENKAN_TO_IME_ON_OFF:
       return kOverlayHenkanMuhenkanToImeOnOffKeyMapFile;
+    case config::Config::OVERLAY_CYCLE_SEGMENTATION:
+      return kOverlayCycleSegmentationKeyMapFile;
     case config::Config::OVERLAY_FOR_TEST:
     case config::Config::NONE:
     default:
@@ -738,6 +742,8 @@ void KeyMapManager::InitCommandData() {
                             ConversionState::SEGMENT_WIDTH_EXPAND);
   RegisterConversionCommand("SegmentWidthShrink",
                             ConversionState::SEGMENT_WIDTH_SHRINK);
+  RegisterConversionCommand("CycleSegmentation",
+                            ConversionState::CYCLE_SEGMENTATION);
   RegisterConversionCommand("ConvertNext", ConversionState::CONVERT_NEXT);
   RegisterConversionCommand("ConvertPrev", ConversionState::CONVERT_PREV);
   RegisterConversionCommand("ConvertNextPage",

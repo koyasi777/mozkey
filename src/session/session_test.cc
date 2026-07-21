@@ -4856,6 +4856,67 @@ TEST_F(SessionTest, SegmentWidthShrink) {
   session.SegmentWidthShrink(&command);
 }
 
+TEST_F(SessionTest, CycleSegmentationOverlayShortcut) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.add_overlay_keymaps(config::Config::OVERLAY_CYCLE_SEGMENTATION);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command command;
+  InsertCharacterChars("aiueo", &session, &command);
+  const ConversionRequest request = CreateConversionRequest(session);
+  Segments segments;
+  SetAiueo(&segments);
+  FillT13Ns(request, &segments);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  command.Clear();
+  ASSERT_TRUE(session.Convert(&command));
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, ResizeSegments(_, _, 0, _))
+      .WillOnce(Invoke([this, &request](
+                          Segments* resized_segments,
+                          const ConversionRequest&, size_t,
+                          absl::Span<const uint8_t> sizes) {
+        EXPECT_EQ(sizes.size(), 2);
+        if (sizes.size() != 2) {
+          return false;
+        }
+        EXPECT_EQ(sizes[0], 1);
+        EXPECT_EQ(sizes[1], 4);
+        resized_segments->clear_conversion_segments();
+        Segment* segment = resized_segments->add_segment();
+        segment->set_key("あ");
+        AddCandidate("あ", "あ", segment);
+        segment = resized_segments->add_segment();
+        segment->set_key("いうえお");
+        AddCandidate("いうえお", "いうえお", segment);
+        FillT13Ns(request, resized_segments);
+        return true;
+      }));
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl Shift Space", &session, &command));
+
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().has_preedit());
+  ASSERT_EQ(command.output().preedit().segment_size(), 2);
+  EXPECT_EQ(command.output().preedit().segment(0).key(), "あ");
+  EXPECT_EQ(command.output().preedit().segment(1).key(), "いうえお");
+  EXPECT_EQ(GetComposition(command), "あいうえお");
+}
+
 TEST_F(SessionTest, ConvertPrev) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

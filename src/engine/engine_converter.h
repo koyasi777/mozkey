@@ -239,6 +239,10 @@ class EngineConverter : public EngineConverterInterface {
   void SegmentWidthExpand(const composer::Composer& composer) override;
   void SegmentWidthShrink(const composer::Composer& composer) override;
 
+  // Cycles through alternative segmentations while keeping the composition
+  // reading unchanged.
+  bool CycleSegmentation(const composer::Composer& composer) override;
+
   // Moves the focus of candidates.
   void CandidateNext(const composer::Composer& composer) override;
   void CandidateNextPage() override;
@@ -383,6 +387,10 @@ class EngineConverter : public EngineConverterInterface {
 
   void SegmentFocusInternal(size_t segment_index);
   void ResizeSegmentWidth(const composer::Composer& composer, int delta);
+  bool ApplySegmentation(const composer::Composer& composer,
+                         const std::vector<uint8_t>& segment_sizes,
+                         size_t focus_position);
+  void ResetSegmentationCycle();
 
   void FillConversion(commands::Preedit* preedit) const;
   void FillResult(commands::Result* result) const;
@@ -459,6 +467,15 @@ class EngineConverter : public EngineConverterInterface {
 
   // Indicates whether config_ will be updated by the command candidate.
   converter::Candidate::Command updated_command_;
+
+  // State used by CycleSegmentation. Entries contain conversion-segment
+  // lengths in Unicode characters and never include history segments.
+  std::vector<uint8_t> cycle_segmentation_base_sizes_;
+  std::vector<uint8_t> cycle_segmentation_current_sizes_;
+  std::vector<std::vector<uint8_t>> cycle_segmentation_candidates_;
+  size_t cycle_segmentation_candidate_index_ = 0;
+  // Absolute reading position used to restore focus throughout one cycle.
+  size_t cycle_segmentation_focus_position_ = 0;
 
   // Revision number of client context with which the converter determines when
   // the history segments should be invalidated. See the implementation of
