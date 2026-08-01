@@ -67,6 +67,9 @@ class RendererStyleHandler {
     uint32_t corner_radius = 9;
     uint32_t size_percent = 100;
     uint32_t opacity_percent = 90;
+    uint32_t horizontal_padding = 14;
+    uint32_t vertical_padding = 6;
+    uint32_t composition_gap = 4;
     WindowShadowStyle shadow;
   };
 
@@ -99,7 +102,8 @@ class RendererStyleHandler {
       RendererStyleType type);
 
   // Returns the ruby-window appearance. Colors are 0xRRGGBB. Corner radius is
-  // a logical pixel radius at 100% DPI.
+  // a logical pixel radius at 100% DPI. Spacing values use the ruby window's
+  // 150% display design baseline and are scaled by size_percent at rendering.
   static RubyWindowStyle GetRubyWindowStyle();
 
   // Applies candidate window theme options to the given style.

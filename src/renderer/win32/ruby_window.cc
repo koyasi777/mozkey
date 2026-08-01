@@ -20,13 +20,12 @@ namespace win32 {
 namespace {
 
 // Theme-aware translucent pill UI.
-constexpr int kPaddingX = 14;
-constexpr int kPaddingY = 6;
-// Keep a real gap from the host application text. A zero gap makes a
-// topmost overlay visually merge with, or cover, editor glyphs.
-constexpr int kGapFromComposition = 4;
 constexpr int kFontPointSize = 13;
-constexpr uint32_t kDefaultDpi = 96;
+// Ruby spacing values use 144 DPI as their design baseline so the existing
+// visual density is preserved on a 150% display while other monitors scale
+// proportionally. Font, corner radius, and shadow keep their normal Windows
+// DPI scaling independently.
+constexpr uint32_t kRubySpacingDesignDpi = 144;
 
 // Keep the overlay close to the preedit, but do not let it cover the glyphs.
 constexpr int kFallbackLineHeight = 22;
@@ -47,17 +46,12 @@ RendererStyleHandler::RubyWindowStyle GetRubyWindowTheme() {
   return RendererStyleHandler::GetRubyWindowStyle();
 }
 
-uint32_t GetWindowDpi(HWND hwnd) {
-  return GetDpiForWindowHandle(hwnd);
-}
-
 int ScaleCornerRadius(uint32_t logical_radius, uint32_t dpi) {
   if (logical_radius == 0) {
     return 0;
   }
   return static_cast<int>(
-      std::lround(logical_radius *
-                  (static_cast<double>(dpi) / static_cast<double>(kDefaultDpi))));
+      std::lround(logical_radius * GetDPIScalingFactor(dpi)));
 }
 
 int ScaleByPercent(int value, uint32_t percent) {
@@ -68,12 +62,26 @@ int ScaleByPercent(int value, uint32_t percent) {
                          static_cast<double>(value) * percent / 100.0)));
 }
 
-int GetRubyPaddingX(const RendererStyleHandler::RubyWindowStyle& theme) {
-  return ScaleByPercent(kPaddingX, theme.size_percent);
+int ScaleRubySpacing(int value, uint32_t percent, uint32_t dpi) {
+  if (value <= 0) {
+    return 0;
+  }
+  return std::max(1, static_cast<int>(std::lround(
+                         static_cast<double>(value) * percent / 100.0 *
+                         static_cast<double>(dpi) /
+                         kRubySpacingDesignDpi)));
 }
 
-int GetRubyPaddingY(const RendererStyleHandler::RubyWindowStyle& theme) {
-  return ScaleByPercent(kPaddingY, theme.size_percent);
+int GetRubyPaddingX(const RendererStyleHandler::RubyWindowStyle& theme,
+                    uint32_t dpi) {
+  return ScaleRubySpacing(
+      static_cast<int>(theme.horizontal_padding), theme.size_percent, dpi);
+}
+
+int GetRubyPaddingY(const RendererStyleHandler::RubyWindowStyle& theme,
+                    uint32_t dpi) {
+  return ScaleRubySpacing(
+      static_cast<int>(theme.vertical_padding), theme.size_percent, dpi);
 }
 
 int GetRubyFontPointSize() {
@@ -262,6 +270,7 @@ bool RubyWindow::BuildReadingText(
 }
 
 bool RubyWindow::GetBasePosition(const commands::RendererCommand& command,
+                                 const LayoutManager& layout_manager,
                                  POINT* point, int* line_height,
                                  bool* from_preedit_rectangle) const {
   // Prefer the preedit rectangle. This is usually closer to the actual
@@ -299,9 +308,20 @@ bool RubyWindow::GetBasePosition(const commands::RendererCommand& command,
         return false;
       }
 
-      point->x = target.top_left().x();
-      point->y = target.top_left().y();
-      *line_height = target_line_height;
+      POINT physical_top_left = {};
+      int physical_line_height = 0;
+      if (layout_manager.GetCompositionTargetInPhysicalCoords(
+              app_info, kFallbackLineHeight, &physical_top_left,
+              &physical_line_height)) {
+        *point = physical_top_left;
+        *line_height = physical_line_height;
+      } else {
+        // Preserve the historical fallback for malformed or legacy commands
+        // whose target window cannot be used for DPI virtualization.
+        point->x = target.top_left().x();
+        point->y = target.top_left().y();
+        *line_height = target_line_height;
+      }
       if (from_preedit_rectangle != nullptr) {
         *from_preedit_rectangle = false;
       }
@@ -400,18 +420,22 @@ void RubyWindow::ResetFont() {
   font_face_name_.clear();
   font_height_ = 0;
   font_weight_ = 0;
-  font_dpi_y_ = 0;
 }
 
-void RubyWindow::UpdateFont(HDC dc) {
-  const int dpi_y = ::GetDeviceCaps(dc, LOGPIXELSY);
+void RubyWindow::UpdateDpi(uint32_t dpi) {
+  if (dpi == 0 || dpi == dpi_) {
+    return;
+  }
+  dpi_ = dpi;
+  ResetFont();
+}
 
+void RubyWindow::UpdateFont() {
   const std::wstring font_name = GetRubyWindowFontFaceName();
-  const int font_height = -MulDiv(GetRubyFontPointSize(), dpi_y, 72);
+  const int font_height = -MulDiv(GetRubyFontPointSize(), dpi_, 72);
   const int font_weight = FW_SEMIBOLD;
 
   if (font_ != nullptr &&
-      font_dpi_y_ == dpi_y &&
       font_height_ == font_height &&
       font_weight_ == font_weight &&
       font_face_name_ == font_name) {
@@ -444,7 +468,6 @@ void RubyWindow::UpdateFont(HDC dc) {
   font_face_name_ = actual_font_name;
   font_height_ = font_height;
   font_weight_ = font_weight;
-  font_dpi_y_ = dpi_y;
 }
 
 SIZE RubyWindow::MeasureText() const {
@@ -475,12 +498,13 @@ SIZE RubyWindow::MeasureText() const {
   ::ReleaseDC(nullptr, dc);
 
   const RendererStyleHandler::RubyWindowStyle theme = GetRubyWindowTheme();
-  size.cx += GetRubyPaddingX(theme) * 2;
-  size.cy += GetRubyPaddingY(theme) * 2;
+  size.cx += GetRubyPaddingX(theme, dpi_) * 2;
+  size.cy += GetRubyPaddingY(theme, dpi_) * 2;
   return size;
 }
 
 void RubyWindow::OnUpdate(const commands::RendererCommand& command,
+                          const LayoutManager& layout_manager,
                           const RECT* avoid_rect) {
   if (!command.visible()) {
     Hide();
@@ -523,7 +547,7 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   POINT base_point = {};
   int line_height = kFallbackLineHeight;
   bool from_preedit_rectangle = false;
-  if (!GetBasePosition(command, &base_point, &line_height,
+  if (!GetBasePosition(command, layout_manager, &base_point, &line_height,
                        &from_preedit_rectangle)) {
     if (KeepCurrentPlacement()) {
       return;
@@ -533,9 +557,11 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     return;
   }
 
-  HDC dc = ::GetDC(nullptr);
-  UpdateFont(dc);
-  ::ReleaseDC(nullptr, dc);
+  // The composition target is now in physical screen coordinates. Resolve
+  // the destination monitor before measuring text so the first visible frame
+  // already uses that monitor's DPI.
+  UpdateDpi(GetDpiForPoint(base_point.x, base_point.y));
+  UpdateFont();
 
   const std::wstring previous_text = text_;
   const SIZE previous_window_size = window_size_;
@@ -553,7 +579,8 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   }
 
   const RendererStyleHandler::RubyWindowStyle theme = GetRubyWindowTheme();
-  const int gap = ScaleByPercent(kGapFromComposition, theme.size_percent);
+  const int gap = ScaleRubySpacing(
+      static_cast<int>(theme.composition_gap), theme.size_percent, dpi_);
 
   const RECT work_area = GetWorkAreaForPoint(base_point);
 
@@ -621,8 +648,7 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   transient_geometry_reject_count_ = 0;
 
   const int radius = ScaleCornerRadius(
-      RendererStyleHandler::GetRubyWindowStyle().corner_radius,
-      GetWindowDpi(m_hWnd));
+      RendererStyleHandler::GetRubyWindowStyle().corner_radius, dpi_);
   if (radius <= 0) {
     ::SetWindowRgn(m_hWnd, nullptr, TRUE);
   } else {
@@ -641,7 +667,7 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   shadow_style.opacity_percent = GetRubyWindowTheme().shadow.opacity_percent;
   shadow_style.angle_degrees = GetRubyWindowTheme().shadow.angle_degrees;
   shadow_style.distance = GetRubyWindowTheme().shadow.distance;
-  shadow_window_.Update(m_hWnd, window_rect, GetWindowDpi(m_hWnd),
+  shadow_window_.Update(m_hWnd, window_rect, dpi_,
                         GetRubyWindowTheme().corner_radius, shadow_style);
 
   last_valid_window_rect_ = window_rect;
@@ -697,7 +723,7 @@ void RubyWindow::DoPaint(HDC dc) {
   HGDIOBJ old_brush = ::SelectObject(dc, bg_brush);
   HGDIOBJ old_pen = ::SelectObject(dc, border_pen);
 
-  const int radius = ScaleCornerRadius(theme.corner_radius, GetWindowDpi(m_hWnd));
+  const int radius = ScaleCornerRadius(theme.corner_radius, dpi_);
   if (radius <= 0) {
     ::Rectangle(dc, rect.left, rect.top, rect.right, rect.bottom);
   } else {
@@ -718,10 +744,10 @@ void RubyWindow::DoPaint(HDC dc) {
   ::SetTextColor(dc, ToColorRef(theme.text_color));
 
   RECT text_rect = rect;
-  text_rect.left += GetRubyPaddingX(theme);
-  text_rect.top += GetRubyPaddingY(theme);
-  text_rect.right -= GetRubyPaddingX(theme);
-  text_rect.bottom -= GetRubyPaddingY(theme);
+  text_rect.left += GetRubyPaddingX(theme, dpi_);
+  text_rect.top += GetRubyPaddingY(theme, dpi_);
+  text_rect.right -= GetRubyPaddingX(theme, dpi_);
+  text_rect.bottom -= GetRubyPaddingY(theme, dpi_);
 
   ::DrawTextW(dc, text_.c_str(), static_cast<int>(text_.size()), &text_rect,
               DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);

@@ -242,7 +242,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     ruby_avoid_rect = &last_live_conversion_passive_suggestion_rect_;
   }
   if (!should_defer_ruby_update) {
-    ruby_window_->OnUpdate(command, ruby_avoid_rect);
+    ruby_window_->OnUpdate(command, *layout_manager_, ruby_avoid_rect);
   }
 
   if (output.live_conversion() && !is_live_conversion_passive_suggestion) {
@@ -350,7 +350,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     last_live_conversion_passive_suggestion_visible_ = false;
     has_last_live_conversion_passive_suggestion_rect_ = false;
     if (should_defer_ruby_update) {
-      ruby_window_->OnUpdate(command);
+      ruby_window_->OnUpdate(command, *layout_manager_);
     }
     return;
   }
@@ -434,7 +434,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
             preedit_rect_for_transition)) {
       main_window_->HideWithEffects();
     }
-    ruby_window_->OnUpdate(command,
+    ruby_window_->OnUpdate(command, *layout_manager_,
                            &next_live_conversion_passive_suggestion_rect);
   }
 

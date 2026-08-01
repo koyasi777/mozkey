@@ -39,6 +39,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -920,6 +921,83 @@ void LayoutManager::GetRectInPhysicalCoords(HWND window_handle,
   GetPointInPhysicalCoords(window_handle, CPoint(rect.right, rect.bottom),
                            &bottom_right);
   *result = CRect(top_left, bottom_right);
+}
+
+bool LayoutManager::GetCompositionTargetInPhysicalCoords(
+    const commands::RendererCommand_ApplicationInfo& app_info,
+    uint32_t fallback_line_height, POINT* top_left, int* line_height) const {
+  if (top_left == nullptr || line_height == nullptr) {
+    return false;
+  }
+  *top_left = POINT{};
+  *line_height = 0;
+
+  if (!app_info.has_target_window_handle() ||
+      app_info.target_window_handle() == 0 ||
+      !app_info.has_composition_target()) {
+    return false;
+  }
+
+  const commands::RendererCommand::CharacterPosition& target =
+      app_info.composition_target();
+  if (!target.has_top_left() || !IsValidPoint(target.top_left())) {
+    return false;
+  }
+
+  const uint32_t logical_line_height =
+      target.has_line_height() ? target.line_height() : fallback_line_height;
+  if (logical_line_height == 0 ||
+      logical_line_height >
+          static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+    return false;
+  }
+
+  const int64_t logical_x = target.top_left().x();
+  const int64_t logical_y = target.top_left().y();
+  int64_t extent_x = logical_x;
+  int64_t extent_y = logical_y;
+  const bool is_vertical =
+      target.has_vertical_writing() && target.vertical_writing();
+  if (is_vertical) {
+    extent_x -= logical_line_height;
+  } else {
+    extent_y += logical_line_height;
+  }
+
+  constexpr int64_t kIntMin = std::numeric_limits<int>::min();
+  constexpr int64_t kIntMax = std::numeric_limits<int>::max();
+  if (extent_x < kIntMin || extent_x > kIntMax || extent_y < kIntMin ||
+      extent_y > kIntMax) {
+    return false;
+  }
+
+  const HWND target_window =
+      WinUtil::DecodeWindowHandle(app_info.target_window_handle());
+  CPoint physical_top_left;
+  GetPointInPhysicalCoords(
+      target_window,
+      CPoint(static_cast<int>(logical_x), static_cast<int>(logical_y)),
+      &physical_top_left);
+  CPoint physical_extent;
+  GetPointInPhysicalCoords(
+      target_window,
+      CPoint(static_cast<int>(extent_x), static_cast<int>(extent_y)),
+      &physical_extent);
+
+  int64_t physical_line_height =
+      is_vertical
+          ? static_cast<int64_t>(physical_top_left.x) - physical_extent.x
+          : static_cast<int64_t>(physical_extent.y) - physical_top_left.y;
+  if (physical_line_height < 0) {
+    physical_line_height = -physical_line_height;
+  }
+  if (physical_line_height <= 0 || physical_line_height > kIntMax) {
+    return false;
+  }
+
+  *top_left = physical_top_left;
+  *line_height = static_cast<int>(physical_line_height);
+  return true;
 }
 
 LayoutManager::LayoutManager()

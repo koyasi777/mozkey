@@ -95,6 +95,9 @@ constexpr uint32_t kMaxWindowOpacityPercent = 100;
 constexpr uint32_t kMaxShadowSize = 96;
 constexpr uint32_t kMaxShadowDistance = 96;
 constexpr uint32_t kMaxShadowOpacityPercent = 100;
+constexpr uint32_t kMaxRubyHorizontalPadding = 40;
+constexpr uint32_t kMaxRubyVerticalPadding = 24;
+constexpr uint32_t kMaxRubyCompositionGap = 32;
 
 ColorTheme GetCandidateWindowColorTheme(const config::Config& config) {
   if (config.has_candidate_window_color_theme()) {
@@ -124,6 +127,18 @@ uint32_t ClampWindowSizePercent(uint32_t percent) {
 uint32_t ClampWindowOpacityPercent(uint32_t percent) {
   return std::clamp(percent, kMinWindowOpacityPercent,
                     kMaxWindowOpacityPercent);
+}
+
+uint32_t ClampRubyHorizontalPadding(uint32_t padding) {
+  return std::clamp(padding, 0u, kMaxRubyHorizontalPadding);
+}
+
+uint32_t ClampRubyVerticalPadding(uint32_t padding) {
+  return std::clamp(padding, 0u, kMaxRubyVerticalPadding);
+}
+
+uint32_t ClampRubyCompositionGap(uint32_t gap) {
+  return std::clamp(gap, 0u, kMaxRubyCompositionGap);
 }
 
 RendererStyleHandler::WindowShadowStyle BuildShadowStyle(
@@ -279,6 +294,12 @@ void UpdateRendererStyleFromConfig() {
       ClampWindowSizePercent(shared_config->ruby_window_size_percent());
   ruby_style.opacity_percent =
       ClampWindowOpacityPercent(shared_config->ruby_window_opacity_percent());
+  ruby_style.horizontal_padding = ClampRubyHorizontalPadding(
+      shared_config->ruby_window_horizontal_padding());
+  ruby_style.vertical_padding = ClampRubyVerticalPadding(
+      shared_config->ruby_window_vertical_padding());
+  ruby_style.composition_gap = ClampRubyCompositionGap(
+      shared_config->ruby_window_composition_gap());
   ruby_style.shadow = BuildShadowStyle(
       shared_config->ruby_window_shadow_size(),
       shared_config->ruby_window_shadow_opacity_percent(),

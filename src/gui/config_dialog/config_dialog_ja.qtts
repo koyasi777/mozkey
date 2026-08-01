@@ -1218,6 +1218,41 @@ The current Windows default IME override will be saved so it can be restored lat
         <source>Set shadow direction</source>
         <translation>影の方向を設定します</translation>
     </message>
+    <message>
+        <location filename="config_dialog.cc" line="2526"/>
+        <source>Ruby window spacing and gap</source>
+        <translation>ルビウィンドウの余白と間隔</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2555"/>
+        <source>Horizontal padding</source>
+        <translation>左右の余白</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2556"/>
+        <source>Space between the ruby text and the left and right window edges.</source>
+        <translation>ルビ文字とウィンドウ左右端の間隔です。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2559"/>
+        <source>Vertical padding</source>
+        <translation>上下の余白</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2560"/>
+        <source>Space between the ruby text and the top and bottom window edges.</source>
+        <translation>ルビ文字とウィンドウ上下端の間隔です。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2563"/>
+        <source>Distance from input text</source>
+        <translation>入力文字との距離</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2564"/>
+        <source>Distance between the ruby window and the text being composed.</source>
+        <translation>ルビウィンドウと入力中の文字列との距離です。</translation>
+    </message>
 </context>
 <context>
     <name>mozc::gui::GenericTableEditorDialog</name>

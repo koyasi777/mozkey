@@ -37,11 +37,14 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "config/config_handler.h"
 #include "ipc/ipc.h"
 #include "ipc/ipc_test_util.h"
+#include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_client.h"
 #include "renderer/renderer_interface.h"
+#include "renderer/renderer_style_handler.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
 
@@ -114,6 +117,38 @@ class DummyRendererLauncher : public RendererLauncherInterface {
 };
 
 class RendererServerTest : public testing::TestWithTempUserProfile {};
+
+TEST_F(RendererServerTest, UsesRubySpacingDefaultsWhenFieldsAreAbsent) {
+  config::Config input = config::ConfigHandler::DefaultConfig();
+  input.clear_ruby_window_horizontal_padding();
+  input.clear_ruby_window_vertical_padding();
+  input.clear_ruby_window_composition_gap();
+  config::ConfigHandler::SetConfig(input);
+
+  TestRendererServer server;
+
+  const RendererStyleHandler::RubyWindowStyle style =
+      RendererStyleHandler::GetRubyWindowStyle();
+  EXPECT_EQ(14u, style.horizontal_padding);
+  EXPECT_EQ(6u, style.vertical_padding);
+  EXPECT_EQ(4u, style.composition_gap);
+}
+
+TEST_F(RendererServerTest, AppliesRubySpacingConfigWithClamping) {
+  config::Config input = config::ConfigHandler::DefaultConfig();
+  input.set_ruby_window_horizontal_padding(999);
+  input.set_ruby_window_vertical_padding(23);
+  input.set_ruby_window_composition_gap(999);
+  config::ConfigHandler::SetConfig(input);
+
+  TestRendererServer server;
+
+  const RendererStyleHandler::RubyWindowStyle style =
+      RendererStyleHandler::GetRubyWindowStyle();
+  EXPECT_EQ(40u, style.horizontal_padding);
+  EXPECT_EQ(23u, style.vertical_padding);
+  EXPECT_EQ(32u, style.composition_gap);
+}
 
 TEST_F(RendererServerTest, IPCTest) {
   mozc::IPCClientFactoryOnMemory on_memory_client_factory;

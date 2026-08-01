@@ -41,6 +41,7 @@ class RubyWindow
   void Destroy();
   void Hide();
   void OnUpdate(const commands::RendererCommand& command,
+                const LayoutManager& layout_manager,
                 const RECT* avoid_rect = nullptr);
 
  private:
@@ -52,7 +53,8 @@ class RubyWindow
 
   void DoPaint(HDC dc);
   void ResetFont();
-  void UpdateFont(HDC dc);
+  void UpdateDpi(uint32_t dpi);
+  void UpdateFont();
   SIZE MeasureText() const;
   bool BuildReadingText(const commands::RendererCommand& command,
                         std::string* reading) const;
@@ -75,7 +77,8 @@ class RubyWindow
                                      const RECT& work_area,
                                      bool from_preedit_rectangle,
                                      bool target_changed) const;
-  bool GetBasePosition(const commands::RendererCommand& command, POINT* point,
+  bool GetBasePosition(const commands::RendererCommand& command,
+                       const LayoutManager& layout_manager, POINT* point,
                        int* line_height,
                        bool* from_preedit_rectangle) const;
 
@@ -83,7 +86,7 @@ class RubyWindow
   std::wstring font_face_name_;
   int font_height_ = 0;
   int font_weight_ = 0;
-  int font_dpi_y_ = 0;
+  uint32_t dpi_ = USER_DEFAULT_SCREEN_DPI;
 
   std::wstring text_;
   SIZE window_size_ = {};

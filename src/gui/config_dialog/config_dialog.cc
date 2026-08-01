@@ -2520,7 +2520,52 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
     grid->setRowStretch(row, 0);
   }
 
-  root_layout->addSpacing(20);
+  root_layout->addSpacing(12);
+
+  QGroupBox* ruby_spacing_box =
+      new QGroupBox(tr("Ruby window spacing and gap"), group);
+  ruby_spacing_box->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+  QGridLayout* ruby_spacing_layout = new QGridLayout(ruby_spacing_box);
+  ruby_spacing_layout->setContentsMargins(8, 8, 8, 8);
+  ruby_spacing_layout->setHorizontalSpacing(8);
+  ruby_spacing_layout->setVerticalSpacing(6);
+
+  auto add_ruby_spacing_spin = [&](int row, const QString& label_text,
+                                   const QString& tooltip,
+                                   const char* object_name, int maximum,
+                                   int default_value) {
+    QLabel* label = new QLabel(label_text, ruby_spacing_box);
+    label->setToolTip(tooltip);
+    ruby_spacing_layout->addWidget(label, row, 0);
+
+    QSpinBox* spin = new QSpinBox(ruby_spacing_box);
+    spin->setObjectName(QString::fromLatin1(object_name));
+    spin->setRange(0, maximum);
+    spin->setValue(default_value);
+    spin->setMinimumHeight(24);
+    spin->setMinimumWidth(72);
+    spin->setToolTip(tooltip);
+    ruby_spacing_layout->addWidget(spin, row, 1);
+    QObject::connect(spin, SIGNAL(valueChanged(int)), this,
+                     SLOT(EnableApplyButton()));
+  };
+
+  add_ruby_spacing_spin(
+      0, tr("Horizontal padding"),
+      tr("Space between the ruby text and the left and right window edges."),
+      "rubyWindowHorizontalPaddingSpinBox", 40, 14);
+  add_ruby_spacing_spin(
+      1, tr("Vertical padding"),
+      tr("Space between the ruby text and the top and bottom window edges."),
+      "rubyWindowVerticalPaddingSpinBox", 24, 6);
+  add_ruby_spacing_spin(
+      2, tr("Distance from input text"),
+      tr("Distance between the ruby window and the text being composed."),
+      "rubyWindowCompositionGapSpinBox", 32, 4);
+  ruby_spacing_layout->setColumnStretch(0, 1);
+  root_layout->addWidget(ruby_spacing_box);
+
+  root_layout->addSpacing(12);
 
   QWidget* shadow_grid_widget = new QWidget(group);
   shadow_grid_widget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -3298,6 +3343,17 @@ void ConfigDialog::ConvertRendererAppearanceFromProto(
   if (QSpinBox* spin = FindSpinBox(this, "rubyWindowOpacityPercentSpinBox")) {
     spin->setValue(static_cast<int>(config.ruby_window_opacity_percent()));
   }
+  if (QSpinBox* spin =
+          FindSpinBox(this, "rubyWindowHorizontalPaddingSpinBox")) {
+    spin->setValue(static_cast<int>(config.ruby_window_horizontal_padding()));
+  }
+  if (QSpinBox* spin =
+          FindSpinBox(this, "rubyWindowVerticalPaddingSpinBox")) {
+    spin->setValue(static_cast<int>(config.ruby_window_vertical_padding()));
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "rubyWindowCompositionGapSpinBox")) {
+    spin->setValue(static_cast<int>(config.ruby_window_composition_gap()));
+  }
 
   if (QSpinBox* spin = FindSpinBox(this, "candidateWindowShadowSizeSpinBox")) {
     spin->setValue(static_cast<int>(config.candidate_window_shadow_size()));
@@ -3421,6 +3477,21 @@ void ConfigDialog::ConvertRendererAppearanceToProto(config::Config *config) cons
     config->set_ruby_window_opacity_percent(
         static_cast<uint32_t>(spin->value()));
   }
+  if (const QSpinBox* spin =
+          FindSpinBox(this, "rubyWindowHorizontalPaddingSpinBox")) {
+    config->set_ruby_window_horizontal_padding(
+        static_cast<uint32_t>(spin->value()));
+  }
+  if (const QSpinBox* spin =
+          FindSpinBox(this, "rubyWindowVerticalPaddingSpinBox")) {
+    config->set_ruby_window_vertical_padding(
+        static_cast<uint32_t>(spin->value()));
+  }
+  if (const QSpinBox* spin =
+          FindSpinBox(this, "rubyWindowCompositionGapSpinBox")) {
+    config->set_ruby_window_composition_gap(
+        static_cast<uint32_t>(spin->value()));
+  }
 
   if (const QSpinBox* spin = FindSpinBox(this, "candidateWindowShadowSizeSpinBox")) {
     config->set_candidate_window_shadow_size(
@@ -3517,6 +3588,17 @@ void ConfigDialog::ResetRendererAppearanceControls() {
   }
   if (QSpinBox* spin = FindSpinBox(this, "rubyWindowOpacityPercentSpinBox")) {
     spin->setValue(90);
+  }
+  if (QSpinBox* spin =
+          FindSpinBox(this, "rubyWindowHorizontalPaddingSpinBox")) {
+    spin->setValue(14);
+  }
+  if (QSpinBox* spin =
+          FindSpinBox(this, "rubyWindowVerticalPaddingSpinBox")) {
+    spin->setValue(6);
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "rubyWindowCompositionGapSpinBox")) {
+    spin->setValue(4);
   }
 
   struct ShadowDefault {

@@ -205,6 +205,15 @@ class LayoutManager {
   void GetRectInPhysicalCoords(HWND window_handle, const RECT& rect,
                                RECT* result) const;
 
+  // Converts |composition_target| from the target application's virtualized
+  // screen coordinates into physical screen coordinates. |top_left| keeps
+  // the same semantic anchor as CharacterPosition::top_left, and
+  // |line_height| is scaled along the writing direction. Uses
+  // |fallback_line_height| when CharacterPosition::line_height is absent.
+  bool GetCompositionTargetInPhysicalCoords(
+      const commands::RendererCommand_ApplicationInfo& app_info,
+      uint32_t fallback_line_height, POINT* top_left, int* line_height) const;
+
   // Converts a local coordinate into a logical screen coordinate assuming
   // |src_point| is the client coorinate in the window specified by
   // |src_window_handle|.

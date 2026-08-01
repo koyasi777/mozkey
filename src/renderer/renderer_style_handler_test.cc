@@ -135,6 +135,9 @@ TEST(RendererStyleHandlerTest, SetRendererWindowStylesSeparatesSuggestion) {
   ruby_style.text_color = 0x123456;
   ruby_style.border_color = 0x654321;
   ruby_style.corner_radius = 12;
+  ruby_style.horizontal_padding = 20;
+  ruby_style.vertical_padding = 8;
+  ruby_style.composition_gap = 7;
 
   RendererStyleHandler::CandidateWindowEffectStyle candidate_effect;
   candidate_effect.opacity_percent = 95;
@@ -173,6 +176,10 @@ TEST(RendererStyleHandlerTest, SetRendererWindowStylesSeparatesSuggestion) {
   EXPECT_EQ(0xabcdef,
             RendererStyleHandler::GetRubyWindowStyle().background_color);
   EXPECT_EQ(12u, RendererStyleHandler::GetRubyWindowStyle().corner_radius);
+  EXPECT_EQ(20u,
+            RendererStyleHandler::GetRubyWindowStyle().horizontal_padding);
+  EXPECT_EQ(8u, RendererStyleHandler::GetRubyWindowStyle().vertical_padding);
+  EXPECT_EQ(7u, RendererStyleHandler::GetRubyWindowStyle().composition_gap);
   EXPECT_EQ(95u, RendererStyleHandler::GetCandidateWindowEffectStyle(
                       RendererStyleHandler::RendererStyleType::kCandidate)
                       .opacity_percent);
