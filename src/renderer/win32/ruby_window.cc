@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 
+#include "base/win32/win_util.h"
 #include "base/win32/wide_char.h"
 #include "config/config_handler.h"
 #include "protocol/commands.pb.h"
@@ -279,10 +280,26 @@ bool RubyWindow::GetBasePosition(const commands::RendererCommand& command,
     const commands::RendererCommand::Rectangle& rect =
         command.preedit_rectangle();
 
-    const int height = rect.bottom() - rect.top();
+    RECT physical_rect = {rect.left(), rect.top(), rect.right(), rect.bottom()};
+    if (command.has_application_info()) {
+      const commands::RendererCommand::ApplicationInfo& app_info =
+          command.application_info();
+      if (app_info.input_framework() ==
+              commands::RendererCommand::ApplicationInfo::TSF &&
+          app_info.has_target_window_handle() &&
+          app_info.target_window_handle() != 0) {
+        const HWND target_window =
+            WinUtil::DecodeWindowHandle(app_info.target_window_handle());
+        const RECT logical_rect = physical_rect;
+        layout_manager.GetRectInPhysicalCoords(target_window, logical_rect,
+                                               &physical_rect);
+      }
+    }
+
+    const int height = physical_rect.bottom - physical_rect.top;
     if (height > 0) {
-      point->x = rect.left();
-      point->y = rect.top();
+      point->x = physical_rect.left;
+      point->y = physical_rect.top;
       *line_height = height;
       if (from_preedit_rectangle != nullptr) {
         *from_preedit_rectangle = true;
