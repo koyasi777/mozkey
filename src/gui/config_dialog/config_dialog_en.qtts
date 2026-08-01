@@ -1192,6 +1192,41 @@ The current Windows default IME override will be saved so it can be restored lat
         <source>Set shadow direction</source>
         <translation>Set shadow direction</translation>
     </message>
+    <message>
+        <location filename="config_dialog.cc" line="2526"/>
+        <source>Ruby window spacing and gap</source>
+        <translation>Ruby window spacing and gap</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2555"/>
+        <source>Horizontal padding</source>
+        <translation>Horizontal padding</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2556"/>
+        <source>Space between the ruby text and the left and right window edges.</source>
+        <translation>Space between the ruby text and the left and right window edges.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2559"/>
+        <source>Vertical padding</source>
+        <translation>Vertical padding</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2560"/>
+        <source>Space between the ruby text and the top and bottom window edges.</source>
+        <translation>Space between the ruby text and the top and bottom window edges.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2563"/>
+        <source>Distance from input text</source>
+        <translation>Distance from input text</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2564"/>
+        <source>Distance between the ruby window and the text being composed.</source>
+        <translation>Distance between the ruby window and the text being composed.</translation>
+    </message>
 </context>
 <context>
     <name>mozc::gui::GenericTableEditorDialog</name>

@@ -82,6 +82,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
 - Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（黒）/ モノクロ（白）から選択可能
 - Windows 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、ライト / ダーク / カスタム配色、サイズ、角丸、透明度、影を設定画面から個別に調整可能
+- Windows 版のルビ表示は、表示先モニターの DPI に合わせて位置・サイズを補正し、左右の余白、上下の余白、入力文字との距離を設定可能
 - サジェストウィンドウとルビ表示は、候補ウィンドウの配色に追従するか、個別のテーマ・カスタム配色を使うかを選択可能
 - Windows 版の候補ウィンドウ・用例ウィンドウ・ライブ変換中のルビ表示に使うフォントを設定画面から変更可能
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
@@ -441,6 +442,8 @@ Windows 版では、設定画面から候補ウィンドウ、サジェストウ
 
 各ウィンドウの表示サイズ、角丸、透明度、影の広がり、濃さ、方向、距離も設定できます。影の方向は画面座標基準の角度で指定し、0° は右、45° は右下、90° は下を表します。影の距離を 0 にすると、全方向に均等な影になります。変換候補・用例などの候補系表示には候補ウィンドウ設定を使い、予測・サジェスト系表示にはサジェストウィンドウ設定を使います。
 
+ルビ表示では、左右の余白、上下の余白、入力文字との距離を個別に設定できます。これらは固定の物理ピクセル値ではなく、ルビ表示のサイズ設定と表示先モニターの DPI に応じて拡大縮小されます。複数モニター環境では、入力位置があるモニターの DPI を基準にフォント、余白、角丸、影、入力文字との距離を再計算し、TSF から得た入力位置も物理座標へ変換して配置します。
+
 候補ウィンドウ、用例ウィンドウ、ライブ変換中のルビ表示に使うフォントも設定画面から変更できます。既定フォントに戻すこともでき、選択したフォントを候補表示に適用できない場合は、候補ウィンドウが消えないように既定フォントへフォールバックします。
 
 ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。
@@ -636,6 +639,7 @@ Main features added in this fork
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Black), and Monochrome (White) in the config dialog
 - Allows configuring light/dark/custom color themes, size, corner radius, opacity, and shadow separately for the Windows candidate window, suggestion window, and live-conversion ruby display from the config dialog
+- Makes the Windows ruby display use target-monitor DPI-aware positioning and scaling, and allows configuring its horizontal padding, vertical padding, and distance from the input text
 - Allows the suggestion window and ruby display to either follow the candidate window color theme or use their own theme/custom colors
 - Allows changing the font used for the Windows candidate window, infolist window, and live-conversion ruby display from the config dialog
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
@@ -1063,6 +1067,14 @@ shadow distance to 0 for an even shadow on all sides.
 Candidate-like displays such as conversion candidates and usage/infolist windows
 use the candidate window settings, while prediction/suggestion displays use the
 suggestion window settings.
+
+For the ruby display, horizontal padding, vertical padding, and distance from
+the input text can be configured independently. These are logical design values,
+not fixed physical-pixel values; they scale with the ruby display size and the
+DPI of the target monitor. In multi-monitor setups, the renderer recalculates
+the font, padding, corner radius, shadow, and input-text gap for the monitor that
+contains the composition target, and converts the TSF geometry to physical
+coordinates before placing the window.
 
 The font used for the candidate window, infolist window, and live-conversion
 ruby display can also be changed from the config dialog. The setting can be

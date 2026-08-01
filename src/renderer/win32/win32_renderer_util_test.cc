@@ -227,6 +227,51 @@ TEST(Win32RendererUtilTest, GetRectInPhysicalCoordsTest) {
   }
 }
 
+TEST(Win32RendererUtilTest, GetCompositionTargetInPhysicalCoordsTest) {
+  const CPoint kClientOffset(8, 42);
+  const CSize kClientSize(100, 200);
+  const CRect kWindowRect(1000, 500, 1116, 750);
+  constexpr double kScaleFactors[] = {1.0, 2.0};
+
+  for (const double scale_factor : kScaleFactors) {
+    HWND hwnd = nullptr;
+    LayoutManager layout_mgr(CreateWindowEmulator(
+        kWindowRect, kClientOffset, kClientSize, scale_factor, &hwnd));
+
+    ApplicationInfo app_info;
+    AppInfoUtil::SetBasicApplicationInfo(
+        &app_info, hwnd, ApplicationInfo::ShowCandidateWindow,
+        ApplicationInfo::TSF);
+    AppInfoUtil::SetCompositionTarget(&app_info, 0, 86, 122, 20, 83, 119,
+                                      109, 525);
+
+    const int expected_x = static_cast<int>(86 * scale_factor);
+    const int expected_y = static_cast<int>(122 * scale_factor);
+    POINT top_left = {};
+    int line_height = 0;
+    ASSERT_TRUE(layout_mgr.GetCompositionTargetInPhysicalCoords(
+        app_info, 22, &top_left, &line_height));
+    EXPECT_EQ(CPoint(expected_x, expected_y), CPoint(top_left));
+    EXPECT_EQ(static_cast<int>(20 * scale_factor), line_height);
+
+    // Vertical writing keeps CharacterPosition::top_left as its right-top
+    // anchor and scales line_height along the x-axis.
+    app_info.mutable_composition_target()->set_vertical_writing(true);
+    ASSERT_TRUE(layout_mgr.GetCompositionTargetInPhysicalCoords(
+        app_info, 22, &top_left, &line_height));
+    EXPECT_EQ(CPoint(expected_x, expected_y), CPoint(top_left));
+    EXPECT_EQ(static_cast<int>(20 * scale_factor), line_height);
+
+    // A missing line height uses the caller-provided logical fallback before
+    // DPI virtualization is applied.
+    app_info.mutable_composition_target()->clear_vertical_writing();
+    app_info.mutable_composition_target()->clear_line_height();
+    ASSERT_TRUE(layout_mgr.GetCompositionTargetInPhysicalCoords(
+        app_info, 22, &top_left, &line_height));
+    EXPECT_EQ(static_cast<int>(22 * scale_factor), line_height);
+  }
+}
+
 TEST(Win32RendererUtilTest, GetScalingFactorTest) {
   constexpr double kScalingFactor = 1.5;
 

@@ -577,6 +577,17 @@ message Config {
   optional uint32 ruby_window_shadow_angle_degrees = 161 [default = 90];
   optional uint32 ruby_window_shadow_distance = 162 [default = 4];
 
+  // Do not reuse these tags. A locally tested build assigned Ruby spacing to
+  // them and could reinterpret unknown fields preserved in existing configs.
+  reserved 164, 165, 166;
+
+  // Ruby window spacing. These are Mozkey-specific logical design values at
+  // the 150% (144 DPI) baseline and are additionally scaled by
+  // ruby_window_size_percent. Mozkey-specific fields use the 1000+ range.
+  optional uint32 ruby_window_horizontal_padding = 1020 [default = 14];
+  optional uint32 ruby_window_vertical_padding = 1021 [default = 6];
+  optional uint32 ruby_window_composition_gap = 1022 [default = 4];
+
   enum WindowsImeIconStyle {
     WINDOWS_IME_ICON_DEFAULT = 0;
     WINDOWS_IME_ICON_MONOCHROME_BLACK = 1;
