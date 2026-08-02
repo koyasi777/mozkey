@@ -39,6 +39,18 @@
 #
 # label: (SUFFIX|PREFIX) suffix rule or prefix rule.
 # feature_regexp: POS/feature regexp patterns.
+# Note on matching behavior:
+# - Patterns are compiled into regex anchored at the beginning ('^').
+# - If a pattern does not end with a comma, '(?:,|$)' is appended so that the
+#   last specified field must end at either a field boundary or the end of the
+#   feature string.
+#   For example, '名詞,接尾' matches both '名詞,接尾' and
+#   '名詞,接尾,一般', but does not match '名詞,接尾可能'.
+# - A trailing comma preserves prefix matching from that field boundary.
+#   For example, '動詞,自立,' matches strings beginning with
+#   '動詞,自立,', but does not match '動詞,自立'.
+# - The '*' character is reserved as a wildcard for a single field (replaced
+#   by '[^,]+'). To use regex repetition, use '+' or '{0,}' instead.
 # penalty: penality cost.
 #
 # basically if a word exists at the beginning or end of user input,
