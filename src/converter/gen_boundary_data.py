@@ -63,7 +63,10 @@ import sys
 
 
 def PatternToRegexp(pattern):
-  return '^' + pattern.replace('*', '[^,]+')
+  regexp = '^' + pattern.replace('*', '[^,]+')
+  if not regexp.endswith(','):
+    regexp += '(?:,|$)'
+  return regexp
 
 
 def LoadPatterns(file):
