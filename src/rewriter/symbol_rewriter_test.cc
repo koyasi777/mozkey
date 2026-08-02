@@ -457,4 +457,36 @@ TEST_F(SymbolRewriterTest, ResizeSegmentFailureIsNotFatal) {
   EXPECT_EQ(resize_request->segment_sizes[0], 2);
 }
 
+TEST_F(SymbolRewriterTest, CaseNormalizationTest) {
+  auto symbol_rewriter = std::make_from_tuple<SymbolRewriter>(
+      data_manager_->GetSymbolRewriterData());
+  const ConversionRequest request;
+
+  // "tm" (half-width lower) is not defined in symbol.tsv, but it should be
+  // automatically generated and registered by
+  // gen_symbol_rewriter_dictionary_main.
+  {
+    Segments segments;
+    AddSegment("tm", "tm", &segments);
+    EXPECT_TRUE(symbol_rewriter.Rewrite(request, &segments));
+    EXPECT_TRUE(HasCandidate(segments, 0, "™"));
+  }
+
+  // "ＴＭ" (full-width upper) should also be automatically registered.
+  {
+    Segments segments;
+    AddSegment("ＴＭ", "ＴＭ", &segments);
+    EXPECT_TRUE(symbol_rewriter.Rewrite(request, &segments));
+    EXPECT_TRUE(HasCandidate(segments, 0, "™"));
+  }
+
+  // "ｔｍ" (full-width lower) should also be automatically registered.
+  {
+    Segments segments;
+    AddSegment("ｔｍ", "ｔｍ", &segments);
+    EXPECT_TRUE(symbol_rewriter.Rewrite(request, &segments));
+    EXPECT_TRUE(HasCandidate(segments, 0, "™"));
+  }
+}
+
 }  // namespace mozc

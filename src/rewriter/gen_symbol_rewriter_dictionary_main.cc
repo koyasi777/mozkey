@@ -1001,17 +1001,17 @@ void AddSymbolToDictionary(const absl::string_view pos,
     sorting_key = it->second;
   }
 
+  absl::flat_hash_set<std::string> normalized_keys;
   for (const std::string& key : keys) {
-    const rewriter::Token &token = dictionary.AddToken(
-        {sorting_key, key, std::string(value), std::string(pos),
-         std::string(description), std::string(additional_description)});
+    std::string normalized_key = japanese::FullWidthAsciiToHalfWidthAscii(key);
+    Util::LowerString(&normalized_key);
+    normalized_keys.insert(normalized_key);
+  }
 
-    std::string fw_key = japanese::HalfWidthAsciiToFullWidthAscii(token.key);
-    if (fw_key != key) {
-      rewriter::Token fw_token = token;
-      fw_token.key = std::move(fw_key);
-      dictionary.AddToken(std::move(fw_token));
-    }
+  for (const std::string& key : normalized_keys) {
+    dictionary.AddToken({sorting_key, key, std::string(value), std::string(pos),
+                         std::string(description),
+                         std::string(additional_description)});
   }
 }
 
