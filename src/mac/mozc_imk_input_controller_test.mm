@@ -88,6 +88,7 @@
   NSRange expectedRange;
   NSDictionary *expectedAttributes;
   int lastCharacterIndex_;
+  NSRange lastMarkedSelectionRange_;
   std::string selectedMode_;
   NSString *insertedText_;
   NSString *overriddenLayout_;
@@ -99,6 +100,7 @@
 @property(readwrite) NSDictionary *expectedAttributes;
 @property(readwrite, assign) NSRange expectedRange;
 @property(readonly) int lastCharacterIndex;
+@property(readonly) NSRange lastMarkedSelectionRange;
 @property(readonly) std::string selectedMode;
 @property(readonly) NSString *insertedText;
 @property(readonly) NSString *overriddenLayout;
@@ -110,6 +112,7 @@
 @synthesize expectedAttributes;
 @synthesize expectedRange;
 @synthesize lastCharacterIndex = lastCharacterIndex_;
+@synthesize lastMarkedSelectionRange = lastMarkedSelectionRange_;
 @synthesize selectedMode = selectedMode_;
 @synthesize insertedText = insertedText_;
 @synthesize overriddenLayout = overriddenLayout_;
@@ -119,6 +122,7 @@
   self.bundleIdentifier = @"com.google.exampleBundle";
   expectedRange = NSMakeRange(NSNotFound, NSNotFound);
   lastCharacterIndex_ = NSNotFound;
+  lastMarkedSelectionRange_ = NSMakeRange(NSNotFound, NSNotFound);
   return self;
 }
 
@@ -171,7 +175,8 @@
 - (void)setMarkedText:(id)string
        selectionRange:(NSRange)selectionRange
      replacementRange:(NSRange)replacementRange {
-  // Do nothing
+  counters_["setMarkedText:selectionRange:replacementRange:"]++;
+  lastMarkedSelectionRange_ = selectionRange;
 }
 
 - (void)insertText:(NSString *)result replacementRange:(NSRange)range {
@@ -330,7 +335,7 @@ bool ComparePreedit(NSAttributedString *expected, NSAttributedString *actual) {
     // Check attributes for underlines
     NSNumber *expectedUnderlineStyle =
         [expectedAttributes valueForKey:NSUnderlineStyleAttributeName];
-    NSNumber *actualUnderlineStyle = [expectedAttributes valueForKey:NSUnderlineStyleAttributeName];
+    NSNumber *actualUnderlineStyle = [actualAttributes valueForKey:NSUnderlineStyleAttributeName];
     if (![expectedUnderlineStyle isEqualToNumber:actualUnderlineStyle] ||
         actualUnderlineStyle == nil) {
       LOG(ERROR) << "underline style is different at range (" << expectedRange.location << ", "
@@ -424,6 +429,146 @@ TEST_F(MozcImkInputControllerTest, UpdateComposedString) {
   NSAttributedString *actual = [controller_ composedString:nil];
   EXPECT_TRUE(ComparePreedit(expected, actual))
       << [[NSString stringWithFormat:@"expected:%@ actual:%@", expected, actual] UTF8String];
+}
+
+TEST_F(MozcImkInputControllerTest,
+       ExplicitConversionKeepsClauseHighlightWithEndSelection) {
+  commands::Preedit preedit;
+  preedit.set_cursor(4);
+
+  commands::Preedit::Segment *segment = preedit.add_segment();
+  segment->set_annotation(commands::Preedit::Segment::HIGHLIGHT);
+  segment->set_value("どういう");
+  segment->set_value_length(4);
+
+  segment = preedit.add_segment();
+  segment->set_annotation(commands::Preedit::Segment::UNDERLINE);
+  segment->set_value("こと");
+  segment->set_value_length(2);
+
+  [controller_ updateComposedString:&preedit];
+
+  EXPECT_TRUE(NSEqualRanges(mock_client_.lastMarkedSelectionRange,
+                            NSMakeRange(6, 0)));
+  NSDictionary *highlightAttributes =
+      [controller_ markForStyle:kTSMHiliteSelectedConvertedText
+                        atRange:NSMakeRange(NSNotFound, 0)];
+  NSDictionary *underlineAttributes =
+      [controller_ markForStyle:kTSMHiliteConvertedText
+                        atRange:NSMakeRange(NSNotFound, 0)];
+  NSMutableAttributedString *expected =
+      [[NSMutableAttributedString alloc] initWithString:@"どういうこと"];
+  [expected addAttributes:highlightAttributes range:NSMakeRange(0, 4)];
+  [expected addAttributes:underlineAttributes range:NSMakeRange(4, 2)];
+  NSAttributedString *actual = [controller_ composedString:nil];
+  EXPECT_TRUE(ComparePreedit(expected, actual))
+      << [[NSString stringWithFormat:@"expected:%@ actual:%@", expected, actual] UTF8String];
+  EXPECT_EQ([actual attribute:NSMarkedClauseSegmentAttributeName atIndex:0
+               effectiveRange:nullptr],
+            nil);
+  EXPECT_EQ([actual attribute:NSMarkedClauseSegmentAttributeName atIndex:4
+               effectiveRange:nullptr],
+            nil);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       LiveConversionUsesUnfocusedTextAndUnspecifiedSelection) {
+  commands::Preedit preedit;
+  preedit.set_cursor(4);
+
+  commands::Preedit::Segment *segment = preedit.add_segment();
+  segment->set_annotation(commands::Preedit::Segment::HIGHLIGHT);
+  segment->set_value("どういう");
+  segment->set_value_length(4);
+
+  segment = preedit.add_segment();
+  segment->set_annotation(commands::Preedit::Segment::UNDERLINE);
+  segment->set_value("こと");
+  segment->set_value_length(2);
+
+  [controller_ updateComposedString:&preedit liveConversion:true];
+
+  EXPECT_TRUE(NSEqualRanges(mock_client_.lastMarkedSelectionRange,
+                            NSMakeRange(NSNotFound, 0)));
+  NSAttributedString *actual = [controller_ composedString:nil];
+  EXPECT_EQ([actual length], 6);
+  EXPECT_EQ([[actual attributesAtIndex:0 effectiveRange:nullptr] count], 0);
+  EXPECT_EQ([[actual attributesAtIndex:4 effectiveRange:nullptr] count], 0);
+  EXPECT_EQ([mock_client_ getCounter:"attributesForCharacterIndex:lineHeightRectangle:"], 0);
+}
+
+TEST_F(MozcImkInputControllerTest, ProcessOutputAppliesLiveConversionPresentation) {
+  commands::Output output;
+  output.set_consumed(true);
+  output.set_live_conversion(true);
+  commands::Preedit *preedit = output.mutable_preedit();
+  preedit->set_cursor(1);
+  commands::Preedit::Segment *segment = preedit->add_segment();
+  segment->set_annotation(commands::Preedit::Segment::HIGHLIGHT);
+  segment->set_value("愛");
+  segment->set_value_length(1);
+
+  [controller_ processOutput:&output client:mock_client_];
+
+  EXPECT_TRUE(NSEqualRanges(mock_client_.lastMarkedSelectionRange,
+                            NSMakeRange(NSNotFound, 0)));
+  NSAttributedString *actual = [controller_ composedString:nil];
+  EXPECT_EQ([[actual attributesAtIndex:0 effectiveRange:nullptr] count], 0);
+}
+
+TEST_F(MozcImkInputControllerTest, CompositionConvertsCodePointCursorToUtf16) {
+  commands::Preedit preedit;
+  preedit.set_cursor(1);
+
+  commands::Preedit::Segment *segment = preedit.add_segment();
+  segment->set_annotation(commands::Preedit::Segment::UNDERLINE);
+  segment->set_value("😀あ");
+  segment->set_value_length(2);
+
+  [controller_ updateComposedString:&preedit];
+
+  EXPECT_TRUE(NSEqualRanges(mock_client_.lastMarkedSelectionRange, NSMakeRange(2, 0)));
+}
+
+TEST_F(MozcImkInputControllerTest, LiveConversionUsesDisplayedValueWithoutClauseFocus) {
+  commands::Preedit preedit;
+  preedit.set_cursor(2);
+
+  commands::Preedit::Segment *segment = preedit.add_segment();
+  segment->set_annotation(commands::Preedit::Segment::HIGHLIGHT);
+  segment->set_key("あい");
+  segment->set_value("愛");
+  segment->set_value_length(1);
+
+  [controller_ updateComposedString:&preedit liveConversion:true];
+
+  EXPECT_TRUE(NSEqualRanges(mock_client_.lastMarkedSelectionRange,
+                            NSMakeRange(NSNotFound, 0)));
+  NSAttributedString *actual = [controller_ composedString:nil];
+  EXPECT_TRUE([[actual string] isEqualToString:@"愛"]);
+  EXPECT_EQ([[actual attributesAtIndex:0 effectiveRange:nullptr] count], 0);
+}
+
+TEST_F(MozcImkInputControllerTest, ExplicitCompositionRestoresSpecifiedSelectionAfterLiveConversion) {
+  commands::Preedit live_preedit;
+  live_preedit.set_cursor(1);
+  commands::Preedit::Segment *segment = live_preedit.add_segment();
+  segment->set_annotation(commands::Preedit::Segment::HIGHLIGHT);
+  segment->set_value("愛");
+  segment->set_value_length(1);
+  [controller_ updateComposedString:&live_preedit liveConversion:true];
+  ASSERT_TRUE(NSEqualRanges(mock_client_.lastMarkedSelectionRange,
+                            NSMakeRange(NSNotFound, 0)));
+
+  commands::Preedit composition;
+  composition.set_cursor(1);
+  segment = composition.add_segment();
+  segment->set_annotation(commands::Preedit::Segment::UNDERLINE);
+  segment->set_value("あ");
+  segment->set_value_length(1);
+  [controller_ updateComposedString:&composition];
+
+  EXPECT_TRUE(NSEqualRanges(mock_client_.lastMarkedSelectionRange, NSMakeRange(1, 0)));
 }
 
 TEST_F(MozcImkInputControllerTest, ClearCandidates) {
