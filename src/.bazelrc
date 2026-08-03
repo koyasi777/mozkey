@@ -62,6 +62,10 @@ build:compiler_msvc_like --cxxopt "/utf-8" --host_cxxopt "/utf-8"
 # Disable all warnings for external code.
 build:compiler_gcc_like  --per_file_copt="external/.*@-w" --host_per_file_copt="external/.*@-w"
 build:compiler_msvc_like --per_file_copt="external/.*@/w" --host_per_file_copt="external/.*@/w"
+# Placeholder for non-build configurations (e.g. `bazel mod`).
+# `--announce_rc=false` practically works as no-op. Explicit command line flag can override it.
+common:compiler_gcc_like --announce_rc=false
+common:compiler_msvc_like --announce_rc=false
 
 ## Linux specific options
 build:linux_env --build_tag_filters=-nolinux --copt "-fPIC"
