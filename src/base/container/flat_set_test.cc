@@ -80,12 +80,21 @@ TEST(FlatSetTest, SingleElement) {
 
 #if defined(EXPECT_DEATH)
 TEST(FlatSetDeathTest, DuplicateEntries) {
+#if defined(_WIN32)
+  // On Windows, GoogleTest observes the child-process death, but the
+  // Abseil fatal log text may not be captured in the death-test output.
+  constexpr char kDuplicateEntryDeathRegex[] = ".*";
+#else
+  constexpr char kDuplicateEntryDeathRegex[] = "Duplicate entry found";
+#endif
   // Runtime construction with duplicate entries hits LOG(FATAL). Compile-time
   // construction with duplicate entries fails the build instead.
-  EXPECT_DEATH(CreateFlatSet<int>({1, 1, 2, 3, 4}), "Duplicate entry found");
+  EXPECT_DEATH(CreateFlatSet<int>({1, 1, 2, 3, 4}),
+               kDuplicateEntryDeathRegex);
   // The uniqueness verification used to stop at the middle of the sorted
   // array, missing duplicates in the second half.
-  EXPECT_DEATH(CreateFlatSet<int>({1, 2, 3, 4, 4}), "Duplicate entry found");
+  EXPECT_DEATH(CreateFlatSet<int>({1, 2, 3, 4, 4}),
+               kDuplicateEntryDeathRegex);
 }
 #endif  // defined(EXPECT_DEATH)
 
