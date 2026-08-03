@@ -9,6 +9,7 @@ mozc_cc_binary(
         "Advapi32.lib",
         "Bcrypt.lib",
         "Winhttp.lib",
+        "Ws2_32.lib",
     ],
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
