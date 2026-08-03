@@ -65,6 +65,9 @@
    * should be -1. */
   int cursorPosition_;
 
+  /** True when AppKit should choose the native marked-text selection. */
+  bool useUnspecifiedSelectionRange_;
+
   /** |mode_| stores the current input mode (Direct or conversion). */
   mozc::commands::CompositionMode mode_;
 
@@ -187,6 +190,10 @@
  * @param preedit The protobuf data representing the composed string.
  */
 - (void)updateComposedString:(const mozc::commands::Preedit *)preedit;
+
+/** Updates the composed string with the display semantics of live conversion. */
+- (void)updateComposedString:(const mozc::commands::Preedit *)preedit
+              liveConversion:(bool)liveConversion;
 
 /** Updates |candidates_| from the result of a key event.
  *
