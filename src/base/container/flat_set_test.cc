@@ -69,5 +69,34 @@ TEST(FlatSetTest, CustomCompare) {
   EXPECT_FALSE(kSet.contains("six"));
 }
 
+TEST(FlatSetTest, SingleElement) {
+  // The uniqueness verification used to read past the end of the array for a
+  // single-element set, which failed the constant evaluation.
+  constexpr auto kSet = CreateFlatSet<int>({42});
+
+  EXPECT_TRUE(kSet.contains(42));
+  EXPECT_FALSE(kSet.contains(0));
+}
+
+#if defined(EXPECT_DEATH)
+TEST(FlatSetDeathTest, DuplicateEntries) {
+#if defined(_WIN32)
+  // On Windows, GoogleTest observes the child-process death, but the
+  // Abseil fatal log text may not be captured in the death-test output.
+  constexpr char kDuplicateEntryDeathRegex[] = ".*";
+#else
+  constexpr char kDuplicateEntryDeathRegex[] = "Duplicate entry found";
+#endif
+  // Runtime construction with duplicate entries hits LOG(FATAL). Compile-time
+  // construction with duplicate entries fails the build instead.
+  EXPECT_DEATH(CreateFlatSet<int>({1, 1, 2, 3, 4}),
+               kDuplicateEntryDeathRegex);
+  // The uniqueness verification used to stop at the middle of the sorted
+  // array, missing duplicates in the second half.
+  EXPECT_DEATH(CreateFlatSet<int>({1, 2, 3, 4, 4}),
+               kDuplicateEntryDeathRegex);
+}
+#endif  // defined(EXPECT_DEATH)
+
 }  // namespace
 }  // namespace mozc
