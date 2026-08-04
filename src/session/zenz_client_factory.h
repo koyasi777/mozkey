@@ -11,9 +11,9 @@ class ZenzClient;
 // Creates the platform transport used by ZenzLiveCorrector.
 //
 // This factory keeps Session independent from concrete IPC transports.  The
-// current implementation preserves the existing named-pipe client on every
-// platform; a macOS Unix-domain-socket client can be selected here without
-// changing Session again.
+// Windows uses the existing named-pipe client. macOS uses a local Unix-domain
+// socket client. Other platforms retain the unavailable named-pipe fallback
+// until a platform transport is explicitly implemented.
 std::unique_ptr<ZenzClient> CreateZenzClient();
 
 }  // namespace session

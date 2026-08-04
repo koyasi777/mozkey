@@ -11,6 +11,29 @@ mozc_cc_library(
     ],
 )
 
+mozc_cc_library(
+    name = "unix_socket_path",
+    srcs = ["zenz_unix_socket_path.cc"],
+    hdrs = ["zenz_unix_socket_path.h"],
+    visibility = [
+        "//session:__pkg__",
+        "//zenz_scorer:__pkg__",
+    ],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_unix_socket_path_test",
+    size = "small",
+    srcs = ["zenz_unix_socket_path_test.cc"],
+    deps = [
+        ":unix_socket_path",
+        "//testing:gunit_main",
+    ],
+)
+
 mozc_cc_test(
     name = "zenz_wire_protocol_test",
     size = "small",

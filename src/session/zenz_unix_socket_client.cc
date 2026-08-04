@@ -12,6 +12,7 @@
 
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "zenz/zenz_unix_socket_path.h"
 #include "zenz/zenz_wire_protocol.h"
 
 #if !defined(_WIN32)
@@ -57,12 +58,6 @@ class ScopedFd {
  private:
   int fd_;
 };
-
-bool IsValidSocketPath(const std::string& socket_path) {
-  return !socket_path.empty() &&
-         socket_path.find('\0') == std::string::npos &&
-         socket_path.size() < sizeof(sockaddr_un::sun_path);
-}
 
 int RemainingTimeoutMsec(absl::Time deadline) {
   const absl::Duration remaining = deadline - absl::Now();
@@ -228,7 +223,7 @@ bool ZenzUnixSocketClient::IsAvailable() const {
 #if defined(_WIN32)
   return false;
 #else
-  return IsValidSocketPath(socket_path_);
+  return ::mozc::zenz::IsValidZenzUnixSocketPath(socket_path_);
 #endif
 }
 
@@ -242,7 +237,7 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
   response.debug = "unix_socket_not_supported_on_windows";
   return response;
 #else
-  if (!IsValidSocketPath(socket_path_)) {
+  if (!::mozc::zenz::IsValidZenzUnixSocketPath(socket_path_)) {
     response.debug = "invalid_socket_path";
     return response;
   }
