@@ -11,6 +11,7 @@ mozc_cc_binary(
         "Winhttp.lib",
         "Ws2_32.lib",
     ],
+    deps = ["//zenz:wire_protocol"],
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//visibility:public"],

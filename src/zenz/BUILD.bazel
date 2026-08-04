@@ -1,0 +1,22 @@
+load("//:build_defs.bzl", "mozc_cc_library", "mozc_cc_test")
+
+package(default_visibility = ["//visibility:private"])
+
+mozc_cc_library(
+    name = "wire_protocol",
+    hdrs = ["zenz_wire_protocol.h"],
+    visibility = [
+        "//session:__pkg__",
+        "//zenz_scorer:__pkg__",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_wire_protocol_test",
+    size = "small",
+    srcs = ["zenz_wire_protocol_test.cc"],
+    deps = [
+        ":wire_protocol",
+        "//testing:gunit_main",
+    ],
+)
