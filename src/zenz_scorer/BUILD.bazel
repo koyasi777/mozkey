@@ -1,18 +1,62 @@
-load("//:build_defs.bzl", "MOZC_TAGS", "mozc_cc_binary")
+load(
+    "//:build_defs.bzl",
+    "mozc_cc_binary",
+    "mozc_cc_library",
+    "mozc_cc_test",
+)
 
 package(default_visibility = ["//visibility:private"])
 
+mozc_cc_library(
+    name = "posix_server",
+    srcs = ["posix_server.cc"],
+    hdrs = ["posix_server.h"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "//zenz:unix_socket_path",
+        "//zenz:wire_protocol",
+    ],
+)
+
+mozc_cc_test(
+    name = "posix_server_test",
+    size = "small",
+    srcs = ["posix_server_test.cc"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":posix_server",
+        "//testing:gunit_main",
+        "//zenz:wire_protocol",
+    ],
+)
+
 mozc_cc_binary(
     name = "mozc_zenz_scorer",
-    srcs = ["main.cc"],
-    linkopts = [
-        "Advapi32.lib",
-        "Bcrypt.lib",
-        "Winhttp.lib",
-        "Ws2_32.lib",
-    ],
-    deps = ["//zenz:wire_protocol"],
-    tags = MOZC_TAGS.WIN_ONLY,
-    target_compatible_with = ["@platforms//os:windows"],
+    srcs = select({
+        "@platforms//os:macos": ["main_posix.cc"],
+        "@platforms//os:windows": ["main.cc"],
+        "//conditions:default": [],
+    }),
+    linkopts = select({
+        "@platforms//os:windows": [
+            "Advapi32.lib",
+            "Bcrypt.lib",
+            "Winhttp.lib",
+            "Ws2_32.lib",
+        ],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = select({
+        "@platforms//os:macos": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//visibility:public"],
+    deps = ["//zenz:wire_protocol"] + select({
+        "@platforms//os:macos": [
+            ":posix_server",
+            "//zenz:unix_socket_path",
+        ],
+        "//conditions:default": [],
+    }),
 )
