@@ -85,6 +85,7 @@ mozc_cc_library(
         "zenz_context_sanitizer.cc",
         "zenz_live_corrector.cc",
         "zenz_named_pipe_client.cc",
+        "zenz_unix_socket_client.cc",
         "zenz_output_validator.cc",
         "zenz_prompt_builder.cc",
     ],
@@ -94,6 +95,7 @@ mozc_cc_library(
         "zenz_context_sanitizer.h",
         "zenz_live_corrector.h",
         "zenz_named_pipe_client.h",
+        "zenz_unix_socket_client.h",
         "zenz_output_validator.h",
         "zenz_prompt_builder.h",
     ],
@@ -132,6 +134,18 @@ mozc_cc_test(
     deps = [
         ":session",
         "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_unix_socket_client_test",
+    size = "small",
+    srcs = ["zenz_unix_socket_client_test.cc"],
+    deps = [
+        ":session",
+        "//testing:gunit_main",
+        "//zenz:wire_protocol",
+        "@com_google_absl//absl/time",
     ],
 )
 
