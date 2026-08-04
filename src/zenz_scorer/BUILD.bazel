@@ -8,6 +8,24 @@ load(
 package(default_visibility = ["//visibility:private"])
 
 mozc_cc_library(
+    name = "llama_http_client",
+    srcs = ["llama_http_client.cc"],
+    hdrs = ["llama_http_client.h"],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+mozc_cc_test(
+    name = "llama_http_client_test",
+    size = "small",
+    srcs = ["llama_http_client_test.cc"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":llama_http_client",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "posix_server",
     srcs = ["posix_server.cc"],
     hdrs = ["posix_server.h"],
