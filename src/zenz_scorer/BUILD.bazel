@@ -15,3 +15,11 @@ mozc_cc_binary(
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//visibility:public"],
 )
+
+mozc_cc_binary(
+    name = "mozc_zenz_scorer_macos",
+    srcs = ["main_mac.cc"],
+    tags = MOZC_TAGS.MAC_ONLY,
+    target_compatible_with = ["@platforms//os:macos"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,14 @@
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "LICENSE",
+    "LICENSE.linenoise.cpp",
+    "libggml.dylib",
+    "libggml-base.dylib",
+    "libggml-blas.dylib",
+    "libggml-cpu.dylib",
+    "libggml-metal.dylib",
+    "libggml-rpc.dylib",
+    "libllama.dylib",
+    "llama-server",
+])

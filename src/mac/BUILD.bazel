@@ -80,14 +80,70 @@ KEYCHAIN_INSTALLER_SELECT = select({
     "//conditions:default": "",
 })
 
+genrule(
+    name = "zenz_runtime_model",
+    srcs = ["//win32/installer/zenz_runtime:models/zenz-v3.2-small-Q5_K_M.gguf"],
+    outs = ["zenz-v3.2-small-Q5_K_M.gguf"],
+    cmd = "cp -X $< $@",
+    tags = MOZC_TAGS.MAC_ONLY,
+)
+
+genrule(
+    name = "zenz_runtime_notice_apache",
+    srcs = ["//win32/installer/zenz_runtime:licenses/Apache-2.0.txt"],
+    outs = ["Apache-2.0.txt"],
+    cmd = "cp -X $< $@",
+    tags = MOZC_TAGS.MAC_ONLY,
+)
+
+genrule(
+    name = "zenz_runtime_notice_third_party",
+    srcs = ["//win32/installer/zenz_runtime:licenses/THIRD_PARTY_NOTICES.md"],
+    outs = ["THIRD_PARTY_NOTICES.md"],
+    cmd = "cp -X $< $@",
+    tags = MOZC_TAGS.MAC_ONLY,
+)
+
+genrule(
+    name = "zenz_runtime_notice_llama_cpp",
+    srcs = ["//win32/installer/zenz_runtime:licenses/llama.cpp-MIT.txt"],
+    outs = ["llama.cpp-MIT.txt"],
+    cmd = "cp -X $< $@",
+    tags = MOZC_TAGS.MAC_ONLY,
+)
+
+genrule(
+    name = "zenz_runtime_notice_model",
+    srcs = ["//win32/installer/zenz_runtime:licenses/zenz-v3.2-small-gguf.txt"],
+    outs = ["zenz-v3.2-small-gguf.txt"],
+    cmd = "cp -X $< $@",
+    tags = MOZC_TAGS.MAC_ONLY,
+)
+
 mozc_macos_application(
     name = "mozc_macos",
     additional_contents = mozc_select(
         default = {},
         # macos is used for Google internal build.
         macos = {
+            "//mac/installer/zenz_runtime:LICENSE": "Resources/zenz_runtime/licenses",
+            "//mac/installer/zenz_runtime:LICENSE.linenoise.cpp": "Resources/zenz_runtime/licenses",
+            "//mac/installer/zenz_runtime:llama-server": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-base.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-blas.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-cpu.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-metal.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-rpc.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libllama.dylib": "Resources/zenz_runtime",
+            "//zenz_scorer:mozc_zenz_scorer_macos": "Resources",
             "//renderer:mozc_renderer_macos": "Resources",
             "//server:mozc_server_macos": "Resources",
+            ":zenz_runtime_notice_apache": "Resources/zenz_runtime/licenses",
+            ":zenz_runtime_notice_third_party": "Resources/zenz_runtime/licenses",
+            ":zenz_runtime_notice_llama_cpp": "Resources/zenz_runtime/licenses",
+            ":zenz_runtime_notice_model": "Resources/zenz_runtime/licenses",
+            ":zenz_runtime_model": "Resources/zenz_runtime/models",
         },
         # prod_macos also refers to oss_macos settings.
         oss_macos = {
@@ -97,8 +153,24 @@ mozc_macos_application(
             "//gui/error_message_dialog:error_message_dialog_macos": "Resources",
             "//gui/tool:mozc_prelauncher_macos": "Resources",
             "//gui/word_register_dialog:word_register_dialog_macos": "Resources",
+            "//mac/installer/zenz_runtime:LICENSE": "Resources/zenz_runtime/licenses",
+            "//mac/installer/zenz_runtime:LICENSE.linenoise.cpp": "Resources/zenz_runtime/licenses",
+            "//mac/installer/zenz_runtime:llama-server": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-base.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-blas.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-cpu.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-metal.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libggml-rpc.dylib": "Resources/zenz_runtime",
+            "//mac/installer/zenz_runtime:libllama.dylib": "Resources/zenz_runtime",
+            "//zenz_scorer:mozc_zenz_scorer_macos": "Resources",
             "//renderer:mozc_renderer_macos": "Resources",
             "//server:mozc_server_macos": "Resources",
+            ":zenz_runtime_notice_apache": "Resources/zenz_runtime/licenses",
+            ":zenz_runtime_notice_third_party": "Resources/zenz_runtime/licenses",
+            ":zenz_runtime_notice_llama_cpp": "Resources/zenz_runtime/licenses",
+            ":zenz_runtime_notice_model": "Resources/zenz_runtime/licenses",
+            ":zenz_runtime_model": "Resources/zenz_runtime/models",
         },
     ),
     app_icons = ["//data/images/mac:product_icon.icns"],

@@ -69,72 +69,89 @@ def main():
     pkg_name = 'GoogleJapaneseInput.pkg'
 
   output_path = os.path.abspath(args.output)
+  old_copyfile_disable = os.environ.get('COPYFILE_DISABLE')
+  os.environ['COPYFILE_DISABLE'] = '1'
 
-  with tempfile.TemporaryDirectory() as tmp_dir:
-    # Use the unzip command to extract symbolic links properly.
-    util.RunOrDie(['unzip', '-q', args.input, '-d', tmp_dir])
-    os.chdir(os.path.join(tmp_dir, 'installer'))
+  try:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      # Use the unzip command to extract symbolic links properly.
+      util.RunOrDie(['unzip', '-q', args.input, '-d', tmp_dir])
+      os.chdir(os.path.join(tmp_dir, 'installer'))
 
-    # Generate a component property list from the root directory, then clear
-    # BundleOverwriteAction to prevent atomic bundle replacement during
-    # upgrades. With 'upgrade' (the default), the installer deletes the old
-    # bundle and installs the new one atomically, which can invalidate the
-    # macOS IME registration. With an empty action, the installer simply
-    # overwrites files in place, preserving the existing registration.
-    # https://github.com/google/mozc/issues/1439
-    component_plist = 'component.plist'
-    util.RunOrDie(
-        ['/usr/bin/pkgbuild', '--analyze', '--root', 'root', component_plist]
-    )
-    with open(component_plist, 'rb') as f:
-      components = plistlib.load(f)
-    for component in components:
-      component['BundleOverwriteAction'] = ''
-    with open(component_plist, 'wb') as f:
-      plistlib.dump(components, f)
+      # Disable copyfile metadata handling and clear xattrs so pkgbuild does
+      # not emit AppleDouble sidecar files such as ._foo into the payload.
+      zenz_runtime_dir = os.path.join(
+          'root', 'Library', 'Input Methods', pkg_name.removesuffix('.pkg') + '.app',
+          'Contents', 'Resources', 'zenz_runtime')
+      if os.path.exists(zenz_runtime_dir):
+        util.RunOrDie(['/bin/chmod', '-R', 'u+w', zenz_runtime_dir])
+        util.RunOrDie(['/usr/bin/xattr', '-cr', zenz_runtime_dir])
 
-    pkgbuild_commands = [
-        '/usr/bin/pkgbuild',
-        '--root',
-        'root',
-        '--component-plist',
-        component_plist,
-        '--identifier',
-        identifier,
-        '--scripts',
-        'scripts/',
-        pkg_name,  # pkg_name is configured in distribution.xml.
-    ]
-    util.RunOrDie(pkgbuild_commands)
-    productbuild_commands = [
-        '/usr/bin/productbuild',
-        '--distribution',
-        'distribution.xml',
-        '--plugins',
-        'Plugins/',
-        '--resources',
-        'Resources/',
-        'package.pkg',  # this name is only used within this script.
-    ]
-    util.RunOrDie(productbuild_commands)
-
-    # codesign the package and copy it to the output path.
-    if args.codesign_identity == '-':
-      shutil.copyfile('package.pkg', output_path)
-    else:
-      keychain_path = os.path.join(
-          os.getenv('HOME'), 'Library/Keychains', args.keychain
+      # Generate a component property list from the root directory, then clear
+      # BundleOverwriteAction to prevent atomic bundle replacement during
+      # upgrades. With 'upgrade' (the default), the installer deletes the old
+      # bundle and installs the new one atomically, which can invalidate the
+      # macOS IME registration. With an empty action, the installer simply
+      # overwrites files in place, preserving the existing registration.
+      # https://github.com/google/mozc/issues/1439
+      component_plist = 'component.plist'
+      util.RunOrDie(
+          ['/usr/bin/pkgbuild', '--analyze', '--root', 'root', component_plist]
       )
-      codesign_commands = [
-          '/usr/bin/productsign',
-          '--sign',
-          args.codesign_identity,
-          '--keychain',
-          keychain_path,
-          'package.pkg',
-          output_path,
+      with open(component_plist, 'rb') as f:
+        components = plistlib.load(f)
+      for component in components:
+        component['BundleOverwriteAction'] = ''
+      with open(component_plist, 'wb') as f:
+        plistlib.dump(components, f)
+
+      pkgbuild_commands = [
+          '/usr/bin/pkgbuild',
+          '--root',
+          'root',
+          '--component-plist',
+          component_plist,
+          '--identifier',
+          identifier,
+          '--scripts',
+          'scripts/',
+          pkg_name,  # pkg_name is configured in distribution.xml.
       ]
-      util.RunOrDie(codesign_commands)
+      util.RunOrDie(pkgbuild_commands)
+      productbuild_commands = [
+          '/usr/bin/productbuild',
+          '--distribution',
+          'distribution.xml',
+          '--plugins',
+          'Plugins/',
+          '--resources',
+          'Resources/',
+          'package.pkg',  # this name is only used within this script.
+      ]
+      util.RunOrDie(productbuild_commands)
+
+      # codesign the package and copy it to the output path.
+      if args.codesign_identity == '-':
+        shutil.copyfile('package.pkg', output_path)
+      else:
+        keychain_path = os.path.join(
+            os.getenv('HOME'), 'Library/Keychains', args.keychain
+        )
+        codesign_commands = [
+            '/usr/bin/productsign',
+            '--sign',
+            args.codesign_identity,
+            '--keychain',
+            keychain_path,
+            'package.pkg',
+            output_path,
+        ]
+        util.RunOrDie(codesign_commands)
+  finally:
+    if old_copyfile_disable is None:
+      os.environ.pop('COPYFILE_DISABLE', None)
+    else:
+      os.environ['COPYFILE_DISABLE'] = old_copyfile_disable
 
 
 if __name__ == '__main__':
