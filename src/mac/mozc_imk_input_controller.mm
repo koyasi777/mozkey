@@ -36,6 +36,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
@@ -231,6 +232,24 @@ int32_t GetRendererAnchorPosition(const Output &output) {
   }
   return 0;
 }
+
+NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offset) {
+  const NSUInteger length = [text length];
+  NSUInteger utf16_offset = 0;
+  uint32_t current_code_point = 0;
+  while (utf16_offset < length && current_code_point < code_point_offset) {
+    const unichar first = [text characterAtIndex:utf16_offset];
+    ++utf16_offset;
+    if (first >= 0xD800 && first <= 0xDBFF && utf16_offset < length) {
+      const unichar second = [text characterAtIndex:utf16_offset];
+      if (second >= 0xDC00 && second <= 0xDFFF) {
+        ++utf16_offset;
+      }
+    }
+    ++current_code_point;
+  }
+  return utf16_offset;
+}
 }  // namespace
 
 @implementation MozcImkInputController
@@ -278,6 +297,7 @@ int32_t GetRendererAnchorPosition(const Output &output) {
   originalString_ = [[NSMutableString alloc] init];
   composedString_ = [[NSMutableAttributedString alloc] init];
   cursorPosition_ = -1;
+  useUnspecifiedSelectionRange_ = false;
   mode_ = mozc::commands::DIRECT;
   suppressSuggestion_ = false;
   yenSignCharacter_ = mozc::config::Config::YEN_SIGN;
@@ -649,7 +669,8 @@ int32_t GetRendererAnchorPosition(const Output &output) {
     }
   }
 
-  [self updateComposedString:&(output->preedit())];
+  [self updateComposedString:&(output->preedit())
+                liveConversion:output->live_conversion()];
   [self updateCandidates:output];
 
   if (output->has_mode()) {
@@ -758,28 +779,52 @@ int32_t GetRendererAnchorPosition(const Output &output) {
 }
 
 - (void)updateComposedString:(const Preedit *)preedit {
+  [self updateComposedString:preedit liveConversion:false];
+}
+
+- (void)updateComposedString:(const Preedit *)preedit
+              liveConversion:(bool)live_conversion {
   // If the last and the current composed string length is 0,
   // we don't update the composition.
-  if (([composedString_ length] == 0) && ((preedit == nullptr || preedit->segment_size() == 0))) {
+  if (([composedString_ length] == 0) &&
+      ((preedit == nullptr || preedit->segment_size() == 0))) {
     return;
   }
 
   [composedString_ deleteCharactersInRange:NSMakeRange(0, [composedString_ length])];
   cursorPosition_ = -1;
+  useUnspecifiedSelectionRange_ = false;
   if (preedit != nullptr) {
-    cursorPosition_ = preedit->cursor();
+    NSDictionary *highlightAttributes =
+        [self markForStyle:kTSMHiliteSelectedConvertedText
+                   atRange:NSMakeRange(NSNotFound, 0)];
+    NSDictionary *underlineAttributes =
+        [self markForStyle:kTSMHiliteConvertedText
+                   atRange:NSMakeRange(NSNotFound, 0)];
+
     for (size_t i = 0; i < preedit->segment_size(); ++i) {
-      NSDictionary *highlightAttributes = [self markForStyle:kTSMHiliteSelectedConvertedText
-                                                     atRange:NSMakeRange(NSNotFound, 0)];
-      NSDictionary *underlineAttributes = [self markForStyle:kTSMHiliteConvertedText
-                                                     atRange:NSMakeRange(NSNotFound, 0)];
       const Preedit::Segment &seg = preedit->segment(static_cast<int32_t>(i));
-      NSDictionary *attr = (seg.annotation() == Preedit::Segment::HIGHLIGHT) ? highlightAttributes
-                                                                             : underlineAttributes;
+      NSDictionary *attributes = nil;
+      if (!live_conversion) {
+        attributes = (seg.annotation() == Preedit::Segment::HIGHLIGHT)
+                         ? highlightAttributes
+                         : underlineAttributes;
+      }
       NSString *seg_string = [NSString stringWithUTF8String:seg.value().c_str()];
       NSAttributedString *seg_attributed_string =
-          [[NSAttributedString alloc] initWithString:seg_string attributes:attr];
+          [[NSAttributedString alloc] initWithString:seg_string attributes:attributes];
       [composedString_ appendAttributedString:seg_attributed_string];
+    }
+
+    if (live_conversion && [composedString_ length] > 0) {
+      // Live conversion is a conversion preview, not a focused-clause
+      // selection.  Leaving the selection unspecified lets AppKit keep its
+      // native insertion caret instead of showing Mozc's focused-clause
+      // boundary as the caret.
+      useUnspecifiedSelectionRange_ = true;
+    } else {
+      cursorPosition_ = static_cast<int>(
+          CodePointOffsetToUtf16Offset([composedString_ string], preedit->cursor()));
     }
   }
   if ([composedString_ length] == 0) {
@@ -812,6 +857,7 @@ int32_t GetRendererAnchorPosition(const Output &output) {
   return composedString_;
 }
 
+
 - (void)clearCandidates {
   hasLiveConversionAnchorLeft_ = false;
   allowCandidateWindowForLiveConversion_ = false;
@@ -826,6 +872,9 @@ int32_t GetRendererAnchorPosition(const Output &output) {
 // |selecrionRange| method is defined at IMKInputController class and
 // means the position of cursor actually.
 - (NSRange)selectionRange {
+  if (useUnspecifiedSelectionRange_) {
+    return NSMakeRange(NSNotFound, 0);
+  }
   if (imkClientForTest_) {
     return NSMakeRange(cursorPosition_, 0);
   }
