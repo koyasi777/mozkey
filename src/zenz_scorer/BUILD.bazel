@@ -26,6 +26,31 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "llama_backend",
+    srcs = ["llama_backend.cc"],
+    hdrs = ["llama_backend.h"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":llama_http_client",
+        ":posix_server",
+        "//zenz:wire_protocol",
+    ],
+)
+
+mozc_cc_test(
+    name = "llama_backend_integration_test",
+    size = "small",
+    srcs = ["llama_backend_integration_test.cc"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":llama_backend",
+        ":posix_server",
+        "//testing:gunit_main",
+        "//zenz:wire_protocol",
+    ],
+)
+
+mozc_cc_library(
     name = "posix_server",
     srcs = ["posix_server.cc"],
     hdrs = ["posix_server.h"],
