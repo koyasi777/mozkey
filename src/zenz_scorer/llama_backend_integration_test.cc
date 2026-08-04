@@ -179,7 +179,7 @@ class FakeLlamaServer final {
 
     sockaddr_in address = {};
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = 0;
     if (::bind(listen_fd_, reinterpret_cast<const sockaddr*>(&address),
                sizeof(address)) != 0 ||
@@ -196,7 +196,7 @@ class FakeLlamaServer final {
       listen_fd_ = -1;
       return false;
     }
-    port_ = static_cast<int>(::ntohs(address.sin_port));
+    port_ = static_cast<int>(ntohs(address.sin_port));
 
     thread_ = std::thread([this, handler = std::move(handler)]() mutable {
       int client_fd = -1;
