@@ -1,0 +1,38 @@
+package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "llama_server",
+    srcs = ["llama-server"],
+    target_compatible_with = ["@platforms//cpu:arm64"],
+    visibility = ["//mac:__pkg__"],
+)
+
+filegroup(
+    name = "model",
+    srcs = ["models/zenz-v3.2-small-Q5_K_M.gguf"],
+    visibility = ["//mac:__pkg__"],
+)
+
+filegroup(
+    name = "apache_license",
+    srcs = ["licenses/Apache-2.0.txt"],
+    visibility = ["//mac:__pkg__"],
+)
+
+filegroup(
+    name = "llama_cpp_license",
+    srcs = ["licenses/llama.cpp-MIT.txt"],
+    visibility = ["//mac:__pkg__"],
+)
+
+filegroup(
+    name = "third_party_notices",
+    srcs = ["licenses/THIRD_PARTY_NOTICES.md"],
+    visibility = ["//mac:__pkg__"],
+)
+
+filegroup(
+    name = "zenz_model_notice",
+    srcs = ["licenses/zenz-v3.2-small-gguf.txt"],
+    visibility = ["//mac:__pkg__"],
+)

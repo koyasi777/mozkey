@@ -230,6 +230,17 @@ def Codesign(top_dir: str, identity: str) -> None:
       codesign = ['/usr/bin/codesign', *args, path]
       util.RunOrDie(codesign)
 
+  # Codesign the raw Zenz Mach-O helpers before signing their parent app.
+  zenz_helper_names = frozenset(['llama-server', 'mozc_zenz_scorer'])
+  for cur_dir, _, files in os.walk(top_dir):  # symbolic links are not followed.
+    if os.path.basename(cur_dir) != 'ZenzRuntime':
+      continue
+    for file_name in files:
+      if file_name in zenz_helper_names:
+        path = os.path.join(cur_dir, file_name)
+        codesign = ['/usr/bin/codesign', *args, path]
+        util.RunOrDie(codesign)
+
   # codesign apps
   # Walk the directory from the bottom to the top. This is necessary because
   # the sub apps should be signed before the main app.
