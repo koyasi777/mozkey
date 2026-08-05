@@ -1,15 +1,36 @@
 package(default_visibility = ["//visibility:private"])
 
+config_setting(
+    name = "macos_arm64",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:macos",
+    ],
+)
+
 filegroup(
     name = "llama_server",
-    srcs = ["llama-server"],
-    target_compatible_with = ["@platforms//cpu:arm64"],
+    srcs = select({
+        ":macos_arm64": ["llama-server"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:macos",
+    ],
     visibility = ["//mac:__pkg__"],
 )
 
 filegroup(
     name = "model",
-    srcs = ["models/zenz-v3.2-small-Q5_K_M.gguf"],
+    srcs = select({
+        ":macos_arm64": ["models/zenz-v3.2-small-Q5_K_M.gguf"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:macos",
+    ],
     visibility = ["//mac:__pkg__"],
 )
 

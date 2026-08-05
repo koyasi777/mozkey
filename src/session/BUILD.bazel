@@ -85,9 +85,9 @@ mozc_cc_library(
         "zenz_context_sanitizer.cc",
         "zenz_live_corrector.cc",
         "zenz_named_pipe_client.cc",
-        "zenz_unix_socket_client.cc",
         "zenz_output_validator.cc",
         "zenz_prompt_builder.cc",
+        "zenz_unix_socket_client.cc",
     ],
     hdrs = [
         "session.h",
@@ -95,9 +95,9 @@ mozc_cc_library(
         "zenz_context_sanitizer.h",
         "zenz_live_corrector.h",
         "zenz_named_pipe_client.h",
-        "zenz_unix_socket_client.h",
         "zenz_output_validator.h",
         "zenz_prompt_builder.h",
+        "zenz_unix_socket_client.h",
     ],
     visibility = [
         "//evaluation/candidates_diff_checker:__pkg__",
