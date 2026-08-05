@@ -77,6 +77,32 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "posix_runtime",
+    srcs = ["posix_runtime.cc"],
+    hdrs = ["posix_runtime.h"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":llama_backend",
+        ":llama_server_process",
+        ":posix_server",
+        "//zenz:wire_protocol",
+    ],
+)
+
+mozc_cc_test(
+    name = "posix_runtime_test",
+    size = "small",
+    srcs = ["posix_runtime_test.cc"],
+    data = [":llama_server_process_test_helper"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":posix_runtime",
+        "//testing:gunit_main",
+        "//zenz:wire_protocol",
+    ],
+)
+
+mozc_cc_library(
     name = "posix_server",
     srcs = ["posix_server.cc"],
     hdrs = ["posix_server.h"],
@@ -123,7 +149,7 @@ mozc_cc_binary(
     visibility = ["//visibility:public"],
     deps = ["//zenz:wire_protocol"] + select({
         "@platforms//os:macos": [
-            ":posix_server",
+            ":posix_runtime",
             "//zenz:unix_socket_path",
         ],
         "//conditions:default": [],
