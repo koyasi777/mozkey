@@ -3052,8 +3052,33 @@ std::unique_ptr<ImeContext> Session::CreateContext(
 }
 
 void Session::PushUndoContext() {
-  // Copy the current context and push it to the undo stack.
-  undo_contexts_.emplace_back(std::make_unique<ImeContext>(*context_));
+  UndoEntry entry;
+  entry.context = std::make_unique<ImeContext>(*context_);
+
+  // A pending live-conversion preedit is partly owned by Session rather than
+  // ImeContext: the converted stable prefix and the raw suffix are composed at
+  // output time. Preserve that display state so Undo can restore exactly what
+  // the user saw before submitting it. Generation numbers are intentionally not
+  // stored; PopUndoContext() issues a fresh generation to keep old callbacks
+  // stale.
+  if (live_conversion_pending_ &&
+      context_->state() == ImeContext::COMPOSITION) {
+    PendingLiveConversionUndoState state;
+    state.pending_key = pending_live_conversion_key_;
+    state.pending_input = pending_live_conversion_input_;
+    state.pending_suggestion_candidate_window =
+        pending_live_conversion_suggestion_candidate_window_;
+    state.live_suggestion_candidate_window =
+        live_conversion_suggestion_candidate_window_;
+    state.live_key = live_conversion_key_;
+    state.live_preedit = live_conversion_preedit_;
+    state.live_value = live_conversion_value_;
+    state.live_preedit_output = live_conversion_preedit_output_;
+    entry.pending_live_conversion = std::move(state);
+  }
+
+  undo_contexts_.push_back(std::move(entry));
+
   // If the stack size exceeds the limitation, purge the oldest entries.
   while (undo_contexts_.size() > kMultipleUndoMaxSize) {
     undo_contexts_.pop_front();
@@ -3061,12 +3086,56 @@ void Session::PushUndoContext() {
   DCHECK_LE(undo_contexts_.size(), kMultipleUndoMaxSize);
 }
 
+void Session::PushDirectCommitUndoContext() {
+  PushUndoContext();
+  DCHECK(!undo_contexts_.empty());
+  undo_contexts_.back().revert_converter_on_undo = false;
+}
+
 void Session::PopUndoContext() {
   if (!HasUndoContext()) {
     return;
   }
-  context_ = std::move(undo_contexts_.back());
+
+  UndoEntry entry = std::move(undo_contexts_.back());
   undo_contexts_.pop_back();
+  context_ = std::move(entry.context);
+
+  // Invalidate every callback issued before Undo. If the restored entry was
+  // pending, it receives a new generation and a new callback from Undo().
+  ClearLiveConversionState();
+
+  if (!entry.pending_live_conversion.has_value() ||
+      context_->state() != ImeContext::COMPOSITION) {
+    return;
+  }
+
+  PendingLiveConversionUndoState& state =
+      *entry.pending_live_conversion;
+  const std::string current_key =
+      context_->composer().GetQueryForConversion();
+  if (state.pending_key.empty() || state.pending_key != current_key) {
+    return;
+  }
+
+  live_conversion_pending_ = true;
+  pending_live_conversion_generation_ = live_conversion_generation_;
+  pending_live_conversion_key_ = std::move(state.pending_key);
+  pending_live_conversion_input_ = std::move(state.pending_input);
+  pending_live_conversion_suggestion_candidate_window_ =
+      std::move(state.pending_suggestion_candidate_window);
+  live_conversion_suggestion_candidate_window_ =
+      std::move(state.live_suggestion_candidate_window);
+  live_conversion_key_ = std::move(state.live_key);
+  live_conversion_preedit_ = std::move(state.live_preedit);
+  live_conversion_value_ = std::move(state.live_value);
+  live_conversion_preedit_output_ =
+      std::move(state.live_preedit_output);
+}
+
+bool Session::ShouldRevertConverterOnUndo() const {
+  return HasUndoContext() &&
+         undo_contexts_.back().revert_converter_on_undo;
 }
 
 void Session::ClearUndoContext() { undo_contexts_.clear(); }
@@ -4534,8 +4603,12 @@ bool Session::Undo(commands::Command* command) {
     return DoNothing(command);
   }
 
-  // Rollback the last user history.
-  context_->mutable_converter()->Revert();
+  // Roll back converter learning only for commit paths that actually used the
+  // converter. Pending-display Submit commits a visible string directly and
+  // therefore has no converter learning to revert.
+  if (ShouldRevertConverterOnUndo()) {
+    context_->mutable_converter()->Revert();
+  }
 
   size_t result_size = 0;
   int32_t cursor_offset = 0;
@@ -4556,6 +4629,20 @@ bool Session::Undo(commands::Command* command) {
         command->mutable_output()->mutable_deletion_range();
     range->set_offset(-(static_cast<int32_t>(result_size) + cursor_offset));
     range->set_length(result_size);
+  }
+
+  if (live_conversion_pending_ &&
+      context_->state() == ImeContext::COMPOSITION) {
+    if (OutputPendingLiveConversion(command)) {
+      AttachCachedLiveConversionSuggestionCandidateWindow(
+          command->mutable_output());
+      AttachDelayedLiveConversionCallback(command);
+      return true;
+    }
+
+    // A corrupted or incompatible snapshot must degrade to ordinary
+    // composition rather than leave an unserviceable pending state.
+    CancelPendingLiveConversion();
   }
 
   Output(command);
@@ -5138,30 +5225,6 @@ bool Session::ApplyDelayedLiveConversion(commands::Command* command) {
   }
 
   return MaybeStartLiveConversion(command);
-}
-
-bool Session::FlushPendingLiveConversion() {
-  if (!live_conversion_pending_) {
-    return false;
-  }
-
-  if (context_->state() != ImeContext::COMPOSITION) {
-    CancelPendingLiveConversion();
-    return false;
-  }
-
-  const std::string current_key = context_->composer().GetQueryForConversion();
-  if (current_key != pending_live_conversion_key_ ||
-      ShouldSkipLiveConversionForCompositionKey(
-          current_key,
-          GetLiveConversionCommittedLeftBoundary(*context_),
-          GetLiveConversionMinKeyLength(context_->GetConfig()))) {
-    CancelPendingLiveConversion();
-    return false;
-  }
-
-  commands::Command dummy_command;
-  return MaybeStartLiveConversion(&dummy_command);
 }
 
 std::string Session::ExtractZenzLeftContext(uint32_t max_chars) const {
@@ -7014,12 +7077,12 @@ bool Session::CommitLiveConversionResult(commands::Command* command) {
   return true;
 }
 
-bool Session::CommitPendingLiveConversionDisplayDirectly(
-    commands::Command* command) {
-  const std::string key = context_->composer().GetQueryForConversion();
-  const std::string raw_preedit = context_->composer().GetStringForPreedit();
-
-  std::string value;
+std::pair<std::string, std::string>
+Session::GetPendingLiveConversionDisplayCommitStrings() const {
+  const std::string key =
+      context_->composer().GetQueryForConversion();
+  const std::string raw_preedit =
+      context_->composer().GetStringForPreedit();
 
   const bool has_stable_live_conversion =
       !live_conversion_key_.empty() &&
@@ -7030,17 +7093,49 @@ bool Session::CommitPendingLiveConversionDisplayDirectly(
   if (has_stable_live_conversion &&
       StartsWithString(key, live_conversion_key_) &&
       StartsWithString(raw_preedit, live_conversion_preedit_)) {
-    const std::string suffix_value =
-        raw_preedit.substr(live_conversion_preedit_.size());
-
-    value = live_conversion_value_;
-    value.append(suffix_value);
-  } else {
-    value = context_->composer().GetStringForSubmission();
+    std::string value = live_conversion_value_;
+    value.append(raw_preedit.substr(live_conversion_preedit_.size()));
+    return {key, std::move(value)};
   }
+
+  return {key, context_->composer().GetStringForSubmission()};
+}
+
+bool Session::CommitPendingLiveConversionDisplayDirectly(
+    commands::Command* command) {
+  auto [key, value] =
+      GetPendingLiveConversionDisplayCommitStrings();
 
   ClearLiveConversionState();
   CommitStringDirectly(key, value, command);
+  return true;
+}
+
+bool Session::CommitPendingLiveConversionDisplayForSubmit(
+    commands::Command* command) {
+  if (!live_conversion_pending_ ||
+      context_->state() != ImeContext::COMPOSITION) {
+    return false;
+  }
+
+  auto [key, value] =
+      GetPendingLiveConversionDisplayCommitStrings();
+  if (key.empty() || value.empty()) {
+    CancelPendingLiveConversion();
+    return false;
+  }
+
+  // Enter accepts only the preedit already visible to the user. The pending
+  // converter result is speculative and must not be materialized, committed,
+  // or learned. Unlike direct-commit punctuation, Enter preserves Mozc Undo.
+  PushDirectCommitUndoContext();
+  ClearPendingRerankedPreeditCommitAfterConvertCancel();
+  ClearLiveConversionState();
+  CommitStringDirectly(key, value, command);
+
+  // Undo() reads the committed result from context_->output() to build the
+  // deletion range before restoring the pending preedit snapshot.
+  *context_->mutable_output() = command->output();
   return true;
 }
 
@@ -7743,7 +7838,10 @@ bool Session::Commit(commands::Command* command) {
     return true;
   }
 
-  FlushPendingLiveConversion();
+  if (CommitPendingLiveConversionDisplayForSubmit(command)) {
+    return true;
+  }
+
   return CommitInternal(command,
                         context_->GetRequest().zero_query_suggestion());
 }

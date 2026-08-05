@@ -36,6 +36,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -441,14 +442,33 @@ class Session {
   ZenzFeedbackStore zenz_feedback_store_;
   std::unique_ptr<ZenzLiveCorrector> zenz_live_corrector_;
 
+  struct PendingLiveConversionUndoState {
+    std::string pending_key;
+    commands::Input pending_input;
+    commands::CandidateWindow pending_suggestion_candidate_window;
+    commands::CandidateWindow live_suggestion_candidate_window;
+    std::string live_key;
+    std::string live_preedit;
+    std::string live_value;
+    commands::Preedit live_preedit_output;
+  };
+
+  struct UndoEntry {
+    std::unique_ptr<ImeContext> context;
+    std::optional<PendingLiveConversionUndoState> pending_live_conversion;
+    bool revert_converter_on_undo = true;
+  };
+
   // Undo stack. *begin is the oldest, and *back is the newest.
-  std::deque<std::unique_ptr<ImeContext>> undo_contexts_;
+  std::deque<UndoEntry> undo_contexts_;
 
   std::unique_ptr<ImeContext> CreateContext(
       const EngineInterface& engine) const;
 
   void PushUndoContext();
+  void PushDirectCommitUndoContext();
   void PopUndoContext();
+  bool ShouldRevertConverterOnUndo() const;
   // Clear the undo context.
   // This should be called when the composer's preedit or cursor position
   // is updated by non-undo related operations. This achieves intuitive
@@ -541,7 +561,6 @@ class Session {
   bool MaybeStartLiveConversion(mozc::commands::Command* command);
   bool MaybeScheduleLiveConversion(mozc::commands::Command* command);
   bool ApplyDelayedLiveConversion(mozc::commands::Command* command);
-  bool FlushPendingLiveConversion();
   bool IgnoreStaleDelayedLiveConversion(mozc::commands::Command* command);
   void CancelPendingLiveConversion();
   void ClearLiveConversionState();
@@ -561,7 +580,11 @@ class Session {
   bool AttachCachedLiveConversionSuggestionCandidateWindow(
       mozc::commands::Output* output);
   bool CommitLiveConversionResult(mozc::commands::Command* command);
+  std::pair<std::string, std::string>
+  GetPendingLiveConversionDisplayCommitStrings() const;
   bool CommitPendingLiveConversionDisplayDirectly(
+      mozc::commands::Command* command);
+  bool CommitPendingLiveConversionDisplayForSubmit(
       mozc::commands::Command* command);
   bool OutputPendingLiveConversion(mozc::commands::Command* command) const;
   void AttachDelayedLiveConversionCallback(
