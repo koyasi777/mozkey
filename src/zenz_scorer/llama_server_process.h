@@ -4,7 +4,10 @@
 #include <sys/types.h>
 
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
 namespace mozc {
@@ -29,7 +32,9 @@ struct LlamaServerProcessOptions {
 // Owns one localhost llama-server child process.  Start() allocates an
 // OS-assigned loopback port, creates a per-launch API key, spawns the child in
 // its own process group, and waits until an authenticated /completion request
-// succeeds.  Stop() terminates and reaps the whole child process group.
+// succeeds.  Child output is drained continuously into a bounded in-memory
+// tail so startup failures remain diagnosable without allowing unbounded logs.
+// Stop() terminates and reaps the whole child process group.
 class LlamaServerProcess final {
  public:
   explicit LlamaServerProcess(LlamaServerProcessOptions options);
@@ -50,12 +55,19 @@ class LlamaServerProcess final {
   bool Spawn(std::string* error);
   bool WaitUntilReady(std::string* error);
   bool ReapIfExited(int* status);
+  void CaptureOutput(int fd);
+  void JoinOutputCapture();
+  void ClearCapturedOutput();
+  void AppendCapturedOutput(std::string_view api_key, std::string* error);
   void ResetState();
 
   LlamaServerProcessOptions options_;
   pid_t pid_ = -1;
   int port_ = 0;
   std::string api_key_;
+  std::thread output_thread_;
+  std::mutex output_mutex_;
+  std::string output_tail_;
 };
 
 }  // namespace zenz_scorer

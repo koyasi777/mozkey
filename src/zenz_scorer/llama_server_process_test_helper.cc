@@ -104,6 +104,23 @@ bool DisableSigPipe(int fd) {
 #endif
 }
 
+bool WriteAll(int fd, std::string_view data) {
+  size_t offset = 0;
+  while (offset < data.size()) {
+    const ssize_t result =
+        ::write(fd, data.data() + offset, data.size() - offset);
+    if (result > 0) {
+      offset += static_cast<size_t>(result);
+      continue;
+    }
+    if (result < 0 && errno == EINTR) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 bool SendAll(int fd, std::string_view data) {
   size_t offset = 0;
   while (offset < data.size()) {
@@ -255,6 +272,15 @@ int main(int argc, char** argv) {
   }
   if (options.test_mode == "exit") {
     return 11;
+  }
+  if (options.test_mode == "exit-with-stderr") {
+    std::string diagnostic = "diagnostic-start\n";
+    diagnostic.append(8192, 'x');
+    diagnostic.append("\napi-key=");
+    diagnostic.append(options.api_key);
+    diagnostic.append("\ndiagnostic-tail\n");
+    WriteAll(STDERR_FILENO, diagnostic);
+    return 12;
   }
   return RunServer(options);
 }

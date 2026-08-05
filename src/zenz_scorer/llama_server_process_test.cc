@@ -168,6 +168,26 @@ TEST(LlamaServerProcessTest, ChildExitBeforeReadyIsReported) {
   EXPECT_FALSE(process.running());
 }
 
+TEST(LlamaServerProcessTest, CapturesBoundedRedactedStartupOutput) {
+  TemporaryModel model;
+  ASSERT_FALSE(model.path().empty());
+
+  LlamaServerProcessOptions options = MakeOptions(model.path());
+  options.additional_args = {"--test-mode=exit-with-stderr"};
+
+  LlamaServerProcess process(std::move(options));
+  std::string error;
+  EXPECT_FALSE(process.Start(&error));
+  EXPECT_NE(error.find("llama_server_exited_code_12"), std::string::npos)
+      << error;
+  EXPECT_NE(error.find("llama_server_output="), std::string::npos) << error;
+  EXPECT_NE(error.find("api-key=<redacted>"), std::string::npos) << error;
+  EXPECT_NE(error.find("diagnostic-tail"), std::string::npos) << error;
+  EXPECT_EQ(error.find("diagnostic-start"), std::string::npos) << error;
+  EXPECT_LE(error.size(), 4600);
+  EXPECT_FALSE(process.running());
+}
+
 TEST(LlamaServerProcessTest, RejectsMissingRuntimeFiles) {
   TemporaryModel model;
   ASSERT_FALSE(model.path().empty());

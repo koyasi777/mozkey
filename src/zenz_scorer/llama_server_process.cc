@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -46,9 +47,98 @@ constexpr int kMinimumProbeTimeoutMsec = 50;
 constexpr int kMaximumProbeTimeoutMsec = 10000;
 constexpr int kGracefulStopTimeoutMsec = 2000;
 constexpr int kStopPollIntervalMsec = 25;
+constexpr size_t kMaximumCapturedOutputBytes = 4096;
 constexpr char kReadinessPrompt[] =
     "\xEE\xB8\x82\xEE\xB8\x80\xE3\x83\x86\xE3\x82\xB9\xE3\x83\x88"
     "\xEE\xB8\x81";
+
+
+bool SetCloseOnExec(int fd) {
+  int flags;
+  do {
+    flags = ::fcntl(fd, F_GETFD);
+  } while (flags < 0 && errno == EINTR);
+  if (flags < 0) {
+    return false;
+  }
+
+  int result;
+  do {
+    result = ::fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+  } while (result < 0 && errno == EINTR);
+  return result == 0;
+}
+
+bool MoveAboveStandardDescriptors(int* fd) {
+  if (*fd > STDERR_FILENO) {
+    return SetCloseOnExec(*fd);
+  }
+
+  int duplicate;
+  do {
+    duplicate = ::fcntl(*fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+  } while (duplicate < 0 && errno == EINTR);
+  if (duplicate < 0) {
+    return false;
+  }
+
+  ::close(*fd);
+  *fd = duplicate;
+  return true;
+}
+
+bool CreateOutputPipe(int output_pipe[2], std::string* error) {
+  if (::pipe(output_pipe) != 0) {
+    *error = "output_pipe_failed";
+    return false;
+  }
+
+  if (!MoveAboveStandardDescriptors(&output_pipe[0]) ||
+      !MoveAboveStandardDescriptors(&output_pipe[1])) {
+    ::close(output_pipe[0]);
+    ::close(output_pipe[1]);
+    output_pipe[0] = -1;
+    output_pipe[1] = -1;
+    *error = "output_pipe_setup_failed";
+    return false;
+  }
+  return true;
+}
+
+std::string SanitizeCapturedOutput(std::string output,
+                                   std::string_view api_key) {
+  if (!api_key.empty()) {
+    size_t position = 0;
+    while ((position = output.find(api_key, position)) != std::string::npos) {
+      output.replace(position, api_key.size(), "<redacted>");
+      position += sizeof("<redacted>") - 1;
+    }
+  }
+
+  bool previous_space = false;
+  size_t write_position = 0;
+  for (const unsigned char character : output) {
+    const bool is_space = character == ' ' || character == '\t' ||
+                          character == '\r' || character == '\n';
+    if (is_space) {
+      if (!previous_space && write_position > 0) {
+        output[write_position++] = ' ';
+      }
+      previous_space = true;
+      continue;
+    }
+    previous_space = false;
+    output[write_position++] =
+        (character < 0x20 || character == 0x7F)
+            ? '?'
+            : static_cast<char>(character);
+  }
+  output.resize(write_position);
+  while (!output.empty() && output.back() == ' ') {
+    output.pop_back();
+  }
+  return output;
+}
 
 bool ContainsNul(const std::string& value) {
   return value.find('\0') != std::string::npos;
@@ -264,13 +354,14 @@ bool LlamaServerProcess::Start(std::string* error) {
   }
   error->clear();
 
-  if (pid_ > 0) {
-    if (running()) {
-      *error = "already_started";
-      return false;
-    }
-    ResetState();
+  if (pid_ > 0 && running()) {
+    *error = "already_started";
+    return false;
   }
+  if (pid_ > 0 || output_thread_.joinable()) {
+    Stop();
+  }
+  ClearCapturedOutput();
 
   if (!ValidateOptions(options_, error)) {
     return false;
@@ -294,8 +385,10 @@ bool LlamaServerProcess::Start(std::string* error) {
     return false;
   }
 
+  const std::string api_key_for_redaction = api_key_;
   if (!WaitUntilReady(error)) {
     Stop();
+    AppendCapturedOutput(api_key_for_redaction, error);
     return false;
   }
   return true;
@@ -311,21 +404,36 @@ bool LlamaServerProcess::Spawn(std::string* error) {
   }
   argv.push_back(nullptr);
 
+  int output_pipe[2] = {-1, -1};
+  if (!CreateOutputPipe(output_pipe, error)) {
+    return false;
+  }
+
   posix_spawn_file_actions_t actions;
   int result = ::posix_spawn_file_actions_init(&actions);
   if (result != 0) {
+    ::close(output_pipe[0]);
+    ::close(output_pipe[1]);
     *error = "spawn_file_actions_init_failed_" + std::to_string(result);
     return false;
   }
 
-  result = ::posix_spawn_file_actions_addopen(
-      &actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+  result = ::posix_spawn_file_actions_adddup2(
+      &actions, output_pipe[1], STDOUT_FILENO);
   if (result == 0) {
-    result = ::posix_spawn_file_actions_addopen(
-        &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    result = ::posix_spawn_file_actions_adddup2(
+        &actions, output_pipe[1], STDERR_FILENO);
+  }
+  if (result == 0) {
+    result = ::posix_spawn_file_actions_addclose(&actions, output_pipe[0]);
+  }
+  if (result == 0) {
+    result = ::posix_spawn_file_actions_addclose(&actions, output_pipe[1]);
   }
   if (result != 0) {
     ::posix_spawn_file_actions_destroy(&actions);
+    ::close(output_pipe[0]);
+    ::close(output_pipe[1]);
     *error = "spawn_redirect_failed_" + std::to_string(result);
     return false;
   }
@@ -334,6 +442,8 @@ bool LlamaServerProcess::Spawn(std::string* error) {
   result = ::posix_spawnattr_init(&attributes);
   if (result != 0) {
     ::posix_spawn_file_actions_destroy(&actions);
+    ::close(output_pipe[0]);
+    ::close(output_pipe[1]);
     *error = "spawn_attr_init_failed_" + std::to_string(result);
     return false;
   }
@@ -349,6 +459,8 @@ bool LlamaServerProcess::Spawn(std::string* error) {
   if (result != 0) {
     ::posix_spawnattr_destroy(&attributes);
     ::posix_spawn_file_actions_destroy(&actions);
+    ::close(output_pipe[0]);
+    ::close(output_pipe[1]);
     *error = "spawn_attr_setup_failed_" + std::to_string(result);
     return false;
   }
@@ -359,13 +471,33 @@ bool LlamaServerProcess::Spawn(std::string* error) {
 
   ::posix_spawnattr_destroy(&attributes);
   ::posix_spawn_file_actions_destroy(&actions);
+  ::close(output_pipe[1]);
+  output_pipe[1] = -1;
 
   if (result != 0 || child_pid <= 0) {
+    ::close(output_pipe[0]);
     *error = "posix_spawn_failed_" + std::to_string(result);
     return false;
   }
 
   pid_ = child_pid;
+  try {
+    output_thread_ =
+        std::thread(&LlamaServerProcess::CaptureOutput, this, output_pipe[0]);
+  } catch (...) {
+    ::close(output_pipe[0]);
+    if (::kill(-child_pid, SIGKILL) != 0 && errno != ESRCH) {
+      ::kill(child_pid, SIGKILL);
+    }
+    int status = 0;
+    pid_t wait_result;
+    do {
+      wait_result = ::waitpid(child_pid, &status, 0);
+    } while (wait_result < 0 && errno == EINTR);
+    pid_ = -1;
+    *error = "output_capture_thread_failed";
+    return false;
+  }
   return true;
 }
 
@@ -464,6 +596,7 @@ bool LlamaServerProcess::running() {
 
 void LlamaServerProcess::Stop() {
   if (pid_ <= 0) {
+    JoinOutputCapture();
     ResetState();
     return;
   }
@@ -478,6 +611,7 @@ void LlamaServerProcess::Stop() {
   while (std::chrono::steady_clock::now() < deadline) {
     int status = 0;
     if (ReapIfExited(&status)) {
+      JoinOutputCapture();
       ResetState();
       return;
     }
@@ -495,7 +629,62 @@ void LlamaServerProcess::Stop() {
     result = ::waitpid(child_pid, &status, 0);
   } while (result < 0 && errno == EINTR);
 
+  pid_ = -1;
+  JoinOutputCapture();
   ResetState();
+}
+
+void LlamaServerProcess::CaptureOutput(int fd) {
+  std::array<char, 1024> buffer = {};
+  while (true) {
+    const ssize_t result = ::read(fd, buffer.data(), buffer.size());
+    if (result > 0) {
+      const size_t bytes = static_cast<size_t>(result);
+      std::lock_guard<std::mutex> lock(output_mutex_);
+      if (bytes >= kMaximumCapturedOutputBytes) {
+        output_tail_.assign(buffer.data() + bytes - kMaximumCapturedOutputBytes,
+                            kMaximumCapturedOutputBytes);
+      } else {
+        output_tail_.append(buffer.data(), bytes);
+        if (output_tail_.size() > kMaximumCapturedOutputBytes) {
+          output_tail_.erase(
+              0, output_tail_.size() - kMaximumCapturedOutputBytes);
+        }
+      }
+      continue;
+    }
+    if (result < 0 && errno == EINTR) {
+      continue;
+    }
+    break;
+  }
+  ::close(fd);
+}
+
+void LlamaServerProcess::JoinOutputCapture() {
+  if (output_thread_.joinable()) {
+    output_thread_.join();
+  }
+}
+
+void LlamaServerProcess::ClearCapturedOutput() {
+  std::lock_guard<std::mutex> lock(output_mutex_);
+  output_tail_.clear();
+}
+
+void LlamaServerProcess::AppendCapturedOutput(std::string_view api_key,
+                                              std::string* error) {
+  std::string output;
+  {
+    std::lock_guard<std::mutex> lock(output_mutex_);
+    output = output_tail_;
+  }
+  output = SanitizeCapturedOutput(std::move(output), api_key);
+  if (output.empty()) {
+    return;
+  }
+  error->append(":llama_server_output=");
+  error->append(output);
 }
 
 void LlamaServerProcess::ResetState() {
