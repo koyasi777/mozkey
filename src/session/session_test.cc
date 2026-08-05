@@ -108,6 +108,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(HandlePendingDirectCommitLearningForSessionCommand);
   PEER_METHOD(Suggest);
   PEER_METHOD(MaybeStartLiveConversion);
+  PEER_METHOD(OutputPendingLiveConversion);
   PEER_METHOD(AttachLiveConversionSuggestionCandidateWindow);
   PEER_METHOD(AttachCachedLiveConversionSuggestionCandidateWindow);
 
@@ -3052,6 +3053,125 @@ TEST_F(SessionTest, LiveConversionHonorsRaisedMinKeyLength) {
   EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
   EXPECT_TRUE(command.output().live_conversion());
   EXPECT_TRUE(EnsurePreedit("愛雨", command));
+}
+
+TEST_F(SessionTest,
+       PendingLiveConversionEnterCommitsVisibleRawPreeditWithoutConversion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(1000);
+  config.set_live_conversion_min_key_length(1);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString("あめ", "ab", &session, &command);
+
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_TRUE(session_peer.live_conversion_pending_());
+  ASSERT_TRUE(command.output().live_conversion_pending());
+  EXPECT_PREEDIT("あめ", command);
+
+  EXPECT_CALL(*converter, StartConversion(_, _)).Times(0);
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ENTER, &session, &command));
+
+  EXPECT_RESULT("あめ", command);
+  EXPECT_FALSE(command.output().has_preedit());
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  EXPECT_FALSE(session_peer.live_conversion_pending_());
+}
+
+TEST_F(SessionTest,
+       PendingLiveConversionEnterCommitsVisibleStablePrefixAndUndoRestoresIt) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(1000);
+  config.set_live_conversion_min_key_length(1);
+  session.SetConfig(config);
+
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  session.set_client_capability(capability);
+
+  commands::Command command;
+  InsertCharacterString("きょうはあめ", "abcdef", &session, &command);
+
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_TRUE(session_peer.live_conversion_pending_());
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  const commands::SessionCommand old_delayed_command =
+      command.output().callback().session_command();
+
+  session_peer.live_conversion_key_() = "きょうは";
+  session_peer.live_conversion_preedit_() = "きょうは";
+  session_peer.live_conversion_value_() = "今日は";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("きょうは");
+  segment->set_value("今日は");
+  segment->set_value_length(Util::CharsLen("今日は"));
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.OutputPendingLiveConversion(&command));
+  EXPECT_PREEDIT("今日はあめ", command);
+
+  EXPECT_CALL(*converter, StartConversion(_, _)).Times(0);
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ENTER, &session, &command));
+
+  EXPECT_RESULT("今日はあめ", command);
+  EXPECT_FALSE(command.output().has_preedit());
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  EXPECT_FALSE(session_peer.live_conversion_pending_());
+
+  command.Clear();
+  ASSERT_TRUE(session.Undo(&command));
+
+  ASSERT_TRUE(command.output().has_deletion_range());
+  EXPECT_EQ(command.output().deletion_range().offset(), -5);
+  EXPECT_EQ(command.output().deletion_range().length(), 5);
+  EXPECT_PREEDIT("今日はあめ", command);
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_TRUE(session_peer.live_conversion_pending_());
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  const commands::SessionCommand new_delayed_command =
+      command.output().callback().session_command();
+  EXPECT_NE(new_delayed_command.live_conversion_generation(),
+            old_delayed_command.live_conversion_generation());
+
+  // The callback issued before Enter must remain stale even after Undo.
+  command.Clear();
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *command.mutable_input()->mutable_command() = old_delayed_command;
+  ASSERT_TRUE(session.SendCommand(&command));
+
+  EXPECT_PREEDIT("今日はあめ", command);
+  EXPECT_TRUE(command.output().live_conversion_pending());
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_TRUE(session_peer.live_conversion_pending_());
 }
 
 TEST_F(SessionTest,
