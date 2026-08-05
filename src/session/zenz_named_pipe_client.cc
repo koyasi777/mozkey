@@ -10,6 +10,7 @@
 
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "zenz/zenz_wire_protocol.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -19,33 +20,14 @@ namespace mozc {
 namespace session {
 namespace {
 
-constexpr uint32_t kZenzWireMagic = 0x315A4E5A;  // "ZNZ1"
-constexpr uint16_t kZenzWireVersion = 1;
-constexpr uint16_t kZenzWireKindRequest = 1;
-constexpr uint16_t kZenzWireKindResponse = 2;
-
-#pragma pack(push, 1)
-struct ZenzWireRequestHeader {
-  uint32_t magic;
-  uint16_t version;
-  uint16_t kind;
-  uint32_t generation;
-  uint32_t timeout_msec;
-  uint32_t max_output_chars;
-  uint32_t prompt_size;
-};
-
-struct ZenzWireResponseHeader {
-  uint32_t magic;
-  uint16_t version;
-  uint16_t kind;
-  uint32_t generation;
-  uint32_t status;
-  uint32_t latency_msec;
-  uint32_t value_size;
-  uint32_t debug_size;
-};
-#pragma pack(pop)
+using ::mozc::zenz::kZenzWireKindRequest;
+using ::mozc::zenz::kZenzWireKindResponse;
+using ::mozc::zenz::kZenzWireMagic;
+using ::mozc::zenz::kZenzWireStatusOk;
+using ::mozc::zenz::kZenzWireStatusTimeout;
+using ::mozc::zenz::kZenzWireVersion;
+using ::mozc::zenz::ZenzWireRequestHeader;
+using ::mozc::zenz::ZenzWireResponseHeader;
 
 #if defined(_WIN32)
 
@@ -456,8 +438,8 @@ ZenzLiveResponse ZenzNamedPipeClient::Convert(
           .append(RedactedStatsWide(L"debug", debug.size())));
 #endif
 
-  response.ok = response_header.status == 0;
-  response.timeout = response_header.status == 2;
+  response.ok = response_header.status == kZenzWireStatusOk;
+  response.timeout = response_header.status == kZenzWireStatusTimeout;
   response.value = std::move(value);
   response.debug = std::move(debug);
   response.latency = absl::Now() - start;

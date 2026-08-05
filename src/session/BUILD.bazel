@@ -81,19 +81,23 @@ mozc_cc_library(
     name = "session",
     srcs = [
         "session.cc",
+        "zenz_client_factory.cc",
         "zenz_context_sanitizer.cc",
         "zenz_live_corrector.cc",
         "zenz_named_pipe_client.cc",
         "zenz_output_validator.cc",
         "zenz_prompt_builder.cc",
+        "zenz_unix_socket_client.cc",
     ],
     hdrs = [
         "session.h",
+        "zenz_client_factory.h",
         "zenz_context_sanitizer.h",
         "zenz_live_corrector.h",
         "zenz_named_pipe_client.h",
         "zenz_output_validator.h",
         "zenz_prompt_builder.h",
+        "zenz_unix_socket_client.h",
     ],
     visibility = [
         "//evaluation/candidates_diff_checker:__pkg__",
@@ -115,9 +119,39 @@ mozc_cc_library(
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
         "//transliteration",
+        "//zenz:unix_socket_path",
+        "//zenz:wire_protocol",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ] + mozc_select(
+        macos = [
+            "//base:file_util",
+            "//base:process",
+            "//base:system_util",
+        ],
+    ),
+)
+
+mozc_cc_test(
+    name = "zenz_client_factory_test",
+    size = "small",
+    srcs = ["zenz_client_factory_test.cc"],
+    deps = [
+        ":session",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_unix_socket_client_test",
+    size = "small",
+    srcs = ["zenz_unix_socket_client_test.cc"],
+    deps = [
+        ":session",
+        "//testing:gunit_main",
+        "//zenz:wire_protocol",
         "@com_google_absl//absl/time",
     ],
 )

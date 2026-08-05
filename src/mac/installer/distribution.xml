@@ -38,7 +38,7 @@
     <pkg-ref id="org.mozc.pkg.JapaneseInput"/>
     <domains enable_localSystem="true"/>
     <options rootVolumeOnly="true"/>
-    <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+    <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
     <choices-outline>
         <line choice="default">
             <line choice="org.mozc.pkg.JapaneseInput"/>

@@ -21,12 +21,24 @@
 #include <thread>
 #include <vector>
 
+#include "zenz/zenz_wire_protocol.h"
+
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "Bcrypt.lib")
 #pragma comment(lib, "Winhttp.lib")
 #pragma comment(lib, "Ws2_32.lib")
 
 namespace {
+
+using ::mozc::zenz::kZenzWireKindRequest;
+using ::mozc::zenz::kZenzWireKindResponse;
+using ::mozc::zenz::kZenzWireMagic;
+using ::mozc::zenz::kZenzWireStatusError;
+using ::mozc::zenz::kZenzWireStatusOk;
+using ::mozc::zenz::kZenzWireStatusTimeout;
+using ::mozc::zenz::kZenzWireVersion;
+using ::mozc::zenz::ZenzWireRequestHeader;
+using ::mozc::zenz::ZenzWireResponseHeader;
 
 std::atomic<bool> g_llama_launch_started{false};
 std::atomic<bool> g_llama_server_ready{false};
@@ -52,15 +64,6 @@ constexpr int kLlamaReadyProbeAttempts = 120;
 constexpr int kLlamaReadyProbeIntervalMsec = 500;
 constexpr int kLlamaReadyProbeHttpTimeoutMsec = 1500;
 
-constexpr uint32_t kZenzWireMagic = 0x315A4E5A;  // "ZNZ1"
-constexpr uint16_t kZenzWireVersion = 1;
-constexpr uint16_t kZenzWireKindRequest = 1;
-constexpr uint16_t kZenzWireKindResponse = 2;
-
-constexpr uint32_t kStatusOk = 0;
-constexpr uint32_t kStatusError = 1;
-constexpr uint32_t kStatusTimeout = 2;
-
 // Minimum wait budget used only while llama-server is still loading.
 // The actual completion request still uses the request timeout from Mozc.
 constexpr uint32_t kMinLlamaReadyWaitMsec = 1500;
@@ -76,29 +79,6 @@ constexpr size_t kMaxHttpResponseBytes = 65536;
 constexpr int kMaxCtx = 1024;
 constexpr int kMaxThreads = 16;
 constexpr int kMaxNPredict = 256;
-
-#pragma pack(push, 1)
-struct ZenzWireRequestHeader {
-  uint32_t magic;
-  uint16_t version;
-  uint16_t kind;
-  uint32_t generation;
-  uint32_t timeout_msec;
-  uint32_t max_output_chars;
-  uint32_t prompt_size;
-};
-
-struct ZenzWireResponseHeader {
-  uint32_t magic;
-  uint16_t version;
-  uint16_t kind;
-  uint32_t generation;
-  uint32_t status;
-  uint32_t latency_msec;
-  uint32_t value_size;
-  uint32_t debug_size;
-};
-#pragma pack(pop)
 
 struct Options {
   std::wstring pipe_name = kDefaultPipeName;
@@ -1461,19 +1441,19 @@ void HandleClient(HANDLE pipe, const Options& options) {
   if (request_header.magic != kZenzWireMagic ||
       request_header.version != kZenzWireVersion ||
       request_header.kind != kZenzWireKindRequest) {
-    SendResponse(pipe, request_header.generation, kStatusError, 0, "",
+    SendResponse(pipe, request_header.generation, kZenzWireStatusError, 0, "",
                  "bad_request_header");
     return;
   }
 
   if (request_header.prompt_size == 0) {
-    SendResponse(pipe, request_header.generation, kStatusError, 0, "",
+    SendResponse(pipe, request_header.generation, kZenzWireStatusError, 0, "",
                  "empty_prompt");
     return;
   }
 
   if (request_header.prompt_size > kMaxPromptBytes) {
-    SendResponse(pipe, request_header.generation, kStatusError, 0, "",
+    SendResponse(pipe, request_header.generation, kZenzWireStatusError, 0, "",
                  "prompt_too_large");
     return;
   }
@@ -1494,7 +1474,7 @@ void HandleClient(HANDLE pipe, const Options& options) {
 
   std::string prompt(request_header.prompt_size, '\0');
   if (!ReadAll(pipe, prompt.data(), request_header.prompt_size)) {
-    SendResponse(pipe, request_header.generation, kStatusError, 0, "",
+    SendResponse(pipe, request_header.generation, kZenzWireStatusError, 0, "",
                  "failed_to_read_prompt");
     return;
   }
@@ -1507,8 +1487,8 @@ void HandleClient(HANDLE pipe, const Options& options) {
   if (!EnsureLlamaServerReadyWithinTimeout(
           options, timeout_msec, &port, &debug)) {
     const DWORD latency = GetTickCount() - start;
-    SendResponse(pipe, request_header.generation, kStatusTimeout, latency, "",
-                 debug);
+    SendResponse(pipe, request_header.generation, kZenzWireStatusTimeout,
+                 latency, "", debug);
     return;
   }
 
@@ -1538,8 +1518,8 @@ void HandleClient(HANDLE pipe, const Options& options) {
     }
 
     const DWORD latency = GetTickCount() - start;
-    SendResponse(pipe, request_header.generation, kStatusError, latency, "",
-                 debug);
+    SendResponse(pipe, request_header.generation, kZenzWireStatusError, latency,
+                 "", debug);
     return;
   }
 
@@ -1549,8 +1529,8 @@ void HandleClient(HANDLE pipe, const Options& options) {
         L" latency=" + std::to_wstring(latency) +
         L" " + RedactedUtf8Bytes(L"value", value));
 
-  SendResponse(pipe, request_header.generation, kStatusOk, latency, value,
-               debug);
+  SendResponse(pipe, request_header.generation, kZenzWireStatusOk, latency,
+               value, debug);
 }
 
 int RunServer(const Options& options) {

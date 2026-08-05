@@ -1,0 +1,23 @@
+Miwa-Keita/zenz-v3.2-small-gguf
+
+Source:
+  Hugging Face model repository: Miwa-Keita/zenz-v3.2-small-gguf
+  https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf
+
+Original model file:
+  ggml-model-Q5_K_M.gguf
+
+Included as:
+  models/zenz-v3.2-small-Q5_K_M.gguf
+
+License:
+  Apache License 2.0
+
+Source commit observed:
+  c67e03e
+
+Notes:
+  Distributed without modification except for file placement, file naming, and packaging into the MSI installer.
+
+Required license file:
+  Apache-2.0.txt
