@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "testing/gunit.h"
 #include "zenz/zenz_wire_protocol.h"
 
@@ -115,7 +116,72 @@ int CreateListeningSocket(const std::string& socket_path) {
   return server_fd;
 }
 
-TEST(ZenzUnixSocketClientTest, ExchangesSharedWireProtocol) {
+bool ServeOneRequest(int server_fd, const ZenzLiveRequest& expected_request,
+                     const std::string& response_value,
+                     const std::string& response_debug) {
+  pollfd descriptor = {};
+  descriptor.fd = server_fd;
+  descriptor.events = POLLIN;
+  if (::poll(&descriptor, 1, 2000) <= 0) {
+    return false;
+  }
+
+  const int client_fd = ::accept(server_fd, nullptr, nullptr);
+  if (client_fd < 0) {
+    return false;
+  }
+
+  ZenzWireRequestHeader request_header = {};
+  std::string received_prompt;
+  bool ok = ReadAll(client_fd, &request_header, sizeof(request_header));
+  if (ok && request_header.prompt_size <= 4096) {
+    received_prompt.assign(request_header.prompt_size, '\0');
+    if (request_header.prompt_size > 0) {
+      ok = ReadAll(client_fd, received_prompt.data(),
+                   request_header.prompt_size);
+    }
+  } else {
+    ok = false;
+  }
+
+  ok = ok && request_header.magic == kZenzWireMagic &&
+       request_header.version == kZenzWireVersion &&
+       request_header.kind == kZenzWireKindRequest &&
+       request_header.generation == expected_request.generation &&
+       request_header.timeout_msec == expected_request.timeout_msec &&
+       request_header.max_output_chars == expected_request.max_output_chars &&
+       received_prompt == expected_request.prompt;
+
+  ZenzWireResponseHeader response_header = {};
+  response_header.magic = kZenzWireMagic;
+  response_header.version = kZenzWireVersion;
+  response_header.kind = kZenzWireKindResponse;
+  response_header.generation = expected_request.generation;
+  response_header.status = kZenzWireStatusOk;
+  response_header.latency_msec = 7;
+  response_header.value_size = static_cast<uint32_t>(response_value.size());
+  response_header.debug_size = static_cast<uint32_t>(response_debug.size());
+
+  ok = ok && WriteAll(client_fd, &response_header, sizeof(response_header));
+  ok = ok && WriteAll(client_fd, response_value.data(), response_value.size());
+  ok = ok && WriteAll(client_fd, response_debug.data(), response_debug.size());
+  ::close(client_fd);
+  return ok;
+}
+
+ZenzLiveRequest MakeRequest(uint32_t generation, const std::string& prompt,
+                            uint32_t timeout_msec) {
+  ZenzLiveRequest request;
+  request.generation = generation;
+  request.key = "reading";
+  request.prompt = prompt;
+  request.timeout_msec = timeout_msec;
+  request.max_output_chars = 128;
+  request.issued_at = absl::Now();
+  return request;
+}
+
+TEST(ZenzUnixSocketClientTest, ExchangesSharedWireProtocolWithoutLaunching) {
   ScopedSocketDirectory socket_directory;
   ASSERT_FALSE(socket_directory.directory().empty());
   ASSERT_LT(socket_directory.socket_path().size(),
@@ -125,87 +191,131 @@ TEST(ZenzUnixSocketClientTest, ExchangesSharedWireProtocol) {
       CreateListeningSocket(socket_directory.socket_path());
   ASSERT_GE(server_fd, 0);
 
-  constexpr uint32_t kGeneration = 37;
-  const std::string prompt = "zenz prompt payload";
+  const ZenzLiveRequest request =
+      MakeRequest(37, "zenz prompt payload", 1000);
   const std::string expected_value = "zenz result";
   const std::string expected_debug = "fake_server_ok";
   std::atomic<bool> server_ok = false;
+  std::atomic<int> launch_count = 0;
 
   std::thread server([&] {
-    pollfd descriptor = {};
-    descriptor.fd = server_fd;
-    descriptor.events = POLLIN;
-    if (::poll(&descriptor, 1, 2000) <= 0) {
-      return;
-    }
-
-    const int client_fd = ::accept(server_fd, nullptr, nullptr);
-    if (client_fd < 0) {
-      return;
-    }
-
-    ZenzWireRequestHeader request_header = {};
-    std::string received_prompt;
-    bool ok = ReadAll(client_fd, &request_header, sizeof(request_header));
-    if (ok && request_header.prompt_size <= 4096) {
-      received_prompt.assign(request_header.prompt_size, '\0');
-      if (request_header.prompt_size > 0) {
-        ok = ReadAll(client_fd, received_prompt.data(),
-                     request_header.prompt_size);
-      }
-    } else {
-      ok = false;
-    }
-
-    ok = ok && request_header.magic == kZenzWireMagic &&
-         request_header.version == kZenzWireVersion &&
-         request_header.kind == kZenzWireKindRequest &&
-         request_header.generation == kGeneration &&
-         request_header.timeout_msec == 1000 &&
-         request_header.max_output_chars == 128 &&
-         received_prompt == prompt;
-
-    ZenzWireResponseHeader response_header = {};
-    response_header.magic = kZenzWireMagic;
-    response_header.version = kZenzWireVersion;
-    response_header.kind = kZenzWireKindResponse;
-    response_header.generation = kGeneration;
-    response_header.status = kZenzWireStatusOk;
-    response_header.latency_msec = 7;
-    response_header.value_size = static_cast<uint32_t>(expected_value.size());
-    response_header.debug_size = static_cast<uint32_t>(expected_debug.size());
-
-    ok = ok && WriteAll(client_fd, &response_header, sizeof(response_header));
-    ok = ok && WriteAll(client_fd, expected_value.data(),
-                        expected_value.size());
-    ok = ok && WriteAll(client_fd, expected_debug.data(),
-                        expected_debug.size());
-    server_ok.store(ok);
-    ::close(client_fd);
+    server_ok.store(ServeOneRequest(server_fd, request, expected_value,
+                                    expected_debug));
   });
 
-  ZenzUnixSocketClient client(socket_directory.socket_path());
+  ZenzUnixSocketClient client(
+      socket_directory.socket_path(),
+      [&] {
+        ++launch_count;
+        return true;
+      });
   EXPECT_TRUE(client.IsAvailable());
-
-  ZenzLiveRequest request;
-  request.generation = kGeneration;
-  request.key = "reading";
-  request.prompt = prompt;
-  request.timeout_msec = 1000;
-  request.max_output_chars = 128;
-  request.issued_at = absl::Now();
 
   const ZenzLiveResponse response = client.Convert(request);
   server.join();
   ::close(server_fd);
 
   EXPECT_TRUE(server_ok.load());
+  EXPECT_EQ(launch_count.load(), 0);
   EXPECT_TRUE(response.ok);
   EXPECT_FALSE(response.timeout);
-  EXPECT_EQ(response.generation, kGeneration);
+  EXPECT_EQ(response.generation, request.generation);
   EXPECT_EQ(response.key, request.key);
   EXPECT_EQ(response.value, expected_value);
   EXPECT_EQ(response.debug, expected_debug);
+}
+
+TEST(ZenzUnixSocketClientTest, LaunchesScorerAndUsesFreshRequestDeadline) {
+  ScopedSocketDirectory socket_directory;
+  ASSERT_FALSE(socket_directory.directory().empty());
+
+  // The fake scorer deliberately takes longer to create its socket than the
+  // inference timeout. Cold-start readiness must therefore use its own budget.
+  const ZenzLiveRequest request =
+      MakeRequest(41, "cold start prompt", 200);
+  const std::string expected_value = "cold start result";
+  const std::string expected_debug = "cold_start_ok";
+  std::atomic<bool> server_ok = false;
+  std::atomic<int> launch_count = 0;
+  std::thread server;
+
+  ZenzUnixSocketClient client(
+      socket_directory.socket_path(),
+      [&] {
+        if (launch_count.fetch_add(1) != 0) {
+          return true;
+        }
+
+        server = std::thread([&] {
+          absl::SleepFor(absl::Milliseconds(300));
+          const int server_fd =
+              CreateListeningSocket(socket_directory.socket_path());
+          if (server_fd < 0) {
+            return;
+          }
+          server_ok.store(ServeOneRequest(server_fd, request, expected_value,
+                                          expected_debug));
+          ::close(server_fd);
+        });
+        return true;
+      },
+      absl::Seconds(1));
+
+  const ZenzLiveResponse response = client.Convert(request);
+  if (server.joinable()) {
+    server.join();
+  }
+
+  EXPECT_EQ(launch_count.load(), 1);
+  EXPECT_TRUE(server_ok.load());
+  EXPECT_TRUE(response.ok);
+  EXPECT_FALSE(response.timeout);
+  EXPECT_EQ(response.value, expected_value);
+  EXPECT_EQ(response.debug, expected_debug);
+}
+
+TEST(ZenzUnixSocketClientTest, ReportsDefinitiveScorerLaunchFailure) {
+  ScopedSocketDirectory socket_directory;
+  ASSERT_FALSE(socket_directory.directory().empty());
+
+  std::atomic<int> launch_count = 0;
+  ZenzUnixSocketClient client(
+      socket_directory.socket_path(),
+      [&] {
+        ++launch_count;
+        return false;
+      },
+      absl::Seconds(1));
+
+  const ZenzLiveResponse response =
+      client.Convert(MakeRequest(42, "launch failure prompt", 1000));
+
+  EXPECT_EQ(launch_count.load(), 1);
+  EXPECT_FALSE(response.ok);
+  EXPECT_FALSE(response.timeout);
+  EXPECT_EQ(response.debug, "scorer_launch_failed");
+}
+
+TEST(ZenzUnixSocketClientTest, TimesOutWhenScorerNeverCreatesSocket) {
+  ScopedSocketDirectory socket_directory;
+  ASSERT_FALSE(socket_directory.directory().empty());
+
+  std::atomic<int> launch_count = 0;
+  ZenzUnixSocketClient client(
+      socket_directory.socket_path(),
+      [&] {
+        ++launch_count;
+        return true;
+      },
+      absl::Milliseconds(80));
+
+  const ZenzLiveResponse response =
+      client.Convert(MakeRequest(43, "timeout prompt", 1000));
+
+  EXPECT_EQ(launch_count.load(), 1);
+  EXPECT_FALSE(response.ok);
+  EXPECT_TRUE(response.timeout);
+  EXPECT_EQ(response.debug, "socket_startup_timeout");
 }
 
 TEST(ZenzUnixSocketClientTest, RejectsInvalidSocketPath) {

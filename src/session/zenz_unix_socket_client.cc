@@ -118,7 +118,10 @@ bool DisableSigPipe(int fd) {
 }
 
 bool ConnectWithDeadline(int fd, const std::string& socket_path,
-                         absl::Time deadline, bool* timed_out) {
+                         absl::Time deadline, bool* timed_out,
+                         int* connect_error) {
+  *connect_error = 0;
+
   sockaddr_un address = {};
   address.sun_family = AF_UNIX;
   std::memcpy(address.sun_path, socket_path.c_str(), socket_path.size() + 1);
@@ -132,19 +135,69 @@ bool ConnectWithDeadline(int fd, const std::string& socket_path,
                 address_length) == 0) {
     return true;
   }
-  if (errno != EINPROGRESS && errno != EAGAIN &&
-      errno != EWOULDBLOCK) {
+
+  const int initial_error = errno;
+  if (initial_error != EINPROGRESS && initial_error != EAGAIN &&
+      initial_error != EWOULDBLOCK) {
+    *connect_error = initial_error;
     return false;
   }
   if (!WaitForFd(fd, POLLOUT, deadline, timed_out)) {
+    *connect_error = *timed_out ? ETIMEDOUT : errno;
     return false;
   }
 
   int socket_error = 0;
   socklen_t socket_error_size = sizeof(socket_error);
-  return ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error,
-                      &socket_error_size) == 0 &&
-         socket_error == 0;
+  if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error,
+                   &socket_error_size) != 0) {
+    *connect_error = errno;
+    return false;
+  }
+
+  *connect_error = socket_error;
+  return socket_error == 0;
+}
+
+bool IsColdStartConnectError(int error) {
+  return error == ENOENT || error == ECONNREFUSED;
+}
+
+struct SocketConnectResult {
+  int fd = -1;
+  int error = 0;
+  bool timed_out = false;
+  const char* debug = nullptr;
+};
+
+SocketConnectResult OpenConnectedSocket(const std::string& socket_path,
+                                         absl::Time deadline) {
+  SocketConnectResult result;
+
+  const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd < 0) {
+    result.error = errno;
+    result.debug = "socket_create_failed";
+    return result;
+  }
+
+  if (!SetNonBlockingAndCloseOnExec(fd) || !DisableSigPipe(fd)) {
+    result.error = errno;
+    result.debug = "socket_configure_failed";
+    ::close(fd);
+    return result;
+  }
+
+  if (!ConnectWithDeadline(fd, socket_path, deadline, &result.timed_out,
+                           &result.error)) {
+    result.debug = result.timed_out ? "socket_connect_timeout"
+                                    : "socket_connect_failed";
+    ::close(fd);
+    return result;
+  }
+
+  result.fd = fd;
+  return result;
 }
 
 int SendFlags() {
@@ -217,7 +270,22 @@ bool ReadAll(int fd, void* data, uint32_t size, absl::Time deadline,
 }  // namespace
 
 ZenzUnixSocketClient::ZenzUnixSocketClient(std::string socket_path)
-    : socket_path_(std::move(socket_path)) {}
+    : ZenzUnixSocketClient(std::move(socket_path), ScorerLauncher()) {}
+
+ZenzUnixSocketClient::ZenzUnixSocketClient(
+    std::string socket_path, ScorerLauncher scorer_launcher)
+    : ZenzUnixSocketClient(std::move(socket_path),
+                           std::move(scorer_launcher),
+                           absl::Milliseconds(1500)) {}
+
+ZenzUnixSocketClient::ZenzUnixSocketClient(
+    std::string socket_path, ScorerLauncher scorer_launcher,
+    absl::Duration startup_timeout)
+    : socket_path_(std::move(socket_path)),
+      scorer_launcher_(std::move(scorer_launcher)),
+      startup_timeout_(startup_timeout > absl::ZeroDuration()
+                           ? startup_timeout
+                           : absl::Milliseconds(1)) {}
 
 bool ZenzUnixSocketClient::IsAvailable() const {
 #if defined(_WIN32)
@@ -247,28 +315,62 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
   }
 
   const absl::Time start = absl::Now();
-  const absl::Time deadline =
-      start + absl::Milliseconds(std::max<uint32_t>(1, request.timeout_msec));
+  const absl::Duration request_timeout =
+      absl::Milliseconds(std::max<uint32_t>(1, request.timeout_msec));
+  absl::Time request_deadline = start + request_timeout;
 
-  ScopedFd socket_fd(::socket(AF_UNIX, SOCK_STREAM, 0));
-  if (socket_fd.get() < 0) {
-    response.debug = "socket_create_failed";
+  SocketConnectResult connection =
+      OpenConnectedSocket(socket_path_, request_deadline);
+
+  if (connection.fd < 0 && !connection.timed_out && scorer_launcher_ &&
+      IsColdStartConnectError(connection.error)) {
+    // Process startup and model readiness are not part of the configured
+    // inference timeout. The session already polls its asynchronous worker for
+    // a longer cold-start window, so wait for the scorer socket separately and
+    // give the connected request a fresh inference deadline.
+    if (!scorer_launcher_()) {
+      response.debug = "scorer_launch_failed";
+      return response;
+    }
+
+    const absl::Time startup_deadline = absl::Now() + startup_timeout_;
+    while (true) {
+      connection = OpenConnectedSocket(socket_path_, startup_deadline);
+      if (connection.fd >= 0 || connection.timed_out ||
+          !IsColdStartConnectError(connection.error)) {
+        break;
+      }
+
+      const absl::Duration remaining = startup_deadline - absl::Now();
+      if (remaining <= absl::ZeroDuration()) {
+        connection.timed_out = true;
+        break;
+      }
+      absl::SleepFor(std::min(absl::Milliseconds(20), remaining));
+    }
+
+    if (connection.fd < 0 &&
+        (connection.timed_out || absl::Now() >= startup_deadline)) {
+      response.timeout = true;
+      response.debug = "socket_startup_timeout";
+      return response;
+    }
+
+    if (connection.fd >= 0) {
+      request_deadline = absl::Now() + request_timeout;
+    }
+  }
+
+  if (connection.fd < 0) {
+    response.timeout = connection.timed_out;
+    response.debug = connection.debug != nullptr
+                         ? connection.debug
+                         : "socket_connect_failed";
     return response;
   }
-  if (!SetNonBlockingAndCloseOnExec(socket_fd.get()) ||
-      !DisableSigPipe(socket_fd.get())) {
-    response.debug = "socket_configure_failed";
-    return response;
-  }
 
+  ScopedFd socket_fd(connection.fd);
   bool timed_out = false;
-  if (!ConnectWithDeadline(socket_fd.get(), socket_path_, deadline,
-                           &timed_out)) {
-    response.timeout = timed_out;
-    response.debug =
-        timed_out ? "socket_connect_timeout" : "socket_connect_failed";
-    return response;
-  }
 
   ZenzWireRequestHeader request_header = {};
   request_header.magic = kZenzWireMagic;
@@ -280,11 +382,11 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
   request_header.prompt_size = static_cast<uint32_t>(request.prompt.size());
 
   bool ok = WriteAll(socket_fd.get(), &request_header,
-                     sizeof(request_header), deadline, &timed_out);
+                     sizeof(request_header), request_deadline, &timed_out);
   if (ok && !request.prompt.empty()) {
     ok = WriteAll(socket_fd.get(), request.prompt.data(),
-                  static_cast<uint32_t>(request.prompt.size()), deadline,
-                  &timed_out);
+                  static_cast<uint32_t>(request.prompt.size()),
+                  request_deadline, &timed_out);
   }
   if (!ok) {
     response.timeout = timed_out;
@@ -295,7 +397,7 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
 
   ZenzWireResponseHeader response_header = {};
   ok = ReadAll(socket_fd.get(), &response_header, sizeof(response_header),
-               deadline, &timed_out);
+               request_deadline, &timed_out);
   if (!ok) {
     response.timeout = timed_out;
     response.debug = timed_out ? "socket_read_header_timeout"
@@ -318,12 +420,12 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
   std::string value(response_header.value_size, '\0');
   if (response_header.value_size > 0) {
     ok = ReadAll(socket_fd.get(), value.data(), response_header.value_size,
-                 deadline, &timed_out);
+                 request_deadline, &timed_out);
   }
   std::string debug(response_header.debug_size, '\0');
   if (ok && response_header.debug_size > 0) {
     ok = ReadAll(socket_fd.get(), debug.data(), response_header.debug_size,
-                 deadline, &timed_out);
+                 request_deadline, &timed_out);
   }
   if (!ok) {
     response.timeout = timed_out;

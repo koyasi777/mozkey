@@ -125,7 +125,13 @@ mozc_cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-    ],
+    ] + mozc_select(
+        macos = [
+            "//base:file_util",
+            "//base:process",
+            "//base:system_util",
+        ],
+    ),
 )
 
 mozc_cc_test(
