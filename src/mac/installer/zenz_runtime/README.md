@@ -80,12 +80,20 @@ bazelisk \
   build \
   --config oss_macos \
   --config release_build \
+  --define=macos_zenz_runtime=1 \
   //mac:package \
   --verbose_failures
 ```
 
 The current package is arm64-only because the pinned `llama-server` runtime
 is arm64-only.
+
+`--define=macos_zenz_runtime=1` is required for a distributable Zenz-enabled
+package. Without this flag, Bazel does not reference the Git-excluded
+`llama-server` and model files. This allows clean-checkout CI builds to verify
+the rest of the macOS package without downloading large runtime assets. A
+package built without the flag must not be distributed as a Zenz-enabled
+release.
 
 This staging script does not download runtime artifacts. Release engineering
 must provide the approved source directory containing the exact pinned files.

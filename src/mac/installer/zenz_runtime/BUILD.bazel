@@ -1,17 +1,20 @@
 package(default_visibility = ["//visibility:private"])
 
 config_setting(
-    name = "macos_arm64",
+    name = "macos_arm64_with_runtime",
     constraint_values = [
         "@platforms//cpu:arm64",
         "@platforms//os:macos",
     ],
+    define_values = {
+        "macos_zenz_runtime": "1",
+    },
 )
 
 filegroup(
     name = "llama_server",
     srcs = select({
-        ":macos_arm64": ["llama-server"],
+        ":macos_arm64_with_runtime": ["llama-server"],
         "//conditions:default": [],
     }),
     target_compatible_with = [
@@ -24,7 +27,7 @@ filegroup(
 filegroup(
     name = "model",
     srcs = select({
-        ":macos_arm64": ["models/zenz-v3.2-small-Q5_K_M.gguf"],
+        ":macos_arm64_with_runtime": ["models/zenz-v3.2-small-Q5_K_M.gguf"],
         "//conditions:default": [],
     }),
     target_compatible_with = [
