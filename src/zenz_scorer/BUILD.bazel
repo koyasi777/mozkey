@@ -26,6 +26,32 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "llama_server_process",
+    srcs = ["llama_server_process.cc"],
+    hdrs = ["llama_server_process.h"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [":llama_http_client"],
+)
+
+mozc_cc_binary(
+    name = "llama_server_process_test_helper",
+    srcs = ["llama_server_process_test_helper.cc"],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+mozc_cc_test(
+    name = "llama_server_process_test",
+    size = "small",
+    srcs = ["llama_server_process_test.cc"],
+    data = [":llama_server_process_test_helper"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":llama_server_process",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "llama_backend",
     srcs = ["llama_backend.cc"],
     hdrs = ["llama_backend.h"],
