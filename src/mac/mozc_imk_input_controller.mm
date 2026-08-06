@@ -190,13 +190,22 @@ bool ShouldDisplayRendererForOutput(const Output &output) {
          (output.live_conversion() && output.has_preedit());
 }
 
-bool ShouldSuppressCandidateWindowForLiveConversion(const Output &output,
-                                                   bool use_live_conversion,
-                                                   bool allow_candidate_window) {
-  return use_live_conversion && !allow_candidate_window &&
-         output.has_candidate_window() &&
-         output.candidate_window().candidate_size() > 0 &&
-         !output.live_conversion();
+bool ShouldSuppressCandidateWindowForLiveConversion(
+    const Output &output, bool use_live_conversion) {
+  if (!use_live_conversion ||
+      !output.has_candidate_window() ||
+      output.candidate_window().candidate_size() == 0 ||
+      output.live_conversion()) {
+    return false;
+  }
+
+  const mozc::commands::CandidateWindow &candidate_window =
+      output.candidate_window();
+
+  // focused_index is the protocol-level distinction between an actual
+  // candidate-selection state and a passive suggestion state.  Do not infer
+  // this state from the physical key or require a particular category.
+  return !candidate_window.has_focused_index();
 }
 
 bool ShouldRecalculateRendererPosition(const RendererCommand &command) {
@@ -261,8 +270,6 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
 @synthesize replacementRange = replacementRange_;
 @synthesize imkClientForTest = imkClientForTest_;
 @synthesize useLiveConversionForTest = useLiveConversion_;
-@synthesize allowCandidateWindowForLiveConversionForTest =
-    allowCandidateWindowForLiveConversion_;
 - (mozc::client::ClientInterface *)mozcClient {
   return mozcClient_.get();
 }
@@ -304,7 +311,6 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
   liveConversionAnchorLeft_ = 0;
   hasLiveConversionAnchorLeft_ = false;
   useLiveConversion_ = false;
-  allowCandidateWindowForLiveConversion_ = false;
   mozcRenderer_ = mozc::renderer::RendererClient::Create();
   mozcClient_ = mozc::client::ClientFactory::NewClient();
   lastKeyDownTime_ = 0;
@@ -860,7 +866,6 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
 
 - (void)clearCandidates {
   hasLiveConversionAnchorLeft_ = false;
-  allowCandidateWindowForLiveConversion_ = false;
   rendererCommand_.set_type(RendererCommand::UPDATE);
   rendererCommand_.set_visible(false);
   rendererCommand_.clear_output();
@@ -964,14 +969,9 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
   }
 
   if (ShouldSuppressCandidateWindowForLiveConversion(
-          *output, useLiveConversion_, allowCandidateWindowForLiveConversion_)) {
+          *output, useLiveConversion_)) {
     [self clearCandidates];
     return;
-  }
-
-  if (output->live_conversion() || !output->has_candidate_window() ||
-      output->candidate_window().candidate_size() == 0) {
-    allowCandidateWindowForLiveConversion_ = false;
   }
 
   rendererCommand_.set_type(RendererCommand::UPDATE);
@@ -1112,14 +1112,6 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
     context.add_experimental_features("google_search_box");
   }
   keyEvent.set_mode(mode_);
-
-  if (useLiveConversion_ && keyEvent.has_special_key() &&
-      keyEvent.special_key() == mozc::commands::KeyEvent::SPACE) {
-    // This flag represents the explicit conversion state, not a property
-    // of the current key.  Keep it enabled during candidate navigation.
-    // updateCandidates() or clearCandidates() resets it when that state ends.
-    allowCandidateWindowForLiveConversion_ = true;
-  }
 
   if ([composedString_ length] == 0 && CanSelectedRange(clientBundle_) &&
       CanSurroundingText(clientBundle_)) {
