@@ -674,6 +674,49 @@ TEST_F(MozcImkInputControllerTest,
   EXPECT_TRUE(controller_.rendererCommand.visible());
 }
 
+TEST_F(MozcImkInputControllerTest,
+       DownKeepsExplicitCandidateWindowVisibleDuringLiveConversion) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useLiveConversionForTest = true;
+  controller_.allowCandidateWindowForLiveConversionForTest = true;
+
+  commands::Output output;
+  output.set_consumed(true);
+
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_focused_index(1);
+  candidate_window->set_size(2);
+
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
+  candidate->set_index(0);
+  candidate->set_value("abc");
+
+  candidate = candidate_window->add_candidate();
+  candidate->set_index(1);
+  candidate->set_value("def");
+
+  mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
+  mock_client_.expectedAttributes =
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::DOWN), _, NotNull()))
+      .WillOnce(DoAll(SetArgPointee<2>(output), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_DownArrow, controller_, mock_client_));
+
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  EXPECT_TRUE(controller_.allowCandidateWindowForLiveConversionForTest);
+  EXPECT_TRUE(controller_.rendererCommand.visible());
+  EXPECT_EQ(
+      controller_.rendererCommand.output().candidate_window().focused_index(),
+      1);
+}
 TEST_F(MozcImkInputControllerTest, UpdateCandidatesForLiveConversionWithoutCandidateWindow) {
   commands::Output output;
   output.set_live_conversion(true);

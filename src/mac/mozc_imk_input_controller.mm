@@ -1113,10 +1113,12 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
   }
   keyEvent.set_mode(mode_);
 
-  if (useLiveConversion_) {
-    allowCandidateWindowForLiveConversion_ =
-        keyEvent.has_special_key() &&
-      keyEvent.special_key() == mozc::commands::KeyEvent::SPACE;
+  if (useLiveConversion_ && keyEvent.has_special_key() &&
+      keyEvent.special_key() == mozc::commands::KeyEvent::SPACE) {
+    // This flag represents the explicit conversion state, not a property
+    // of the current key.  Keep it enabled during candidate navigation.
+    // updateCandidates() or clearCandidates() resets it when that state ends.
+    allowCandidateWindowForLiveConversion_ = true;
   }
 
   if ([composedString_ length] == 0 && CanSelectedRange(clientBundle_) &&
