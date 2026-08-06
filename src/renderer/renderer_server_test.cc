@@ -134,6 +134,50 @@ TEST_F(RendererServerTest, UsesRubySpacingDefaultsWhenFieldsAreAbsent) {
   EXPECT_EQ(4u, style.composition_gap);
 }
 
+TEST_F(RendererServerTest, UsesFontWeightDefaultsWhenFieldsAreAbsent) {
+  config::Config input = config::ConfigHandler::DefaultConfig();
+  input.clear_candidate_window_font_weight();
+  input.clear_suggest_window_font_weight();
+  input.clear_ruby_window_font_weight();
+  config::ConfigHandler::SetConfig(input);
+
+  TestRendererServer server;
+
+  RendererStyle candidate_style;
+  RendererStyle suggestion_style;
+  ASSERT_TRUE(RendererStyleHandler::GetRendererStyleForWindowType(
+      RendererStyleHandler::RendererStyleType::kCandidate,
+      &candidate_style));
+  ASSERT_TRUE(RendererStyleHandler::GetRendererStyleForWindowType(
+      RendererStyleHandler::RendererStyleType::kSuggestion,
+      &suggestion_style));
+  EXPECT_EQ(400, candidate_style.candidate_style().font_weight());
+  EXPECT_EQ(400, suggestion_style.candidate_style().font_weight());
+  EXPECT_EQ(400u, RendererStyleHandler::GetRubyWindowStyle().font_weight);
+}
+
+TEST_F(RendererServerTest, AppliesIndependentFontWeightsWithNormalization) {
+  config::Config input = config::ConfigHandler::DefaultConfig();
+  input.set_candidate_window_font_weight(149);
+  input.set_suggest_window_font_weight(650);
+  input.set_ruby_window_font_weight(999);
+  config::ConfigHandler::SetConfig(input);
+
+  TestRendererServer server;
+
+  RendererStyle candidate_style;
+  RendererStyle suggestion_style;
+  ASSERT_TRUE(RendererStyleHandler::GetRendererStyleForWindowType(
+      RendererStyleHandler::RendererStyleType::kCandidate,
+      &candidate_style));
+  ASSERT_TRUE(RendererStyleHandler::GetRendererStyleForWindowType(
+      RendererStyleHandler::RendererStyleType::kSuggestion,
+      &suggestion_style));
+  EXPECT_EQ(100, candidate_style.candidate_style().font_weight());
+  EXPECT_EQ(700, suggestion_style.candidate_style().font_weight());
+  EXPECT_EQ(900u, RendererStyleHandler::GetRubyWindowStyle().font_weight);
+}
+
 TEST_F(RendererServerTest, AppliesRubySpacingConfigWithClamping) {
   config::Config input = config::ConfigHandler::DefaultConfig();
   input.set_ruby_window_horizontal_padding(999);

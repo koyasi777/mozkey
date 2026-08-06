@@ -43,6 +43,7 @@ TEST(RendererStyleHandlerTest, GetRendererStyle) {
   EXPECT_TRUE(style.has_window_border());
   EXPECT_TRUE(style.has_infolist_style());
   EXPECT_TRUE(style.infolist_style().has_focused_border_color());
+  EXPECT_EQ(400, style.candidate_style().font_weight());
 }
 
 TEST(RendererStyleHandlerTest, ApplyCandidateRubyFont) {
@@ -135,6 +136,7 @@ TEST(RendererStyleHandlerTest, SetRendererWindowStylesSeparatesSuggestion) {
   ruby_style.text_color = 0x123456;
   ruby_style.border_color = 0x654321;
   ruby_style.corner_radius = 12;
+  ruby_style.font_weight = 700;
   ruby_style.horizontal_padding = 20;
   ruby_style.vertical_padding = 8;
   ruby_style.composition_gap = 7;
@@ -176,6 +178,7 @@ TEST(RendererStyleHandlerTest, SetRendererWindowStylesSeparatesSuggestion) {
   EXPECT_EQ(0xabcdef,
             RendererStyleHandler::GetRubyWindowStyle().background_color);
   EXPECT_EQ(12u, RendererStyleHandler::GetRubyWindowStyle().corner_radius);
+  EXPECT_EQ(700u, RendererStyleHandler::GetRubyWindowStyle().font_weight);
   EXPECT_EQ(20u,
             RendererStyleHandler::GetRubyWindowStyle().horizontal_padding);
   EXPECT_EQ(8u, RendererStyleHandler::GetRubyWindowStyle().vertical_padding);

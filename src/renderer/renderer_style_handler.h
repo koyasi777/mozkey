@@ -66,6 +66,7 @@ class RendererStyleHandler {
     uint32_t border_color = 0x969696;
     uint32_t corner_radius = 9;
     uint32_t size_percent = 100;
+    uint32_t font_weight = 400;
     uint32_t opacity_percent = 90;
     uint32_t horizontal_padding = 14;
     uint32_t vertical_padding = 6;

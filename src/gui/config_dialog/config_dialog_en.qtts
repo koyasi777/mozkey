@@ -1053,6 +1053,56 @@ The current Windows default IME override will be saved so it can be restored lat
         <translation>Candidate, suggestion, and ruby font</translation>
     </message>
     <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Font weight</source>
+        <translation>Font weight</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Thin (100)</source>
+        <translation>Thin (100)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Extra Light (200)</source>
+        <translation>Extra Light (200)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Light (300)</source>
+        <translation>Light (300)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Regular (400)</source>
+        <translation>Regular (400)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Medium (500)</source>
+        <translation>Medium (500)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>SemiBold (600)</source>
+        <translation>SemiBold (600)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Bold (700)</source>
+        <translation>Bold (700)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Extra Bold (800)</source>
+        <translation>Extra Bold (800)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Black (900)</source>
+        <translation>Black (900)</translation>
+    </message>
+    <message>
         <location filename="config_dialog.cc" line="1670"/>
         <source>Background</source>
         <translation>Background</translation>

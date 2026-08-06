@@ -50,6 +50,8 @@ message RendererStyle {
     // Right padding size (pixel)
     optional int32 right_padding = 5 [default = 0];
     optional string font_name = 6;
+    // Windows LOGFONT weight scale: 100 (Thin) through 900 (Black).
+    optional int32 font_weight = 7 [default = 400];
   }
 
   message InfolistStyle {

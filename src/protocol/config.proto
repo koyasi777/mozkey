@@ -588,6 +588,13 @@ message Config {
   optional uint32 ruby_window_vertical_padding = 1021 [default = 6];
   optional uint32 ruby_window_composition_gap = 1022 [default = 4];
 
+  // Font weights use the Windows LOGFONT scale. The settings UI exposes
+  // 100-step values from 100 (Thin) through 900 (Black). 400 matches the
+  // upstream Mozc candidate/suggestion text weight and is also used for ruby.
+  optional uint32 candidate_window_font_weight = 1023 [default = 400];
+  optional uint32 suggest_window_font_weight = 1024 [default = 400];
+  optional uint32 ruby_window_font_weight = 1025 [default = 400];
+
   enum WindowsImeIconStyle {
     WINDOWS_IME_ICON_DEFAULT = 0;
     WINDOWS_IME_ICON_MONOCHROME_BLACK = 1;
