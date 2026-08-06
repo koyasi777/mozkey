@@ -156,15 +156,32 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
   }
 
   if (command_.has_output() && command_.output().live_conversion()) {
-    candidate_window_->Hide();
+    const bool has_passive_suggestion =
+        command_.output().has_candidate_window() &&
+        command_.output().candidate_window().has_category() &&
+        command_.output().candidate_window().category() ==
+            commands::SUGGESTION &&
+        command_.output().candidate_window().candidate_size() > 0 &&
+        !command_.output().candidate_window().has_focused_index();
+
     cascading_window_->Hide();
     infolist_window_->Hide();
-    if (!ruby_window_->Update(command_)) {
-      ruby_window_->Hide();
-      return true;
+
+    if (has_passive_suggestion) {
+      candidate_window_->SetCandidateWindow(
+          command_.output().candidate_window());
+      AlignWindows();
+      candidate_window_->Show();
+    } else {
+      candidate_window_->Hide();
     }
-    AlignRubyWindow();
-    ruby_window_->Show();
+
+    if (ruby_window_->Update(command_)) {
+      AlignRubyWindow();
+      ruby_window_->Show();
+    } else {
+      ruby_window_->Hide();
+    }
     return true;
   }
 

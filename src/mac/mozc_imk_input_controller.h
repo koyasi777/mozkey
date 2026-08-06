@@ -104,9 +104,6 @@
   /** True when the current config enables live conversion. */
   bool useLiveConversion_;
 
-  /** True after explicit conversion request so candidate UI may be shown. */
-  bool allowCandidateWindowForLiveConversion_;
-
   /** Latest delayed callback requested by Output::Callback. */
   std::unique_ptr<mozc::commands::SessionCommand> delayedSessionCommand_;
   __weak id delayedSessionCommandClient_;
@@ -132,7 +129,6 @@
 @property(readwrite, assign) NSRange replacementRange;
 @property(readwrite, retain) id imkClientForTest;
 @property(readwrite, assign) bool useLiveConversionForTest;
-@property(readwrite, assign) bool allowCandidateWindowForLiveConversionForTest;
 
 /** Sets the RendererReceiver used by all instances of the controller.
  * the RendererReceiver is a singleton object used as a proxy to receive messages from

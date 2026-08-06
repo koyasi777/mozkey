@@ -631,32 +631,36 @@ TEST_F(MozcImkInputControllerTest, UpdateCandidates) {
 }
 
 TEST_F(MozcImkInputControllerTest,
-       SuppressCandidateWindowWhileLiveConversionEnabledUntilSpace) {
+       SuppressUnfocusedSuggestionOutsideLiveConversionOutput) {
   controller_.useLiveConversionForTest = true;
-  controller_.allowCandidateWindowForLiveConversionForTest = false;
 
   commands::Output output;
-  commands::CandidateWindow *candidate_window = output.mutable_candidate_window();
-  candidate_window->set_focused_index(0);
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_category(commands::SUGGESTION);
   candidate_window->set_size(1);
-  commands::CandidateWindow::Candidate *candidate = candidate_window->add_candidate();
+
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
   candidate->set_index(0);
   candidate->set_value("abc");
 
   [controller_ updateCandidates:&output];
-  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
 
   EXPECT_EQ(mock_renderer_->counter_ExecCommand(), 1);
   EXPECT_FALSE(controller_.rendererCommand.visible());
 }
 
 TEST_F(MozcImkInputControllerTest,
-       AllowCandidateWindowAfterExplicitSpaceDuringLiveConversion) {
+       ShowFocusedConversionCandidateWindowWhileLiveConversionEnabled) {
   controller_.useLiveConversionForTest = true;
-  controller_.allowCandidateWindowForLiveConversionForTest = true;
 
   commands::Output output;
   commands::CandidateWindow *candidate_window = output.mutable_candidate_window();
+  candidate_window->set_category(commands::CONVERSION);
   candidate_window->set_focused_index(0);
   candidate_window->set_size(1);
   commands::CandidateWindow::Candidate *candidate = candidate_window->add_candidate();
@@ -675,16 +679,61 @@ TEST_F(MozcImkInputControllerTest,
 }
 
 TEST_F(MozcImkInputControllerTest,
-       DownKeepsExplicitCandidateWindowVisibleDuringLiveConversion) {
+       TabShowsPredictionCandidateWindowDuringLiveConversion) {
   controller_.mode = commands::HIRAGANA;
   controller_.useLiveConversionForTest = true;
-  controller_.allowCandidateWindowForLiveConversionForTest = true;
 
   commands::Output output;
   output.set_consumed(true);
 
   commands::CandidateWindow *candidate_window =
       output.mutable_candidate_window();
+  candidate_window->set_category(commands::PREDICTION);
+  candidate_window->set_focused_index(0);
+  candidate_window->set_size(2);
+
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
+  candidate->set_index(0);
+  candidate->set_value("ありがとう");
+
+  candidate = candidate_window->add_candidate();
+  candidate->set_index(1);
+  candidate->set_value("ありがたい");
+
+  mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
+  mock_client_.expectedAttributes =
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SetArgPointee<2>(output), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_Tab, controller_, mock_client_));
+
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  EXPECT_TRUE(controller_.rendererCommand.visible());
+  EXPECT_EQ(controller_.rendererCommand.output().candidate_window().category(),
+            commands::PREDICTION);
+  EXPECT_EQ(
+      controller_.rendererCommand.output().candidate_window().focused_index(),
+      0);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       DownKeepsFocusedPredictionWindowVisibleDuringLiveConversion) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useLiveConversionForTest = true;
+
+  commands::Output output;
+  output.set_consumed(true);
+
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_category(commands::PREDICTION);
   candidate_window->set_focused_index(1);
   candidate_window->set_size(2);
 
@@ -711,7 +760,6 @@ TEST_F(MozcImkInputControllerTest,
   [[NSRunLoop currentRunLoop]
       runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
 
-  EXPECT_TRUE(controller_.allowCandidateWindowForLiveConversionForTest);
   EXPECT_TRUE(controller_.rendererCommand.visible());
   EXPECT_EQ(
       controller_.rendererCommand.output().candidate_window().focused_index(),
