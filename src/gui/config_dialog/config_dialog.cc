@@ -872,6 +872,11 @@ constexpr uint32_t kDefaultTargetPreeditTextColor = 0x000000;
 constexpr uint32_t kDefaultTargetPreeditBackgroundColor = 0xddeeff;
 constexpr uint32_t kDefaultTargetPreeditUnderlineColor = 0x0066ff;
 
+constexpr int kDefaultRendererFontWeight = 400;
+constexpr int kMinRendererFontWeight = 100;
+constexpr int kMaxRendererFontWeight = 900;
+constexpr int kRendererFontWeightStep = 100;
+
 QColor RgbHexToQColor(const uint32_t rgb) {
   return QColor((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
 }
@@ -978,6 +983,33 @@ QSpinBox* FindSpinBox(const QObject* parent, const char* name) {
 }
 QString TrConfigDialog(const char* source) {
   return QCoreApplication::translate("ConfigDialog", source);
+}
+
+int NormalizeRendererFontWeight(uint32_t weight) {
+  const uint32_t clamped_weight =
+      std::clamp(weight, static_cast<uint32_t>(kMinRendererFontWeight),
+                 static_cast<uint32_t>(kMaxRendererFontWeight));
+  const int clamped = static_cast<int>(clamped_weight);
+  return ((clamped + kRendererFontWeightStep / 2) /
+          kRendererFontWeightStep) *
+         kRendererFontWeightStep;
+}
+
+void InitializeRendererFontWeightComboBox(QComboBox* combo) {
+  if (combo == nullptr) {
+    return;
+  }
+  combo->addItem(TrConfigDialog("Thin (100)"), 100);
+  combo->addItem(TrConfigDialog("Extra Light (200)"), 200);
+  combo->addItem(TrConfigDialog("Light (300)"), 300);
+  combo->addItem(TrConfigDialog("Regular (400)"), 400);
+  combo->addItem(TrConfigDialog("Medium (500)"), 500);
+  combo->addItem(TrConfigDialog("SemiBold (600)"), 600);
+  combo->addItem(TrConfigDialog("Bold (700)"), 700);
+  combo->addItem(TrConfigDialog("Extra Bold (800)"), 800);
+  combo->addItem(TrConfigDialog("Black (900)"), 900);
+  const int default_index = combo->findData(kDefaultRendererFontWeight);
+  combo->setCurrentIndex(default_index >= 0 ? default_index : 0);
 }
 
 QPushButton* FindButton(const QObject* parent, const QString& name) {
@@ -2422,6 +2454,38 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   font_layout->setColumnStretch(1, 1);
   root_layout->addLayout(font_layout);
 
+  QGroupBox* font_weight_box = new QGroupBox(tr("Font weight"), group);
+  font_weight_box->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+  QGridLayout* font_weight_layout = new QGridLayout(font_weight_box);
+  font_weight_layout->setContentsMargins(8, 8, 8, 8);
+  font_weight_layout->setHorizontalSpacing(8);
+  font_weight_layout->setVerticalSpacing(4);
+
+  auto add_font_weight_row = [&](int row, const QString& label_text,
+                                 const char* object_name) {
+    QLabel* label = new QLabel(label_text, font_weight_box);
+    label->setMinimumHeight(24);
+    font_weight_layout->addWidget(label, row, 0);
+
+    QComboBox* combo = new QComboBox(font_weight_box);
+    combo->setObjectName(QString::fromLatin1(object_name));
+    combo->setMinimumHeight(24);
+    combo->setMinimumWidth(160);
+    InitializeRendererFontWeightComboBox(combo);
+    font_weight_layout->addWidget(combo, row, 1);
+    font_weight_layout->setColumnStretch(0, 1);
+    QObject::connect(combo, SIGNAL(currentIndexChanged(int)), this,
+                     SLOT(EnableApplyButton()));
+  };
+
+  add_font_weight_row(0, tr("Candidate window"),
+                      "candidateWindowFontWeightComboBox");
+  add_font_weight_row(1, tr("Suggestion window"),
+                      "suggestWindowFontWeightComboBox");
+  add_font_weight_row(2, tr("Ruby window"),
+                      "rubyWindowFontWeightComboBox");
+  root_layout->addWidget(font_weight_box);
+
   QWidget* color_grid_widget = new QWidget(group);
   color_grid_widget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
   QGridLayout* grid = new QGridLayout(color_grid_widget);
@@ -3324,6 +3388,16 @@ void ConfigDialog::ConvertRendererAppearanceFromProto(
             : 100));
   }
 
+  SetComboCurrentData(
+      FindComboBox(this, "candidateWindowFontWeightComboBox"),
+      NormalizeRendererFontWeight(config.candidate_window_font_weight()));
+  SetComboCurrentData(
+      FindComboBox(this, "suggestWindowFontWeightComboBox"),
+      NormalizeRendererFontWeight(config.suggest_window_font_weight()));
+  SetComboCurrentData(
+      FindComboBox(this, "rubyWindowFontWeightComboBox"),
+      NormalizeRendererFontWeight(config.ruby_window_font_weight()));
+
   if (QSpinBox* spin = FindSpinBox(this, "candidateWindowCornerRadiusSpinBox")) {
     spin->setValue(static_cast<int>(config.candidate_window_custom_corner_radius()));
   }
@@ -3452,6 +3526,18 @@ void ConfigDialog::ConvertRendererAppearanceToProto(config::Config *config) cons
         static_cast<uint32_t>(spin->value()));
   }
 
+  config->set_candidate_window_font_weight(static_cast<uint32_t>(
+      GetComboCurrentData(FindComboBox(this,
+                                       "candidateWindowFontWeightComboBox"),
+                          kDefaultRendererFontWeight)));
+  config->set_suggest_window_font_weight(static_cast<uint32_t>(
+      GetComboCurrentData(FindComboBox(this,
+                                       "suggestWindowFontWeightComboBox"),
+                          kDefaultRendererFontWeight)));
+  config->set_ruby_window_font_weight(static_cast<uint32_t>(
+      GetComboCurrentData(FindComboBox(this, "rubyWindowFontWeightComboBox"),
+                          kDefaultRendererFontWeight)));
+
   if (const QSpinBox* spin = FindSpinBox(this, "candidateWindowCornerRadiusSpinBox")) {
     config->set_candidate_window_custom_corner_radius(
         static_cast<uint32_t>(spin->value()));
@@ -3569,6 +3655,13 @@ void ConfigDialog::ResetRendererAppearanceControls() {
   if (QSpinBox* spin = FindSpinBox(this, "rubyWindowSizePercentSpinBox")) {
     spin->setValue(100);
   }
+
+  SetComboCurrentData(FindComboBox(this, "candidateWindowFontWeightComboBox"),
+                      kDefaultRendererFontWeight);
+  SetComboCurrentData(FindComboBox(this, "suggestWindowFontWeightComboBox"),
+                      kDefaultRendererFontWeight);
+  SetComboCurrentData(FindComboBox(this, "rubyWindowFontWeightComboBox"),
+                      kDefaultRendererFontWeight);
 
   if (QSpinBox* spin = FindSpinBox(this, "candidateWindowCornerRadiusSpinBox")) {
     spin->setValue(6);

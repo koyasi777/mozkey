@@ -41,7 +41,7 @@ shortcut_style {
   right_padding: 8
 }
 gap1_style { font_size: 14 }
-candidate_style { font_size: 14 }
+candidate_style { font_size: 14 font_weight: 400 }
 description_style {
   font_size: 12
   foreground_color { r: 136 g: 136 b: 136 }

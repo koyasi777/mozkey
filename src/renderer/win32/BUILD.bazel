@@ -232,6 +232,7 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":win32_dpi_util",
+        ":win32_font_util",
         ":win32_renderer_util",
         "//base/win32:wide_char",
         "//bazel/win32:gdi32",

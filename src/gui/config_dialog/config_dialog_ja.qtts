@@ -1079,6 +1079,56 @@ The current Windows default IME override will be saved so it can be restored lat
         <translation>候補・サジェスト・ルビのフォント</translation>
     </message>
     <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Font weight</source>
+        <translation>フォントの太さ</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Thin (100)</source>
+        <translation>極細 (100)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Extra Light (200)</source>
+        <translation>特細 (200)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Light (300)</source>
+        <translation>細字 (300)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Regular (400)</source>
+        <translation>標準 (400)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Medium (500)</source>
+        <translation>中字 (500)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>SemiBold (600)</source>
+        <translation>中太 (600)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Bold (700)</source>
+        <translation>太字 (700)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Extra Bold (800)</source>
+        <translation>特太 (800)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="2430"/>
+        <source>Black (900)</source>
+        <translation>極太 (900)</translation>
+    </message>
+    <message>
         <location filename="config_dialog.cc" line="1670"/>
         <source>Background</source>
         <translation>背景</translation>

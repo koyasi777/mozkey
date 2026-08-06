@@ -13,6 +13,7 @@
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_style_handler.h"
 #include "renderer/win32/win32_dpi_util.h"
+#include "renderer/win32/win32_font_util.h"
 #include "renderer/win32/win32_renderer_util.h"
 
 namespace mozc {
@@ -95,25 +96,37 @@ bool IsLiveConversionRubyWindowEnabled() {
   return config == nullptr || config->show_live_conversion_ruby_window();
 }
 
-std::wstring GetRubyWindowFontFaceName() {
+std::wstring GetDefaultRubyWindowFontFaceName(uint32_t dpi) {
+  const LOGFONTW logfont = GetMessageBoxLogFont(dpi);
+  const std::wstring font_name(logfont.lfFaceName);
+  if (font_name.empty() || font_name.front() == L'@') {
+    return L"Segoe UI";
+  }
+  return font_name;
+}
+
+std::wstring GetRubyWindowFontFaceName(uint32_t dpi) {
+  const std::wstring default_font_name =
+      GetDefaultRubyWindowFontFaceName(dpi);
+
   RendererStyle style;
   if (!RendererStyleHandler::GetRendererStyle(&style)) {
-    return L"Yu Gothic UI";
+    return default_font_name;
   }
 
   const RendererStyle::TextStyle& candidate_style = style.candidate_style();
   if (!candidate_style.has_font_name() || candidate_style.font_name().empty()) {
-    return L"Yu Gothic UI";
+    return default_font_name;
   }
 
   const std::wstring font_name =
       mozc::win32::Utf8ToWide(candidate_style.font_name());
   if (font_name.empty()) {
-    return L"Yu Gothic UI";
+    return default_font_name;
   }
 
   if (font_name.front() == L'@' || font_name.size() >= LF_FACESIZE) {
-    return L"Yu Gothic UI";
+    return default_font_name;
   }
 
   return font_name;
@@ -448,9 +461,14 @@ void RubyWindow::UpdateDpi(uint32_t dpi) {
 }
 
 void RubyWindow::UpdateFont() {
-  const std::wstring font_name = GetRubyWindowFontFaceName();
+  const RendererStyleHandler::RubyWindowStyle theme = GetRubyWindowTheme();
+  const std::wstring default_font_name =
+      GetDefaultRubyWindowFontFaceName(dpi_);
+  const std::wstring font_name = GetRubyWindowFontFaceName(dpi_);
   const int font_height = -MulDiv(GetRubyFontPointSize(), dpi_, 72);
-  const int font_weight = FW_SEMIBOLD;
+  const int font_weight = std::clamp(
+      static_cast<int>(theme.font_weight), static_cast<int>(FW_THIN),
+      static_cast<int>(FW_HEAVY));
 
   if (font_ != nullptr &&
       font_height_ == font_height &&
@@ -472,10 +490,10 @@ void RubyWindow::UpdateFont() {
   font_ = ::CreateFontIndirectW(&logfont);
 
   std::wstring actual_font_name = font_name;
-  if (font_ == nullptr && font_name != L"Yu Gothic UI") {
-    wcscpy_s(logfont.lfFaceName, L"Yu Gothic UI");
+  if (font_ == nullptr && font_name != default_font_name) {
+    wcscpy_s(logfont.lfFaceName, default_font_name.c_str());
     font_ = ::CreateFontIndirectW(&logfont);
-    actual_font_name = L"Yu Gothic UI";
+    actual_font_name = default_font_name;
   }
 
   if (font_ == nullptr) {

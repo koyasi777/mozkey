@@ -193,6 +193,15 @@ namespace {
     wcscpy_s(font->lfFaceName, font_name.c_str());
   }
 
+  int GetFontWeight(const RendererStyle::TextStyle* text_style,
+                    int default_weight) {
+    if (text_style == nullptr || !text_style->has_font_weight()) {
+      return default_weight;
+    }
+    return std::clamp(text_style->font_weight(), static_cast<int>(FW_THIN),
+                      static_cast<int>(FW_HEAVY));
+  }
+
   int ToDpiScaledFontHeight(double font_size, uint32_t dpi) {
     return -std::max(1, static_cast<int>(std::lround(
                             font_size * GetDPIScalingFactor(dpi))));
@@ -231,7 +240,7 @@ namespace {
           font.lfHeight += (font.lfHeight > 0 ? 2 : -2);
         }
         ApplyFontNameFromTextStyle(text_style, &font);
-        font.lfWeight = FW_SEMIBOLD;
+        font.lfWeight = GetFontWeight(text_style, FW_NORMAL);
         return font;
       }
 

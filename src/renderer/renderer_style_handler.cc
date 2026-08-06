@@ -118,6 +118,10 @@ RendererStyleHandler::RubyWindowStyle RubyStyleFromRendererStyle(
     ruby_style.text_color = ToRgb(style.candidate_style().foreground_color(),
                                   ruby_style.text_color);
   }
+  if (style.candidate_style().has_font_weight()) {
+    ruby_style.font_weight = static_cast<uint32_t>(std::clamp(
+        style.candidate_style().font_weight(), 100, 900));
+  }
   return ruby_style;
 }
 
