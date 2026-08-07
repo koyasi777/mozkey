@@ -213,33 +213,30 @@ bool ShouldRecalculateRendererPosition(const RendererCommand &command) {
          (command.has_output() && command.output().live_conversion());
 }
 
-uint32_t GetPreeditCharLength(const Preedit &preedit) {
-  uint32_t length = 0;
-  for (int i = 0; i < preedit.segment_size(); ++i) {
-    const Preedit::Segment &segment = preedit.segment(i);
-    if (segment.has_value_length()) {
-      length += segment.value_length();
-    } else {
-      length += mozc::Util::CharsLen(segment.value());
-    }
-  }
-  return length;
-}
-
 int32_t GetRendererAnchorPosition(const Output &output) {
-  if (output.live_conversion() && output.has_preedit()) {
-    const Preedit &preedit = output.preedit();
-    const uint32_t length = GetPreeditCharLength(preedit);
-    if (length == 0) {
-      return 0;
-    }
-    const uint32_t cursor = std::min(preedit.cursor(), length);
-    return (cursor == 0) ? 0 : static_cast<int32_t>(cursor - 1);
-  }
+  // CandidateWindow::position is the protocol-defined position within the
+  // composition.  Live conversion must not replace it with cursor - 1,
+  // because doing so moves a suggestion toward the end of a multi-character
+  // preedit.
   if (output.has_candidate_window()) {
     return output.candidate_window().position();
   }
+
+  // A live-conversion ruby window can be displayed without a candidate
+  // window.  Such a window is anchored to the start of the composition.
   return 0;
+}
+
+void SetRendererRectangle(
+    const NSRect &line_rect, const NSPoint &baseline,
+    RendererCommand::Rectangle *rectangle) {
+  const int right_offset = line_rect.size.width;
+  const int top_offset = -line_rect.size.height;
+
+  rectangle->set_left(baseline.x);
+  rectangle->set_right(baseline.x + right_offset);
+  rectangle->set_top(baseline.y + top_offset);
+  rectangle->set_bottom(baseline.y);
 }
 
 NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offset) {
@@ -923,36 +920,55 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
   rendererCommand_.set_visible(true);
 
   NSRect preeditRect = NSZeroRect;
-  const int32_t position = GetRendererAnchorPosition(rendererCommand_.output());
-  // Some applications throws error when we call attributesForCharacterIndex.
+  const Output &output = rendererCommand_.output();
+  const int32_t position = GetRendererAnchorPosition(output);
+
+  // Some applications throw an exception from
+  // attributesForCharacterIndex:lineHeightRectangle:.
   DLOG(INFO) << "attributesForCharacterIndex: " << position;
   @try {
-    NSDictionary *clientData = [[self client] attributesForCharacterIndex:position
-                                                      lineHeightRectangle:&preeditRect];
+    NSDictionary *clientData =
+        [[self client] attributesForCharacterIndex:position
+                              lineHeightRectangle:&preeditRect];
 
-    // IMKBaseline: Left-bottom of the composition.
-    NSPoint baseline = [clientData[@"IMKBaseline"] pointValue];
-    // IMKTextOrientation: 0: vertical writing, 1: horizontal writing.
-    // IMKLineHeight: Height of the composition (in horizontal writing).
-    // NSFont: Font information of the composition.
-    // IMKLineAscent: Not sure. A float number. (e.g. 9.240234)
+    // IMKBaseline is the left-bottom coordinate of the requested character.
+    const NSPoint baseline = [clientData[@"IMKBaseline"] pointValue];
 
-    const int right_offset = preeditRect.size.width;
-    const int top_offset = -preeditRect.size.height;
-    int left = baseline.x;
-    if (rendererCommand_.output().live_conversion()) {
+    int candidate_left = baseline.x;
+    if (output.live_conversion()) {
       if (!hasLiveConversionAnchorLeft_) {
         liveConversionAnchorLeft_ = baseline.x;
         hasLiveConversionAnchorLeft_ = true;
       }
-      left = liveConversionAnchorLeft_;
+      candidate_left = liveConversionAnchorLeft_;
     }
 
-    RendererCommand::Rectangle *rect = rendererCommand_.mutable_preedit_rectangle();
-    rect->set_left(left);
-    rect->set_right(left + right_offset);
-    rect->set_top(baseline.y + top_offset);
-    rect->set_bottom(baseline.y);
+    SetRendererRectangle(
+        preeditRect, NSMakePoint(candidate_left, baseline.y),
+        rendererCommand_.mutable_preedit_rectangle());
+
+    rendererCommand_.clear_ruby_preedit_rectangle();
+
+    if (output.live_conversion()) {
+      if (position == 0) {
+        rendererCommand_.mutable_ruby_preedit_rectangle()->CopyFrom(
+            rendererCommand_.preedit_rectangle());
+      } else {
+        // A passive suggestion may be anchored partway through the
+        // composition. Ruby represents the reading of the entire preedit and
+        // therefore needs the geometry of character index zero.
+        NSRect rubyPreeditRect = NSZeroRect;
+        NSDictionary *rubyClientData =
+            [[self client] attributesForCharacterIndex:0
+                                  lineHeightRectangle:&rubyPreeditRect];
+        const NSPoint rubyBaseline =
+            [rubyClientData[@"IMKBaseline"] pointValue];
+
+        SetRendererRectangle(
+            rubyPreeditRect, rubyBaseline,
+            rendererCommand_.mutable_ruby_preedit_rectangle());
+      }
+    }
 
   } @catch (NSException *exception) {
     LOG(ERROR) << "Exception from [" << clientBundle_ << "] " << [[exception name] UTF8String]

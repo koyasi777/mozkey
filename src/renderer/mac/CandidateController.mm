@@ -51,7 +51,6 @@ namespace mac {
 namespace {
 const int kHideWindowDelay = 500;  // msec
 const int kWindowMargin = 10;      // pixel
-const int kRubyWindowGap = 8;      // pixel
 
 // In Cocoa's coordinate system the origin point is left-bottom and the Y-axis
 // points up. But in Mozc's coordinate system the Y-axis points down. So we use
@@ -152,6 +151,7 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
     cascading_window_->Hide();
     infolist_window_->Hide();
     ruby_window_->Hide();
+    has_candidate_rect_ = false;
     return true;
   }
 
@@ -174,10 +174,16 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
       candidate_window_->Show();
     } else {
       candidate_window_->Hide();
+      has_candidate_rect_ = false;
     }
 
-    if (ruby_window_->Update(command_)) {
-      AlignRubyWindow();
+    const mozc::Rect *ruby_avoid_rect =
+        has_passive_suggestion && has_candidate_rect_
+            ? &candidate_rect_
+            : nullptr;
+
+    if (ruby_window_->Update(command_) &&
+        AlignRubyWindow(ruby_avoid_rect)) {
       ruby_window_->Show();
     } else {
       ruby_window_->Hide();
@@ -235,6 +241,8 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
 }
 
 void CandidateController::AlignWindows() {
+  has_candidate_rect_ = false;
+
   // If candidate window is not visible, we do nothing for aligning.
   if (!command_.has_preedit_rectangle()) {
     return;
@@ -279,6 +287,8 @@ void CandidateController::AlignWindows() {
   const mozc::Rect candidate_rect = WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
       target_point, preedit_rect, candidate_window_->GetWindowSize(), candidate_zero_point,
       display_rect, is_vertical);
+  candidate_rect_ = candidate_rect;
+  has_candidate_rect_ = true;
   candidate_window_->MoveWindow(OriginPointInCocoaCoord(candidate_rect));
 
   // Align infolist window
@@ -310,39 +320,45 @@ void CandidateController::AlignWindows() {
   cascading_window_->MoveWindow(OriginPointInCocoaCoord(cascading_rect));
 }
 
-void CandidateController::AlignRubyWindow() {
+bool CandidateController::AlignRubyWindow(
+    const mozc::Rect *avoid_rect) {
   if (!command_.has_preedit_rectangle()) {
-    return;
+    return false;
   }
 
   const mozc::Size ruby_size = ruby_window_->GetWindowSize();
   if (ruby_size.width <= 0 || ruby_size.height <= 0) {
-    return;
+    return false;
   }
+
+  const RendererCommand::Rectangle &anchor =
+      command_.has_ruby_preedit_rectangle()
+          ? command_.ruby_preedit_rectangle()
+          : command_.preedit_rectangle();
 
   const mozc::Size preedit_size(
-      command_.preedit_rectangle().right() - command_.preedit_rectangle().left(),
-      command_.preedit_rectangle().bottom() - command_.preedit_rectangle().top());
-  mozc::Rect preedit_rect(
-      mozc::Point(command_.preedit_rectangle().left(),
-                  command_.preedit_rectangle().top() - GetBaseScreenHeight()),
+      anchor.right() - anchor.left(),
+      anchor.bottom() - anchor.top());
+
+  const mozc::Rect preedit_rect(
+      mozc::Point(anchor.left(),
+                  anchor.top() - GetBaseScreenHeight()),
       preedit_size);
-  const mozc::Rect display_rect = GetNearestDisplayRect(preedit_rect);
 
-  const int max_left = std::max(display_rect.Left(),
-                                display_rect.Right() - ruby_size.width);
-  const int left = std::clamp(preedit_rect.Left(), display_rect.Left(), max_left);
+  const mozc::Rect display_rect =
+      GetNearestDisplayRect(preedit_rect);
 
-  int top = preedit_rect.Top() - ruby_size.height - kRubyWindowGap;
-  if (top < display_rect.Top()) {
-    top = preedit_rect.Bottom() + kRubyWindowGap;
+  mozc::Rect ruby_rect;
+  if (!WindowUtil::GetRubyWindowRect(
+          preedit_rect, ruby_size,
+          ruby_window_->GetCompositionGap(),
+          display_rect, avoid_rect, &ruby_rect)) {
+    return false;
   }
-  const int max_top = std::max(display_rect.Top(),
-                               display_rect.Bottom() - ruby_size.height);
-  top = std::clamp(top, display_rect.Top(), max_top);
 
   ruby_window_->MoveWindow(
-      OriginPointInCocoaCoord(mozc::Rect(left, top, ruby_size.width, ruby_size.height)));
+      OriginPointInCocoaCoord(ruby_rect));
+  return true;
 }
 
 }  // namespace mozc::renderer::mac

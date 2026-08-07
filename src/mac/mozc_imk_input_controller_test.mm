@@ -139,6 +139,8 @@
 
 - (NSDictionary *)attributesForCharacterIndex:(int)index lineHeightRectangle:(NSRect *)rect {
   counters_["attributesForCharacterIndex:lineHeightRectangle:"]++;
+  counters_[std::string("attributesForCharacterIndex:") +
+            std::to_string(index)]++;
   lastCharacterIndex_ = index;
   *rect = expectedCursor;
   return expectedAttributes;
@@ -797,6 +799,75 @@ TEST_F(MozcImkInputControllerTest, UpdateCandidatesForLiveConversionWithoutCandi
   EXPECT_EQ(preedit_rectangle.top(), 708);
   EXPECT_EQ(preedit_rectangle.right(), 51);
   EXPECT_EQ(preedit_rectangle.bottom(), 718);
+}
+
+TEST_F(
+    MozcImkInputControllerTest,
+    LiveConversionSuggestionUsesCandidateWindowPosition) {
+  commands::Output output;
+  output.set_live_conversion(true);
+
+  commands::Preedit *preedit = output.mutable_preedit();
+  preedit->set_cursor(4);
+
+  commands::Preedit::Segment *segment = preedit->add_segment();
+  segment->set_annotation(commands::Preedit::Segment::HIGHLIGHT);
+  segment->set_key("こうほひょうじ");
+  segment->set_value("候補表示");
+  segment->set_value_length(4);
+
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_category(commands::SUGGESTION);
+  candidate_window->set_position(1);
+  candidate_window->set_size(1);
+
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
+  candidate->set_index(0);
+  candidate->set_value("候補表示");
+
+  mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
+  mock_client_.expectedAttributes =
+      @{@"IMKBaseline" :
+            [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+
+  [controller_ updateCandidates:&output];
+
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  EXPECT_EQ(
+      [mock_client_
+          getCounter:"attributesForCharacterIndex:lineHeightRectangle:"],
+      2);
+  EXPECT_EQ(
+      [mock_client_ getCounter:"attributesForCharacterIndex:1"], 1);
+  EXPECT_EQ(
+      [mock_client_ getCounter:"attributesForCharacterIndex:0"], 1);
+
+  // Candidate geometry is queried at index 1. Ruby geometry is queried
+  // independently at composition index 0.
+  EXPECT_EQ(mock_client_.lastCharacterIndex, 0);
+  EXPECT_EQ(mock_renderer_->counter_ExecCommand(), 1);
+  EXPECT_TRUE(controller_.rendererCommand.visible());
+
+  ASSERT_TRUE(controller_.rendererCommand.has_preedit_rectangle());
+  ASSERT_TRUE(controller_.rendererCommand.has_ruby_preedit_rectangle());
+
+  EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().left(), 50);
+  EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().top(), 708);
+  EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().right(), 51);
+  EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().bottom(), 718);
+
+  EXPECT_EQ(
+      controller_.rendererCommand.ruby_preedit_rectangle().left(), 50);
+  EXPECT_EQ(
+      controller_.rendererCommand.ruby_preedit_rectangle().top(), 708);
+  EXPECT_EQ(
+      controller_.rendererCommand.ruby_preedit_rectangle().right(), 51);
+  EXPECT_EQ(
+      controller_.rendererCommand.ruby_preedit_rectangle().bottom(), 718);
 }
 
 TEST_F(MozcImkInputControllerTest, LiveConversionRecalculatesRendererPosition) {

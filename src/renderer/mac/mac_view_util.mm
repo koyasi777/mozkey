@@ -28,8 +28,84 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "renderer/mac/mac_view_util.h"
+
+#include <algorithm>
+
 #include "base/coordinates.h"
 #include "protocol/renderer_style.pb.h"
+
+namespace {
+
+NSFontWeight ToNSFontWeight(int renderer_weight) {
+  const int weight = std::clamp(renderer_weight, 100, 900);
+
+  if (weight < 150) {
+    return NSFontWeightUltraLight;
+  }
+  if (weight < 250) {
+    return NSFontWeightThin;
+  }
+  if (weight < 350) {
+    return NSFontWeightLight;
+  }
+  if (weight < 450) {
+    return NSFontWeightRegular;
+  }
+  if (weight < 550) {
+    return NSFontWeightMedium;
+  }
+  if (weight < 650) {
+    return NSFontWeightSemibold;
+  }
+  if (weight < 750) {
+    return NSFontWeightBold;
+  }
+  if (weight < 850) {
+    return NSFontWeightHeavy;
+  }
+  return NSFontWeightBlack;
+}
+
+NSFont *CreateFont(
+    const mozc::renderer::RendererStyle::TextStyle &style) {
+  const CGFloat font_size =
+      std::max<CGFloat>(1.0, static_cast<CGFloat>(style.font_size()));
+  const NSFontWeight font_weight = ToNSFontWeight(style.font_weight());
+
+  if (style.has_font_name() && !style.font_name().empty()) {
+    NSString *family =
+        [NSString stringWithUTF8String:style.font_name().c_str()];
+
+    NSDictionary *traits = [NSDictionary
+        dictionaryWithObject:[NSNumber numberWithDouble:font_weight]
+                      forKey:NSFontWeightTrait];
+    NSDictionary *attributes = [NSDictionary
+        dictionaryWithObjectsAndKeys:
+            family, NSFontFamilyAttribute,
+            traits, NSFontTraitsAttribute,
+            nil];
+
+    NSFontDescriptor *descriptor =
+        [NSFontDescriptor fontDescriptorWithFontAttributes:attributes];
+    NSFont *font =
+        [NSFont fontWithDescriptor:descriptor size:font_size];
+
+    if (font != nil) {
+      return font;
+    }
+
+    // Preserve the selected family even when the family does not publish
+    // the requested weight through its font descriptor.
+    font = [NSFont fontWithName:family size:font_size];
+    if (font != nil) {
+      return font;
+    }
+  }
+
+  return [NSFont systemFontOfSize:font_size weight:font_weight];
+}
+
+}  // namespace
 
 namespace mozc {
 namespace renderer {
@@ -67,25 +143,23 @@ NSColor *MacViewUtil::MacViewUtil::ToNSColor(
                                    alpha:color.a()];
 }
 
-NSAttributedString *MacViewUtil::ToNSAttributedString(const std::string &str,
-                                                      const RendererStyle::TextStyle &style) {
+NSAttributedString *MacViewUtil::ToNSAttributedString(
+    const std::string &str,
+    const RendererStyle::TextStyle &style) {
   NSString *nsstr = [NSString stringWithUTF8String:str.c_str()];
-  NSFont *font;
-  if (style.has_font_name()) {
-    font = [NSFont fontWithName:[NSString stringWithUTF8String:style.font_name().c_str()]
-                           size:style.font_size()];
-  } else {
-    font = [NSFont messageFontOfSize:style.font_size()];
-  }
-  NSDictionary *attr;
+  NSFont *font = CreateFont(style);
+
+  NSMutableDictionary *attributes =
+      [NSMutableDictionary dictionaryWithObject:font
+                                         forKey:NSFontAttributeName];
+
   if (style.has_foreground_color()) {
-    attr = [NSDictionary dictionaryWithObjectsAndKeys:font, NSFontAttributeName,
-                                                      ToNSColor(style.foreground_color()),
-                                                      NSForegroundColorAttributeName, nil];
-  } else {
-    attr = [NSDictionary dictionaryWithObjectsAndKeys:font, NSFontAttributeName, nil];
+    [attributes setObject:ToNSColor(style.foreground_color())
+                   forKey:NSForegroundColorAttributeName];
   }
-  return [[NSAttributedString alloc] initWithString:nsstr attributes:attr];
+
+  return [[NSAttributedString alloc] initWithString:nsstr
+                                         attributes:attributes];
 }
 }  // namespace mozc::renderer::mac
 }  // namespace mozc::renderer

@@ -64,6 +64,8 @@ using mozc::renderer::mac::MacViewUtil;
 // Private method declarations.
 @interface CandidateView ()
 - (void)initializeDefaultStyle;
+- (void)reloadStyleForCandidateWindow;
+- (void)updateStyleDependentResources;
 
 // Draw the |row|-th row.
 - (void)drawRow:(int)row;
@@ -105,35 +107,65 @@ using mozc::renderer::mac::MacViewUtil;
 }
 
 - (void)initializeDefaultStyle {
-  RendererStyleHandler::GetRendererStyle(&style_);
-
-  const std::string &logo_file_name = style_.logo_file_name();
-  logoImage_ = [NSImage imageNamed:[NSString stringWithUTF8String:logo_file_name.c_str()]];
-  if (logoImage_) {
-    // Fix the image size.  Sometimes the size can be smaller than the
-    // actual size because of blank margin.
-    const NSArray *logoReps = [logoImage_ representations];
-    if (logoReps && [logoReps count] > 0) {
-      const NSImageRep *representation = [logoReps objectAtIndex:0];
-      [logoImage_ setSize:NSMakeSize([representation pixelsWide], [representation pixelsHigh])];
-    }
+  if (!RendererStyleHandler::GetRendererStyleForWindowType(
+          RendererStyleHandler::RendererStyleType::kCandidate, &style_)) {
+    RendererStyleHandler::GetDefaultRendererStyle(&style_);
   }
+  [self updateStyleDependentResources];
 
-  NSString *nsstr = [NSString stringWithUTF8String:style_.column_minimum_width_string().c_str()];
-  NSDictionary *attr = [NSDictionary dictionaryWithObject:[NSFont messageFontOfSize:14]
-                                                   forKey:NSFontAttributeName];
-  const NSAttributedString *defaultMessage = [[NSAttributedString alloc] initWithString:nsstr
-                                                                             attributes:attr];
-  columnMinimumWidth_ = [defaultMessage size].width;
-
-  // default line width is specified as 1.0 *pt*, but we want to draw
-  // it as 1.0 px.
+  // Default line width is specified as 1.0 pt, but the renderer expects
+  // a one-pixel logical border.
   [NSBezierPath setDefaultLineWidth:1.0];
   [NSBezierPath setDefaultLineJoinStyle:NSLineJoinStyleMiter];
 }
 
+- (void)reloadStyleForCandidateWindow {
+  // Prediction is the focused continuation of suggestion UI, so both
+  // categories share the suggestion appearance bucket.
+  const bool use_suggestion_style =
+      candidate_window_.category() == mozc::commands::SUGGESTION ||
+      candidate_window_.category() == mozc::commands::PREDICTION;
+
+  const RendererStyleHandler::RendererStyleType style_type =
+      use_suggestion_style
+          ? RendererStyleHandler::RendererStyleType::kSuggestion
+          : RendererStyleHandler::RendererStyleType::kCandidate;
+
+  if (!RendererStyleHandler::GetRendererStyleForWindowType(style_type,
+                                                            &style_)) {
+    RendererStyleHandler::GetDefaultRendererStyle(&style_);
+  }
+
+  [self updateStyleDependentResources];
+}
+
+- (void)updateStyleDependentResources {
+  const std::string &logo_file_name = style_.logo_file_name();
+  logoImage_ =
+      [NSImage imageNamed:[NSString stringWithUTF8String:logo_file_name.c_str()]];
+
+  if (logoImage_) {
+    // Fix the image size. Sometimes the logical size can be smaller than the
+    // underlying representation because of transparent margins.
+    const NSArray *logoReps = [logoImage_ representations];
+    if (logoReps && [logoReps count] > 0) {
+      const NSImageRep *representation = [logoReps objectAtIndex:0];
+      [logoImage_
+          setSize:NSMakeSize([representation pixelsWide],
+                             [representation pixelsHigh])];
+    }
+  }
+
+  const NSAttributedString *minimumWidthText =
+      MacViewUtil::ToNSAttributedString(
+          style_.column_minimum_width_string(), style_.candidate_style());
+  columnMinimumWidth_ =
+      std::max(1, static_cast<int>([minimumWidthText size].width));
+}
+
 - (void)setCandidateWindow:(const CandidateWindow *)candidate_window {
   candidate_window_ = *candidate_window;
+  [self reloadStyleForCandidateWindow];
 }
 
 - (void)setSendCommandInterface:(SendCommandInterface *)command_sender {
@@ -276,6 +308,17 @@ using mozc::renderer::mac::MacViewUtil;
     LOG(WARNING) << "Unknown candidates category: " << candidate_window_.category();
     return;
   }
+
+  // Paint the complete view before drawing individual cells. Otherwise,
+  // column gaps and unused layout regions expose the NSPanel's default
+  // white background when a dark renderer style is active.
+  if (style_.candidate_style().has_background_color()) {
+    [MacViewUtil::ToNSColor(
+        style_.candidate_style().background_color()) set];
+  } else {
+    [NSColor.windowBackgroundColor set];
+  }
+  [NSBezierPath fillRect:self.bounds];
 
   for (int i = 0; i < candidate_window_.candidate_size(); ++i) {
     [self drawRow:i];

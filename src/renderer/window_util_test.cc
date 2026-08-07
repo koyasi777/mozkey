@@ -236,5 +236,47 @@ TEST_F(WindowUtilTest, MonitorErrors) {
   EXPECT_EQ(result.Top(), 32);
 }
 
+TEST_F(WindowUtilTest, RubyWindowPrefersAbovePreedit) {
+  const Rect preedit_rect(100, 200, 20, 20);
+  const Size ruby_size(100, 30);
+  const Rect working_area(0, 0, 1000, 800);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRect(
+      preedit_rect, ruby_size, 4, working_area, nullptr, &result));
+
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 166);
+  EXPECT_EQ(result.Width(), 100);
+  EXPECT_EQ(result.Height(), 30);
+}
+
+TEST_F(WindowUtilTest, RubyWindowMovesBelowAvoidRectangle) {
+  const Rect preedit_rect(100, 200, 20, 20);
+  const Size ruby_size(100, 30);
+  const Rect working_area(0, 0, 1000, 800);
+  const Rect avoid_rect(90, 150, 160, 60);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRect(
+      preedit_rect, ruby_size, 4, working_area, &avoid_rect, &result));
+
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 224);
+  EXPECT_EQ(result.Width(), 100);
+  EXPECT_EQ(result.Height(), 30);
+}
+
+TEST_F(WindowUtilTest, RubyWindowReturnsFalseWhenBothSidesAreBlocked) {
+  const Rect preedit_rect(100, 200, 20, 20);
+  const Size ruby_size(100, 30);
+  const Rect working_area(0, 0, 1000, 800);
+  const Rect avoid_rect(80, 140, 200, 140);
+
+  Rect result;
+  EXPECT_FALSE(WindowUtil::GetRubyWindowRect(
+      preedit_rect, ruby_size, 4, working_area, &avoid_rect, &result));
+}
+
 }  // namespace renderer
 }  // namespace mozc

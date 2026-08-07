@@ -30,6 +30,7 @@
 #ifndef MOZC_RENDERER_MAC_CANDIDATE_CONTROLLER_H_
 #define MOZC_RENDERER_MAC_CANDIDATE_CONTROLLER_H_
 
+#include "base/coordinates.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_interface.h"
 
@@ -62,7 +63,7 @@ class CandidateController : public RendererInterface {
  private:
   // Relocate windows to prevent overlaps.
   void AlignWindows();
-  void AlignRubyWindow();
+  bool AlignRubyWindow(const mozc::Rect *avoid_rect);
 
   // We don't use std::unique_ptr<> for those two pointers because we don't
   // want to include CandidateWindow.h when the user of this class
@@ -73,6 +74,8 @@ class CandidateController : public RendererInterface {
   CandidateWindow *cascading_window_;
   InfolistWindow *infolist_window_;
   RubyWindow *ruby_window_;
+  mozc::Rect candidate_rect_;
+  bool has_candidate_rect_ = false;
   mozc::commands::RendererCommand command_;
 };
 
