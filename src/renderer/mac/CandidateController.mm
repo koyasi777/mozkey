@@ -38,6 +38,7 @@
 #include "renderer/mac/InfolistWindow.h"
 #include "renderer/mac/RubyWindow.h"
 #include "renderer/mac/mac_view_util.h"
+#include "renderer/renderer_style_handler.h"
 #include "renderer/table_layout.h"
 #include "renderer/window_util.h"
 
@@ -182,7 +183,9 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
             ? &candidate_rect_
             : nullptr;
 
-    if (ruby_window_->Update(command_) &&
+    const RendererStyleHandler::RubyWindowStyle ruby_style =
+        RendererStyleHandler::GetRubyWindowStyle();
+    if (ruby_style.enabled && ruby_window_->Update(command_) &&
         AlignRubyWindow(ruby_avoid_rect)) {
       ruby_window_->Show();
     } else {
