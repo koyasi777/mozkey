@@ -29,6 +29,8 @@
 
 #include "renderer/window_util.h"
 
+#include <algorithm>
+
 #include "base/coordinates.h"
 
 namespace mozc {
@@ -210,6 +212,68 @@ Rect WindowUtil::GetWindowRectForCascadingWindow(const Rect& selected_row,
   }
 
   return window_rect;
+}
+
+bool WindowUtil::GetRubyWindowRect(
+    const Rect& preedit_rect, const Size& window_size, int gap,
+    const Rect& working_area, const Rect* avoid_rect, Rect* window_rect) {
+  if (window_rect == nullptr || window_size.width <= 0 ||
+      window_size.height <= 0 || working_area.Width() <= 0 ||
+      working_area.Height() <= 0) {
+    return false;
+  }
+
+  const int normalized_gap = std::max(0, gap);
+
+  int left = preedit_rect.Left();
+  if (preedit_rect.Width() > window_size.width) {
+    left += (preedit_rect.Width() - window_size.width) / 2;
+  }
+
+  const int max_left = std::max(
+      working_area.Left(), working_area.Right() - window_size.width);
+  left = std::clamp(left, working_area.Left(), max_left);
+
+  const auto intersects = [](const Rect& lhs, const Rect& rhs) {
+    return lhs.Left() < rhs.Right() && rhs.Left() < lhs.Right() &&
+           lhs.Top() < rhs.Bottom() && rhs.Top() < lhs.Bottom();
+  };
+
+  const auto is_usable = [&](const Rect& rect) {
+    if (rect.Left() < working_area.Left() ||
+        rect.Right() > working_area.Right() ||
+        rect.Top() < working_area.Top() ||
+        rect.Bottom() > working_area.Bottom()) {
+      return false;
+    }
+
+    if (avoid_rect != nullptr && intersects(rect, *avoid_rect)) {
+      return false;
+    }
+
+    return true;
+  };
+
+  const int above_top =
+      preedit_rect.Top() - window_size.height - normalized_gap;
+  const Rect above_rect(
+      left, above_top, window_size.width, window_size.height);
+
+  if (is_usable(above_rect)) {
+    *window_rect = above_rect;
+    return true;
+  }
+
+  const int below_top = preedit_rect.Bottom() + normalized_gap;
+  const Rect below_rect(
+      left, below_top, window_size.width, window_size.height);
+
+  if (is_usable(below_rect)) {
+    *window_rect = below_rect;
+    return true;
+  }
+
+  return false;
 }
 
 Rect WindowUtil::GetWindowRectForInfolistWindow(const Size& window_size,

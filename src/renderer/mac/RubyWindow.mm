@@ -31,77 +31,153 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <string>
 
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
+#include "protocol/renderer_style.pb.h"
+#include "renderer/mac/mac_view_util.h"
+#include "renderer/renderer_style_handler.h"
 
 namespace {
 
-constexpr CGFloat kPaddingX = 14.0;
-constexpr CGFloat kPaddingY = 6.0;
-constexpr CGFloat kCornerRadius = 5.0;
-constexpr CGFloat kFontSize = 13.0;
+constexpr CGFloat kBaseFontSize = 13.0;
 
-NSString *ToNSString(const std::string &text) {
-  return [[NSString alloc] initWithUTF8String:text.c_str()];
+CGFloat ScaleMetric(uint32_t value, uint32_t size_percent) {
+  return std::round(
+      static_cast<CGFloat>(value) *
+      static_cast<CGFloat>(size_percent) / 100.0);
+}
+
+// Ruby spacing values are defined as physical pixels at the Windows
+// 144-DPI design baseline. Cocoa geometry is expressed in 72-DPI points.
+// Preserve the shared Windows value and convert only at the macOS boundary.
+CGFloat ScaleWindowsRubySpacingToCocoaPoints(
+    uint32_t value, uint32_t size_percent) {
+  const CGFloat windows_design_pixels =
+      std::round(
+          static_cast<CGFloat>(value) *
+          static_cast<CGFloat>(size_percent) / 100.0);
+  return windows_design_pixels * 72.0 / 144.0;
+}
+
+CGFloat ScaleFontSize(uint32_t size_percent) {
+  return std::max<CGFloat>(
+      1.0,
+      kBaseFontSize * static_cast<CGFloat>(size_percent) / 100.0);
+}
+
+NSColor *ToNSColor(uint32_t rgb) {
+  return [NSColor
+      colorWithCalibratedRed:static_cast<CGFloat>((rgb >> 16) & 0xff) / 255.0
+                       green:static_cast<CGFloat>((rgb >> 8) & 0xff) / 255.0
+                        blue:static_cast<CGFloat>(rgb & 0xff) / 255.0
+                       alpha:1.0];
+}
+
+void SetRgbColor(uint32_t rgb,
+                 mozc::renderer::RendererStyle::RGBAColor *color) {
+  color->set_r(static_cast<double>((rgb >> 16) & 0xff));
+  color->set_g(static_cast<double>((rgb >> 8) & 0xff));
+  color->set_b(static_cast<double>(rgb & 0xff));
+  color->set_a(1.0);
 }
 
 }  // namespace
 
 @interface RubyView : NSView
-- (void)setRubyText:(NSString *)text;
+- (void)setRubyText:(NSAttributedString *)text;
+- (void)setBackgroundColor:(NSColor *)backgroundColor
+               borderColor:(NSColor *)borderColor
+              cornerRadius:(CGFloat)cornerRadius
+         horizontalPadding:(CGFloat)horizontalPadding
+           verticalPadding:(CGFloat)verticalPadding;
 - (NSSize)preferredSize;
 @end
 
 @implementation RubyView {
-  NSString *text_;
-  NSDictionary<NSAttributedStringKey, id> *attributes_;
+  NSAttributedString *text_;
+  NSColor *backgroundColor_;
+  NSColor *borderColor_;
+  CGFloat cornerRadius_;
+  CGFloat horizontalPadding_;
+  CGFloat verticalPadding_;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
-    text_ = @"";
-    NSFont *font = [NSFont fontWithName:@"Hiragino Sans" size:kFontSize];
-    if (font == nil) {
-      font = [NSFont systemFontOfSize:kFontSize weight:NSFontWeightSemibold];
-    }
-    attributes_ = @{
-      NSFontAttributeName : font,
-      NSForegroundColorAttributeName : NSColor.whiteColor,
-    };
+    text_ = [[NSAttributedString alloc] initWithString:@""];
+    backgroundColor_ = [NSColor colorWithCalibratedWhite:0.10 alpha:1.0];
+    borderColor_ = NSColor.clearColor;
+    cornerRadius_ = 5.0;
+    horizontalPadding_ = 7.0;
+    verticalPadding_ = 6.0;
     [self setWantsLayer:YES];
   }
   return self;
 }
 
-- (void)setRubyText:(NSString *)text {
+- (void)setRubyText:(NSAttributedString *)text {
   text_ = [text copy];
   [self setNeedsDisplay:YES];
 }
 
+- (void)setBackgroundColor:(NSColor *)backgroundColor
+               borderColor:(NSColor *)borderColor
+              cornerRadius:(CGFloat)cornerRadius
+         horizontalPadding:(CGFloat)horizontalPadding
+           verticalPadding:(CGFloat)verticalPadding {
+  backgroundColor_ = backgroundColor;
+  borderColor_ = borderColor;
+  cornerRadius_ = std::max<CGFloat>(0.0, cornerRadius);
+  horizontalPadding_ = std::max<CGFloat>(0.0, horizontalPadding);
+  verticalPadding_ = std::max<CGFloat>(0.0, verticalPadding);
+  [self setNeedsDisplay:YES];
+}
+
 - (NSSize)preferredSize {
-  NSSize textSize = [text_ sizeWithAttributes:attributes_];
-  return NSMakeSize(ceil(textSize.width + kPaddingX * 2.0),
-                    ceil(textSize.height + kPaddingY * 2.0));
+  const NSSize textSize = [text_ size];
+  return NSMakeSize(
+      ceil(textSize.width + horizontalPadding_ * 2.0),
+      ceil(textSize.height + verticalPadding_ * 2.0));
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
   [super drawRect:dirtyRect];
 
-  [[NSColor colorWithCalibratedWhite:0.10 alpha:0.90] setFill];
+  const NSRect pathBounds = NSInsetRect(self.bounds, 0.5, 0.5);
+  const CGFloat maximumRadius =
+      std::max<CGFloat>(
+          0.0,
+          std::min(NSWidth(pathBounds), NSHeight(pathBounds)) / 2.0);
+  const CGFloat effectiveRadius =
+      std::min(cornerRadius_, maximumRadius);
+
   NSBezierPath *background =
-      [NSBezierPath bezierPathWithRoundedRect:self.bounds
-                                     xRadius:kCornerRadius
-                                     yRadius:kCornerRadius];
+      [NSBezierPath bezierPathWithRoundedRect:pathBounds
+                                     xRadius:effectiveRadius
+                                     yRadius:effectiveRadius];
+
+  [backgroundColor_ setFill];
   [background fill];
 
-  NSSize textSize = [text_ sizeWithAttributes:attributes_];
-  NSRect textRect = NSMakeRect((NSWidth(self.bounds) - textSize.width) / 2.0,
-                               (NSHeight(self.bounds) - textSize.height) / 2.0,
-                               textSize.width, textSize.height);
-  [text_ drawInRect:textRect withAttributes:attributes_];
+  if (borderColor_ != nil) {
+    [borderColor_ setStroke];
+    [background setLineWidth:1.0];
+    [background stroke];
+  }
+
+  const NSSize textSize = [text_ size];
+  const NSRect textRect =
+      NSMakeRect((NSWidth(self.bounds) - textSize.width) / 2.0,
+                 (NSHeight(self.bounds) - textSize.height) / 2.0,
+                 textSize.width,
+                 textSize.height);
+  [text_ drawInRect:textRect];
 }
 @end
 
@@ -113,8 +189,9 @@ RubyWindow::RubyWindow() = default;
 
 RubyWindow::~RubyWindow() = default;
 
-bool RubyWindow::BuildReadingText(const commands::RendererCommand &command,
-                                  std::string *reading) const {
+bool RubyWindow::BuildReadingText(
+    const commands::RendererCommand &command,
+    std::string *reading) const {
   reading->clear();
 
   if (!command.has_output()) {
@@ -149,11 +226,67 @@ bool RubyWindow::Update(const commands::RendererCommand &command) {
     InitWindow();
   }
 
+  const RendererStyleHandler::RubyWindowStyle appearance =
+      RendererStyleHandler::GetRubyWindowStyle();
+
+  RendererStyle renderer_style;
+  if (!RendererStyleHandler::GetRendererStyleForWindowType(
+          RendererStyleHandler::RendererStyleType::kCandidate,
+          &renderer_style)) {
+    RendererStyleHandler::GetDefaultRendererStyle(&renderer_style);
+  }
+
+  RendererStyle::TextStyle text_style;
+  text_style.set_font_size(ScaleFontSize(appearance.size_percent));
+  text_style.set_font_weight(
+      static_cast<int32_t>(appearance.font_weight));
+  SetRgbColor(
+      appearance.text_color,
+      text_style.mutable_foreground_color());
+
+  if (renderer_style.has_candidate_style() &&
+      renderer_style.candidate_style().has_font_name() &&
+      !renderer_style.candidate_style().font_name().empty()) {
+    text_style.set_font_name(
+        renderer_style.candidate_style().font_name());
+  }
+
   RubyView *ruby_view = (RubyView *)view_;
-  [ruby_view setRubyText:ToNSString(reading)];
+  [ruby_view
+      setBackgroundColor:ToNSColor(appearance.background_color)
+             borderColor:ToNSColor(appearance.border_color)
+            cornerRadius:ScaleMetric(
+                             appearance.corner_radius,
+                             appearance.size_percent)
+       horizontalPadding:ScaleWindowsRubySpacingToCocoaPoints(
+                             appearance.horizontal_padding,
+                             appearance.size_percent)
+         verticalPadding:ScaleMetric(
+                             appearance.vertical_padding,
+                             appearance.size_percent)];
+
+  [ruby_view setRubyText:
+      MacViewUtil::ToNSAttributedString(reading, text_style)];
+
+  composition_gap_ = static_cast<int32_t>(
+      ScaleMetric(
+          appearance.composition_gap,
+          appearance.size_percent));
+
+  [window_ setAlphaValue:std::clamp<CGFloat>(
+      static_cast<CGFloat>(appearance.opacity_percent) / 100.0,
+      0.0,
+      1.0)];
+
   const NSSize size = [ruby_view preferredSize];
-  ResizeWindow(size.width, size.height);
+  ResizeWindow(
+      static_cast<int32_t>(ceil(size.width)),
+      static_cast<int32_t>(ceil(size.height)));
   return true;
+}
+
+int32_t RubyWindow::GetCompositionGap() const {
+  return composition_gap_;
 }
 
 void RubyWindow::InitWindow() {

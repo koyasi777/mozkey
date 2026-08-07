@@ -30,6 +30,7 @@
 #ifndef MOZC_RENDERER_MAC_RUBY_WINDOW_H_
 #define MOZC_RENDERER_MAC_RUBY_WINDOW_H_
 
+#include <cstdint>
 #include <string>
 
 #include "renderer/mac/RendererBaseWindow.h"
@@ -51,12 +52,17 @@ class RubyWindow : public RendererBaseWindow {
 
   bool Update(const commands::RendererCommand &command);
 
+  // Returns the scaled distance between the composition text and ruby window.
+  int32_t GetCompositionGap() const;
+
  private:
   void InitWindow() override;
   void ResetView() override;
 
   bool BuildReadingText(const commands::RendererCommand &command,
                         std::string *reading) const;
+
+  int32_t composition_gap_ = 4;
 };
 
 }  // namespace mac

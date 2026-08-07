@@ -100,6 +100,7 @@ TEST(RendererStyleHandlerTest, ApplyCandidateWindowCustomColors) {
   EXPECT_EQ(0x0d0e0f, Rgb(style.border_color()));
   EXPECT_EQ(0x101112, Rgb(style.shortcut_style().foreground_color()));
   EXPECT_EQ(0x131415, Rgb(style.shortcut_style().background_color()));
+  EXPECT_EQ(0x010203, Rgb(style.gap1_style().background_color()));
   EXPECT_EQ(0x161718, Rgb(style.description_style().foreground_color()));
   EXPECT_EQ(0x191a1b, Rgb(style.footer_style().foreground_color()));
   EXPECT_EQ(0x1c1d1e, Rgb(style.footer_top_color()));
@@ -108,6 +109,22 @@ TEST(RendererStyleHandlerTest, ApplyCandidateWindowCustomColors) {
   EXPECT_EQ(0x252627, Rgb(style.scrollbar_indicator_color()));
 }
 
+
+TEST(RendererStyleHandlerTest,
+     ApplyCandidateWindowThemeSetsGapBackground) {
+  RendererStyle style;
+  RendererStyleHandler::GetDefaultRendererStyle(&style);
+
+  RendererStyleHandler::ApplyCandidateWindowTheme(false, &style);
+  EXPECT_TRUE(style.gap1_style().has_background_color());
+  EXPECT_EQ(Rgb(style.candidate_style().background_color()),
+            Rgb(style.gap1_style().background_color()));
+
+  RendererStyleHandler::ApplyCandidateWindowTheme(true, &style);
+  EXPECT_TRUE(style.gap1_style().has_background_color());
+  EXPECT_EQ(Rgb(style.candidate_style().background_color()),
+            Rgb(style.gap1_style().background_color()));
+}
 
 TEST(RendererStyleHandlerTest, ApplyCandidateWindowSize) {
   RendererStyle style;

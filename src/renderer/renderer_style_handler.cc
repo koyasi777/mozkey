@@ -133,6 +133,9 @@ void ApplyLightCandidateWindowTheme(RendererStyle* style) {
   SetColor(style->mutable_shortcut_style()->mutable_background_color(),
            0xf3, 0xf4, 0xff);
 
+  SetColor(style->mutable_gap1_style()->mutable_background_color(),
+           0xff, 0xff, 0xff);
+
   SetColor(style->mutable_candidate_style()->mutable_foreground_color(),
            0x00, 0x00, 0x00);
   SetColor(style->mutable_candidate_style()->mutable_background_color(),
@@ -185,6 +188,9 @@ void ApplyDarkCandidateWindowTheme(RendererStyle* style) {
   SetColor(style->mutable_shortcut_style()->mutable_foreground_color(),
            0x96, 0xa0, 0xaa);
   SetColor(style->mutable_shortcut_style()->mutable_background_color(),
+           0x18, 0x1b, 0x20);
+
+  SetColor(style->mutable_gap1_style()->mutable_background_color(),
            0x18, 0x1b, 0x20);
 
   SetColor(style->mutable_candidate_style()->mutable_foreground_color(),
@@ -453,6 +459,8 @@ void RendererStyleHandler::ApplyCandidateWindowCustomColors(
               shortcut_text_color);
   SetRgbColor(style->mutable_shortcut_style()->mutable_background_color(),
               shortcut_background_color);
+  SetRgbColor(style->mutable_gap1_style()->mutable_background_color(),
+              background_color);
   SetRgbColor(style->mutable_candidate_style()->mutable_foreground_color(),
               text_color);
   SetRgbColor(style->mutable_candidate_style()->mutable_background_color(),

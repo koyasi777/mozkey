@@ -427,15 +427,18 @@ ConfigDialog::ConfigDialog()
   // Mode indicator is available only on Windows.
   useModeIndicator->hide();
 
-  // Candidate/ruby appearance options are available only on Windows.
+  // Preedit display color customization is available only on Windows TSF.
+  preeditDisplayColorGroupBox->hide();
+#endif  // !_WIN32
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+  // Detailed renderer appearance controls are supported by the Windows and
+  // macOS desktop renderers.
   useDarkModeCandidateWindow->hide();
   candidateRubyFontLabel->hide();
   candidateRubyFontComboBox->hide();
   showLiveConversionRubyWindow->hide();
-
-  // Preedit display color customization is available only on Windows TSF.
-  preeditDisplayColorGroupBox->hide();
-#endif  // !_WIN32
+#endif  // !defined(_WIN32) && !defined(__APPLE__)
 
   // Reset texts explicitly for translations.
   configDialogButtonBox->button(QDialogButtonBox::Ok)->setText(tr("  Ok  "));
@@ -2392,9 +2395,9 @@ void ConfigDialog::InitializeWindowsImeIconStyleControls() {
 // Actually ConvertFromProto and ConvertToProto are almost the same.
 // The difference only SET_ and GET_. We would like to unify the twos.
 void ConfigDialog::InitializeRendererAppearanceControls() {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
   return;
-#endif  // !_WIN32
+#endif  // !defined(_WIN32) && !defined(__APPLE__)
 
   useDarkModeCandidateWindow->hide();
   candidateRubyFontLabel->hide();
@@ -2403,7 +2406,9 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   constexpr int kRendererAppearanceGroupX = 30;
   constexpr int kRendererAppearanceGroupY = 1146;
   constexpr int kRendererAppearanceGroupWidth = 441;
+#ifdef _WIN32
   constexpr int kRendererAppearanceToPreeditMargin = 18;
+#endif  // _WIN32
   constexpr int kInputSupportBottomMargin = 30;
 
   QWidget* group = new QWidget(inputSupportScrollAreaWidgetContents);
@@ -2494,7 +2499,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   grid->setVerticalSpacing(2);
   root_layout->addWidget(color_grid_widget);
 
-  auto add_color_theme_combo = [this](QComboBox* combo, bool allow_follow) {
+  auto add_color_theme_combo = [](QComboBox* combo, bool allow_follow) {
     if (allow_follow) {
       combo->addItem(
           tr("Follow candidate window"),
@@ -2855,6 +2860,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   const int appearance_height = root_layout->sizeHint().height();
   group->setGeometry(kRendererAppearanceGroupX, kRendererAppearanceGroupY,
                      kRendererAppearanceGroupWidth, appearance_height);
+#ifdef _WIN32
   preeditDisplayColorGroupBox->move(
       kRendererAppearanceGroupX,
       group->y() + group->height() + kRendererAppearanceToPreeditMargin);
@@ -2862,7 +2868,13 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
       485, preeditDisplayColorGroupBox->y() +
                preeditDisplayColorGroupBox->height() +
                kInputSupportBottomMargin);
-
+#else
+  // The preedit color section is Windows TSF-specific.  On macOS, terminate
+  // the scrollable content immediately after the renderer appearance section
+  // so that hiding the preedit section does not leave a large blank area.
+  inputSupportScrollAreaWidgetContents->resize(
+      485, group->y() + group->height() + kInputSupportBottomMargin);
+#endif  // _WIN32
 }
 
 void ConfigDialog::ConvertFromProto(const config::Config &config) {
@@ -3339,13 +3351,13 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
 
 void ConfigDialog::ConvertRendererAppearanceFromProto(
     const config::Config &config) {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
   if (useDarkModeCandidateWindow != nullptr) {
     useDarkModeCandidateWindow->setChecked(
         config.use_dark_mode_candidate_window());
   }
   return;
-#endif  // !_WIN32
+#endif  // !defined(_WIN32) && !defined(__APPLE__)
 
   const int candidate_color_theme =
       config.has_candidate_window_color_theme()
@@ -3474,14 +3486,15 @@ void ConfigDialog::ConvertRendererAppearanceFromProto(
   UpdateRendererAppearanceControls();
 }
 
-void ConfigDialog::ConvertRendererAppearanceToProto(config::Config *config) const {
-#ifndef _WIN32
+void ConfigDialog::ConvertRendererAppearanceToProto(
+    config::Config *config) const {
+#if !defined(_WIN32) && !defined(__APPLE__)
   if (useDarkModeCandidateWindow != nullptr) {
     config->set_use_dark_mode_candidate_window(
         useDarkModeCandidateWindow->isChecked());
   }
   return;
-#endif  // !_WIN32
+#endif  // !defined(_WIN32) && !defined(__APPLE__)
 
   const int candidate_color_theme = GetComboCurrentData(
       FindComboBox(this, "candidateWindowColorThemeComboBox"),
