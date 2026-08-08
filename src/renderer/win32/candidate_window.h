@@ -58,8 +58,9 @@ namespace win32 {
 // SPI_GETACTIVEWINDOWTRACKING is enabled.
 // TODO(yukawa): Support mouse operations before we add a GUI feature which
 //   requires UI interaction by mouse and/or touch. (b/2954874)
-typedef ATL::CWinTraits<WS_POPUP | WS_DISABLED,
-                        WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE>
+typedef ATL::CWinTraits<
+    WS_POPUP | WS_DISABLED,
+    WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED>
     CandidateWindowTraits;
 
 // a class which implements an IME candidate window for Windows. This class
@@ -111,12 +112,12 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
 
   void UpdateLayout(const commands::CandidateWindow& candidate_window);
   void UpdateEffectWindows();
-  void RedrawImmediately();
-  // Paints the pre-rendered candidate window bitmap to the window DC
-  // immediately.  This is used just after SWP_SHOWWINDOW for live passive
-  // suggestion UI so that the first visible frame already contains the
-  // completed candidate contents.  If the cache is unavailable, this method
-  // is a no-op and the normal WM_PAINT path remains the fallback.
+  void SetShadowZOrderAnchor(HWND hwnd) { shadow_z_order_anchor_ = hwnd; }
+  HWND GetWindowHandle() const { return m_hWnd; }
+  // Presents the pre-rendered PBGRA candidate surface with per-pixel alpha.
+  // The rounded silhouette and the configured whole-window opacity are both
+  // composed by UpdateLayeredWindow, so this must be used instead of BitBlt or
+  // SetLayeredWindowAttributes for candidate-like windows.
   void PresentCachedBitmapImmediately();
   // Hides both the candidate window and its renderer-owned visual effects.
   // This avoids one-frame shadow remnants when WindowManager suppresses or
@@ -132,10 +133,9 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   Rect GetFirstRowInClientCord() const;
 
  private:
-  void DoPaint(HDC dc);
+  void DoPaint(HDC dc, bool draw_frame);
 
   bool RenderToBitmapCache();
-  bool BitBltCachedBitmapTo(HDC target_dc, const RECT& target_rect) const;
   void ClearBitmapCache();
 
   void DrawCells(HDC dc);
@@ -232,6 +232,7 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   int indicator_width_;
   bool metrics_changed_;
   bool mouse_moving_;
+  HWND shadow_z_order_anchor_ = nullptr;
   RendererShadowWindow shadow_window_;
 };
 

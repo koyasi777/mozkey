@@ -442,11 +442,23 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   main_window_->SetWindowPos(HWND_TOPMOST, main_window_rect.Left(),
                              main_window_rect.Top(), main_window_rect.Width(),
                              main_window_rect.Height(), set_windows_pos_flags);
-  if (is_live_conversion_passive_suggestion) {
-    main_window_->PresentCachedBitmapImmediately();
-    main_window_->RedrawImmediately();
-  }
-  main_window_->UpdateEffectWindows();
+  // CandidateWindow is a per-pixel-alpha layered window. Present the complete
+  // cached surface immediately for every candidate-like UI, not only passive
+  // live suggestions, so WM_PAINT scheduling cannot expose an empty/stale
+  // first frame.
+  main_window_->PresentCachedBitmapImmediately();
+
+  // The main candidate body is the bottom-most body in this renderer family.
+  // Secondary windows keep their shadows behind it, so no custom shadow can
+  // cover another renderer body while candidate UI is being updated.
+  const HWND main_window_handle = main_window_->GetWindowHandle();
+  infolist_window_->SetShadowZOrderAnchor(main_window_handle);
+  cascading_window_->SetShadowZOrderAnchor(main_window_handle);
+  // Ruby can be updated before the main candidate window. Reassert it now so
+  // main_window_ is the lowest visible renderer body before any secondary
+  // shadow is presented.
+  ruby_window_->RaiseToTopmostWithoutActivation();
+
   if (is_live_conversion_passive_suggestion) {
     last_live_conversion_passive_suggestion_visible_ = true;
     last_live_conversion_passive_suggestion_rect_ =
@@ -476,18 +488,20 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   if (infolist_visible && !cascading_visible) {
     if (candidate_changed) {
       infolist_window_->UpdateLayout(candidate_window);
-      infolist_window_->Invalidate();
     }
 
     // Align infolist window
     const Rect infolist_rect = WindowUtil::GetWindowRectForInfolistWindow(
         infolist_window_->GetLayoutSize(), main_window_rect, working_area);
+    // InfolistWindow is permanently layered. Its cached PBGRA surface is
+    // presented explicitly by UpdateEffectWindows(), so moving/resizing must
+    // not trigger the legacy WM_PAINT path.
     infolist_window_->MoveWindow(infolist_rect.Left(), infolist_rect.Top(),
                                  infolist_rect.Width(), infolist_rect.Height(),
-                                 TRUE);
+                                 FALSE);
     infolist_window_->SetWindowPos(
         HWND_TOPMOST, 0, 0, 0, 0,
-        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
     infolist_window_->UpdateEffectWindows();
 
     if (candidate_window.has_focused_index() &&
@@ -544,21 +558,20 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
         HWND_TOPMOST, cascading_window_rect.Left(), cascading_window_rect.Top(),
         cascading_window_rect.Width(), cascading_window_rect.Height(),
         set_windows_pos_flags);
+    cascading_window_->PresentCachedBitmapImmediately();
     cascading_window_->UpdateEffectWindows();
     // This trick ensures that the window is certainly shown as 'inactivated'
     // in terms of visual effect on DWM-enabled desktop.
     cascading_window_->SendMessageW(WM_NCACTIVATE, FALSE);
-    if (candidate_changed) {
-      main_window_->Invalidate();
-      cascading_window_->Invalidate();
-    }
   } else {
     // no cascading window
-    if (candidate_changed) {
-      main_window_->Invalidate();
-    }
     cascading_window_->HideWithEffects();
   }
+
+  // Present the main shadow only after every secondary body has been positioned.
+  // main_window_ is the common Z-order anchor, so every candidate-family
+  // shadow stays below Infolist, cascade, and ruby surfaces.
+  main_window_->UpdateEffectWindows();
 }
 
 bool WindowManager::IsAvailable() const {

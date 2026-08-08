@@ -18,7 +18,8 @@ namespace renderer {
 namespace win32 {
 
 typedef ATL::CWinTraits<WS_POPUP,
-                        WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE>
+                        WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST |
+                            WS_EX_NOACTIVATE>
     RubyWindowTraits;
 
 class RubyWindow
@@ -40,6 +41,10 @@ class RubyWindow
   void Initialize();
   void Destroy();
   void Hide();
+  // Reassert the ruby body at the top of the topmost band without moving or
+  // activating it. WindowManager calls this after candidate-family bodies are
+  // positioned so all renderer bodies remain above their custom shadows.
+  void RaiseToTopmostWithoutActivation();
   void OnUpdate(const commands::RendererCommand& command,
                 const LayoutManager& layout_manager,
                 const RECT* avoid_rect = nullptr);
@@ -52,6 +57,7 @@ class RubyWindow
   LRESULT OnPaint(UINT msg_id, WPARAM wparam, LPARAM lparam, BOOL& handled);
 
   void DoPaint(HDC dc);
+  bool RenderAndPresent();
   void ResetFont();
   void UpdateDpi(uint32_t dpi);
   void UpdateFont();

@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <string>
+
+#include <wil/resource.h>
 
 #include "base/win32/win_util.h"
 #include "base/win32/wide_char.h"
@@ -46,14 +49,6 @@ COLORREF ToColorRef(uint32_t rgb) {
 
 RendererStyleHandler::RubyWindowStyle GetRubyWindowTheme() {
   return RendererStyleHandler::GetRubyWindowStyle();
-}
-
-int ScaleCornerRadius(uint32_t logical_radius, uint32_t dpi) {
-  if (logical_radius == 0) {
-    return 0;
-  }
-  return static_cast<int>(
-      std::lround(logical_radius * GetDPIScalingFactor(dpi)));
 }
 
 int ScaleByPercent(int value, uint32_t percent) {
@@ -207,9 +202,6 @@ void RubyWindow::Initialize() {
     Create(nullptr);
   }
 
-  ApplyRendererWindowOpacity(
-      m_hWnd, RendererStyleHandler::GetRubyWindowStyle().opacity_percent);
-
   ShowWindow(SW_HIDE);
 }
 
@@ -238,6 +230,14 @@ void RubyWindow::ClearPlacementTracking() {
 void RubyWindow::Hide() {
   ClearPlacementTracking();
   HideWindowOnly();
+}
+
+void RubyWindow::RaiseToTopmostWithoutActivation() {
+  if (m_hWnd == nullptr || !::IsWindow(m_hWnd) || !::IsWindowVisible(m_hWnd)) {
+    return;
+  }
+  SetWindowPos(HWND_TOPMOST, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 bool RubyWindow::BuildReadingText(
@@ -682,28 +682,29 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   }
   transient_geometry_reject_count_ = 0;
 
-  const int radius = ScaleCornerRadius(
-      RendererStyleHandler::GetRubyWindowStyle().corner_radius, dpi_);
-  if (radius <= 0) {
-    ::SetWindowRgn(m_hWnd, nullptr, TRUE);
-  } else {
-    HRGN region = ::CreateRoundRectRgn(0, 0, window_size_.cx + 1,
-                                       window_size_.cy + 1, radius * 2,
-                                       radius * 2);
-    ::SetWindowRgn(m_hWnd, region, TRUE);
-    // Ownership of |region| is transferred to the window.
+  // Resize and position while still hidden. The layered surface is fully
+  // prepared before ShowWindow so the first visible ruby frame is already
+  // antialiased and complete.
+  SetWindowPos(HWND_TOPMOST, left, top, window_size_.cx, window_size_.cy,
+               SWP_NOACTIVATE);
+  if (!RenderAndPresent()) {
+    restore_previous_content();
+    HideWindowOnly();
+    return;
   }
 
-  SetWindowPos(HWND_TOPMOST, left, top, window_size_.cx, window_size_.cy,
-               SWP_NOACTIVATE | SWP_SHOWWINDOW);
-  ApplyRendererWindowOpacity(m_hWnd, GetRubyWindowTheme().opacity_percent);
+  ShowWindow(SW_SHOWNOACTIVATE);
+
+  const RendererStyleHandler::RubyWindowStyle current_theme =
+      GetRubyWindowTheme();
   RendererWindowShadowStyle shadow_style;
-  shadow_style.size = GetRubyWindowTheme().shadow.size;
-  shadow_style.opacity_percent = GetRubyWindowTheme().shadow.opacity_percent;
-  shadow_style.angle_degrees = GetRubyWindowTheme().shadow.angle_degrees;
-  shadow_style.distance = GetRubyWindowTheme().shadow.distance;
-  shadow_window_.Update(m_hWnd, window_rect, dpi_,
-                        GetRubyWindowTheme().corner_radius, shadow_style);
+  shadow_style.size = current_theme.shadow.size;
+  shadow_style.opacity_percent = current_theme.shadow.opacity_percent;
+  shadow_style.angle_degrees = current_theme.shadow.angle_degrees;
+  shadow_style.distance = current_theme.shadow.distance;
+  const int corner_radius = GetRendererWindowCornerRadiusInPixels(
+      current_theme.corner_radius, dpi_, window_size_.cx, window_size_.cy);
+  shadow_window_.Update(m_hWnd, window_rect, dpi_, corner_radius, shadow_style);
 
   last_valid_window_rect_ = window_rect;
 
@@ -713,13 +714,11 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     has_last_target_identity_ = true;
   }
 
-  ShowWindow(SW_SHOWNOACTIVATE);
-  Invalidate(FALSE);
 }
 
-LRESULT RubyWindow::OnEraseBkgnd(UINT msg_id,
-                                 WPARAM wparam,
-                                 LPARAM lparam,
+LRESULT RubyWindow::OnEraseBkgnd(UINT /*msg_id*/,
+                                 WPARAM /*wparam*/,
+                                 LPARAM /*lparam*/,
                                  BOOL& handled) {
   handled = TRUE;
   return TRUE;
@@ -733,15 +732,59 @@ LRESULT RubyWindow::OnShowWindow(UINT /*msg_id*/, WPARAM wparam,
   return 0;
 }
 
-LRESULT RubyWindow::OnPaint(UINT msg_id,
-                            WPARAM wparam,
-                            LPARAM lparam,
-                            BOOL& handled) {
+LRESULT RubyWindow::OnPaint(UINT /*msg_id*/,
+                            WPARAM /*wparam*/,
+                            LPARAM /*lparam*/,
+                            BOOL& /*handled*/) {
   PAINTSTRUCT ps = {};
-  HDC dc = BeginPaint(&ps);
-  DoPaint(dc);
+  BeginPaint(&ps);
   EndPaint(&ps);
   return 0;
+}
+
+bool RubyWindow::RenderAndPresent() {
+  if (m_hWnd == nullptr || !::IsWindow(m_hWnd) || window_size_.cx <= 0 ||
+      window_size_.cy <= 0) {
+    return false;
+  }
+
+  HDC screen_dc = ::GetDC(nullptr);
+  if (screen_dc == nullptr) {
+    return false;
+  }
+  wil::unique_hdc memory_dc(::CreateCompatibleDC(screen_dc));
+  uint32_t* pixels = nullptr;
+  wil::unique_hbitmap bitmap(CreateRendererLayeredWindowBitmap(
+      screen_dc, window_size_.cx, window_size_.cy, &pixels));
+  ::ReleaseDC(nullptr, screen_dc);
+  if (!memory_dc.is_valid() || !bitmap.is_valid() || pixels == nullptr) {
+    return false;
+  }
+
+  std::fill_n(pixels, static_cast<size_t>(window_size_.cx) *
+                          static_cast<size_t>(window_size_.cy),
+              0u);
+  // A GDI bitmap can be selected into only one memory DC at a time. Keep the
+  // drawing selection scoped so the bitmap is restored to the original DC
+  // before PresentRendererLayeredWindowBitmap selects it into its own source
+  // DC for UpdateLayeredWindow.
+  {
+    wil::unique_select_object old_bitmap =
+        wil::SelectObject(memory_dc.get(), bitmap.get());
+    DoPaint(memory_dc.get());
+    ::GdiFlush();
+  }
+
+  const RendererStyleHandler::RubyWindowStyle theme = GetRubyWindowTheme();
+  const int corner_radius = GetRendererWindowCornerRadiusInPixels(
+      theme.corner_radius, dpi_, window_size_.cx, window_size_.cy);
+  ApplyRoundedRectAlphaAndBorder(pixels, window_size_.cx, window_size_.cy,
+                                 corner_radius, /*border_width=*/1,
+                                 ToColorRef(theme.border_color));
+
+  return PresentRendererLayeredWindowBitmap(
+      m_hWnd, bitmap.get(), window_size_.cx, window_size_.cy,
+      RendererWindowOpacityToAlpha(theme.opacity_percent));
 }
 
 void RubyWindow::DoPaint(HDC dc) {
@@ -753,22 +796,7 @@ void RubyWindow::DoPaint(HDC dc) {
   ::SetBkMode(dc, TRANSPARENT);
 
   HBRUSH bg_brush = ::CreateSolidBrush(ToColorRef(theme.background_color));
-  HPEN border_pen = ::CreatePen(PS_SOLID, 1, ToColorRef(theme.border_color));
-
-  HGDIOBJ old_brush = ::SelectObject(dc, bg_brush);
-  HGDIOBJ old_pen = ::SelectObject(dc, border_pen);
-
-  const int radius = ScaleCornerRadius(theme.corner_radius, dpi_);
-  if (radius <= 0) {
-    ::Rectangle(dc, rect.left, rect.top, rect.right, rect.bottom);
-  } else {
-    ::RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, radius * 2,
-                radius * 2);
-  }
-
-  ::SelectObject(dc, old_pen);
-  ::SelectObject(dc, old_brush);
-  ::DeleteObject(border_pen);
+  ::FillRect(dc, &rect, bg_brush);
   ::DeleteObject(bg_brush);
 
   HFONT old_font = nullptr;

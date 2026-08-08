@@ -171,37 +171,6 @@ COLORREF GetFooterBorderColor(const RendererStyle& style) {
   return GetFrameColor(style);
 }
 
-int GetWindowCornerRadius(uint32_t dpi,
-                          RendererStyleHandler::RendererStyleType style_type) {
-  const uint32_t logical_radius =
-      RendererStyleHandler::GetCandidateWindowCornerRadius(style_type);
-  if (logical_radius == 0) {
-    return 0;
-  }
-  return static_cast<int>(std::lround(logical_radius *
-                                      GetDPIScalingFactor(dpi)));
-}
-
-void UpdateRoundedWindowRegion(
-    HWND hwnd, const Size& size, uint32_t dpi,
-    RendererStyleHandler::RendererStyleType style_type) {
-  if (hwnd == nullptr || size.width <= 0 || size.height <= 0) {
-    return;
-  }
-
-  const int radius = GetWindowCornerRadius(dpi, style_type);
-  if (radius <= 0) {
-    ::SetWindowRgn(hwnd, nullptr, TRUE);
-    return;
-  }
-  HRGN region =
-      ::CreateRoundRectRgn(0, 0, size.width + 1, size.height + 1,
-                           radius * 2, radius * 2);
-  if (region != nullptr) {
-    ::SetWindowRgn(hwnd, region, TRUE);
-  }
-}
-
 // Returns the smallest index of the given candidate list which satisfies
 // candidates.candidate(i) == |candidate_index|.
 // This function returns the size of the given candidate list when there
@@ -498,31 +467,25 @@ void CandidateWindow::OnMouseMove(UINT nFlags, CPoint point) {
 }
 
 void CandidateWindow::OnPaint(HDC dc) {
-  CRect client_rect;
-  this->GetClientRect(&client_rect);
-
-  wil::unique_hdc_paint paint_dc;
-  if (dc == nullptr) {
-    paint_dc = wil::BeginPaint(this->m_hWnd);
-  }
-  HDC target_dc = paint_dc.is_valid() ? paint_dc.get() : dc;
-
-  if (BitBltCachedBitmapTo(target_dc, client_rect)) {
+  if (dc != nullptr) {
+    DoPaint(dc, true);
     return;
   }
 
-  // Render to offline bitmap first to avoid tearing.
-  wil::unique_hdc memdc(::CreateCompatibleDC(target_dc));
-  wil::unique_hbitmap bitmap(::CreateCompatibleBitmap(
-      target_dc, client_rect.Width(), client_rect.Height()));
-  wil::unique_select_object old_bitmap =
-      wil::SelectObject(memdc.get(), bitmap.get());
-  DoPaint(memdc.get());
-  ::BitBlt(target_dc, client_rect.left, client_rect.top, client_rect.Width(),
-           client_rect.Height(), memdc.get(), 0, 0, SRCCOPY);
+  // UpdateLayeredWindow owns the on-screen candidate surface. WM_PAINT only
+  // validates the invalid region and re-presents the cache when necessary.
+  wil::unique_hdc_paint paint_dc = wil::BeginPaint(this->m_hWnd);
+  if (!cached_bitmap_valid_ && !RenderToBitmapCache()) {
+    return;
+  }
+  PresentCachedBitmapImmediately();
 }
 
-void CandidateWindow::OnPrintClient(HDC dc, UINT uFlags) { OnPaint(dc); }
+void CandidateWindow::OnPrintClient(HDC dc, UINT /*uFlags*/) {
+  if (dc != nullptr) {
+    DoPaint(dc, true);
+  }
+}
 
 bool CandidateWindow::RenderToBitmapCache() {
   ClearBitmapCache();
@@ -542,47 +505,42 @@ bool CandidateWindow::RenderToBitmapCache() {
   }
 
   wil::unique_hdc memdc(::CreateCompatibleDC(screen_dc));
-  wil::unique_hbitmap bitmap(::CreateCompatibleBitmap(
-      screen_dc, layout_size.width, layout_size.height));
+
+  uint32_t* pixels = nullptr;
+  wil::unique_hbitmap bitmap(CreateRendererLayeredWindowBitmap(
+      screen_dc, layout_size.width, layout_size.height, &pixels));
   ::ReleaseDC(nullptr, screen_dc);
 
-  if (!memdc.is_valid() || !bitmap.is_valid()) {
+  if (!memdc.is_valid() || !bitmap.is_valid() || pixels == nullptr) {
     return false;
   }
 
+  std::fill_n(pixels, static_cast<size_t>(layout_size.width) *
+                          static_cast<size_t>(layout_size.height),
+              0u);
+
   wil::unique_select_object old_bitmap =
       wil::SelectObject(memdc.get(), bitmap.get());
-  DoPaint(memdc.get());
+  DoPaint(memdc.get(), false);
+
+  // GDI may batch writes to a DIB section. Flush before touching the backing
+  // memory directly so the alpha/border pass observes the completed frame.
+  ::GdiFlush();
+
+  const RendererStyleHandler::RendererStyleType style_type =
+      GetRendererStyleType(*candidate_window_);
+  const RendererStyle style = GetCurrentRendererStyle(style_type);
+  const int corner_radius = GetRendererWindowCornerRadiusInPixels(
+      RendererStyleHandler::GetCandidateWindowCornerRadius(style_type), dpi_,
+      layout_size.width, layout_size.height);
+  ApplyRoundedRectAlphaAndBorder(pixels, layout_size.width, layout_size.height,
+                                 corner_radius, kWindowBorder,
+                                 GetFrameColor(style));
 
   cached_bitmap_ = std::move(bitmap);
   cached_bitmap_size_ = layout_size;
   cached_bitmap_valid_ = true;
   return true;
-}
-
-bool CandidateWindow::BitBltCachedBitmapTo(HDC target_dc,
-                                           const RECT& target_rect) const {
-  if (target_dc == nullptr || !cached_bitmap_valid_ ||
-      !cached_bitmap_.is_valid()) {
-    return false;
-  }
-
-  const int width = target_rect.right - target_rect.left;
-  const int height = target_rect.bottom - target_rect.top;
-  if (width <= 0 || height <= 0 || cached_bitmap_size_.width != width ||
-      cached_bitmap_size_.height != height) {
-    return false;
-  }
-
-  wil::unique_hdc memdc(::CreateCompatibleDC(target_dc));
-  if (!memdc.is_valid()) {
-    return false;
-  }
-
-  wil::unique_select_object old_bitmap =
-      wil::SelectObject(memdc.get(), cached_bitmap_.get());
-  return ::BitBlt(target_dc, target_rect.left, target_rect.top, width, height,
-                  memdc.get(), 0, 0, SRCCOPY) != FALSE;
 }
 
 void CandidateWindow::ClearBitmapCache() {
@@ -592,25 +550,23 @@ void CandidateWindow::ClearBitmapCache() {
 }
 
 void CandidateWindow::PresentCachedBitmapImmediately() {
-  if (m_hWnd == nullptr || !::IsWindow(m_hWnd)) {
+  if (m_hWnd == nullptr || !::IsWindow(m_hWnd) || !cached_bitmap_valid_ ||
+      !cached_bitmap_.is_valid() || cached_bitmap_size_.width <= 0 ||
+      cached_bitmap_size_.height <= 0) {
     return;
   }
 
-  RECT client_rect = {};
-  if (!::GetClientRect(m_hWnd, &client_rect)) {
-    return;
-  }
-
-  HDC target_dc = ::GetDC(m_hWnd);
-  if (target_dc == nullptr) {
-    return;
-  }
-
-  BitBltCachedBitmapTo(target_dc, client_rect);
-  ::ReleaseDC(m_hWnd, target_dc);
+  const RendererStyleHandler::RendererStyleType style_type =
+      GetRendererStyleType(*candidate_window_);
+  const RendererStyleHandler::CandidateWindowEffectStyle effect_style =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(style_type);
+  PresentRendererLayeredWindowBitmap(
+      m_hWnd, cached_bitmap_.get(), cached_bitmap_size_.width,
+      cached_bitmap_size_.height,
+      RendererWindowOpacityToAlpha(effect_style.opacity_percent));
 }
 
-void CandidateWindow::DoPaint(HDC dc) {
+void CandidateWindow::DoPaint(HDC dc, bool draw_frame) {
   switch (candidate_window_->category()) {
     case commands::CONVERSION:
     case commands::PREDICTION:
@@ -638,7 +594,9 @@ void CandidateWindow::DoPaint(HDC dc) {
   DrawInformationIcon(dc);
   DrawVScrollBar(dc);
   DrawFooter(dc);
-  DrawFrame(dc);
+  if (draw_frame) {
+    DrawFrame(dc);
+  }
 }
 
 void CandidateWindow::OnShowWindow(BOOL shown, UINT /*status*/) {
@@ -855,18 +813,6 @@ void CandidateWindow::UpdateLayout(
   table_layout_->FreezeLayout();
 
   RenderToBitmapCache();
-
-  if (m_hWnd != nullptr) {
-    UpdateRoundedWindowRegion(m_hWnd, table_layout_->GetTotalSize(), dpi_,
-                              GetRendererStyleType(*candidate_window_));
-  }
-}
-
-void CandidateWindow::RedrawImmediately() {
-  if (m_hWnd != nullptr && ::IsWindow(m_hWnd)) {
-    ::RedrawWindow(m_hWnd, nullptr, nullptr,
-                   RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-  }
 }
 
 void CandidateWindow::UpdateEffectWindows() {
@@ -877,7 +823,6 @@ void CandidateWindow::UpdateEffectWindows() {
       GetRendererStyleType(*candidate_window_);
   const RendererStyleHandler::CandidateWindowEffectStyle effect_style =
       RendererStyleHandler::GetCandidateWindowEffectStyle(style_type);
-  ApplyRendererWindowOpacity(m_hWnd, effect_style.opacity_percent);
   RECT window_rect = {};
   if (!::GetWindowRect(m_hWnd, &window_rect)) {
     shadow_window_.Hide();
@@ -888,10 +833,11 @@ void CandidateWindow::UpdateEffectWindows() {
   shadow_style.opacity_percent = effect_style.shadow.opacity_percent;
   shadow_style.angle_degrees = effect_style.shadow.angle_degrees;
   shadow_style.distance = effect_style.shadow.distance;
-  shadow_window_.Update(m_hWnd, window_rect, dpi_,
-                        RendererStyleHandler::GetCandidateWindowCornerRadius(
-                            style_type),
-                        shadow_style);
+  const int corner_radius = GetRendererWindowCornerRadiusInPixels(
+      RendererStyleHandler::GetCandidateWindowCornerRadius(style_type), dpi_,
+      window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
+  shadow_window_.Update(m_hWnd, window_rect, dpi_, corner_radius, shadow_style,
+                        shadow_z_order_anchor_);
 }
 
 void CandidateWindow::SetSendCommandInterface(
@@ -1116,8 +1062,10 @@ void CandidateWindow::DrawSelectedRect(HDC dc) {
 
     selected_rect.DeflateRect(4, 1);
 
-    const int radius = GetWindowCornerRadius(
-        dpi_, GetRendererStyleType(*candidate_window_));
+    const int radius = GetRendererWindowCornerRadiusInPixels(
+        RendererStyleHandler::GetCandidateWindowCornerRadius(
+            GetRendererStyleType(*candidate_window_)),
+        dpi_, selected_rect.Width(), selected_rect.Height());
 
     wil::unique_select_object prev_pen =
         wil::SelectObject(dc, static_cast<HPEN>(::GetStockObject(DC_PEN)));
@@ -1170,8 +1118,10 @@ void CandidateWindow::DrawFrame(HDC dc) {
   const Rect client_rect(Point(0, 0), table_layout_->GetTotalSize());
   const CRect client_crect = ToCRect(client_rect);
 
-  const int radius = GetWindowCornerRadius(
-        dpi_, GetRendererStyleType(*candidate_window_));
+  const int radius = GetRendererWindowCornerRadiusInPixels(
+      RendererStyleHandler::GetCandidateWindowCornerRadius(
+          GetRendererStyleType(*candidate_window_)),
+      dpi_, client_crect.Width(), client_crect.Height());
 
   wil::unique_select_object prev_pen =
       wil::SelectObject(dc, static_cast<HPEN>(::GetStockObject(DC_PEN)));

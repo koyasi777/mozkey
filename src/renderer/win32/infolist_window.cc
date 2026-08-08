@@ -35,6 +35,8 @@
 #include <wil/resource.h>
 #include <windows.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -101,9 +103,11 @@ void InfolistWindow::UpdateDpi(uint32_t dpi) {
   GetScaledRendererStyleForWindowType(
       RendererStyleHandler::RendererStyleType::kCandidate, style_.get(), dpi_);
   text_renderer_->OnDpiChanged(dpi_);
+  ClearBitmapCache();
 }
 
 void InfolistWindow::OnDestroy() {
+  ClearBitmapCache();
   shadow_window_.Destroy();
   // PostQuitMessage may stop the message loop even though other
   // windows are not closed. WindowManager should close these windows
@@ -126,29 +130,27 @@ void InfolistWindow::OnGetMinMaxInfo(MINMAXINFO* min_max_info) {
 }
 
 void InfolistWindow::OnPaint(HDC dc) {
-  CRect client_rect;
-  this->GetClientRect(&client_rect);
-
-  wil::unique_hdc_paint paint_dc;
-  if (dc == nullptr) {
-    paint_dc = wil::BeginPaint(this->m_hWnd);
+  if (dc != nullptr) {
+    DoPaint(dc, true);
+    return;
   }
-  HDC target_dc = paint_dc.is_valid() ? paint_dc.get() : dc;
 
-  // Render to off-screen bitmap first to avoid tearing.
-  wil::unique_hdc memdc(::CreateCompatibleDC(target_dc));
-  wil::unique_hbitmap bitmap(::CreateCompatibleBitmap(
-      target_dc, client_rect.Width(), client_rect.Height()));
-  wil::unique_select_object old_bitmap =
-      wil::SelectObject(memdc.get(), bitmap.get());
-  DoPaint(memdc.get());
-  ::BitBlt(target_dc, client_rect.left, client_rect.top, client_rect.Width(),
-           client_rect.Height(), memdc.get(), 0, 0, SRCCOPY);
+  // The on-screen surface belongs to UpdateLayeredWindow. WM_PAINT only
+  // validates the region and restores the cached layered surface if needed.
+  wil::unique_hdc_paint paint_dc = wil::BeginPaint(this->m_hWnd);
+  if (!cached_bitmap_valid_ && !RenderToBitmapCache()) {
+    return;
+  }
+  PresentCachedBitmapImmediately();
 }
 
-void InfolistWindow::OnPrintClient(HDC dc, UINT uFlags) { OnPaint(dc); }
+void InfolistWindow::OnPrintClient(HDC dc, UINT /*uFlags*/) {
+  if (dc != nullptr) {
+    DoPaint(dc, true);
+  }
+}
 
-Size InfolistWindow::DoPaint(HDC dc) {
+Size InfolistWindow::DoPaint(HDC dc, bool draw_frame) {
   if (dc != nullptr) {
     ::SetBkMode(dc, TRANSPARENT);
   }
@@ -193,12 +195,26 @@ Size InfolistWindow::DoPaint(HDC dc) {
   }
   ypos += infostyle.window_border();
 
-  if (dc != nullptr) {
+  if (dc != nullptr && draw_frame) {
     const CRect rect(0, 0, infostyle.window_width(), ypos);
-    ::SetDCBrushColor(
-        dc, RGB(infostyle.border_color().r(), infostyle.border_color().g(),
-                infostyle.border_color().b()));
-    ::FrameRect(dc, &rect, static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
+    const COLORREF border_color =
+        RGB(infostyle.border_color().r(), infostyle.border_color().g(),
+            infostyle.border_color().b());
+    const int corner_radius = GetRendererWindowCornerRadiusInPixels(
+        RendererStyleHandler::GetCandidateWindowCornerRadius(
+            RendererStyleHandler::RendererStyleType::kCandidate),
+        dpi_, rect.Width(), rect.Height());
+    wil::unique_select_object old_brush = wil::SelectObject(
+        dc, static_cast<HBRUSH>(::GetStockObject(HOLLOW_BRUSH)));
+    wil::unique_select_object old_pen =
+        wil::SelectObject(dc, static_cast<HPEN>(::GetStockObject(DC_PEN)));
+    ::SetDCPenColor(dc, border_color);
+    if (corner_radius <= 0) {
+      ::Rectangle(dc, rect.left, rect.top, rect.right, rect.bottom);
+    } else {
+      ::RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom,
+                  corner_radius * 2, corner_radius * 2);
+    }
   }
 
   return Size(style_->infolist_style().window_width(), ypos);
@@ -313,6 +329,7 @@ void InfolistWindow::OnSettingChange(UINT uFlags, LPCTSTR /*lpszSection*/) {
     case SPI_SETFONTSMOOTHINGTYPE:
     case SPI_SETNONCLIENTMETRICS:
       metrics_changed_ = true;
+      ClearBitmapCache();
       break;
     default:
       // We ignore other changes.
@@ -335,6 +352,9 @@ void InfolistWindow::DelayShow(UINT mseconds) {
   visible_ = true;
   KillTimer(kIdDelayShowHideTimer);
   if (mseconds <= 0) {
+    // Prepare the layered pixels before exposing the window so delayed usage
+    // UI cannot flash an empty or rectangular first frame.
+    PresentCachedBitmapImmediately();
     SetWindowPos(HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     SendMessageW(WM_NCACTIVATE, FALSE);
@@ -357,6 +377,7 @@ void InfolistWindow::DelayHide(UINT mseconds) {
 
 void InfolistWindow::UpdateLayout(
     const commands::CandidateWindow& candidate_window) {
+  ClearBitmapCache();
   *candidate_window_ = candidate_window;
 
   // InfolistWindow caches both RendererStyle and TextRenderer.  Mozkey's
@@ -366,7 +387,95 @@ void InfolistWindow::UpdateLayout(
       RendererStyleHandler::RendererStyleType::kCandidate, style_.get(), dpi_);
   text_renderer_->OnThemeChanged();
   metrics_changed_ = false;
-  UpdateEffectWindows();
+  RenderToBitmapCache();
+}
+
+bool InfolistWindow::RenderToBitmapCache() {
+  ClearBitmapCache();
+  if (metrics_changed_) {
+    GetScaledRendererStyleForWindowType(
+        RendererStyleHandler::RendererStyleType::kCandidate, style_.get(),
+        dpi_);
+    text_renderer_->OnThemeChanged();
+    metrics_changed_ = false;
+  }
+  const Size layout_size = DoPaint(nullptr, false);
+  if (layout_size.width <= 0 || layout_size.height <= 0) {
+    return false;
+  }
+
+  HDC screen_dc = ::GetDC(nullptr);
+  if (screen_dc == nullptr) {
+    return false;
+  }
+  wil::unique_hdc memory_dc(::CreateCompatibleDC(screen_dc));
+  uint32_t* pixels = nullptr;
+  wil::unique_hbitmap bitmap(CreateRendererLayeredWindowBitmap(
+      screen_dc, layout_size.width, layout_size.height, &pixels));
+  ::ReleaseDC(nullptr, screen_dc);
+  if (!memory_dc.is_valid() || !bitmap.is_valid() || pixels == nullptr) {
+    return false;
+  }
+
+  std::fill_n(pixels, static_cast<size_t>(layout_size.width) *
+                          static_cast<size_t>(layout_size.height),
+              0u);
+  wil::unique_select_object old_bitmap =
+      wil::SelectObject(memory_dc.get(), bitmap.get());
+
+  const RendererStyle::InfolistStyle& infostyle = style_->infolist_style();
+  COLORREF background_color = kDefaultBackgroundColor;
+  if (infostyle.title_style().has_background_color()) {
+    const RendererStyle::RGBAColor& background =
+        infostyle.title_style().background_color();
+    background_color = RGB(background.r(), background.g(), background.b());
+  }
+  const RECT background_rect = {0, 0, layout_size.width, layout_size.height};
+  FillSolidRect(memory_dc.get(), &background_rect, background_color);
+  DoPaint(memory_dc.get(), false);
+  ::GdiFlush();
+
+  const int corner_radius = GetRendererWindowCornerRadiusInPixels(
+      RendererStyleHandler::GetCandidateWindowCornerRadius(
+          RendererStyleHandler::RendererStyleType::kCandidate),
+      dpi_, layout_size.width, layout_size.height);
+  const COLORREF border_color =
+      RGB(infostyle.border_color().r(), infostyle.border_color().g(),
+          infostyle.border_color().b());
+  ApplyRoundedRectAlphaAndBorder(pixels, layout_size.width, layout_size.height,
+                                 corner_radius, /*border_width=*/1,
+                                 border_color);
+
+  cached_bitmap_ = std::move(bitmap);
+  cached_bitmap_size_ = layout_size;
+  cached_bitmap_valid_ = true;
+  return true;
+}
+
+void InfolistWindow::ClearBitmapCache() {
+  cached_bitmap_.reset();
+  cached_bitmap_size_ = Size(0, 0);
+  cached_bitmap_valid_ = false;
+}
+
+void InfolistWindow::PresentCachedBitmapImmediately() {
+  if (m_hWnd == nullptr || !::IsWindow(m_hWnd)) {
+    return;
+  }
+  if (!cached_bitmap_valid_ && !RenderToBitmapCache()) {
+    return;
+  }
+  if (!cached_bitmap_.is_valid() || cached_bitmap_size_.width <= 0 ||
+      cached_bitmap_size_.height <= 0) {
+    return;
+  }
+  const RendererStyleHandler::CandidateWindowEffectStyle effect_style =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(
+          RendererStyleHandler::RendererStyleType::kCandidate);
+  PresentRendererLayeredWindowBitmap(
+      m_hWnd, cached_bitmap_.get(), cached_bitmap_size_.width,
+      cached_bitmap_size_.height,
+      RendererWindowOpacityToAlpha(effect_style.opacity_percent));
 }
 
 void InfolistWindow::UpdateEffectWindows() {
@@ -376,7 +485,7 @@ void InfolistWindow::UpdateEffectWindows() {
   const RendererStyleHandler::CandidateWindowEffectStyle effect_style =
       RendererStyleHandler::GetCandidateWindowEffectStyle(
           RendererStyleHandler::RendererStyleType::kCandidate);
-  ApplyRendererWindowOpacity(m_hWnd, effect_style.opacity_percent);
+  PresentCachedBitmapImmediately();
   RECT window_rect = {};
   if (!::GetWindowRect(m_hWnd, &window_rect)) {
     shadow_window_.Hide();
@@ -387,11 +496,13 @@ void InfolistWindow::UpdateEffectWindows() {
   shadow_style.opacity_percent = effect_style.shadow.opacity_percent;
   shadow_style.angle_degrees = effect_style.shadow.angle_degrees;
   shadow_style.distance = effect_style.shadow.distance;
-  shadow_window_.Update(
-      m_hWnd, window_rect, dpi_,
+  const int corner_radius = GetRendererWindowCornerRadiusInPixels(
       RendererStyleHandler::GetCandidateWindowCornerRadius(
           RendererStyleHandler::RendererStyleType::kCandidate),
-      shadow_style);
+      dpi_, window_rect.right - window_rect.left,
+      window_rect.bottom - window_rect.top);
+  shadow_window_.Update(m_hWnd, window_rect, dpi_, corner_radius, shadow_style,
+                        shadow_z_order_anchor_);
 }
 
 void InfolistWindow::SetSendCommandInterface(
@@ -399,7 +510,12 @@ void InfolistWindow::SetSendCommandInterface(
   send_command_interface_ = send_command_interface;
 }
 
-Size InfolistWindow::GetLayoutSize() { return DoPaint(nullptr); }
+Size InfolistWindow::GetLayoutSize() {
+  if (cached_bitmap_valid_) {
+    return cached_bitmap_size_;
+  }
+  return DoPaint(nullptr, false);
+}
 }  // namespace win32
 }  // namespace renderer
 }  // namespace mozc

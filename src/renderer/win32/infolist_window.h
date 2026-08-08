@@ -33,6 +33,7 @@
 #include <atlbase.h>
 #include <atltypes.h>
 #include <atlwin.h>
+#include <wil/resource.h>
 #include <windows.h>
 
 #include <cstdint>
@@ -52,7 +53,8 @@ namespace renderer {
 namespace win32 {
 
 typedef ATL::CWinTraits<WS_POPUP | WS_DISABLED,
-                        WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE>
+                        WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST |
+                            WS_EX_NOACTIVATE>
     InfolistWindowTraits;
 
 // a class which implements an IME infolist window for Windows. This class
@@ -95,7 +97,9 @@ class InfolistWindow : public ATL::CWindowImpl<InfolistWindow, ATL::CWindow,
   void UpdateDpi(uint32_t dpi);
 
   void UpdateLayout(const commands::CandidateWindow& candidates);
+  void PresentCachedBitmapImmediately();
   void UpdateEffectWindows();
+  void SetShadowZOrderAnchor(HWND hwnd) { shadow_z_order_anchor_ = hwnd; }
   void SetSendCommandInterface(
       client::SendCommandInterface* send_command_interface);
 
@@ -106,8 +110,10 @@ class InfolistWindow : public ATL::CWindowImpl<InfolistWindow, ATL::CWindow,
   void DelayHide(UINT mseconds);
 
  private:
-  Size DoPaint(HDC dc);
+  Size DoPaint(HDC dc, bool draw_frame);
   Size DoPaintRow(HDC dc, int row, int ypos);
+  bool RenderToBitmapCache();
+  void ClearBitmapCache();
 
   inline LRESULT OnDestroy(UINT msg_id, WPARAM wparam, LPARAM lparam,
                            BOOL& handled) {
@@ -157,6 +163,10 @@ class InfolistWindow : public ATL::CWindowImpl<InfolistWindow, ATL::CWindow,
   std::unique_ptr<renderer::RendererStyle> style_;
   bool metrics_changed_;
   bool visible_;
+  wil::unique_hbitmap cached_bitmap_;
+  Size cached_bitmap_size_;
+  bool cached_bitmap_valid_ = false;
+  HWND shadow_z_order_anchor_ = nullptr;
   RendererShadowWindow shadow_window_;
 };
 
