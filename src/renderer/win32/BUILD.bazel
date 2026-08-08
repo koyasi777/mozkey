@@ -242,6 +242,7 @@ mozc_cc_library(
         "//protocol:config_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_style_handler",
+        "@com_microsoft_wil//:wil",
     ],
 )
 

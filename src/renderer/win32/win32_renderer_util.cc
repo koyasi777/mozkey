@@ -110,10 +110,28 @@ double SignedDistanceFromRoundedRect(double x, double y, double width,
   const double qy = std::abs(y - half_height) - (half_height - radius);
   const double outside_x = std::max(qx, 0.0);
   const double outside_y = std::max(qy, 0.0);
-  const double outside_distance =
-      std::sqrt(outside_x * outside_x + outside_y * outside_y);
+  double outside_distance = 0.0;
+  if (outside_x > 0.0 || outside_y > 0.0) {
+    outside_distance =
+        std::sqrt(outside_x * outside_x + outside_y * outside_y);
+  }
   const double inside_distance = std::min(std::max(qx, qy), 0.0);
   return outside_distance + inside_distance - radius;
+}
+
+// Converts signed distance at a pixel center to one-pixel-wide antialias
+// coverage. A pixel centered at least half a pixel inside is fully covered; a
+// pixel centered at least half a pixel outside is fully transparent.
+double RoundedRectCoverage(double x, double y, double width, double height,
+                           double radius) {
+  return std::clamp(
+      0.5 - SignedDistanceFromRoundedRect(x, y, width, height, radius), 0.0,
+      1.0);
+}
+
+uint8_t ClampToByte(double value) {
+  return static_cast<uint8_t>(
+      std::clamp(std::lround(value), 0l, 255l));
 }
 
 constexpr double kPi = 3.14159265358979323846;
@@ -687,6 +705,170 @@ bool GetWorkingAreaFromPoint(const POINT& point, RECT* working_area) {
   return GetWorkingAreaFromPointImpl(point, working_area);
 }
 
+BYTE RendererWindowOpacityToAlpha(uint32_t opacity_percent) {
+  const uint32_t clamped =
+      std::clamp(opacity_percent, kMinOpacityPercent, kMaxOpacityPercent);
+  return static_cast<BYTE>(clamped * 255u / 100u);
+}
+
+int GetRendererWindowCornerRadiusInPixels(uint32_t logical_radius, uint32_t dpi,
+                                          int width, int height) {
+  if (logical_radius == 0 || width <= 0 || height <= 0) {
+    return 0;
+  }
+  const int scaled_radius =
+      std::max(0, ScaleLogicalPixel(static_cast<int>(logical_radius), dpi));
+  return std::min(scaled_radius, std::min(width, height) / 2);
+}
+
+HBITMAP CreateRendererLayeredWindowBitmap(HDC reference_dc, int width,
+                                          int height, uint32_t** pixels) {
+  if (pixels == nullptr) {
+    return nullptr;
+  }
+  *pixels = nullptr;
+  if (reference_dc == nullptr || width <= 0 || height <= 0) {
+    return nullptr;
+  }
+
+  BITMAPINFO bitmap_info = {};
+  bitmap_info.bmiHeader.biSize = sizeof(bitmap_info.bmiHeader);
+  bitmap_info.bmiHeader.biWidth = width;
+  bitmap_info.bmiHeader.biHeight = -height;  // top-down DIB
+  bitmap_info.bmiHeader.biPlanes = 1;
+  bitmap_info.bmiHeader.biBitCount = 32;
+  bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+  void* bits = nullptr;
+  HBITMAP bitmap = ::CreateDIBSection(reference_dc, &bitmap_info, DIB_RGB_COLORS,
+                                      &bits, nullptr, 0);
+  if (bitmap == nullptr || bits == nullptr) {
+    if (bitmap != nullptr) {
+      ::DeleteObject(bitmap);
+    }
+    return nullptr;
+  }
+
+  *pixels = static_cast<uint32_t*>(bits);
+  return bitmap;
+}
+
+bool PresentRendererLayeredWindowBitmap(HWND hwnd, HBITMAP bitmap, int width,
+                                        int height, BYTE opacity) {
+  if (hwnd == nullptr || !::IsWindow(hwnd) || bitmap == nullptr || width <= 0 ||
+      height <= 0) {
+    return false;
+  }
+
+  RECT window_rect = {};
+  if (!::GetWindowRect(hwnd, &window_rect)) {
+    return false;
+  }
+
+  HDC screen_dc = ::GetDC(nullptr);
+  if (screen_dc == nullptr) {
+    return false;
+  }
+  HDC memory_dc = ::CreateCompatibleDC(screen_dc);
+  if (memory_dc == nullptr) {
+    ::ReleaseDC(nullptr, screen_dc);
+    return false;
+  }
+
+  HGDIOBJ old_bitmap = ::SelectObject(memory_dc, bitmap);
+  if (old_bitmap == nullptr || old_bitmap == HGDI_ERROR) {
+    ::DeleteDC(memory_dc);
+    ::ReleaseDC(nullptr, screen_dc);
+    return false;
+  }
+
+  POINT destination = {window_rect.left, window_rect.top};
+  POINT source = {0, 0};
+  SIZE size = {width, height};
+  BLENDFUNCTION blend = {AC_SRC_OVER, 0, opacity, AC_SRC_ALPHA};
+  const BOOL updated = ::UpdateLayeredWindow(
+      hwnd, screen_dc, &destination, &size, memory_dc, &source, 0, &blend,
+      ULW_ALPHA);
+  const DWORD update_error = updated ? ERROR_SUCCESS : ::GetLastError();
+
+  ::SelectObject(memory_dc, old_bitmap);
+  ::DeleteDC(memory_dc);
+  ::ReleaseDC(nullptr, screen_dc);
+
+  if (!updated) {
+    LOG(ERROR) << "UpdateLayeredWindow failed. Error: " << update_error;
+    return false;
+  }
+  return true;
+}
+
+void ApplyRoundedRectAlphaAndBorder(uint32_t* pixels, int width, int height,
+                                    int corner_radius, int border_width,
+                                    COLORREF border_color) {
+  if (pixels == nullptr || width <= 0 || height <= 0) {
+    return;
+  }
+
+  const double outer_width = static_cast<double>(width);
+  const double outer_height = static_cast<double>(height);
+  const double radius = std::clamp(
+      static_cast<double>(corner_radius), 0.0,
+      std::min(outer_width, outer_height) / 2.0);
+  const double border = std::clamp(
+      static_cast<double>(border_width), 0.0,
+      std::min(outer_width, outer_height) / 2.0);
+  const double inner_width = std::max(0.0, outer_width - border * 2.0);
+  const double inner_height = std::max(0.0, outer_height - border * 2.0);
+  const double inner_radius = std::max(0.0, radius - border);
+
+  const double border_r = static_cast<double>(GetRValue(border_color));
+  const double border_g = static_cast<double>(GetGValue(border_color));
+  const double border_b = static_cast<double>(GetBValue(border_color));
+
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      const double pixel_x = static_cast<double>(x) + 0.5;
+      const double pixel_y = static_cast<double>(y) + 0.5;
+      const double outer_coverage = RoundedRectCoverage(
+          pixel_x, pixel_y, outer_width, outer_height, radius);
+
+      double inner_coverage = 0.0;
+      if (border <= 0.0) {
+        inner_coverage = outer_coverage;
+      } else if (inner_width > 0.0 && inner_height > 0.0) {
+        inner_coverage = RoundedRectCoverage(
+            pixel_x - border, pixel_y - border, inner_width, inner_height,
+            inner_radius);
+        // Numerical noise must never make the nested inner shape cover more
+        // than the outer shape.
+        inner_coverage = std::min(inner_coverage, outer_coverage);
+      }
+
+      const double border_coverage = outer_coverage - inner_coverage;
+      const uint32_t source = pixels[y * width + x];
+      const double source_r = static_cast<double>((source >> 16) & 0xff);
+      const double source_g = static_cast<double>((source >> 8) & 0xff);
+      const double source_b = static_cast<double>(source & 0xff);
+
+      // PBGRA stores color channels already multiplied by alpha. The source
+      // candidate surface is opaque before this pass, so the two coverages can
+      // directly weight the content and analytical border colors.
+      const uint8_t alpha = ClampToByte(outer_coverage * 255.0);
+      const uint8_t red = ClampToByte(source_r * inner_coverage +
+                                      border_r * border_coverage);
+      const uint8_t green = ClampToByte(source_g * inner_coverage +
+                                        border_g * border_coverage);
+      const uint8_t blue = ClampToByte(source_b * inner_coverage +
+                                       border_b * border_coverage);
+
+      pixels[y * width + x] =
+          (static_cast<uint32_t>(alpha) << 24) |
+          (static_cast<uint32_t>(red) << 16) |
+          (static_cast<uint32_t>(green) << 8) | static_cast<uint32_t>(blue);
+    }
+  }
+}
+
 std::unique_ptr<WindowPositionEmulator> WindowPositionEmulator::Create() {
   return std::make_unique<WindowPositionEmulatorImpl>();
 }
@@ -718,10 +900,9 @@ void ApplyRendererWindowOpacity(HWND hwnd, uint32_t opacity_percent) {
   if (hwnd == nullptr) {
     return;
   }
-  opacity_percent = std::clamp(opacity_percent, kMinOpacityPercent,
-                               kMaxOpacityPercent);
+  const BYTE alpha = RendererWindowOpacityToAlpha(opacity_percent);
   LONG_PTR ex_style = ::GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-  if (opacity_percent >= 100) {
+  if (alpha >= 255) {
     if ((ex_style & WS_EX_LAYERED) != 0) {
       ::SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_LAYERED);
       ::RedrawWindow(hwnd, nullptr, nullptr,
@@ -733,8 +914,6 @@ void ApplyRendererWindowOpacity(HWND hwnd, uint32_t opacity_percent) {
   if ((ex_style & WS_EX_LAYERED) == 0) {
     ::SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED);
   }
-  const BYTE alpha = static_cast<BYTE>(
-      std::clamp(opacity_percent * 255u / 100u, 1u, 255u));
   ::SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
 }
 
@@ -754,8 +933,9 @@ void RendererShadowWindow::Hide() {
 }
 
 bool RendererShadowWindow::Update(HWND owner_window, const RECT& owner_rect,
-                                  uint32_t dpi, uint32_t owner_corner_radius,
-                                  const RendererWindowShadowStyle& style) {
+                                  uint32_t dpi, int owner_corner_radius_pixels,
+                                  const RendererWindowShadowStyle& style,
+                                  HWND z_order_anchor_window) {
   if (owner_window == nullptr || !::IsWindow(owner_window) ||
       !::IsWindowVisible(owner_window)) {
     Hide();
@@ -805,11 +985,9 @@ bool RendererShadowWindow::Update(HWND owner_window, const RECT& owner_rect,
   const int right_margin = shadow_size + std::max(shadow_dx, 0);
   const int top_margin = shadow_size + std::max(-shadow_dy, 0);
   const int bottom_margin = shadow_size + std::max(shadow_dy, 0);
-  const int corner_radius = static_cast<int>(
-      ScaleLogicalPixel(std::min(owner_corner_radius,
-                                 static_cast<uint32_t>(std::min(owner_width,
-                                                                owner_height) / 2)),
-                        dpi));
+  const int corner_radius =
+      std::clamp(owner_corner_radius_pixels, 0,
+                 std::min(owner_width, owner_height) / 2);
   const int width = owner_width + left_margin + right_margin;
   const int height = owner_height + top_margin + bottom_margin;
   if (width <= 0 || height <= 0) {
@@ -827,29 +1005,18 @@ bool RendererShadowWindow::Update(HWND owner_window, const RECT& owner_rect,
     return false;
   }
 
-  BITMAPINFO bitmap_info = {};
-  bitmap_info.bmiHeader.biSize = sizeof(bitmap_info.bmiHeader);
-  bitmap_info.bmiHeader.biWidth = width;
-  bitmap_info.bmiHeader.biHeight = -height;  // top-down DIB
-  bitmap_info.bmiHeader.biPlanes = 1;
-  bitmap_info.bmiHeader.biBitCount = 32;
-  bitmap_info.bmiHeader.biCompression = BI_RGB;
-
-  void* bits = nullptr;
-  HBITMAP bitmap = ::CreateDIBSection(screen_dc, &bitmap_info, DIB_RGB_COLORS,
-                                      &bits, nullptr, 0);
-  if (bitmap == nullptr || bits == nullptr) {
-    if (bitmap != nullptr) {
-      ::DeleteObject(bitmap);
-    }
+  uint32_t* pixels = nullptr;
+  HBITMAP bitmap =
+      CreateRendererLayeredWindowBitmap(screen_dc, width, height, &pixels);
+  if (bitmap == nullptr || pixels == nullptr) {
     ::DeleteDC(memory_dc);
     ::ReleaseDC(nullptr, screen_dc);
     return false;
   }
 
-  DrawShadowBitmap(static_cast<uint32_t*>(bits), width, height, owner_width,
-                   owner_height, shadow_size, shadow_dx, shadow_dy, left_margin,
-                   top_margin, corner_radius, shadow_opacity);
+  DrawShadowBitmap(pixels, width, height, owner_width, owner_height,
+                   shadow_size, shadow_dx, shadow_dy, left_margin, top_margin,
+                   corner_radius, shadow_opacity);
 
   HGDIOBJ old_bitmap = ::SelectObject(memory_dc, bitmap);
   POINT dst = {owner_rect.left - left_margin, owner_rect.top - top_margin};
@@ -870,8 +1037,21 @@ bool RendererShadowWindow::Update(HWND owner_window, const RECT& owner_rect,
     return false;
   }
 
-  ::SetWindowPos(hwnd_, owner_window, 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  HWND z_order_anchor = owner_window;
+  if (z_order_anchor_window != nullptr &&
+      ::IsWindow(z_order_anchor_window) &&
+      ::IsWindowVisible(z_order_anchor_window)) {
+    z_order_anchor = z_order_anchor_window;
+  }
+  if (!::SetWindowPos(
+          hwnd_, z_order_anchor, 0, 0, 0, 0,
+          SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW)) {
+    const DWORD error = ::GetLastError();
+    LOG(ERROR) << "SetWindowPos failed for renderer shadow Z-order. Error: "
+               << error;
+    Hide();
+    return false;
+  }
   return true;
 }
 

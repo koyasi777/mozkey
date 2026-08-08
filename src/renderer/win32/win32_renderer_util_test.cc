@@ -36,6 +36,7 @@
 #include <bit>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
@@ -270,6 +271,110 @@ TEST(Win32RendererUtilTest, GetCompositionTargetInPhysicalCoordsTest) {
         app_info, 22, &top_left, &line_height));
     EXPECT_EQ(static_cast<int>(22 * scale_factor), line_height);
   }
+}
+
+TEST(Win32RendererUtilTest, RendererWindowOpacityToAlphaClampsAndScales) {
+  EXPECT_EQ(51, RendererWindowOpacityToAlpha(0));
+  EXPECT_EQ(51, RendererWindowOpacityToAlpha(20));
+  EXPECT_EQ(127, RendererWindowOpacityToAlpha(50));
+  EXPECT_EQ(229, RendererWindowOpacityToAlpha(90));
+  EXPECT_EQ(252, RendererWindowOpacityToAlpha(99));
+  EXPECT_EQ(255, RendererWindowOpacityToAlpha(100));
+  EXPECT_EQ(255, RendererWindowOpacityToAlpha(999));
+}
+
+TEST(Win32RendererUtilTest, RendererWindowCornerRadiusScalesAcrossDpi) {
+  struct TestCase {
+    uint32_t logical_radius;
+    uint32_t dpi;
+    int expected_radius;
+  };
+  constexpr TestCase kCases[] = {
+      {0, 96, 0},   {0, 120, 0},  {0, 144, 0},  {0, 168, 0},
+      {0, 192, 0},  {4, 96, 4},   {4, 120, 5},  {4, 144, 6},
+      {4, 168, 7},  {4, 192, 8},  {6, 96, 6},   {6, 120, 8},
+      {6, 144, 9},  {6, 168, 11}, {6, 192, 12}, {8, 96, 8},
+      {8, 120, 10}, {8, 144, 12}, {8, 168, 14}, {8, 192, 16},
+      {12, 96, 12}, {12, 120, 15}, {12, 144, 18}, {12, 168, 21},
+      {12, 192, 24},
+  };
+  constexpr int kWidth = 200;
+  constexpr int kHeight = 100;
+
+  for (const TestCase& test_case : kCases) {
+    EXPECT_EQ(test_case.expected_radius,
+              GetRendererWindowCornerRadiusInPixels(
+                  test_case.logical_radius, test_case.dpi, kWidth, kHeight))
+        << "logical_radius=" << test_case.logical_radius
+        << " dpi=" << test_case.dpi;
+  }
+}
+
+TEST(Win32RendererUtilTest, RendererWindowCornerRadiusClampsToOwnerGeometry) {
+  EXPECT_EQ(0, GetRendererWindowCornerRadiusInPixels(0, 192, 20, 14));
+  EXPECT_EQ(0, GetRendererWindowCornerRadiusInPixels(12, 192, 0, 14));
+  EXPECT_EQ(0, GetRendererWindowCornerRadiusInPixels(12, 192, 20, 0));
+  EXPECT_EQ(7, GetRendererWindowCornerRadiusInPixels(12, 192, 20, 14));
+}
+
+TEST(Win32RendererUtilTest, RoundedRectMaskKeepsOpaqueInteriorAndBorder) {
+  constexpr int kWidth = 5;
+  constexpr int kHeight = 5;
+  constexpr uint32_t kContent = 0x00112233;
+  std::vector<uint32_t> pixels(kWidth * kHeight, kContent);
+
+  ApplyRoundedRectAlphaAndBorder(pixels.data(), kWidth, kHeight,
+                                 /*corner_radius=*/0, /*border_width=*/1,
+                                 RGB(0xaa, 0xbb, 0xcc));
+
+  EXPECT_EQ(0xffaabbccu, pixels[2]);
+  EXPECT_EQ(0xffaabbccu, pixels[2 * kWidth]);
+  EXPECT_EQ(0xff112233u, pixels[2 * kWidth + 2]);
+}
+
+TEST(Win32RendererUtilTest, RoundedRectMaskAntialiasesAndPremultiplies) {
+  constexpr int kWidth = 7;
+  constexpr int kHeight = 7;
+  std::vector<uint32_t> pixels(kWidth * kHeight, 0x00ffffffu);
+
+  ApplyRoundedRectAlphaAndBorder(pixels.data(), kWidth, kHeight,
+                                 /*corner_radius=*/3, /*border_width=*/0,
+                                 RGB(0, 0, 0));
+
+  EXPECT_EQ(0u, pixels[0]);
+  EXPECT_EQ(0xffffffffu, pixels[3]);
+  EXPECT_EQ(0xffffffffu, pixels[3 * kWidth + 3]);
+
+  const uint32_t edge = pixels[1];
+  const uint32_t alpha = (edge >> 24) & 0xff;
+  const uint32_t red = (edge >> 16) & 0xff;
+  const uint32_t green = (edge >> 8) & 0xff;
+  const uint32_t blue = edge & 0xff;
+  EXPECT_GT(alpha, 0u);
+  EXPECT_LT(alpha, 255u);
+  EXPECT_EQ(alpha, red);
+  EXPECT_EQ(alpha, green);
+  EXPECT_EQ(alpha, blue);
+
+  EXPECT_EQ(pixels[1], pixels[kWidth - 2]);
+  EXPECT_EQ(pixels[1], pixels[(kHeight - 1) * kWidth + 1]);
+  EXPECT_EQ(pixels[1], pixels[kHeight * kWidth - 2]);
+}
+
+TEST(Win32RendererUtilTest, RoundedRectMaskClampsOversizedRadius) {
+  constexpr int kWidth = 4;
+  constexpr int kHeight = 4;
+  std::vector<uint32_t> clamped(kWidth * kHeight, 0x00ffffffu);
+  std::vector<uint32_t> oversized(kWidth * kHeight, 0x00ffffffu);
+
+  ApplyRoundedRectAlphaAndBorder(clamped.data(), kWidth, kHeight,
+                                 /*corner_radius=*/2, /*border_width=*/0,
+                                 RGB(0, 0, 0));
+  ApplyRoundedRectAlphaAndBorder(oversized.data(), kWidth, kHeight,
+                                 /*corner_radius=*/100, /*border_width=*/0,
+                                 RGB(0, 0, 0));
+
+  EXPECT_EQ(clamped, oversized);
 }
 
 TEST(Win32RendererUtilTest, GetScalingFactorTest) {
