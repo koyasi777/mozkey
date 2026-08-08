@@ -134,6 +134,25 @@ TEST_F(RendererServerTest, UsesRubySpacingDefaultsWhenFieldsAreAbsent) {
   EXPECT_EQ(4u, style.composition_gap);
 }
 
+TEST_F(RendererServerTest,
+       UsesLiveConversionRubyVisibilityDefaultWhenFieldIsAbsent) {
+  config::Config input = config::ConfigHandler::DefaultConfig();
+  input.clear_show_live_conversion_ruby_window();
+  config::ConfigHandler::SetConfig(input);
+
+  TestRendererServer server;
+  EXPECT_TRUE(RendererStyleHandler::GetRubyWindowStyle().enabled);
+}
+
+TEST_F(RendererServerTest, AppliesLiveConversionRubyVisibilityConfig) {
+  config::Config input = config::ConfigHandler::DefaultConfig();
+  input.set_show_live_conversion_ruby_window(false);
+  config::ConfigHandler::SetConfig(input);
+
+  TestRendererServer server;
+  EXPECT_FALSE(RendererStyleHandler::GetRubyWindowStyle().enabled);
+}
+
 TEST_F(RendererServerTest, UsesFontWeightDefaultsWhenFieldsAreAbsent) {
   config::Config input = config::ConfigHandler::DefaultConfig();
   input.clear_candidate_window_font_weight();

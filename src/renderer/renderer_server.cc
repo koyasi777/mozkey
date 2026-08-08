@@ -304,6 +304,8 @@ void UpdateRendererStyleFromConfig() {
       ruby_color_theme, shared_config->ruby_window_custom_color_palette(),
       candidate_style, ruby_corner_radius,
       shared_config->ruby_window_size_percent());
+  ruby_style.enabled =
+      shared_config->show_live_conversion_ruby_window();
   ruby_style.corner_radius = ruby_corner_radius;
   ruby_style.size_percent =
       ClampWindowSizePercent(shared_config->ruby_window_size_percent());

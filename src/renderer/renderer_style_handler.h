@@ -61,6 +61,7 @@ class RendererStyleHandler {
   };
 
   struct RubyWindowStyle {
+    bool enabled = true;
     uint32_t background_color = 0xffffff;
     uint32_t text_color = 0x000000;
     uint32_t border_color = 0x969696;
