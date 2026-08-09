@@ -34,6 +34,8 @@
 
 #include <cstdint>
 
+#include "renderer/mac/RendererShadowWindow.h"
+#include "renderer/renderer_style_handler.h"
 
 namespace mozc {
 namespace renderer {
@@ -58,8 +60,20 @@ class RendererBaseWindow {
   NSView *view_;
   virtual void InitWindow();
 
+  // Applies whole-window opacity and the custom renderer shadow while keeping
+  // the owner NSPanel geometry unchanged. |corner_radius| is in Cocoa points.
+  void SetWindowEffects(
+      uint32_t opacity_percent, CGFloat corner_radius,
+      const RendererStyleHandler::WindowShadowStyle &shadow_style);
+
  private:
   virtual void ResetView();
+  void UpdateShadowWindow();
+
+  RendererShadowWindow shadow_window_;
+  bool window_effects_configured_;
+  CGFloat effect_corner_radius_;
+  RendererStyleHandler::WindowShadowStyle shadow_style_;
   NSInteger window_level_;
 };
 

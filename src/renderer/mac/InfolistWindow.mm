@@ -37,6 +37,7 @@
 #include "client/client_interface.h"
 #include "protocol/commands.pb.h"
 #include "renderer/mac/InfolistWindow.h"
+#include "renderer/renderer_style_handler.h"
 
 using mozc::commands::CandidateWindow;
 using mozc::commands::Output;
@@ -69,7 +70,8 @@ namespace mozc {
 namespace renderer {
 namespace mac {
 
-InfolistWindow::InfolistWindow() : lasttimer_(nullptr), command_sender_(nullptr) {
+InfolistWindow::InfolistWindow()
+    : lasttimer_(nullptr), visible_(false), command_sender_(nullptr) {
   timer_handler_ = [[InfolistWindowTimerHandler alloc] initWithInfolistWindow:this];
 }
 
@@ -92,6 +94,22 @@ void InfolistWindow::SetCandidateWindow(const CandidateWindow& candidate_window)
   [infolist_view setNeedsDisplay:YES];
   NSSize size = [infolist_view updateLayout];
   ResizeWindow(size.width, size.height);
+
+  const RendererStyleHandler::CandidateWindowEffectStyle effect_style =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(
+          RendererStyleHandler::RendererStyleType::kCandidate);
+  SetWindowEffects(
+      effect_style.opacity_percent,
+      static_cast<CGFloat>(RendererStyleHandler::GetCandidateWindowCornerRadius(
+          RendererStyleHandler::RendererStyleType::kCandidate)),
+      effect_style.shadow);
+}
+
+void InfolistWindow::InitWindow() {
+  RendererBaseWindow::InitWindow();
+  [window_ setOpaque:NO];
+  [window_ setHasShadow:NO];
+  [window_ setBackgroundColor:NSColor.clearColor];
 }
 
 void InfolistWindow::DelayHide(int delay) {

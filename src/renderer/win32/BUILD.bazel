@@ -332,6 +332,7 @@ mozc_cc_library(
         "//bazel/win32:gdi32",
         "//bazel/win32:user32",
         "//protocol:renderer_cc_proto",
+        "//renderer:window_effect_util",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
     ],

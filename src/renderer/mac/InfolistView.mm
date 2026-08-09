@@ -27,6 +27,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <algorithm>
+#include <new>
 #include <set>
 
 #import "renderer/mac/InfolistView.h"
@@ -48,6 +50,8 @@ using mozc::renderer::mac::MacViewUtil;
 
 // Private method declarations.
 @interface InfolistView ()
+- (void)reloadStyle;
+
 // Draw the |row|-th row and return the height of it.
 // If draw_flag is true, it does not draw but only calculate the size.
 - (CGFloat)drawRow:(int)row ypos:(CGFloat)ypos draw_flag:(bool)draw_flag;
@@ -63,11 +67,10 @@ using mozc::renderer::mac::MacViewUtil;
 - (id)initWithFrame:(NSRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
-    RendererStyle *style = new (std::nothrow) RendererStyle;
-    if (style) {
-      RendererStyleHandler::GetRendererStyle(style);
+    style_ = new (std::nothrow) RendererStyle;
+    if (style_ != nullptr) {
+      [self reloadStyle];
     }
-    style_ = style;
   }
 
   if (!style_) {
@@ -76,8 +79,24 @@ using mozc::renderer::mac::MacViewUtil;
   return self;
 }
 
+- (void)dealloc {
+  delete style_;
+  style_ = nullptr;
+}
+
+- (void)reloadStyle {
+  if (style_ == nullptr) {
+    return;
+  }
+  if (!RendererStyleHandler::GetRendererStyleForWindowType(
+          RendererStyleHandler::RendererStyleType::kCandidate, style_)) {
+    RendererStyleHandler::GetDefaultRendererStyle(style_);
+  }
+}
+
 - (void)setCandidateWindow:(const CandidateWindow *)candidate_window {
   candidate_window_.CopyFrom(*candidate_window);
+  [self reloadStyle];
 }
 
 - (BOOL)isFlipped {
@@ -189,13 +208,6 @@ using mozc::renderer::mac::MacViewUtil;
   }
   ypos += infostyle.window_border();
 
-  if (draw_flag) {
-    [MacViewUtil::ToNSColor(infostyle.border_color()) set];
-    [NSBezierPath setDefaultLineWidth:infostyle.window_border()];
-    [NSBezierPath setDefaultLineJoinStyle:NSLineJoinStyleMiter];
-    [NSBezierPath strokeRect:NSMakeRect(0.5, 0.5, infostyle.window_width() - 1, ypos - 1)];
-  }
-
   return NSMakeSize(infostyle.window_width(), ypos);
 }
 
@@ -204,7 +216,48 @@ using mozc::renderer::mac::MacViewUtil;
 }
 
 - (void)drawRect:(NSRect)rect {
+  if (style_ == nullptr) {
+    return;
+  }
+
+  NSRectFillUsingOperation(self.bounds, NSCompositingOperationClear);
+
+  const RendererStyle::InfolistStyle &infostyle = style_->infolist_style();
+  const CGFloat borderWidth =
+      std::max<CGFloat>(1.0, infostyle.window_border());
+  const NSRect pathBounds =
+      NSInsetRect(self.bounds, borderWidth / 2.0, borderWidth / 2.0);
+  const CGFloat configuredRadius = static_cast<CGFloat>(
+      RendererStyleHandler::GetCandidateWindowCornerRadius(
+          RendererStyleHandler::RendererStyleType::kCandidate));
+  const CGFloat maximumRadius = std::max<CGFloat>(
+      0.0, std::min(NSWidth(pathBounds), NSHeight(pathBounds)) / 2.0);
+  const CGFloat effectiveRadius =
+      std::min(std::max<CGFloat>(configuredRadius, 0.0), maximumRadius);
+  NSBezierPath *windowPath =
+      [NSBezierPath bezierPathWithRoundedRect:pathBounds
+                                     xRadius:effectiveRadius
+                                     yRadius:effectiveRadius];
+
+  [NSGraphicsContext saveGraphicsState];
+  [windowPath addClip];
+  [NSBezierPath setDefaultLineWidth:infostyle.window_border()];
+  [NSBezierPath setDefaultLineJoinStyle:NSLineJoinStyleMiter];
+
+  if (infostyle.title_style().has_background_color()) {
+    [MacViewUtil::ToNSColor(
+        infostyle.title_style().background_color()) setFill];
+  } else {
+    [NSColor.whiteColor setFill];
+  }
+  [NSBezierPath fillRect:self.bounds];
   [self drawView:true];
+
+  [NSGraphicsContext restoreGraphicsState];
+
+  [MacViewUtil::ToNSColor(infostyle.border_color()) setStroke];
+  [windowPath setLineWidth:borderWidth];
+  [windowPath stroke];
 }
 
 @end

@@ -36,6 +36,7 @@
 #include "base/coordinates.h"
 #include "protocol/commands.pb.h"
 #include "renderer/mac/CandidateWindow.h"
+#include "renderer/renderer_style_handler.h"
 
 namespace mozc {
 namespace renderer {
@@ -56,6 +57,9 @@ void CandidateWindow::SetSendCommandInterface(
 
 void CandidateWindow::InitWindow() {
   RendererBaseWindow::InitWindow();
+  [window_ setOpaque:NO];
+  [window_ setHasShadow:NO];
+  [window_ setBackgroundColor:NSColor.clearColor];
   const CandidateView* candidate_view = (CandidateView*)view_;
   [candidate_view setSendCommandInterface:command_sender_];
 }
@@ -78,6 +82,17 @@ void CandidateWindow::SetCandidateWindow(const commands::CandidateWindow& candid
   [candidate_view setNeedsDisplay:YES];
   NSSize size = [candidate_view updateLayout];
   ResizeWindow(size.width, size.height);
+
+  const RendererStyleHandler::RendererStyleType style_type =
+      RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+          candidate_window);
+  const RendererStyleHandler::CandidateWindowEffectStyle effect_style =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(style_type);
+  SetWindowEffects(
+      effect_style.opacity_percent,
+      static_cast<CGFloat>(
+          RendererStyleHandler::GetCandidateWindowCornerRadius(style_type)),
+      effect_style.shadow);
 }
 
 void CandidateWindow::ResetView() {

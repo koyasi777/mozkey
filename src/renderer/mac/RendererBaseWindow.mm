@@ -31,6 +31,7 @@
 #include <Cocoa/Cocoa.h>
 #include <objc/message.h>
 
+#include <algorithm>
 #include <cstdint>
 
 #include "absl/log/log.h"
@@ -38,12 +39,19 @@
 #include "base/mac/mac_util.h"
 #include "protocol/commands.pb.h"
 #include "renderer/mac/RendererBaseWindow.h"
+#include "renderer/renderer_style_handler.h"
 
 namespace mozc {
 namespace renderer {
 namespace mac {
 
-RendererBaseWindow::RendererBaseWindow() : window_level_(NSPopUpMenuWindowLevel) {}
+RendererBaseWindow::RendererBaseWindow()
+    : window_(nil),
+      view_(nil),
+      window_effects_configured_(false),
+      effect_corner_radius_(0.0),
+      shadow_style_(),
+      window_level_(NSPopUpMenuWindowLevel) {}
 
 void RendererBaseWindow::InitWindow() {
   if (window_) {
@@ -68,7 +76,12 @@ void RendererBaseWindow::InitWindow() {
   [window_ orderOut:window_];
 }
 
-RendererBaseWindow::~RendererBaseWindow() { [window_ close]; }
+RendererBaseWindow::~RendererBaseWindow() {
+  shadow_window_.Hide();
+  if (window_ != nil) {
+    [window_ close];
+  }
+}
 
 Size RendererBaseWindow::GetWindowSize() const {
   if (!window_) {
@@ -79,6 +92,7 @@ Size RendererBaseWindow::GetWindowSize() const {
 }
 
 void RendererBaseWindow::Hide() {
+  shadow_window_.Hide();
   if (window_) {
     [window_ orderOut:window_];
   }
@@ -89,6 +103,7 @@ void RendererBaseWindow::Show() {
     InitWindow();
   }
   [window_ orderFront:window_];
+  UpdateShadowWindow();
 }
 
 bool RendererBaseWindow::IsVisible() {
@@ -103,23 +118,60 @@ void RendererBaseWindow::ResetView() {
 }
 
 void RendererBaseWindow::MoveWindow(const NSPoint &point) {
+  if (!window_) {
+    return;
+  }
   NSRect rect = [window_ frame];
   rect.origin.x = point.x;
   rect.origin.y = point.y;
   [window_ setFrame:rect display:FALSE];
+  UpdateShadowWindow();
 }
 
 void RendererBaseWindow::ResizeWindow(int32_t width, int32_t height) {
+  if (!window_) {
+    return;
+  }
   NSRect rect = [window_ frame];
   rect.size.width = width;
   rect.size.height = height;
   [window_ setFrame:rect display:FALSE];
+  UpdateShadowWindow();
 }
 
 void RendererBaseWindow::SetWindowLevel(NSInteger window_level) {
   if (window_level_ != window_level) {
     window_level_ = window_level;
-    [window_ setLevel:window_level_];
+    if (window_) {
+      [window_ setLevel:window_level_];
+    }
+  }
+}
+
+void RendererBaseWindow::SetWindowEffects(
+    uint32_t opacity_percent, CGFloat corner_radius,
+    const RendererStyleHandler::WindowShadowStyle &shadow_style) {
+  if (!window_) {
+    return;
+  }
+
+  [window_ setAlphaValue:std::clamp<CGFloat>(
+      static_cast<CGFloat>(opacity_percent) / 100.0, 0.0, 1.0)];
+  [window_ setHasShadow:NO];
+
+  window_effects_configured_ = true;
+  effect_corner_radius_ = std::max<CGFloat>(0.0, corner_radius);
+  shadow_style_ = shadow_style;
+  UpdateShadowWindow();
+}
+
+void RendererBaseWindow::UpdateShadowWindow() {
+  if (!window_effects_configured_ || !window_) {
+    shadow_window_.Hide();
+    return;
+  }
+  if (!shadow_window_.Update(window_, effect_corner_radius_, shadow_style_)) {
+    LOG(ERROR) << "Failed to update macOS renderer shadow window.";
   }
 }
 

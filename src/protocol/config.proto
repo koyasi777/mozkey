@@ -526,7 +526,8 @@ message Config {
     optional uint32 border_color = 3 [default = 0x969696];
   }
 
-  // Candidate, prediction/suggestion, and ruby window appearance on Windows.
+  // Candidate, prediction/suggestion, and ruby window appearance on desktop
+  // renderers (Windows and macOS).
   // CONVERSION, TRANSLITERATION, and USAGE use the candidate window appearance.
   // PREDICTION and SUGGESTION use the suggest window appearance.
   // RubyWindow has its own compact palette.
@@ -564,18 +565,18 @@ message Config {
   // the custom shadow. Size and distance are logical pixels and are DPI-scaled
   // by the renderer. Angle is screen-space degrees: 0=right, 45=down-right,
   // 90=down. Distance 0 creates an even shadow on all sides.
-  optional uint32 candidate_window_shadow_size = 151 [default = 12];
-  optional uint32 candidate_window_shadow_opacity_percent = 152 [default = 30];
+  optional uint32 candidate_window_shadow_size = 151 [default = 5];
+  optional uint32 candidate_window_shadow_opacity_percent = 152 [default = 10];
   optional uint32 candidate_window_shadow_angle_degrees = 153 [default = 45];
   optional uint32 candidate_window_shadow_distance = 154 [default = 6];
-  optional uint32 suggest_window_shadow_size = 155 [default = 12];
-  optional uint32 suggest_window_shadow_opacity_percent = 156 [default = 30];
+  optional uint32 suggest_window_shadow_size = 155 [default = 5];
+  optional uint32 suggest_window_shadow_opacity_percent = 156 [default = 10];
   optional uint32 suggest_window_shadow_angle_degrees = 157 [default = 45];
   optional uint32 suggest_window_shadow_distance = 158 [default = 6];
-  optional uint32 ruby_window_shadow_size = 159 [default = 10];
-  optional uint32 ruby_window_shadow_opacity_percent = 160 [default = 28];
-  optional uint32 ruby_window_shadow_angle_degrees = 161 [default = 90];
-  optional uint32 ruby_window_shadow_distance = 162 [default = 4];
+  optional uint32 ruby_window_shadow_size = 159 [default = 5];
+  optional uint32 ruby_window_shadow_opacity_percent = 160 [default = 8];
+  optional uint32 ruby_window_shadow_angle_degrees = 161 [default = 45];
+  optional uint32 ruby_window_shadow_distance = 162 [default = 3];
 
   // Do not reuse these tags. A locally tested build assigned Ruby spacing to
   // them and could reinterpret unknown fields preserved in existing configs.

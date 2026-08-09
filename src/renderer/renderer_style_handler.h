@@ -36,6 +36,10 @@
 #include "protocol/renderer_style.pb.h"
 
 namespace mozc {
+namespace commands {
+class CandidateWindow;
+}  // namespace commands
+
 namespace renderer {
 
 // this is pure static class
@@ -47,6 +51,12 @@ class RendererStyleHandler {
     kCandidate,
     kSuggestion,
   };
+
+  // Maps candidate-window categories to the appearance bucket used by both
+  // renderer platforms. PREDICTION and SUGGESTION share the suggestion
+  // appearance; the remaining categories use the candidate appearance.
+  static RendererStyleType GetRendererStyleTypeForCandidateWindow(
+      const commands::CandidateWindow& candidate_window);
 
   struct WindowShadowStyle {
     uint32_t size = 12;
