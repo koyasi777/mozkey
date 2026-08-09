@@ -114,6 +114,7 @@ mozc_cc_library(
     deps = [
         ":renderer_interface",
         ":renderer_style_handler",
+        ":window_effect_util",
         "//base:const",
         "//base:random",
         "//base:system_util",
@@ -194,6 +195,23 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "window_effect_util",
+    srcs = ["window_effect_util.cc"],
+    hdrs = ["window_effect_util.h"],
+    visibility = ["//renderer:__subpackages__"],
+)
+
+mozc_cc_test(
+    name = "window_effect_util_test",
+    size = "small",
+    srcs = ["window_effect_util_test.cc"],
+    deps = [
+        ":window_effect_util",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "renderer_interface",
     hdrs = ["renderer_interface.h"],
     visibility = [
@@ -257,6 +275,7 @@ mozc_cc_library(
         "//base:protobuf_util",
         "//base:text_normalizer",
         "//base/protobuf:text_format",
+        "//protocol:candidate_window_cc_proto",
         "//protocol:renderer_cc_proto",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/log:check",
@@ -270,6 +289,7 @@ mozc_cc_test(
     srcs = ["renderer_style_handler_test.cc"],
     deps = [
         ":renderer_style_handler",
+        "//protocol:candidate_window_cc_proto",
         "//protocol:renderer_cc_proto",
         "//testing:gunit_main",
     ],
@@ -311,6 +331,7 @@ mozc_objc_library(
         "mac/InfolistView.mm",
         "mac/InfolistWindow.mm",
         "mac/RendererBaseWindow.mm",
+        "mac/RendererShadowWindow.mm",
         "mac/RubyWindow.mm",
         "mac/mac_server.mm",
         "mac/mac_server_send_command.mm",
@@ -323,6 +344,7 @@ mozc_objc_library(
         "mac/InfolistView.h",
         "mac/InfolistWindow.h",
         "mac/RendererBaseWindow.h",
+        "mac/RendererShadowWindow.h",
         "mac/RubyWindow.h",
         "mac/mac_server.h",
         "mac/mac_server_send_command.h",
@@ -338,6 +360,7 @@ mozc_objc_library(
         ":renderer_server",
         ":renderer_style_handler",
         ":table_layout",
+        ":window_effect_util",
         ":window_util",
         "//base:const",
         "//base:coordinates",

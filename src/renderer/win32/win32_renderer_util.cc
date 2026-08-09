@@ -49,6 +49,7 @@
 #include "absl/log/log.h"
 #include "base/win32/win_util.h"
 #include "protocol/renderer_command.pb.h"
+#include "renderer/window_effect_util.h"
 
 namespace mozc {
 namespace renderer {
@@ -61,9 +62,6 @@ constexpr wchar_t kRendererShadowWindowClassName[] =
 constexpr uint32_t kDefaultDpi = 96;
 constexpr uint32_t kMinOpacityPercent = 20;
 constexpr uint32_t kMaxOpacityPercent = 100;
-constexpr uint32_t kMaxShadowSize = 96;
-constexpr uint32_t kMaxShadowDistance = 96;
-constexpr uint32_t kMaxShadowOpacityPercent = 100;
 
 LRESULT CALLBACK ShadowWindowProc(HWND hwnd, UINT message, WPARAM wparam,
                                   LPARAM lparam) {
@@ -99,89 +97,27 @@ uint32_t ScaleLogicalPixel(uint32_t value, uint32_t dpi) {
                                                static_cast<int>(value), dpi)));
 }
 
-// Signed distance from a rounded rectangle.  Negative means inside the owner
-// shape.  Positive means outside and is used as the shadow falloff distance.
-double SignedDistanceFromRoundedRect(double x, double y, double width,
-                                     double height, double radius) {
-  radius = std::max(0.0, std::min(radius, std::min(width, height) / 2.0));
-  const double half_width = width / 2.0;
-  const double half_height = height / 2.0;
-  const double qx = std::abs(x - half_width) - (half_width - radius);
-  const double qy = std::abs(y - half_height) - (half_height - radius);
-  const double outside_x = std::max(qx, 0.0);
-  const double outside_y = std::max(qy, 0.0);
-  double outside_distance = 0.0;
-  if (outside_x > 0.0 || outside_y > 0.0) {
-    outside_distance =
-        std::sqrt(outside_x * outside_x + outside_y * outside_y);
-  }
-  const double inside_distance = std::min(std::max(qx, qy), 0.0);
-  return outside_distance + inside_distance - radius;
-}
-
-// Converts signed distance at a pixel center to one-pixel-wide antialias
-// coverage. A pixel centered at least half a pixel inside is fully covered; a
-// pixel centered at least half a pixel outside is fully transparent.
-double RoundedRectCoverage(double x, double y, double width, double height,
-                           double radius) {
-  return std::clamp(
-      0.5 - SignedDistanceFromRoundedRect(x, y, width, height, radius), 0.0,
-      1.0);
-}
-
 uint8_t ClampToByte(double value) {
   return static_cast<uint8_t>(
       std::clamp(std::lround(value), 0l, 255l));
 }
 
-constexpr double kPi = 3.14159265358979323846;
-
-void DrawShadowBitmap(uint32_t* pixels, int width, int height, int owner_width,
-                      int owner_height, int shadow_size, int shadow_dx,
-                      int shadow_dy, int owner_left, int owner_top,
-                      int owner_corner_radius, uint32_t opacity_percent) {
-  if (pixels == nullptr || width <= 0 || height <= 0 || owner_width <= 0 ||
-      owner_height <= 0 || shadow_size <= 0 || opacity_percent == 0) {
+void DrawShadowBitmap(uint32_t* pixels,
+                      const WindowShadowGeometry& geometry,
+                      uint32_t opacity_percent) {
+  if (pixels == nullptr || !geometry.enabled() || opacity_percent == 0) {
     return;
   }
 
-  std::memset(pixels, 0, sizeof(uint32_t) * width * height);
-  const uint32_t max_alpha =
-      std::clamp(opacity_percent, 0u, kMaxShadowOpacityPercent) * 255u / 100u;
-  const double corner_radius = static_cast<double>(owner_corner_radius);
-  const double falloff = static_cast<double>(std::max(1, shadow_size));
-
-  for (int y = 0; y < height; ++y) {
-    for (int x = 0; x < width; ++x) {
-      const double owner_x = static_cast<double>(x - owner_left) + 0.5;
-      const double owner_y = static_cast<double>(y - owner_top) + 0.5;
-      const double owner_distance = SignedDistanceFromRoundedRect(
-          owner_x, owner_y, owner_width, owner_height, corner_radius);
-      if (owner_distance <= 0.0) {
-        continue;
-      }
-
-      const double shadow_x =
-          static_cast<double>(x - owner_left - shadow_dx) + 0.5;
-      const double shadow_y =
-          static_cast<double>(y - owner_top - shadow_dy) + 0.5;
-      const double shadow_distance = SignedDistanceFromRoundedRect(
-          shadow_x, shadow_y, owner_width, owner_height, corner_radius);
-
-      double normalized = 0.0;
-      if (shadow_distance > 0.0) {
-        normalized = shadow_distance / falloff;
-      }
-      if (normalized > 1.0) {
-        continue;
-      }
-
-      // A smooth, monotonic falloff avoids the visible seams produced by
-      // independent top/right/bottom/left gradient bands.
-      const double t = 1.0 - std::clamp(normalized, 0.0, 1.0);
-      const uint32_t alpha = static_cast<uint32_t>(std::lround(
-          static_cast<double>(max_alpha) * t * t * (3.0 - 2.0 * t)));
-      pixels[y * width + x] = (alpha << 24);  // PBGRA black.
+  const size_t pixel_count =
+      static_cast<size_t>(geometry.width) * geometry.height;
+  std::memset(pixels, 0, sizeof(uint32_t) * pixel_count);
+  for (int y = 0; y < geometry.height; ++y) {
+    for (int x = 0; x < geometry.width; ++x) {
+      const uint8_t alpha =
+          ComputeWindowShadowAlpha(geometry, x, y, opacity_percent);
+      pixels[static_cast<size_t>(y) * geometry.width + x] =
+          static_cast<uint32_t>(alpha) << 24;  // PBGRA black.
     }
   }
 }
@@ -945,12 +881,12 @@ bool RendererShadowWindow::Update(HWND owner_window, const RECT& owner_rect,
   const int owner_width = owner_rect.right - owner_rect.left;
   const int owner_height = owner_rect.bottom - owner_rect.top;
   const uint32_t logical_shadow_size =
-      std::clamp(style.size, 0u, kMaxShadowSize);
+      std::clamp(style.size, 0u, kMaxWindowShadowSize);
   const uint32_t logical_shadow_distance =
-      std::clamp(style.distance, 0u, kMaxShadowDistance);
+      std::clamp(style.distance, 0u, kMaxWindowShadowDistance);
   const uint32_t shadow_angle = style.angle_degrees % 360u;
   const uint32_t shadow_opacity =
-      std::clamp(style.opacity_percent, 0u, kMaxShadowOpacityPercent);
+      std::clamp(style.opacity_percent, 0u, kMaxWindowShadowOpacityPercent);
   if (owner_width <= 0 || owner_height <= 0 || logical_shadow_size == 0 ||
       shadow_opacity == 0) {
     Hide();
@@ -976,21 +912,10 @@ bool RendererShadowWindow::Update(HWND owner_window, const RECT& owner_rect,
       ScaleLogicalPixel(logical_shadow_size, dpi));
   const int shadow_distance = static_cast<int>(
       ScaleLogicalPixel(logical_shadow_distance, dpi));
-  const double radians = static_cast<double>(shadow_angle) * kPi / 180.0;
-  const int shadow_dx =
-      static_cast<int>(std::lround(std::cos(radians) * shadow_distance));
-  const int shadow_dy =
-      static_cast<int>(std::lround(std::sin(radians) * shadow_distance));
-  const int left_margin = shadow_size + std::max(-shadow_dx, 0);
-  const int right_margin = shadow_size + std::max(shadow_dx, 0);
-  const int top_margin = shadow_size + std::max(-shadow_dy, 0);
-  const int bottom_margin = shadow_size + std::max(shadow_dy, 0);
-  const int corner_radius =
-      std::clamp(owner_corner_radius_pixels, 0,
-                 std::min(owner_width, owner_height) / 2);
-  const int width = owner_width + left_margin + right_margin;
-  const int height = owner_height + top_margin + bottom_margin;
-  if (width <= 0 || height <= 0) {
+  const WindowShadowGeometry geometry = ComputeWindowShadowGeometry(
+      owner_width, owner_height, shadow_size, shadow_distance, shadow_angle,
+      owner_corner_radius_pixels);
+  if (!geometry.enabled()) {
     Hide();
     return true;
   }
@@ -1006,22 +931,21 @@ bool RendererShadowWindow::Update(HWND owner_window, const RECT& owner_rect,
   }
 
   uint32_t* pixels = nullptr;
-  HBITMAP bitmap =
-      CreateRendererLayeredWindowBitmap(screen_dc, width, height, &pixels);
+  HBITMAP bitmap = CreateRendererLayeredWindowBitmap(
+      screen_dc, geometry.width, geometry.height, &pixels);
   if (bitmap == nullptr || pixels == nullptr) {
     ::DeleteDC(memory_dc);
     ::ReleaseDC(nullptr, screen_dc);
     return false;
   }
 
-  DrawShadowBitmap(pixels, width, height, owner_width, owner_height,
-                   shadow_size, shadow_dx, shadow_dy, left_margin, top_margin,
-                   corner_radius, shadow_opacity);
+  DrawShadowBitmap(pixels, geometry, shadow_opacity);
 
   HGDIOBJ old_bitmap = ::SelectObject(memory_dc, bitmap);
-  POINT dst = {owner_rect.left - left_margin, owner_rect.top - top_margin};
+  POINT dst = {owner_rect.left - geometry.left_margin,
+               owner_rect.top - geometry.top_margin};
   POINT src = {0, 0};
-  SIZE size = {width, height};
+  SIZE size = {geometry.width, geometry.height};
   BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
   const BOOL updated = ::UpdateLayeredWindow(hwnd_, screen_dc, &dst, &size,
                                              memory_dc, &src, 0, &blend,

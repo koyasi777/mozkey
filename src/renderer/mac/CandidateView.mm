@@ -84,6 +84,7 @@ using mozc::renderer::mac::MacViewUtil;
   mozc::commands::CandidateWindow candidate_window_;
   mozc::renderer::TableLayout tableLayout_;
   mozc::renderer::RendererStyle style_;
+  CGFloat cornerRadius_;
 
   // The row which has focused background.
   int focusedRow_;
@@ -111,6 +112,9 @@ using mozc::renderer::mac::MacViewUtil;
           RendererStyleHandler::RendererStyleType::kCandidate, &style_)) {
     RendererStyleHandler::GetDefaultRendererStyle(&style_);
   }
+  cornerRadius_ = static_cast<CGFloat>(
+      RendererStyleHandler::GetCandidateWindowCornerRadius(
+          RendererStyleHandler::RendererStyleType::kCandidate));
   [self updateStyleDependentResources];
 
   // Default line width is specified as 1.0 pt, but the renderer expects
@@ -120,21 +124,16 @@ using mozc::renderer::mac::MacViewUtil;
 }
 
 - (void)reloadStyleForCandidateWindow {
-  // Prediction is the focused continuation of suggestion UI, so both
-  // categories share the suggestion appearance bucket.
-  const bool use_suggestion_style =
-      candidate_window_.category() == mozc::commands::SUGGESTION ||
-      candidate_window_.category() == mozc::commands::PREDICTION;
-
   const RendererStyleHandler::RendererStyleType style_type =
-      use_suggestion_style
-          ? RendererStyleHandler::RendererStyleType::kSuggestion
-          : RendererStyleHandler::RendererStyleType::kCandidate;
+      RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+          candidate_window_);
 
   if (!RendererStyleHandler::GetRendererStyleForWindowType(style_type,
                                                             &style_)) {
     RendererStyleHandler::GetDefaultRendererStyle(&style_);
   }
+  cornerRadius_ = static_cast<CGFloat>(
+      RendererStyleHandler::GetCandidateWindowCornerRadius(style_type));
 
   [self updateStyleDependentResources];
 }
@@ -305,13 +304,30 @@ using mozc::renderer::mac::MacViewUtil;
 
 - (void)drawRect:(NSRect)rect {
   if (!Category_IsValid(candidate_window_.category())) {
-    LOG(WARNING) << "Unknown candidates category: " << candidate_window_.category();
+    LOG(WARNING) << "Unknown candidates category: "
+                 << candidate_window_.category();
     return;
   }
 
+  // The NSPanel is transparent so the rounded silhouette must explicitly
+  // clear stale pixels before drawing a new frame.
+  NSRectFillUsingOperation(self.bounds, NSCompositingOperationClear);
+
+  const NSRect pathBounds = NSInsetRect(self.bounds, 0.5, 0.5);
+  const CGFloat maximumRadius = std::max<CGFloat>(
+      0.0, std::min(NSWidth(pathBounds), NSHeight(pathBounds)) / 2.0);
+  const CGFloat effectiveRadius =
+      std::min(std::max<CGFloat>(cornerRadius_, 0.0), maximumRadius);
+  NSBezierPath *windowPath =
+      [NSBezierPath bezierPathWithRoundedRect:pathBounds
+                                     xRadius:effectiveRadius
+                                     yRadius:effectiveRadius];
+
+  [NSGraphicsContext saveGraphicsState];
+  [windowPath addClip];
+
   // Paint the complete view before drawing individual cells. Otherwise,
-  // column gaps and unused layout regions expose the NSPanel's default
-  // white background when a dark renderer style is active.
+  // column gaps and unused layout regions would remain transparent.
   if (style_.candidate_style().has_background_color()) {
     [MacViewUtil::ToNSColor(
         style_.candidate_style().background_color()) set];
@@ -329,10 +345,12 @@ using mozc::renderer::mac::MacViewUtil;
   }
   [self drawFooter];
 
-  // Draw the window border at last
-  [MacViewUtil::ToNSColor(style_.border_color()) set];
-  const mozc::Size windowSize = tableLayout_.GetTotalSize();
-  [NSBezierPath strokeRect:NSMakeRect(0.5, 0.5, windowSize.width - 1, windowSize.height - 1)];
+  [NSGraphicsContext restoreGraphicsState];
+
+  // Draw the rounded outer border last so it remains crisp at the clip edge.
+  [MacViewUtil::ToNSColor(style_.border_color()) setStroke];
+  [windowPath setLineWidth:1.0];
+  [windowPath stroke];
 }
 
 #pragma mark drawing aux methods

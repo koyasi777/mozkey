@@ -101,13 +101,8 @@ COLORREF ToColorRef(const RendererStyle::RGBAColor& color) {
 
 RendererStyleHandler::RendererStyleType GetRendererStyleType(
     const commands::CandidateWindow& candidate_window) {
-  // PREDICTION is the user-visible continuation of suggestion UI, so it uses
-  // the same appearance bucket as SUGGESTION.
-  const bool use_suggestion_style =
-      candidate_window.category() == commands::SUGGESTION ||
-      candidate_window.category() == commands::PREDICTION;
-  return use_suggestion_style ? RendererStyleHandler::RendererStyleType::kSuggestion
-                              : RendererStyleHandler::RendererStyleType::kCandidate;
+  return RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+      candidate_window);
 }
 
 RendererStyle GetCurrentRendererStyle(

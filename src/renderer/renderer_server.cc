@@ -51,6 +51,7 @@
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_interface.h"
 #include "renderer/renderer_style_handler.h"
+#include "renderer/window_effect_util.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -92,9 +93,6 @@ constexpr uint32_t kMinWindowSizePercent = 80;
 constexpr uint32_t kMaxWindowSizePercent = 200;
 constexpr uint32_t kMinWindowOpacityPercent = 20;
 constexpr uint32_t kMaxWindowOpacityPercent = 100;
-constexpr uint32_t kMaxShadowSize = 96;
-constexpr uint32_t kMaxShadowDistance = 96;
-constexpr uint32_t kMaxShadowOpacityPercent = 100;
 constexpr uint32_t kMaxRubyHorizontalPadding = 40;
 constexpr uint32_t kMaxRubyVerticalPadding = 24;
 constexpr uint32_t kMaxRubyCompositionGap = 32;
@@ -155,11 +153,11 @@ RendererStyleHandler::WindowShadowStyle BuildShadowStyle(
     uint32_t size, uint32_t opacity_percent, uint32_t angle_degrees,
     uint32_t distance) {
   RendererStyleHandler::WindowShadowStyle style;
-  style.size = std::clamp(size, 0u, kMaxShadowSize);
+  style.size = std::clamp(size, 0u, kMaxWindowShadowSize);
   style.opacity_percent =
-      std::clamp(opacity_percent, 0u, kMaxShadowOpacityPercent);
+      std::clamp(opacity_percent, 0u, kMaxWindowShadowOpacityPercent);
   style.angle_degrees = angle_degrees % 360u;
-  style.distance = std::clamp(distance, 0u, kMaxShadowDistance);
+  style.distance = std::clamp(distance, 0u, kMaxWindowShadowDistance);
   return style;
 }
 

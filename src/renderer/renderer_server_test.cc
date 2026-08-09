@@ -197,6 +197,105 @@ TEST_F(RendererServerTest, AppliesIndependentFontWeightsWithNormalization) {
   EXPECT_EQ(900u, RendererStyleHandler::GetRubyWindowStyle().font_weight);
 }
 
+TEST_F(RendererServerTest, UsesWindowEffectDefaultsWhenFieldsAreAbsent) {
+  config::Config input = config::ConfigHandler::DefaultConfig();
+  input.clear_candidate_window_shadow_size();
+  input.clear_candidate_window_shadow_opacity_percent();
+  input.clear_candidate_window_shadow_angle_degrees();
+  input.clear_candidate_window_shadow_distance();
+  input.clear_suggest_window_shadow_size();
+  input.clear_suggest_window_shadow_opacity_percent();
+  input.clear_suggest_window_shadow_angle_degrees();
+  input.clear_suggest_window_shadow_distance();
+  input.clear_ruby_window_shadow_size();
+  input.clear_ruby_window_shadow_opacity_percent();
+  input.clear_ruby_window_shadow_angle_degrees();
+  input.clear_ruby_window_shadow_distance();
+  config::ConfigHandler::SetConfig(input);
+
+  TestRendererServer server;
+
+  const auto candidate_effect =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(
+          RendererStyleHandler::RendererStyleType::kCandidate);
+  EXPECT_EQ(5u, candidate_effect.shadow.size);
+  EXPECT_EQ(10u, candidate_effect.shadow.opacity_percent);
+  EXPECT_EQ(45u, candidate_effect.shadow.angle_degrees);
+  EXPECT_EQ(6u, candidate_effect.shadow.distance);
+
+  const auto suggestion_effect =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(
+          RendererStyleHandler::RendererStyleType::kSuggestion);
+  EXPECT_EQ(5u, suggestion_effect.shadow.size);
+  EXPECT_EQ(10u, suggestion_effect.shadow.opacity_percent);
+  EXPECT_EQ(45u, suggestion_effect.shadow.angle_degrees);
+  EXPECT_EQ(6u, suggestion_effect.shadow.distance);
+
+  const RendererStyleHandler::RubyWindowStyle ruby =
+      RendererStyleHandler::GetRubyWindowStyle();
+  EXPECT_EQ(5u, ruby.shadow.size);
+  EXPECT_EQ(8u, ruby.shadow.opacity_percent);
+  EXPECT_EQ(45u, ruby.shadow.angle_degrees);
+  EXPECT_EQ(3u, ruby.shadow.distance);
+}
+
+TEST_F(RendererServerTest, AppliesWindowEffectsWithClamping) {
+  config::Config input = config::ConfigHandler::DefaultConfig();
+  input.set_candidate_window_custom_corner_radius(999);
+  input.set_suggest_window_custom_corner_radius(23);
+  input.set_ruby_window_custom_corner_radius(999);
+  input.set_candidate_window_opacity_percent(0);
+  input.set_suggest_window_opacity_percent(999);
+  input.set_ruby_window_opacity_percent(1);
+  input.set_candidate_window_shadow_size(999);
+  input.set_candidate_window_shadow_opacity_percent(999);
+  input.set_candidate_window_shadow_angle_degrees(725);
+  input.set_candidate_window_shadow_distance(999);
+  input.set_suggest_window_shadow_size(0);
+  input.set_suggest_window_shadow_opacity_percent(0);
+  input.set_suggest_window_shadow_angle_degrees(450);
+  input.set_suggest_window_shadow_distance(17);
+  input.set_ruby_window_shadow_size(11);
+  input.set_ruby_window_shadow_opacity_percent(37);
+  input.set_ruby_window_shadow_angle_degrees(999);
+  input.set_ruby_window_shadow_distance(999);
+  config::ConfigHandler::SetConfig(input);
+
+  TestRendererServer server;
+
+  EXPECT_EQ(24u, RendererStyleHandler::GetCandidateWindowCornerRadius(
+                     RendererStyleHandler::RendererStyleType::kCandidate));
+  EXPECT_EQ(23u, RendererStyleHandler::GetCandidateWindowCornerRadius(
+                     RendererStyleHandler::RendererStyleType::kSuggestion));
+
+  const auto candidate_effect =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(
+          RendererStyleHandler::RendererStyleType::kCandidate);
+  EXPECT_EQ(20u, candidate_effect.opacity_percent);
+  EXPECT_EQ(96u, candidate_effect.shadow.size);
+  EXPECT_EQ(100u, candidate_effect.shadow.opacity_percent);
+  EXPECT_EQ(5u, candidate_effect.shadow.angle_degrees);
+  EXPECT_EQ(96u, candidate_effect.shadow.distance);
+
+  const auto suggestion_effect =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(
+          RendererStyleHandler::RendererStyleType::kSuggestion);
+  EXPECT_EQ(100u, suggestion_effect.opacity_percent);
+  EXPECT_EQ(0u, suggestion_effect.shadow.size);
+  EXPECT_EQ(0u, suggestion_effect.shadow.opacity_percent);
+  EXPECT_EQ(90u, suggestion_effect.shadow.angle_degrees);
+  EXPECT_EQ(17u, suggestion_effect.shadow.distance);
+
+  const RendererStyleHandler::RubyWindowStyle ruby =
+      RendererStyleHandler::GetRubyWindowStyle();
+  EXPECT_EQ(24u, ruby.corner_radius);
+  EXPECT_EQ(20u, ruby.opacity_percent);
+  EXPECT_EQ(11u, ruby.shadow.size);
+  EXPECT_EQ(37u, ruby.shadow.opacity_percent);
+  EXPECT_EQ(279u, ruby.shadow.angle_degrees);
+  EXPECT_EQ(96u, ruby.shadow.distance);
+}
+
 TEST_F(RendererServerTest, AppliesRubySpacingConfigWithClamping) {
   config::Config input = config::ConfigHandler::DefaultConfig();
   input.set_ruby_window_horizontal_padding(999);

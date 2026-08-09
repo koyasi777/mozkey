@@ -40,6 +40,7 @@
 #include "base/protobuf/text_format.h"
 #include "base/protobuf_util.h"
 #include "base/text_normalizer.h"
+#include "protocol/candidate_window.pb.h"
 #include "protocol/renderer_style.pb.h"
 
 namespace mozc {
@@ -393,6 +394,16 @@ bool RendererStyleHandler::GetRendererStyle(RendererStyle* style) {
 
 bool RendererStyleHandler::SetRendererStyle(const RendererStyle& style) {
   return GetRendererStyleHandlerImpl()->SetRendererStyle(style);
+}
+
+RendererStyleHandler::RendererStyleType
+RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+    const commands::CandidateWindow& candidate_window) {
+  const bool use_suggestion_style =
+      candidate_window.category() == commands::SUGGESTION ||
+      candidate_window.category() == commands::PREDICTION;
+  return use_suggestion_style ? RendererStyleType::kSuggestion
+                              : RendererStyleType::kCandidate;
 }
 
 bool RendererStyleHandler::GetRendererStyleForWindowType(

@@ -2735,17 +2735,17 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                  "candidateWindowShadowSizeSpinBox",
                  "candidateWindowShadowOpacityPercentSpinBox",
                  "candidateWindowShadowDistanceSpinBox",
-                 "candidateWindowShadowAngleDegreesSpinBox", 12, 30, 6, 45);
+                 "candidateWindowShadowAngleDegreesSpinBox", 5, 10, 6, 45);
   add_shadow_row(2, tr("Suggestion window"),
                  "suggestWindowShadowSizeSpinBox",
                  "suggestWindowShadowOpacityPercentSpinBox",
                  "suggestWindowShadowDistanceSpinBox",
-                 "suggestWindowShadowAngleDegreesSpinBox", 12, 30, 6, 45);
+                 "suggestWindowShadowAngleDegreesSpinBox", 5, 10, 6, 45);
   add_shadow_row(3, tr("Ruby window"),
                  "rubyWindowShadowSizeSpinBox",
                  "rubyWindowShadowOpacityPercentSpinBox",
                  "rubyWindowShadowDistanceSpinBox",
-                 "rubyWindowShadowAngleDegreesSpinBox", 10, 28, 4, 90);
+                 "rubyWindowShadowAngleDegreesSpinBox", 5, 8, 3, 45);
 
   auto add_palette_button = [&](QGridLayout* layout, int row, int col,
                                 const QString& prefix, const char* suffix,
@@ -3721,15 +3721,15 @@ void ConfigDialog::ResetRendererAppearanceControls() {
       {"candidateWindowShadowSizeSpinBox",
        "candidateWindowShadowOpacityPercentSpinBox",
        "candidateWindowShadowAngleDegreesSpinBox",
-       "candidateWindowShadowDistanceSpinBox", 12, 30, 45, 6},
+       "candidateWindowShadowDistanceSpinBox", 5, 10, 45, 6},
       {"suggestWindowShadowSizeSpinBox",
        "suggestWindowShadowOpacityPercentSpinBox",
        "suggestWindowShadowAngleDegreesSpinBox",
-       "suggestWindowShadowDistanceSpinBox", 12, 30, 45, 6},
+       "suggestWindowShadowDistanceSpinBox", 5, 10, 45, 6},
       {"rubyWindowShadowSizeSpinBox",
        "rubyWindowShadowOpacityPercentSpinBox",
        "rubyWindowShadowAngleDegreesSpinBox",
-       "rubyWindowShadowDistanceSpinBox", 10, 28, 90, 4},
+       "rubyWindowShadowDistanceSpinBox", 5, 8, 45, 3},
   };
   for (const ShadowDefault& shadow_default : shadow_defaults) {
     if (QSpinBox* spin = FindSpinBox(this, shadow_default.size_name)) {

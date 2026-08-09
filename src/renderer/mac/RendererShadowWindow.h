@@ -27,36 +27,53 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MOZC_RENDERER_MAC_INFOLIST_VIEW_H_
-#define MOZC_RENDERER_MAC_INFOLIST_VIEW_H_
+#ifndef MOZC_RENDERER_MAC_RENDERER_SHADOW_WINDOW_H_
+#define MOZC_RENDERER_MAC_RENDERER_SHADOW_WINDOW_H_
 
 #import <Cocoa/Cocoa.h>
 
-#include "protocol/candidate_window.pb.h"
-#include "protocol/renderer_command.pb.h"
+#include <cstdint>
+
+#include "renderer/renderer_style_handler.h"
+#include "renderer/window_effect_util.h"
+
+@class MozcRendererShadowView;
 
 namespace mozc {
 namespace renderer {
-class RendererStyle;
-}  // namespace mozc::renderer
+namespace mac {
+
+// Owns the transparent visual-only panel used for renderer shadows on macOS.
+// The owner NSWindow keeps the logical renderer geometry used by WindowUtil;
+// this panel is deliberately excluded from positioning and collision logic.
+class RendererShadowWindow {
+ public:
+  RendererShadowWindow();
+  RendererShadowWindow(const RendererShadowWindow &) = delete;
+  RendererShadowWindow &operator=(const RendererShadowWindow &) = delete;
+  ~RendererShadowWindow();
+
+  void Hide();
+  // Updates shadow pixels and geometry from the current owner frame. The
+  // corner radius is expressed in Cocoa points. Pixel data is regenerated only
+  // when rendering inputs change. If the owner is visible, the shadow is also
+  // presented. Returns false only when an enabled shadow cannot be rendered.
+  bool Update(NSWindow *owner_window, CGFloat owner_corner_radius,
+              const RendererStyleHandler::WindowShadowStyle &style);
+
+ private:
+  void EnsureWindow();
+
+  NSPanel *window_;
+  MozcRendererShadowView *view_;
+  bool cached_image_valid_;
+  WindowShadowGeometry cached_geometry_;
+  uint32_t cached_opacity_percent_;
+  CGFloat cached_backing_scale_;
+};
+
+}  // namespace mac
+}  // namespace renderer
 }  // namespace mozc
 
-// InfolistView is an NSView subclass to draw the infolist window
-// according to the current candidates.
-@interface InfolistView : NSView {
- @private
-  mozc::commands::CandidateWindow candidate_window_;
-  mozc::renderer::RendererStyle *style_;
-  // The row which has focused background.
-  int focusedRow_;
-}
-
-// setCandidateWindow: sets the candidate window to be rendered.
-- (void)setCandidateWindow:(const mozc::commands::CandidateWindow *)candidate_window;
-
-// Checks the |candidates_| and recalculates the layout.
-// It also returns the size which is necessary to draw all GUI elements.
-- (NSSize)updateLayout;
-@end
-
-#endif  // MOZC_RENDERER_MAC_INFOLIST_VIEW_H_
+#endif  // MOZC_RENDERER_MAC_RENDERER_SHADOW_WINDOW_H_

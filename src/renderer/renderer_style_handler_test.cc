@@ -31,6 +31,7 @@
 
 #include <cstdint>
 
+#include "protocol/candidate_window.pb.h"
 #include "protocol/renderer_style.pb.h"
 #include "testing/gunit.h"
 
@@ -124,6 +125,35 @@ TEST(RendererStyleHandlerTest,
   EXPECT_TRUE(style.gap1_style().has_background_color());
   EXPECT_EQ(Rgb(style.candidate_style().background_color()),
             Rgb(style.gap1_style().background_color()));
+}
+
+TEST(RendererStyleHandlerTest, CandidateWindowCategorySelectsAppearanceBucket) {
+  commands::CandidateWindow candidate;
+
+  candidate.set_category(commands::CONVERSION);
+  EXPECT_EQ(RendererStyleHandler::RendererStyleType::kCandidate,
+            RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+                candidate));
+
+  candidate.set_category(commands::TRANSLITERATION);
+  EXPECT_EQ(RendererStyleHandler::RendererStyleType::kCandidate,
+            RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+                candidate));
+
+  candidate.set_category(commands::USAGE);
+  EXPECT_EQ(RendererStyleHandler::RendererStyleType::kCandidate,
+            RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+                candidate));
+
+  candidate.set_category(commands::SUGGESTION);
+  EXPECT_EQ(RendererStyleHandler::RendererStyleType::kSuggestion,
+            RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+                candidate));
+
+  candidate.set_category(commands::PREDICTION);
+  EXPECT_EQ(RendererStyleHandler::RendererStyleType::kSuggestion,
+            RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(
+                candidate));
 }
 
 TEST(RendererStyleHandlerTest, ApplyCandidateWindowSize) {

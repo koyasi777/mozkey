@@ -148,6 +148,7 @@ void SetRgbColor(uint32_t rgb,
 
 - (void)drawRect:(NSRect)dirtyRect {
   [super drawRect:dirtyRect];
+  NSRectFillUsingOperation(self.bounds, NSCompositingOperationClear);
 
   const NSRect pathBounds = NSInsetRect(self.bounds, 0.5, 0.5);
   const CGFloat maximumRadius =
@@ -252,12 +253,12 @@ bool RubyWindow::Update(const commands::RendererCommand &command) {
   }
 
   RubyView *ruby_view = (RubyView *)view_;
+  const CGFloat corner_radius =
+      ScaleMetric(appearance.corner_radius, appearance.size_percent);
   [ruby_view
       setBackgroundColor:ToNSColor(appearance.background_color)
              borderColor:ToNSColor(appearance.border_color)
-            cornerRadius:ScaleMetric(
-                             appearance.corner_radius,
-                             appearance.size_percent)
+            cornerRadius:corner_radius
        horizontalPadding:ScaleWindowsRubySpacingToCocoaPoints(
                              appearance.horizontal_padding,
                              appearance.size_percent)
@@ -273,15 +274,12 @@ bool RubyWindow::Update(const commands::RendererCommand &command) {
           appearance.composition_gap,
           appearance.size_percent));
 
-  [window_ setAlphaValue:std::clamp<CGFloat>(
-      static_cast<CGFloat>(appearance.opacity_percent) / 100.0,
-      0.0,
-      1.0)];
-
   const NSSize size = [ruby_view preferredSize];
   ResizeWindow(
       static_cast<int32_t>(ceil(size.width)),
       static_cast<int32_t>(ceil(size.height)));
+  SetWindowEffects(appearance.opacity_percent, corner_radius,
+                   appearance.shadow);
   return true;
 }
 
@@ -292,7 +290,7 @@ int32_t RubyWindow::GetCompositionGap() const {
 void RubyWindow::InitWindow() {
   RendererBaseWindow::InitWindow();
   [window_ setOpaque:NO];
-  [window_ setHasShadow:YES];
+  [window_ setHasShadow:NO];
   [window_ setBackgroundColor:NSColor.clearColor];
   [window_ setIgnoresMouseEvents:YES];
 }

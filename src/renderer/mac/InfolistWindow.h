@@ -59,6 +59,7 @@ class InfolistWindow : public RendererBaseWindow {
   void onTimer(NSTimer *timer);
 
  private:
+  void InitWindow() override;
   InfolistWindowTimerHandler *timer_handler_;
   NSTimer *lasttimer_;
   bool visible_;
