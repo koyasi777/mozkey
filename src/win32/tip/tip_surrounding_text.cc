@@ -54,14 +54,16 @@ namespace win32 {
 namespace tsf {
 namespace {
 
-constexpr int kMaxSurroundingLength = 20;
+constexpr int kDefaultMaxSurroundingLength = 20;
 constexpr int kMaxCharacterLength = 1024 * 1024;
 
 class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
  public:
   SurroudingTextUpdater(wil::com_ptr_nothrow<ITfContext> context,
-                        bool move_anchor)
-      : context_(std::move(context)), move_anchor_(move_anchor) {}
+                        bool move_anchor, int max_surrounding_length)
+      : context_(std::move(context)),
+        move_anchor_(move_anchor),
+        max_surrounding_length_(max_surrounding_length) {}
 
   const TipSurroundingTextInfo& result() const { return result_; }
 
@@ -105,7 +107,7 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
       if (SUCCEEDED(selected_range->Clone(&preceding_range)) &&
           SUCCEEDED(preceding_range->Collapse(edit_cookie, TF_ANCHOR_START)) &&
           SUCCEEDED(preceding_range->ShiftStart(
-              edit_cookie, -kMaxSurroundingLength, &preceding_range_shifted,
+              edit_cookie, -max_surrounding_length_, &preceding_range_shifted,
               &halt_cond))) {
         HRESULT result = TipRangeUtil::GetText(
             preceding_range.get(), edit_cookie, &result_.preceding_text);
@@ -119,7 +121,7 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
       if (SUCCEEDED(selected_range->Clone(&following_range)) &&
           SUCCEEDED(following_range->Collapse(edit_cookie, TF_ANCHOR_END)) &&
           SUCCEEDED(following_range->ShiftEnd(
-              edit_cookie, kMaxSurroundingLength, &following_range_shifted,
+              edit_cookie, max_surrounding_length_, &following_range_shifted,
               &halt_cond))) {
         HRESULT result = TipRangeUtil::GetText(
             following_range.get(), edit_cookie, &result_.following_text);
@@ -133,6 +135,7 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
   wil::com_ptr_nothrow<ITfContext> context_;
   TipSurroundingTextInfo result_;
   bool move_anchor_;
+  int max_surrounding_length_;
 };
 
 class PrecedingTextDeleter final : public TipComImplements<ITfEditSession> {
@@ -253,6 +256,13 @@ bool GetSurroundingTextImm32(ITfContext* context,
 
 bool TipSurroundingText::Get(TipTextService* text_service, ITfContext* context,
                              TipSurroundingTextInfo* info) {
+  return GetWithMaxSurroundingLength(
+      text_service, context, kDefaultMaxSurroundingLength, info);
+}
+
+bool TipSurroundingText::GetWithMaxSurroundingLength(
+    TipTextService* text_service, ITfContext* context,
+    size_t max_surrounding_length, TipSurroundingTextInfo* info) {
   if (info == nullptr) {
     return false;
   }
@@ -272,7 +282,12 @@ bool TipSurroundingText::Get(TipTextService* text_service, ITfContext* context,
   // When RequestEditSession fails, it does not maintain the reference count.
   // So we need to ensure that AddRef/Release should be called at least once
   // per object.
-  auto updater = MakeComPtr<SurroudingTextUpdater>(full_context, false);
+  const int tsf_range_limit =
+      max_surrounding_length > static_cast<size_t>(kMaxCharacterLength)
+          ? kMaxCharacterLength
+          : static_cast<int>(max_surrounding_length);
+  auto updater = MakeComPtr<SurroudingTextUpdater>(
+      full_context, false, tsf_range_limit);
 
   HRESULT edit_session_result = S_OK;
   const HRESULT hr = full_context->RequestEditSession(
@@ -304,7 +319,8 @@ bool PrepareForReconversionTSF(TipTextService* text_service,
   // When RequestEditSession fails, it does not maintain the reference count.
   // So we need to ensure that AddRef/Release should be called at least once
   // per object.
-  auto updater = MakeComPtr<SurroudingTextUpdater>(full_context, true);
+  auto updater = MakeComPtr<SurroudingTextUpdater>(
+      full_context, true, kDefaultMaxSurroundingLength);
 
   HRESULT edit_session_result = S_OK;
   const HRESULT hr = full_context->RequestEditSession(

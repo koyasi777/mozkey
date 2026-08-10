@@ -68,6 +68,18 @@ class TipSurroundingText {
   static bool Get(TipTextService* text_service, ITfContext* context,
                   TipSurroundingTextInfo* info);
 
+  // Same as Get(), but allows the TSF text-range budget to be specified by
+  // the caller. This is intended for fork-specific features such as extended
+  // Zenz context acquisition. The legacy IMM32 document-feed fallback is not
+  // guaranteed to honor this limit because its payload size is controlled by
+  // the host application.
+  //
+  // This overload is deliberately separate from Get() so existing generic
+  // Mozc surrounding-text semantics remain unchanged.
+  static bool GetWithMaxSurroundingLength(
+      TipTextService* text_service, ITfContext* context,
+      size_t max_surrounding_length, TipSurroundingTextInfo* info);
+
   // A variant of TipSurroundingText::Get. One difference is that this method
   // moves the anchor position of the selection at the end of the range.
   // Another difference is that this method uses IMM32 message when fails to
