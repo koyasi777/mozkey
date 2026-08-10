@@ -60,6 +60,7 @@
 #include "session/ime_context.h"
 #include "session/key_event_transformer.h"
 #include "session/keymap.h"
+#include "session/zenz_client_context.h"
 #include "session/zenz_client_factory.h"
 #include "session/zenz_context_assembler.h"
 #include "session/zenz_prompt_builder.h"
@@ -5512,9 +5513,10 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
   const uint32_t left_context_len =
       GetZenzLiveCorrectionLeftContextLength(config);
 
+  const ZenzClientContextView zenz_client_context =
+      GetZenzClientContextView(context_->client_context());
   ZenzContextAssemblyInput context_input;
-  context_input.preceding_text =
-      context_->client_context().preceding_text();
+  context_input.preceding_text = zenz_client_context.preceding_text;
   context_input.left_max_chars = left_context_len;
 
   const ZenzContextAssemblyResult assembled_context =
@@ -5691,11 +5693,11 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
   const uint32_t right_context_len =
       GetZenzLiveCorrectionRightContextLength(config);
 
+  const ZenzClientContextView zenz_client_context =
+      GetZenzClientContextView(context_->client_context());
   ZenzContextAssemblyInput context_input;
-  context_input.preceding_text =
-      context_->client_context().preceding_text();
-  context_input.following_text =
-      context_->client_context().following_text();
+  context_input.preceding_text = zenz_client_context.preceding_text;
+  context_input.following_text = zenz_client_context.following_text;
   context_input.left_max_chars = left_context_len;
   context_input.right_max_chars = right_context_len;
 

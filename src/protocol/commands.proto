@@ -519,6 +519,15 @@ message Context {
   // Latter part of surrounding text.
   optional string following_text = 2;
 
+  // Fork-specific extended surrounding text for Zenz.  These fields are
+  // independent from preceding_text/following_text so ordinary Mozc history,
+  // prediction, and rewriting semantics remain unchanged.  Clients should
+  // leave them unset when extended context was not acquired.  Presence is
+  // significant: an explicitly empty value means that the client observed a
+  // structural boundary and must not fall back to generic surrounding text.
+  optional string zenz_preceding_text = 1001;
+  optional string zenz_following_text = 1002;
+
   // If this is true, suggestion feature is disabled regardless the
   // configuration.  If this is false, suggestion feature is followed
   // by the user's configuration.  If you want to omit interim

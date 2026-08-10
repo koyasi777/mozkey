@@ -109,6 +109,16 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "zenz_client_context",
+    srcs = ["zenz_client_context.cc"],
+    hdrs = ["zenz_client_context.h"],
+    deps = [
+        "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
     name = "zenz_context_assembler",
     srcs = ["zenz_context_assembler.cc"],
     hdrs = ["zenz_context_assembler.h"],
@@ -164,6 +174,7 @@ mozc_cc_library(
         ":key_event_transformer",
         ":keymap",
         ":zenz_adoption_policy",
+        ":zenz_client_context",
         ":zenz_context_assembler",
         ":zenz_context_sanitizer",
         ":zenz_feedback_store",
@@ -263,6 +274,17 @@ mozc_cc_test(
     srcs = ["zenz_prompt_builder_test.cc"],
     deps = [
         ":zenz_prompt_builder",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_client_context_test",
+    size = "small",
+    srcs = ["zenz_client_context_test.cc"],
+    deps = [
+        ":zenz_client_context",
+        "//protocol:commands_cc_proto",
         "//testing:gunit_main",
     ],
 )
