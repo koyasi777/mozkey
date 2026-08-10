@@ -78,10 +78,21 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "zenz_context_script_analyzer",
+    srcs = ["zenz_context_script_analyzer.cc"],
+    hdrs = ["zenz_context_script_analyzer.h"],
+    deps = [
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
     name = "zenz_context_sanitizer",
     srcs = ["zenz_context_sanitizer.cc"],
     hdrs = ["zenz_context_sanitizer.h"],
     deps = [
+        ":zenz_context_script_analyzer",
         "//base:util",
         "@com_google_absl//absl/strings",
     ],
@@ -191,6 +202,16 @@ mozc_cc_test(
     srcs = ["zenz_adoption_policy_test.cc"],
     deps = [
         ":zenz_adoption_policy",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_script_analyzer_test",
+    size = "small",
+    srcs = ["zenz_context_script_analyzer_test.cc"],
+    deps = [
+        ":zenz_context_script_analyzer",
         "//testing:gunit_main",
     ],
 )
