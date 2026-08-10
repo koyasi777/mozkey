@@ -359,28 +359,78 @@ TEST(ZenzContextSanitizerTest,
 }
 
 TEST(ZenzContextSanitizerTest,
-     RefinedPrivacyAndScriptDominanceRemainSeparateGates) {
+     MixedScriptPolicyAcceptsNaturalJapaneseTechnicalContext) {
   const ZenzContextSanitizer sanitizer;
 
   const char* const inputs[] = {
       "2026年",
       "Windows11を使う",
+      "GPT-5で生成する",
+      "UTF-8に変換する",
+      "HTTP/2に対応する",
+      "M1で動かす",
+      "v3.2へ更新する",
+      "C++で書く",
+      "macOS15でも使える",
+      "Visual Studioを使う",
+      "Visual Studio Codeで書く",
+      "OpenAI APIを使う",
+      "GitHub Actionsで実行する",
+      "Ruby on Railsを使う",
+      "Windows Subsystem for Linuxを使う",
+      "「Windows11」を使う",
+      "「Visual Studio」を使う",
+      "（OpenAI API）を使う",
   };
 
   for (const char* input : inputs) {
     SCOPED_TRACE(input);
 
-    // These strings are no longer rejected as sensitive merely because they
-    // contain ordinary digits or ASCII text. They still fail the independent
-    // C1 script-dominance policy, which is intentionally unchanged in C2C.
     const ZenzContextSanitizationResult result =
         sanitizer.SanitizeForZenz(
             input,
-            24);
+            128);
 
     EXPECT_EQ(
         result.context_class,
         "mixed_japanese_ascii");
+    EXPECT_EQ(
+        result.sanitized_context,
+        input);
+    EXPECT_TRUE(
+        result.allowed_for_prompt);
+    EXPECT_FALSE(
+        result.allowed_for_learning);
+    EXPECT_EQ(
+        result.reason,
+        "context_allowed");
+  }
+}
+
+TEST(ZenzContextSanitizerTest,
+     MixedScriptPolicyStillRejectsNonJapaneseOrUnattachedContext) {
+  const ZenzContextSanitizer sanitizer;
+
+  const char* const inputs[] = {
+      "Windows11",
+      "2026",
+      "日本語 ABCDE",
+      "This is Englishです",
+      "hello worldを",
+      "ABCDEFG日",
+      "日한국어문",
+      "日😀😀😀😀",
+      "ＡＢＣＤＥを",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextSanitizationResult result =
+        sanitizer.SanitizeForZenz(
+            input,
+            128);
+
     EXPECT_TRUE(
         result.sanitized_context.empty());
     EXPECT_FALSE(
@@ -392,6 +442,44 @@ TEST(ZenzContextSanitizerTest,
         "non_japanese_context_rejected");
   }
 }
+
+TEST(ZenzContextSanitizerTest,
+     PrivacyGateStillPrecedesMixedScriptPolicy) {
+  const ZenzContextSanitizer sanitizer;
+
+  const char* const inputs[] = {
+      "passwordを変更",
+      "パスワードを変更",
+      "認証コードを入力",
+      "a@bを使う",
+      "https://example.comを開く",
+      "foo\\barを開く",
+      "ghp_abcを使う",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextSanitizationResult result =
+        sanitizer.SanitizeForZenz(
+            input,
+            128);
+
+    EXPECT_EQ(
+        result.context_class,
+        "sensitive_like");
+    EXPECT_TRUE(
+        result.sanitized_context.empty());
+    EXPECT_FALSE(
+        result.allowed_for_prompt);
+    EXPECT_FALSE(
+        result.allowed_for_learning);
+    EXPECT_EQ(
+        result.reason,
+        "sensitive_context_rejected");
+  }
+}
+
 TEST(ZenzContextSanitizerTest,
      RejectsAsciiOnlyContextAsNonJapanese) {
   const ZenzContextSanitizer sanitizer;

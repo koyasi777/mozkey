@@ -86,7 +86,8 @@ ZenzContextSanitizer::SanitizeForZenz(
   result.allowed_for_learning = false;
 
   if (!script_analyzer_.
-          LooksMostlyJapanese(
+          LooksUsableAsJapaneseContext(
+              truncated,
               script_profile)) {
     result.reason =
         "non_japanese_context_rejected";
