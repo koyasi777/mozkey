@@ -6,6 +6,7 @@
 
 #include "absl/strings/string_view.h"
 #include "session/zenz_context_script_analyzer.h"
+#include "session/zenz_text_privacy_analyzer.h"
 
 namespace mozc {
 namespace session {
@@ -25,16 +26,8 @@ class ZenzContextSanitizer {
       size_t max_chars) const;
 
  private:
-  static bool ContainsSensitiveAsciiPattern(
-      absl::string_view text);
-
-  static bool ContainsLongAsciiRun(
-      absl::string_view text);
-
-  static bool ContainsLongDigitRun(
-      absl::string_view text);
-
   ZenzContextScriptAnalyzer script_analyzer_;
+  ZenzTextPrivacyAnalyzer privacy_analyzer_;
 };
 
 }  // namespace session

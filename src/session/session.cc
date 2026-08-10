@@ -63,6 +63,7 @@
 #include "session/zenz_client_factory.h"
 #include "session/zenz_context_assembler.h"
 #include "session/zenz_prompt_builder.h"
+#include "session/zenz_text_privacy_analyzer.h"
 #include "transliteration/transliteration.h"
 
 #ifdef __APPLE__
@@ -2096,55 +2097,6 @@ struct ZenzTextPrivacyDecision {
   const char* reason = "unspecified";
 };
 
-bool IsAsciiAlpha(unsigned char c) {
-  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
-}
-
-bool IsAsciiDigit(unsigned char c) {
-  return '0' <= c && c <= '9';
-}
-
-bool IsAsciiAlnum(unsigned char c) {
-  return IsAsciiAlpha(c) || IsAsciiDigit(c);
-}
-
-bool IsAsciiControl(unsigned char c) {
-  return c < 0x20 || c == 0x7f;
-}
-
-std::string ToLowerAscii(absl::string_view text) {
-  std::string result;
-  result.reserve(text.size());
-
-  for (const unsigned char c : text) {
-    if ('A' <= c && c <= 'Z') {
-      result.push_back(static_cast<char>(c - 'A' + 'a'));
-    } else {
-      result.push_back(static_cast<char>(c));
-    }
-  }
-
-  return result;
-}
-
-bool ContainsAsciiSubstring(const std::string& text,
-                            absl::string_view needle) {
-  if (needle.empty()) {
-    return true;
-  }
-
-  return text.find(needle.data(), 0, needle.size()) != std::string::npos;
-}
-
-bool ContainsAsciiControl(absl::string_view text) {
-  for (const unsigned char c : text) {
-    if (IsAsciiControl(c)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 bool IsJapaneseScriptSignal(char32_t c) {
   // Hiragana
   if (0x3040 <= c && c <= 0x309F) {
@@ -2188,388 +2140,19 @@ bool IsJapaneseScriptSignal(char32_t c) {
   return false;
 }
 
-bool ContainsJapaneseScriptSignal(absl::string_view text) {
-  for (ConstChar32Iterator iter(text); !iter.Done(); iter.Next()) {
-    if (IsJapaneseScriptSignal(iter.Get())) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool LooksLikeUrlOrDomain(absl::string_view text) {
-  const std::string lower = ToLowerAscii(text);
-
-  if (lower.find("://") != std::string::npos ||
-      lower.find("www.") != std::string::npos) {
-    return true;
-  }
-
-  constexpr absl::string_view kDomainSuffixes[] = {
-      ".com",
-      ".net",
-      ".org",
-      ".jp",
-      ".co.jp",
-      ".io",
-      ".dev",
-      ".app",
-      ".local",
-      ".localhost",
-  };
-
-  for (const absl::string_view suffix : kDomainSuffixes) {
-    if (ContainsAsciiSubstring(lower, suffix)) {
+bool ContainsJapaneseScriptSignal(
+    absl::string_view text) {
+  for (ConstChar32Iterator iter(text);
+       !iter.Done();
+       iter.Next()) {
+    if (IsJapaneseScriptSignal(
+            iter.Get())) {
       return true;
     }
   }
 
   return false;
 }
-
-bool LooksLikeEmail(absl::string_view text) {
-  // Broad by design. In Japanese composition, raw '@' almost always means an
-  // address-like or handle-like token. Keep it out of the local model path.
-  return text.find('@') != absl::string_view::npos;
-}
-
-bool LooksLikePath(absl::string_view text) {
-  const std::string lower = ToLowerAscii(text);
-
-  if (text.find('\\') != absl::string_view::npos) {
-    return true;
-  }
-
-  if (lower.size() >= 3 &&
-      IsAsciiAlpha(static_cast<unsigned char>(lower[0])) &&
-      lower[1] == ':' &&
-      (lower[2] == '\\' || lower[2] == '/')) {
-    return true;
-  }
-
-  if (StartsWithString(lower, "/") ||
-      StartsWithString(lower, "~/") ||
-      lower.find("../") != std::string::npos ||
-      lower.find("./") != std::string::npos) {
-    return true;
-  }
-
-  return false;
-}
-
-bool IsAsciiTokenChar(unsigned char c) {
-  return IsAsciiAlnum(c) || c == '_' || c == '-' || c == '.';
-}
-
-bool IsAsciiHexDigit(unsigned char c) {
-  return IsAsciiDigit(c) ||
-         ('a' <= c && c <= 'f') ||
-         ('A' <= c && c <= 'F');
-}
-
-bool IsIpv4LikeAsciiToken(absl::string_view token) {
-  size_t i = 0;
-  int group_count = 0;
-
-  while (i < token.size()) {
-    if (group_count >= 4) {
-      return false;
-    }
-
-    const size_t start = i;
-    int value = 0;
-
-    while (i < token.size() &&
-           IsAsciiDigit(static_cast<unsigned char>(token[i]))) {
-      value = value * 10 + (token[i] - '0');
-      if (value > 255) {
-        return false;
-      }
-      ++i;
-    }
-
-    if (i == start) {
-      return false;
-    }
-
-    ++group_count;
-
-    if (group_count == 4) {
-      break;
-    }
-
-    if (i >= token.size() || token[i] != '.') {
-      return false;
-    }
-
-    ++i;
-  }
-
-  return group_count == 4 && i == token.size();
-}
-
-bool IsVersionLikeAsciiToken(absl::string_view token) {
-  if (token.empty()) {
-    return false;
-  }
-
-  size_t i = 0;
-
-  if (i < token.size() && (token[i] == 'v' || token[i] == 'V')) {
-    ++i;
-  }
-
-  const auto consume_digits = [&token, &i]() {
-    const size_t start = i;
-    while (i < token.size() &&
-           IsAsciiDigit(static_cast<unsigned char>(token[i]))) {
-      ++i;
-    }
-    return i > start;
-  };
-
-  if (!consume_digits()) {
-    return false;
-  }
-
-  size_t numeric_group_count = 1;
-  bool saw_dot = false;
-
-  while (i < token.size() && token[i] == '.') {
-    saw_dot = true;
-    ++i;
-
-    if (!consume_digits()) {
-      return false;
-    }
-
-    ++numeric_group_count;
-    if (numeric_group_count > 4) {
-      return false;
-    }
-  }
-
-  // Require at least one dot so plain "v12345678" is not treated as a
-  // harmless version string.
-  if (!saw_dot) {
-    return false;
-  }
-
-  if (i < token.size() && token[i] == '-') {
-    ++i;
-
-    const size_t suffix_start = i;
-    while (i < token.size() &&
-           IsAsciiAlpha(static_cast<unsigned char>(token[i]))) {
-      ++i;
-    }
-
-    if (i == suffix_start) {
-      return false;
-    }
-
-    while (i < token.size() &&
-           IsAsciiDigit(static_cast<unsigned char>(token[i]))) {
-      ++i;
-    }
-  }
-
-  return i == token.size();
-}
-
-bool LooksLikeLongAsciiToken(absl::string_view text) {
-  size_t token_start = 0;
-  bool in_token = false;
-
-  const auto check_token = [&](size_t start, size_t end) {
-    if (end <= start) {
-      return false;
-    }
-
-    const absl::string_view token = text.substr(start, end - start);
-
-    if (IsIpv4LikeAsciiToken(token)) {
-      return true;
-    }
-
-    if (IsVersionLikeAsciiToken(token)) {
-      return false;
-    }
-
-    size_t longest_digit_run = 0;
-    size_t current_digit_run = 0;
-
-    bool has_alpha = false;
-    bool has_digit = false;
-    bool has_symbol = false;
-    bool all_hex = true;
-
-    for (const unsigned char c : token) {
-      if (IsAsciiDigit(c)) {
-        has_digit = true;
-        ++current_digit_run;
-        longest_digit_run = std::max(longest_digit_run, current_digit_run);
-      } else {
-        current_digit_run = 0;
-      }
-
-      if (IsAsciiAlpha(c)) {
-        has_alpha = true;
-      }
-
-      if (c == '_' || c == '-' || c == '.') {
-        has_symbol = true;
-      }
-
-      if (!IsAsciiHexDigit(c)) {
-        all_hex = false;
-      }
-    }
-
-    const size_t len = token.size();
-
-    // Long digit runs are often phone numbers, account IDs, ticket IDs,
-    // verification codes, order numbers, or other sensitive identifiers.
-    //
-    // This intentionally rejects some harmless numbers.  For live correction,
-    // falling back to Mozc is safer than sending opaque numeric IDs to Zenz.
-    if (longest_digit_run >= 8) {
-      return true;
-    }
-
-    // Separator-bearing mixed identifiers:
-    //   ghb_741298790561977834
-    //   abc-1234567890
-    //   user_12345678
-    //
-    // Keep version-like strings such as v0.7.0 and v1.0.0-alpha out of this
-    // branch by checking IsVersionLikeAsciiToken() first.
-    if (len >= 12 && has_alpha && has_digit && has_symbol) {
-      return true;
-    }
-
-    // Mixed alphanumeric opaque identifiers without separators:
-    //   AKIAIOSFODNN7EXAMPLE
-    //   a1b2c3d4e5f6g7h8
-    if (len >= 16 && has_alpha && has_digit) {
-      return true;
-    }
-
-    // Long hex-like values:
-    //   deadbeefcafebabe
-    //   0123456789abcdef
-    if (len >= 16 && all_hex && has_alpha) {
-      return true;
-    }
-
-    // Very long ASCII words / identifiers are poor live-correction targets and
-    // may be generated IDs, slugs, or copied tokens.
-    if (len >= 24 && has_alpha) {
-      return true;
-    }
-
-    if (len >= 32) {
-      return true;
-    }
-
-    return false;
-  };
-
-  for (size_t i = 0; i < text.size(); ++i) {
-    const unsigned char c = static_cast<unsigned char>(text[i]);
-
-    if (IsAsciiTokenChar(c)) {
-      if (!in_token) {
-        token_start = i;
-        in_token = true;
-      }
-      continue;
-    }
-
-    if (in_token) {
-      if (check_token(token_start, i)) {
-        return true;
-      }
-      in_token = false;
-    }
-  }
-
-  if (in_token && check_token(token_start, text.size())) {
-    return true;
-  }
-
-  return false;
-}
-
-bool LooksLikeKnownSecretPrefix(absl::string_view text) {
-  const std::string lower = ToLowerAscii(text);
-
-  constexpr absl::string_view kPrefixes[] = {
-      "ghp_",
-      "github_pat_",
-      "glpat-",
-      "sk-",
-      "xoxb-",
-      "xoxp-",
-      "ya29.",
-      "akia",
-      "bearer ",
-  };
-
-  for (const absl::string_view prefix : kPrefixes) {
-    if (ContainsAsciiSubstring(lower, prefix)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-bool ContainsSensitiveCredentialWord(absl::string_view text) {
-  const std::string lower = ToLowerAscii(text);
-
-  constexpr absl::string_view kAsciiWords[] = {
-      "password",
-      "passwd",
-      "passphrase",
-      "secret",
-      "token",
-      "apikey",
-      "api_key",
-      "credential",
-      "privatekey",
-      "private_key",
-      "authorization",
-  };
-
-  for (const absl::string_view word : kAsciiWords) {
-    if (ContainsAsciiSubstring(lower, word)) {
-      return true;
-    }
-  }
-
-  constexpr absl::string_view kJapaneseWords[] = {
-      "パスワード",
-      "暗証番号",
-      "認証コード",
-      "認証番号",
-      "秘密鍵",
-      "秘密キー",
-      "トークン",
-      "アクセストークン",
-      "APIキー",
-      "apiキー",
-  };
-
-  for (const absl::string_view word : kJapaneseWords) {
-    if (text.find(word) != absl::string_view::npos) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 ZenzTextPrivacyDecision EvaluateZenzLiveKeyPrivacy(
     absl::string_view key) {
   if (key.empty()) {
@@ -2580,47 +2163,38 @@ ZenzTextPrivacyDecision EvaluateZenzLiveKeyPrivacy(
     return {false, "invalid_utf8"};
   }
 
-  if (ContainsAsciiControl(key)) {
-    return {false, "control_char"};
+  for (const unsigned char c : key) {
+    if (c < 0x20 ||
+        c == 0x7f) {
+      return {false, "control_char"};
+    }
   }
 
-  if (Util::CharsLen(key) > kMaxZenzLiveCorrectionKeyChars) {
+  if (Util::CharsLen(key) >
+      kMaxZenzLiveCorrectionKeyChars) {
     return {false, "key_too_long"};
   }
 
-  // Main difference from the old ContainsAsciiAlphabet() gate:
-  // ASCII is allowed only when the composition has a Japanese script signal.
-  if (!ContainsJapaneseScriptSignal(key)) {
+  // Preserve the existing live-key requirement exactly.
+  if (!ContainsJapaneseScriptSignal(
+          key)) {
     return {false, "no_japanese_signal"};
   }
 
-  if (LooksLikeEmail(key)) {
-    return {false, "email_like"};
-  }
+  const ZenzTextPrivacyAnalysis privacy =
+      ZenzTextPrivacyAnalyzer().Analyze(
+          key,
+          ZenzTextPrivacyPolicy::kLiveText);
 
-  if (LooksLikeUrlOrDomain(key)) {
-    return {false, "url_or_domain_like"};
-  }
-
-  if (LooksLikePath(key)) {
-    return {false, "path_like"};
-  }
-
-  if (LooksLikeKnownSecretPrefix(key)) {
-    return {false, "secret_prefix"};
-  }
-
-  if (LooksLikeLongAsciiToken(key)) {
-    return {false, "token_like"};
-  }
-
-  if (ContainsSensitiveCredentialWord(key)) {
-    return {false, "credential_word"};
+  if (privacy.sensitive()) {
+    return {
+        false,
+        privacy.reason(),
+    };
   }
 
   return {true, "allow"};
 }
-
 ZenzTextPrivacyDecision EvaluateZenzLiveValuePrivacy(
     absl::string_view value) {
   if (value.empty()) {
@@ -2631,43 +2205,34 @@ ZenzTextPrivacyDecision EvaluateZenzLiveValuePrivacy(
     return {false, "invalid_utf8"};
   }
 
-  if (ContainsAsciiControl(value)) {
-    return {false, "control_char"};
+  for (const unsigned char c : value) {
+    if (c < 0x20 ||
+        c == 0x7f) {
+      return {false, "control_char"};
+    }
   }
 
-  if (Util::CharsLen(value) > kMaxZenzLiveCorrectionValueChars) {
+  if (Util::CharsLen(value) >
+      kMaxZenzLiveCorrectionValueChars) {
     return {false, "value_too_long"};
   }
 
-  // Do not require a Japanese signal for value.
-  // Example: key=ぎっとはぶ, value=GitHub should remain valid.
-  if (LooksLikeEmail(value)) {
-    return {false, "email_like"};
-  }
+  // Value intentionally does not require a Japanese-script signal.
+  // Example: key=ぎっとはぶ, value=GitHub remains valid.
+  const ZenzTextPrivacyAnalysis privacy =
+      ZenzTextPrivacyAnalyzer().Analyze(
+          value,
+          ZenzTextPrivacyPolicy::kLiveText);
 
-  if (LooksLikeUrlOrDomain(value)) {
-    return {false, "url_or_domain_like"};
-  }
-
-  if (LooksLikePath(value)) {
-    return {false, "path_like"};
-  }
-
-  if (LooksLikeKnownSecretPrefix(value)) {
-    return {false, "secret_prefix"};
-  }
-
-  if (LooksLikeLongAsciiToken(value)) {
-    return {false, "token_like"};
-  }
-
-  if (ContainsSensitiveCredentialWord(value)) {
-    return {false, "credential_word"};
+  if (privacy.sensitive()) {
+    return {
+        false,
+        privacy.reason(),
+    };
   }
 
   return {true, "allow"};
 }
-
 void AddPreeditSegment(absl::string_view key,
                        absl::string_view value,
                        commands::Preedit::Segment::Annotation annotation,

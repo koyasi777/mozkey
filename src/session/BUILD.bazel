@@ -88,11 +88,21 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "zenz_text_privacy_analyzer",
+    srcs = ["zenz_text_privacy_analyzer.cc"],
+    hdrs = ["zenz_text_privacy_analyzer.h"],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
     name = "zenz_context_sanitizer",
     srcs = ["zenz_context_sanitizer.cc"],
     hdrs = ["zenz_context_sanitizer.h"],
     deps = [
         ":zenz_context_script_analyzer",
+        ":zenz_text_privacy_analyzer",
         "//base:util",
         "@com_google_absl//absl/strings",
     ],
@@ -148,6 +158,7 @@ mozc_cc_library(
         ":zenz_context_sanitizer",
         ":zenz_feedback_store",
         ":zenz_prompt_builder",
+        ":zenz_text_privacy_analyzer",
         "//base:clock",
         "//base:util",
         "//composer",
@@ -212,6 +223,16 @@ mozc_cc_test(
     srcs = ["zenz_context_script_analyzer_test.cc"],
     deps = [
         ":zenz_context_script_analyzer",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_text_privacy_analyzer_test",
+    size = "small",
+    srcs = ["zenz_text_privacy_analyzer_test.cc"],
+    deps = [
+        ":zenz_text_privacy_analyzer",
         "//testing:gunit_main",
     ],
 )
