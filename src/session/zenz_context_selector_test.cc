@@ -226,6 +226,47 @@ TEST(ZenzContextSelectorTest,
 }
 
 TEST(ZenzContextSelectorTest,
+     RightBeginningWithAsciiSpacesThenLfIsEmpty) {
+  const ZenzContextSelector selector;
+
+  EXPECT_TRUE(
+      selector.SelectRight(
+          "   \n次の行",
+          128).empty());
+}
+
+TEST(ZenzContextSelectorTest,
+     RightBeginningWithTabThenCrLfIsEmpty) {
+  const ZenzContextSelector selector;
+
+  EXPECT_TRUE(
+      selector.SelectRight(
+          "\t\r\n次の行",
+          128).empty());
+}
+
+TEST(ZenzContextSelectorTest,
+     RightBeginningWithIdeographicSpaceThenLfIsEmpty) {
+  const ZenzContextSelector selector;
+
+  EXPECT_TRUE(
+      selector.SelectRight(
+          "　\n次の行",
+          128).empty());
+}
+
+TEST(ZenzContextSelectorTest,
+     RightLeadingSpacesWithoutLineBreakArePreserved) {
+  const ZenzContextSelector selector;
+
+  EXPECT_EQ(
+      selector.SelectRight(
+          "  を採用する。次の文",
+          128),
+      "  を採用する。");
+}
+
+TEST(ZenzContextSelectorTest,
      RightBeginningWithLfIsEmpty) {
   const ZenzContextSelector selector;
 

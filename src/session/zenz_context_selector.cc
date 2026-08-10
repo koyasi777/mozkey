@@ -279,11 +279,21 @@ std::string ZenzContextSelector::SelectRight(
     return "";
   }
 
-  // Preserve the conservative interpretation of an immediate line break:
-  // there is no right-side continuation on the current logical input point.
+  // Preserve the conservative interpretation of an immediate line break.
+  // Horizontal whitespace at the end of the current line does not make the
+  // next logical line a continuation of the cursor position.
+  size_t leading_blank_end = 0;
+
+  while (leading_blank_end <
+             codepoints.size() &&
+         IsHorizontalBlankSpace(
+             codepoints[leading_blank_end])) {
+    ++leading_blank_end;
+  }
+
   if (LogicalLineBreakLength(
           codepoints,
-          0) != 0) {
+          leading_blank_end) != 0) {
     return "";
   }
 
