@@ -61,6 +61,7 @@
 #include "session/key_event_transformer.h"
 #include "session/keymap.h"
 #include "session/zenz_client_factory.h"
+#include "session/zenz_context_assembler.h"
 #include "session/zenz_prompt_builder.h"
 #include "transliteration/transliteration.h"
 
@@ -5227,55 +5228,6 @@ bool Session::ApplyDelayedLiveConversion(commands::Command* command) {
   return MaybeStartLiveConversion(command);
 }
 
-std::string Session::ExtractZenzLeftContext(uint32_t max_chars) const {
-  if (max_chars == 0) {
-    return "";
-  }
-
-  if (!context_->client_context().has_preceding_text()) {
-    return "";
-  }
-
-  const std::string& preceding_text =
-      context_->client_context().preceding_text();
-  const size_t len = Util::CharsLen(preceding_text);
-  if (len <= max_chars) {
-    return preceding_text;
-  }
-
-  return std::string(
-    Util::Utf8SubString(preceding_text, len - max_chars, max_chars));
-}
-
-std::string Session::ExtractZenzRightContext(uint32_t max_chars) const {
-  if (max_chars == 0) {
-    return "";
-  }
-
-  if (!context_->client_context().has_following_text()) {
-    return "";
-  }
-
-  const std::string& following_text =
-      context_->client_context().following_text();
-
-  // Right context should describe the continuation of the current line.
-  // Do not let text from following lines leak into the Zenz prompt, because
-  // multi-line editors often expose the rest of the document as following_text.
-  const size_t line_break_pos = following_text.find_first_of("\r\n");
-  const std::string current_line =
-      line_break_pos == std::string::npos
-          ? following_text
-          : following_text.substr(0, line_break_pos);
-
-  const size_t len = Util::CharsLen(current_line);
-  if (len <= max_chars) {
-    return current_line;
-  }
-
-  return std::string(Util::Utf8SubString(current_line, 0, max_chars));
-}
-
 std::string Session::BuildZenzFeedbackContextClass(
     absl::string_view left_context) const {
   const ZenzContextSanitizationResult result =
@@ -5995,21 +5947,21 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
   const uint32_t left_context_len =
       GetZenzLiveCorrectionLeftContextLength(config);
 
-  const std::string raw_left_context =
-      ExtractZenzLeftContext(left_context_len);
-  const ZenzContextSanitizationResult context_result =
-      zenz_context_sanitizer_.SanitizeForZenz(
-          raw_left_context, left_context_len);
+  ZenzContextAssemblyInput context_input;
+  context_input.preceding_text =
+      context_->client_context().preceding_text();
+  context_input.left_max_chars = left_context_len;
 
-  const std::string left_context_for_validation =
-      context_result.allowed_for_prompt
-          ? context_result.sanitized_context
-          : std::string();
+  const ZenzContextAssemblyResult assembled_context =
+      zenz_context_assembler_.Assemble(context_input);
+
+  const std::string& left_context_for_validation =
+      assembled_context.left.prompt_context;
 
   const std::string context_class =
-      context_result.context_class.empty()
+      assembled_context.left.context_class.empty()
           ? std::string("empty")
-          : context_result.context_class;
+          : assembled_context.left.context_class;
 
   const std::vector<ZenzFeedbackCandidate> feedback_candidates =
       zenz_feedback_store_.GetAcceptedCandidates(
@@ -6174,27 +6126,21 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
   const uint32_t right_context_len =
       GetZenzLiveCorrectionRightContextLength(config);
 
-  const std::string raw_left_context =
-      ExtractZenzLeftContext(left_context_len);
-  const ZenzContextSanitizationResult context_result =
-      zenz_context_sanitizer_.SanitizeForZenz(
-          raw_left_context, left_context_len);
+  ZenzContextAssemblyInput context_input;
+  context_input.preceding_text =
+      context_->client_context().preceding_text();
+  context_input.following_text =
+      context_->client_context().following_text();
+  context_input.left_max_chars = left_context_len;
+  context_input.right_max_chars = right_context_len;
 
-  const std::string left_context_for_prompt =
-      context_result.allowed_for_prompt
-          ? context_result.sanitized_context
-          : std::string();
+  const ZenzContextAssemblyResult assembled_context =
+      zenz_context_assembler_.Assemble(context_input);
 
-  const std::string raw_right_context =
-      ExtractZenzRightContext(right_context_len);
-  const ZenzContextSanitizationResult right_context_result =
-      zenz_context_sanitizer_.SanitizeForZenz(
-          raw_right_context, right_context_len);
-
-  const std::string right_context_for_prompt =
-      right_context_result.allowed_for_prompt
-          ? right_context_result.sanitized_context
-          : std::string();
+  const std::string& left_context_for_prompt =
+      assembled_context.left.prompt_context;
+  const std::string& right_context_for_prompt =
+      assembled_context.right.prompt_context;
 
   ZenzPromptOptions prompt_options;
   prompt_options.left_context = left_context_for_prompt;
@@ -6220,7 +6166,7 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
   pending_zenz_live_.key = live_conversion_key_;
   pending_zenz_live_.left_context = left_context_for_prompt;
   pending_zenz_live_.right_context = right_context_for_prompt;
-  pending_zenz_live_.context_class = context_result.context_class;
+  pending_zenz_live_.context_class = assembled_context.left.context_class;
   pending_zenz_live_.mozc_value = live_conversion_value_;
   pending_zenz_live_.symbol_style_source =
       live_conversion_preedit_.empty() ? live_conversion_key_
@@ -6236,12 +6182,13 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
       "[zenz] scheduled ",
       ZenzRedactedTextStats("key", live_conversion_key_),
       " ", ZenzRedactedTextStats("mozc_value", live_conversion_value_),
-      " context_class=", context_result.context_class,
-      " context_allowed=", ZenzBool(context_result.allowed_for_prompt),
-      " context_reason=", context_result.reason,
+      " context_class=", assembled_context.left.context_class,
+      " context_allowed=",
+      ZenzBool(assembled_context.left.allowed_for_prompt),
+      " context_reason=", assembled_context.left.reason,
       " right_context_allowed=",
-      ZenzBool(right_context_result.allowed_for_prompt),
-      " right_context_reason=", right_context_result.reason,
+      ZenzBool(assembled_context.right.allowed_for_prompt),
+      " right_context_reason=", assembled_context.right.reason,
       " protected_prompt_replacements=",
       protected_prompt.placeholder_count));
 

@@ -78,25 +78,51 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "zenz_context_sanitizer",
+    srcs = ["zenz_context_sanitizer.cc"],
+    hdrs = ["zenz_context_sanitizer.h"],
+    deps = [
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_context_assembler",
+    srcs = ["zenz_context_assembler.cc"],
+    hdrs = ["zenz_context_assembler.h"],
+    deps = [
+        ":zenz_context_sanitizer",
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_prompt_builder",
+    srcs = ["zenz_prompt_builder.cc"],
+    hdrs = ["zenz_prompt_builder.h"],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
     name = "session",
     srcs = [
         "session.cc",
         "zenz_client_factory.cc",
-        "zenz_context_sanitizer.cc",
         "zenz_live_corrector.cc",
         "zenz_named_pipe_client.cc",
         "zenz_output_validator.cc",
-        "zenz_prompt_builder.cc",
         "zenz_unix_socket_client.cc",
     ],
     hdrs = [
         "session.h",
         "zenz_client_factory.h",
-        "zenz_context_sanitizer.h",
         "zenz_live_corrector.h",
         "zenz_named_pipe_client.h",
         "zenz_output_validator.h",
-        "zenz_prompt_builder.h",
         "zenz_unix_socket_client.h",
     ],
     visibility = [
@@ -107,7 +133,10 @@ mozc_cc_library(
         ":key_event_transformer",
         ":keymap",
         ":zenz_adoption_policy",
+        ":zenz_context_assembler",
+        ":zenz_context_sanitizer",
         ":zenz_feedback_store",
+        ":zenz_prompt_builder",
         "//base:clock",
         "//base:util",
         "//composer",
@@ -162,6 +191,36 @@ mozc_cc_test(
     srcs = ["zenz_adoption_policy_test.cc"],
     deps = [
         ":zenz_adoption_policy",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_sanitizer_test",
+    size = "small",
+    srcs = ["zenz_context_sanitizer_test.cc"],
+    deps = [
+        ":zenz_context_sanitizer",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_prompt_builder_test",
+    size = "small",
+    srcs = ["zenz_prompt_builder_test.cc"],
+    deps = [
+        ":zenz_prompt_builder",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_assembler_test",
+    size = "small",
+    srcs = ["zenz_context_assembler_test.cc"],
+    deps = [
+        ":zenz_context_assembler",
         "//testing:gunit_main",
     ],
 )
