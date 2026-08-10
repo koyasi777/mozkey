@@ -120,6 +120,16 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "zenz_context_selector",
+    srcs = ["zenz_context_selector.cc"],
+    hdrs = ["zenz_context_selector.h"],
+    deps = [
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
     name = "zenz_prompt_builder",
     srcs = ["zenz_prompt_builder.cc"],
     hdrs = ["zenz_prompt_builder.h"],
@@ -263,6 +273,16 @@ mozc_cc_test(
     srcs = ["zenz_context_assembler_test.cc"],
     deps = [
         ":zenz_context_assembler",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_selector_test",
+    size = "small",
+    srcs = ["zenz_context_selector_test.cc"],
+    deps = [
+        ":zenz_context_selector",
         "//testing:gunit_main",
     ],
 )
