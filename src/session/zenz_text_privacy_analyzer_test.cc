@@ -385,6 +385,303 @@ TEST(ZenzTextPrivacyAnalyzerTest,
   EXPECT_FALSE(context.sensitive());
 }
 
+TEST(ZenzTextPrivacyAnalyzerTest,
+     ContextPolicyAllowsOrdinaryJapaneseTechnicalText) {
+  const ZenzTextPrivacyAnalyzer analyzer;
+
+  const char* const texts[] = {
+      "2026年",
+      "日本語1234",
+      "日本語!!!!!!!!",
+      "Windows11を使う",
+      "GPT-5を使う",
+      "UTF-8で保存",
+      "HTTP/2に対応",
+      "v3.2を使う",
+      "M1 Mac",
+  };
+
+  for (const char* text : texts) {
+    SCOPED_TRACE(text);
+
+    const ZenzTextPrivacyAnalysis result =
+        analyzer.Analyze(
+            text,
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_FALSE(result.sensitive());
+    EXPECT_EQ(
+        result.signal,
+        ZenzTextPrivacySignal::kNone);
+  }
+}
+
+TEST(ZenzTextPrivacyAnalyzerTest,
+     ContextPolicyDoesNotUseLegacyLengthFallbacks) {
+  const ZenzTextPrivacyAnalyzer analyzer;
+
+  {
+    const ZenzTextPrivacyAnalysis legacy =
+        analyzer.Analyze(
+            "日本語1234",
+            ZenzTextPrivacyPolicy::kLegacyContext);
+
+    const ZenzTextPrivacyAnalysis refined =
+        analyzer.Analyze(
+            "日本語1234",
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_TRUE(legacy.sensitive());
+    EXPECT_EQ(
+        legacy.signal,
+        ZenzTextPrivacySignal::kLegacyLongDigitRun);
+
+    EXPECT_FALSE(refined.sensitive());
+  }
+
+  {
+    const ZenzTextPrivacyAnalysis legacy =
+        analyzer.Analyze(
+            "日本語!!!!!!!!",
+            ZenzTextPrivacyPolicy::kLegacyContext);
+
+    const ZenzTextPrivacyAnalysis refined =
+        analyzer.Analyze(
+            "日本語!!!!!!!!",
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_TRUE(legacy.sensitive());
+    EXPECT_EQ(
+        legacy.signal,
+        ZenzTextPrivacySignal::kLegacyLongVisibleAscii);
+
+    EXPECT_FALSE(refined.sensitive());
+  }
+}
+
+TEST(ZenzTextPrivacyAnalyzerTest,
+     ContextPolicyProtectsAddressAndLocationLikeStructure) {
+  const ZenzTextPrivacyAnalyzer analyzer;
+
+  struct TestCase {
+    const char* text;
+    ZenzTextPrivacySignal signal;
+  };
+
+  const TestCase cases[] = {
+      {
+          "a@b",
+          ZenzTextPrivacySignal::kEmailLike,
+      },
+      {
+          "name@host",
+          ZenzTextPrivacySignal::kEmailLike,
+      },
+      {
+          "user@example.com",
+          ZenzTextPrivacySignal::kEmailLike,
+      },
+      {
+          "https://example.com",
+          ZenzTextPrivacySignal::kUrlOrDomainLike,
+      },
+      {
+          "example.com",
+          ZenzTextPrivacySignal::kUrlOrDomainLike,
+      },
+      {
+          "mailto:someone",
+          ZenzTextPrivacySignal::kUrlOrDomainLike,
+      },
+      {
+          "C:\\Users\\Makoto\\notes.txt",
+          ZenzTextPrivacySignal::kPathLike,
+      },
+      {
+          "foo\\bar",
+          ZenzTextPrivacySignal::kPathLike,
+      },
+      {
+          "/home/user/notes.txt",
+          ZenzTextPrivacySignal::kPathLike,
+      },
+      {
+          "../private/file",
+          ZenzTextPrivacySignal::kPathLike,
+      },
+  };
+
+  for (const TestCase& test : cases) {
+    SCOPED_TRACE(test.text);
+
+    const ZenzTextPrivacyAnalysis result =
+        analyzer.Analyze(
+            test.text,
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_TRUE(result.sensitive());
+    EXPECT_EQ(result.signal, test.signal);
+  }
+}
+
+TEST(ZenzTextPrivacyAnalyzerTest,
+     ContextPolicyProtectsCredentialVocabulary) {
+  const ZenzTextPrivacyAnalyzer analyzer;
+
+  const char* const texts[] = {
+      "password=abc",
+      "passwd=abc",
+      "pwd=abc",
+      "passphrase=abc",
+      "secret=abc",
+      "token=abc",
+      "apikey=abc",
+      "api_key=abc",
+      "credential=abc",
+      "privatekey=abc",
+      "private_key=abc",
+      "authorization=abc",
+      "cookie=abc",
+      "sessionid=abc",
+      "session_id=abc",
+      "パスワードを変更",
+      "暗証番号を入力",
+      "認証コードを入力",
+      "認証番号を入力",
+      "秘密鍵を保存",
+      "秘密キーを保存",
+      "トークンを設定",
+      "アクセストークンを設定",
+      "APIキーを設定",
+  };
+
+  for (const char* text : texts) {
+    SCOPED_TRACE(text);
+
+    const ZenzTextPrivacyAnalysis result =
+        analyzer.Analyze(
+            text,
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_TRUE(result.sensitive());
+    EXPECT_EQ(
+        result.signal,
+        ZenzTextPrivacySignal::kCredentialWord);
+  }
+}
+
+TEST(ZenzTextPrivacyAnalyzerTest,
+     ContextPolicyProtectsAllKnownSecretPrefixes) {
+  const ZenzTextPrivacyAnalyzer analyzer;
+
+  const char* const texts[] = {
+      "ghp_abcdefghijklmnopqrstuvwxyz",
+      "github_pat_abcdefghijklmnopqrstuvwxyz",
+      "glpat-abcdefghijklmnopqrstuvwxyz",
+      "sk-abcdefghijklmnopqrstuvwxyz",
+      "pk_abcdefghijklmnopqrstuvwxyz",
+      "xoxb-abcdefghijklmnopqrstuvwxyz",
+      "xoxp-abcdefghijklmnopqrstuvwxyz",
+      "ya29.abcdefghijklmnopqrstuvwxyz",
+      "AKIAIOSFODNN7EXAMPLE",
+      "Bearer abcdefghijklmnopqrstuvwxyz",
+  };
+
+  for (const char* text : texts) {
+    SCOPED_TRACE(text);
+
+    const ZenzTextPrivacyAnalysis result =
+        analyzer.Analyze(
+            text,
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_TRUE(result.sensitive());
+    EXPECT_EQ(
+        result.signal,
+        ZenzTextPrivacySignal::kSecretPrefix);
+  }
+}
+
+TEST(ZenzTextPrivacyAnalyzerTest,
+     ContextPolicyProtectsOpaqueIdentifiers) {
+  const ZenzTextPrivacyAnalyzer analyzer;
+
+  const char* const texts[] = {
+      "12345678",
+      "192.168.0.1",
+      "abc-1234567890",
+      "user_12345678",
+      "a1b2c3d4e5f6g7h8",
+      "deadbeefcafebabe",
+  };
+
+  for (const char* text : texts) {
+    SCOPED_TRACE(text);
+
+    const ZenzTextPrivacyAnalysis result =
+        analyzer.Analyze(
+            text,
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_TRUE(result.sensitive());
+    EXPECT_EQ(
+        result.signal,
+        ZenzTextPrivacySignal::kTokenLike);
+  }
+}
+
+TEST(ZenzTextPrivacyAnalyzerTest,
+     ContextPolicyKeepsVersionLikeTokens) {
+  const ZenzTextPrivacyAnalyzer analyzer;
+
+  const char* const texts[] = {
+      "v0.7.0",
+      "v1.0.0-alpha1",
+      "v3.2",
+      "12345678.1",
+      "v12345678.1",
+  };
+
+  for (const char* text : texts) {
+    SCOPED_TRACE(text);
+
+    const ZenzTextPrivacyAnalysis result =
+        analyzer.Analyze(
+            text,
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_FALSE(result.sensitive());
+  }
+}
+
+TEST(ZenzTextPrivacyAnalyzerTest,
+     ContextPolicyUsesSpecificSignalBeforeOpaqueToken) {
+  const ZenzTextPrivacyAnalyzer analyzer;
+
+  {
+    const ZenzTextPrivacyAnalysis result =
+        analyzer.Analyze(
+            "ghp_12345678901234567890",
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_TRUE(result.sensitive());
+    EXPECT_EQ(
+        result.signal,
+        ZenzTextPrivacySignal::kSecretPrefix);
+  }
+
+  {
+    const ZenzTextPrivacyAnalysis result =
+        analyzer.Analyze(
+            "password=12345678",
+            ZenzTextPrivacyPolicy::kContext);
+
+    EXPECT_TRUE(result.sensitive());
+    EXPECT_EQ(
+        result.signal,
+        ZenzTextPrivacySignal::kCredentialWord);
+  }
+}
 }  // namespace
 }  // namespace session
 }  // namespace mozc

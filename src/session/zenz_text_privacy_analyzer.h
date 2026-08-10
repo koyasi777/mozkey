@@ -9,13 +9,19 @@ namespace session {
 // Privacy policies intentionally remain separate in C2A.
 //
 // kLiveText preserves the existing Session key/value privacy policy.
-// kLegacyContext preserves the existing context sanitizer policy exactly.
 //
-// C2B can refine context semantics after this shared implementation has been
-// independently validated.
+// kLegacyContext preserves the historical context sanitizer policy, including
+// the broad four-digit and eight-visible-ASCII fallbacks.
+//
+// kContext is the refined surrounding-context policy. It protects structured
+// sensitive data instead of treating ordinary short technical text as secret.
+//
+// The sanitizer deliberately remains on kLegacyContext until C2C so this policy
+// can be characterized independently before production behavior changes.
 enum class ZenzTextPrivacyPolicy {
   kLiveText,
   kLegacyContext,
+  kContext,
 };
 
 enum class ZenzTextPrivacySignal {

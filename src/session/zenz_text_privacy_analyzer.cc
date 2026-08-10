@@ -709,6 +709,91 @@ ZenzTextPrivacyAnalysis AnalyzeLiveText(
   return {};
 }
 
+bool ContainsContextSensitiveCredentialWord(
+    absl::string_view text) {
+  // Preserve every credential word recognized by either historical context
+  // privacy or the more complete live policy.
+  return ContainsLegacyContextCredentialWord(text) ||
+         ContainsLiveSensitiveCredentialWord(text);
+}
+
+bool LooksLikeContextUrlOrDomain(
+    absl::string_view text) {
+  if (LooksLikeLiveUrlOrDomain(text)) {
+    return true;
+  }
+
+  // The historical context policy additionally treated mailto: as sensitive
+  // even when no '@' was present.
+  const std::string lower =
+      ToLowerAscii(text);
+
+  return ContainsAsciiSubstring(
+      lower,
+      "mailto:");
+}
+
+bool LooksLikeContextKnownSecretPrefix(
+    absl::string_view text) {
+  if (LooksLikeLiveKnownSecretPrefix(text)) {
+    return true;
+  }
+
+  // Preserve the historical pk_ prefix without changing kLiveText semantics.
+  const std::string lower =
+      ToLowerAscii(text);
+
+  return ContainsAsciiSubstring(
+      lower,
+      "pk_");
+}
+
+ZenzTextPrivacyAnalysis AnalyzeContextText(
+    absl::string_view text) {
+  // Prefer concrete secret/token schemes before generic credential
+  // vocabulary. Some strings, notably "Bearer ...", intentionally match both.
+  // Keeping the prefix signal first also matches the already validated live
+  // privacy precedence.
+  if (LooksLikeContextKnownSecretPrefix(text)) {
+    return {
+        ZenzTextPrivacySignal::kSecretPrefix};
+  }
+
+  if (ContainsContextSensitiveCredentialWord(text)) {
+    return {
+        ZenzTextPrivacySignal::kCredentialWord};
+  }
+
+  // Context privacy deliberately treats any '@' as potentially identifying.
+  // This is stronger than the historical '@' + '.' heuristic and matches the
+  // already validated live privacy boundary.
+  if (LooksLikeLiveEmail(text)) {
+    return {
+        ZenzTextPrivacySignal::kEmailLike};
+  }
+
+  if (LooksLikeContextUrlOrDomain(text)) {
+    return {
+        ZenzTextPrivacySignal::kUrlOrDomainLike};
+  }
+
+  // Use the broader live path detector: absolute paths, relative paths and
+  // backslash-bearing Windows-like text can expose local machine structure.
+  if (LooksLikeLivePath(text)) {
+    return {
+        ZenzTextPrivacySignal::kPathLike};
+  }
+
+  // Keep the existing conservative opaque-token detector. Unlike the legacy
+  // context rule, this does not reject every four-digit year or every
+  // eight-character ASCII word.
+  if (LooksLikeLongAsciiToken(text)) {
+    return {
+        ZenzTextPrivacySignal::kTokenLike};
+  }
+
+  return {};
+}
 ZenzTextPrivacyAnalysis AnalyzeLegacyContext(
     absl::string_view text) {
   if (ContainsLegacyContextCredentialWord(
@@ -819,6 +904,10 @@ ZenzTextPrivacyAnalyzer::Analyze(
     case ZenzTextPrivacyPolicy::
         kLegacyContext:
       return AnalyzeLegacyContext(text);
+
+    case ZenzTextPrivacyPolicy::
+        kContext:
+      return AnalyzeContextText(text);
   }
 
   return {};
