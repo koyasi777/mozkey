@@ -148,7 +148,7 @@ TEST(ZenzContextAssemblerTest,
 TEST(ZenzContextAssemblerTest,
      SanitizesLeftAndRightIndependently) {
   ZenzContextAssemblyInput input;
-  input.preceding_text = "日本語1234";
+  input.preceding_text = "パスワードを変更";
   input.following_text = "安全な文脈";
   input.left_max_chars = 24;
   input.right_max_chars = 24;

@@ -233,86 +233,51 @@ TEST(ZenzContextSanitizerTest,
 }
 
 TEST(ZenzContextSanitizerTest,
-     CurrentPrivacyRuleRejectsEightConsecutiveVisibleAsciiCharacters) {
+     RefinedPrivacyDoesNotRejectEightVisibleAsciiByLengthAlone) {
   const ZenzContextSanitizer sanitizer;
 
-  {
-    const ZenzContextSanitizationResult result =
-        sanitizer.SanitizeForZenz(
-            "日本語!!!!!!!",
-            24);
+  const ZenzContextSanitizationResult result =
+      sanitizer.SanitizeForZenz(
+          "日本語!!!!!!!!",
+          24);
 
-    EXPECT_EQ(
-        result.context_class,
-        "japanese_with_punctuation");
-    EXPECT_EQ(
-        result.sanitized_context,
-        "日本語!!!!!!!");
-    EXPECT_TRUE(result.allowed_for_prompt);
-    EXPECT_EQ(
-        result.reason,
-        "context_allowed");
-  }
-
-  {
-    const ZenzContextSanitizationResult result =
-        sanitizer.SanitizeForZenz(
-            "日本語!!!!!!!!",
-            24);
-
-    EXPECT_EQ(
-        result.context_class,
-        "sensitive_like");
-    EXPECT_TRUE(
-        result.sanitized_context.empty());
-    EXPECT_FALSE(
-        result.allowed_for_prompt);
-    EXPECT_EQ(
-        result.reason,
-        "sensitive_context_rejected");
-  }
+  EXPECT_EQ(
+      result.context_class,
+      "japanese_with_punctuation");
+  EXPECT_EQ(
+      result.sanitized_context,
+      "日本語!!!!!!!!");
+  EXPECT_TRUE(
+      result.allowed_for_prompt);
+  EXPECT_FALSE(
+      result.allowed_for_learning);
+  EXPECT_EQ(
+      result.reason,
+      "context_allowed");
 }
 
 TEST(ZenzContextSanitizerTest,
-     CurrentPrivacyRuleRejectsFourConsecutiveAsciiDigits) {
+     RefinedPrivacyDoesNotRejectFourDigitsByLengthAlone) {
   const ZenzContextSanitizer sanitizer;
 
-  {
-    const ZenzContextSanitizationResult result =
-        sanitizer.SanitizeForZenz(
-            "日本語123",
-            24);
+  const ZenzContextSanitizationResult result =
+      sanitizer.SanitizeForZenz(
+          "日本語1234",
+          24);
 
-    EXPECT_EQ(
-        result.context_class,
-        "mixed_japanese_ascii");
-    EXPECT_EQ(
-        result.sanitized_context,
-        "日本語123");
-    EXPECT_TRUE(
-        result.allowed_for_prompt);
-    EXPECT_EQ(
-        result.reason,
-        "context_allowed");
-  }
-
-  {
-    const ZenzContextSanitizationResult result =
-        sanitizer.SanitizeForZenz(
-            "日本語1234",
-            24);
-
-    EXPECT_EQ(
-        result.context_class,
-        "sensitive_like");
-    EXPECT_TRUE(
-        result.sanitized_context.empty());
-    EXPECT_FALSE(
-        result.allowed_for_prompt);
-    EXPECT_EQ(
-        result.reason,
-        "sensitive_context_rejected");
-  }
+  EXPECT_EQ(
+      result.context_class,
+      "mixed_japanese_ascii");
+  EXPECT_EQ(
+      result.sanitized_context,
+      "日本語1234");
+  EXPECT_TRUE(
+      result.allowed_for_prompt);
+  EXPECT_FALSE(
+      result.allowed_for_learning);
+  EXPECT_EQ(
+      result.reason,
+      "context_allowed");
 }
 
 TEST(ZenzContextSanitizerTest,
@@ -355,6 +320,78 @@ TEST(ZenzContextSanitizerTest,
   }
 }
 
+TEST(ZenzContextSanitizerTest,
+     RefinedPrivacyRejectsStructuredSensitiveContext) {
+  const ZenzContextSanitizer sanitizer;
+
+  const char* const inputs[] = {
+      "a@b",
+      "example.com",
+      "foo\\bar",
+      "Bearer abcdefghijklmnopqrstuvwxyz",
+      "pk_abc",
+      "12345678",
+      "パスワードを変更",
+      "認証コードを入力",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextSanitizationResult result =
+        sanitizer.SanitizeForZenz(
+            input,
+            128);
+
+    EXPECT_EQ(
+        result.context_class,
+        "sensitive_like");
+    EXPECT_TRUE(
+        result.sanitized_context.empty());
+    EXPECT_FALSE(
+        result.allowed_for_prompt);
+    EXPECT_FALSE(
+        result.allowed_for_learning);
+    EXPECT_EQ(
+        result.reason,
+        "sensitive_context_rejected");
+  }
+}
+
+TEST(ZenzContextSanitizerTest,
+     RefinedPrivacyAndScriptDominanceRemainSeparateGates) {
+  const ZenzContextSanitizer sanitizer;
+
+  const char* const inputs[] = {
+      "2026年",
+      "Windows11を使う",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    // These strings are no longer rejected as sensitive merely because they
+    // contain ordinary digits or ASCII text. They still fail the independent
+    // C1 script-dominance policy, which is intentionally unchanged in C2C.
+    const ZenzContextSanitizationResult result =
+        sanitizer.SanitizeForZenz(
+            input,
+            24);
+
+    EXPECT_EQ(
+        result.context_class,
+        "mixed_japanese_ascii");
+    EXPECT_TRUE(
+        result.sanitized_context.empty());
+    EXPECT_FALSE(
+        result.allowed_for_prompt);
+    EXPECT_FALSE(
+        result.allowed_for_learning);
+    EXPECT_EQ(
+        result.reason,
+        "non_japanese_context_rejected");
+  }
+}
 TEST(ZenzContextSanitizerTest,
      RejectsAsciiOnlyContextAsNonJapanese) {
   const ZenzContextSanitizer sanitizer;

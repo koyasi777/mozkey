@@ -54,13 +54,15 @@ ZenzContextSanitizer::SanitizeForZenz(
           raw_context,
           max_chars);
 
-  // C2A deliberately preserves the old context privacy policy. Only ownership
-  // changes here: privacy detection now lives in the shared Zenz analyzer.
+  // Surrounding context uses the structural privacy policy. Ordinary technical
+  // text is not sensitive merely because it contains four digits or eight
+  // visible ASCII characters, while credential, address, path, secret-prefix
+  // and opaque-identifier structures remain protected.
   const ZenzTextPrivacyAnalysis privacy =
       privacy_analyzer_.Analyze(
           truncated,
           ZenzTextPrivacyPolicy::
-              kLegacyContext);
+              kContext);
 
   if (privacy.sensitive()) {
     result.context_class =
