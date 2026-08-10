@@ -125,9 +125,244 @@ bool IsJapaneseTechnicalNominalSuffix(
   }
 }
 
+bool IsAsciiUpper(const char32_t codepoint) {
+  return U'A' <= codepoint &&
+         codepoint <= U'Z';
+}
+
+bool IsAsciiLower(const char32_t codepoint) {
+  return U'a' <= codepoint &&
+         codepoint <= U'z';
+}
+
+bool IsJapaneseBoundaryPunctuation(
+    const char32_t codepoint) {
+  switch (codepoint) {
+    case U'「':
+    case U'」':
+    case U'『':
+    case U'』':
+    case U'（':
+    case U'）':
+    case U'［':
+    case U'］':
+    case U'【':
+    case U'】':
+    case U'〈':
+    case U'〉':
+    case U'《':
+    case U'》':
+    case U'“':
+    case U'”':
+    case U'‘':
+    case U'’':
+    case U'(':
+    case U')':
+    case U'[':
+    case U']':
+    case U'"':
+    case U'\'':
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+char32_t JapaneseNeighborToLeft(
+    const std::vector<char32_t>& codepoints,
+    const size_t begin) {
+  size_t i = begin;
+
+  while (i > 0) {
+    --i;
+
+    const char32_t codepoint =
+        codepoints[i];
+
+    if (IsJapaneseScriptType(
+            Util::GetScriptType(
+                codepoint))) {
+      return codepoint;
+    }
+
+    if (!IsJapaneseBoundaryPunctuation(
+            codepoint)) {
+      return U'\0';
+    }
+  }
+
+  return U'\0';
+}
+
+char32_t JapaneseNeighborToRight(
+    const std::vector<char32_t>& codepoints,
+    const size_t end) {
+  for (size_t i = end;
+       i < codepoints.size();
+       ++i) {
+    const char32_t codepoint =
+        codepoints[i];
+
+    if (IsJapaneseScriptType(
+            Util::GetScriptType(
+                codepoint))) {
+      return codepoint;
+    }
+
+    if (!IsJapaneseBoundaryPunctuation(
+            codepoint)) {
+      return U'\0';
+    }
+  }
+
+  return U'\0';
+}
+
+bool IsAsciiSpace(
+    const char32_t codepoint) {
+  return codepoint == U' ';
+}
+
+bool IsLowercaseTechnicalConnectorWord(
+    const std::vector<char32_t>& codepoints,
+    const size_t begin,
+    const size_t end) {
+  std::string token;
+  token.reserve(end - begin);
+
+  for (size_t i = begin; i < end; ++i) {
+    const char32_t codepoint =
+        codepoints[i];
+
+    if (!IsAsciiAlphaNum(codepoint)) {
+      return false;
+    }
+
+    if (IsAsciiUpper(codepoint)) {
+      token.push_back(
+          static_cast<char>(
+              codepoint - U'A' + U'a'));
+    } else {
+      token.push_back(
+          static_cast<char>(codepoint));
+    }
+  }
+
+  return token == "for" ||
+         token == "on" ||
+         token == "of" ||
+         token == "to";
+}
+
+bool IsLikelyMultiwordTechnicalComponent(
+    const std::vector<char32_t>& codepoints,
+    const size_t begin,
+    const size_t end) {
+  bool has_alpha = false;
+  bool has_digit = false;
+  bool has_connector = false;
+  bool all_alpha_upper = true;
+  bool title_case = true;
+  bool saw_alpha = false;
+  bool has_noninitial_upper = false;
+
+  size_t alpha_index = 0;
+
+  for (size_t i = begin; i < end; ++i) {
+    const char32_t codepoint =
+        codepoints[i];
+
+    if (U'0' <= codepoint &&
+        codepoint <= U'9') {
+      has_digit = true;
+      continue;
+    }
+
+    if (IsAsciiUpper(codepoint)) {
+      has_alpha = true;
+
+      if (alpha_index > 0) {
+        has_noninitial_upper = true;
+        title_case = false;
+      }
+
+      saw_alpha = true;
+      ++alpha_index;
+      continue;
+    }
+
+    if (IsAsciiLower(codepoint)) {
+      has_alpha = true;
+      all_alpha_upper = false;
+
+      if (!saw_alpha) {
+        title_case = false;
+      }
+
+      saw_alpha = true;
+      ++alpha_index;
+      continue;
+    }
+
+    if (IsAsciiTechnicalConnector(
+            codepoint)) {
+      has_connector = true;
+      continue;
+    }
+
+    return false;
+  }
+
+  if (IsLowercaseTechnicalConnectorWord(
+          codepoints,
+          begin,
+          end)) {
+    return true;
+  }
+
+  if (has_digit ||
+      has_connector ||
+      has_noninitial_upper) {
+    return true;
+  }
+
+  if (!has_alpha) {
+    return false;
+  }
+
+  return all_alpha_upper ||
+         title_case;
+}
+
+bool GapContainsOnlyAsciiSpaces(
+    const std::vector<char32_t>& codepoints,
+    const size_t begin,
+    const size_t end) {
+  if (begin >= end) {
+    return false;
+  }
+
+  for (size_t i = begin; i < end; ++i) {
+    if (!IsAsciiSpace(
+            codepoints[i])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+struct AsciiTechnicalToken {
+  size_t begin = 0;
+  size_t end = 0;
+  size_t ascii_alnum_chars = 0;
+  bool likely_multiword_component = false;
+};
+
 struct MixedScriptStructure {
   size_t ascii_alnum_chars = 0;
-  size_t attached_ascii_alnum_chars = 0;
+  size_t licensed_ascii_alnum_chars = 0;
   size_t technical_symbol_chars = 0;
   size_t max_japanese_run_chars = 0;
 
@@ -148,11 +383,20 @@ MixedScriptStructure AnalyzeMixedScriptStructure(
 
   MixedScriptStructure result;
 
+  std::vector<bool> licensed(
+      codepoints.size(),
+      false);
+
+  std::vector<AsciiTechnicalToken>
+      tokens;
+
   size_t current_japanese_run = 0;
 
-  for (const char32_t codepoint : codepoints) {
+  for (const char32_t codepoint :
+       codepoints) {
     if (IsJapaneseScriptType(
-            Util::GetScriptType(codepoint))) {
+            Util::GetScriptType(
+                codepoint))) {
       ++current_japanese_run;
 
       if (current_japanese_run >
@@ -168,7 +412,8 @@ MixedScriptStructure AnalyzeMixedScriptStructure(
   size_t i = 0;
 
   while (i < codepoints.size()) {
-    if (!IsAsciiAlphaNum(codepoints[i])) {
+    if (!IsAsciiAlphaNum(
+            codepoints[i])) {
       ++i;
       continue;
     }
@@ -199,36 +444,40 @@ MixedScriptStructure AnalyzeMixedScriptStructure(
       ++i;
     }
 
+    const size_t token_end = i;
+
     result.ascii_alnum_chars +=
         token_ascii_alnum_chars;
 
     result.technical_symbol_chars +=
         token_symbol_chars;
 
-    const bool left_is_japanese =
-        token_begin > 0 &&
-        IsJapaneseScriptType(
-            Util::GetScriptType(
-                codepoints[token_begin - 1]));
+    const char32_t left_japanese =
+        JapaneseNeighborToLeft(
+            codepoints,
+            token_begin);
 
-    const bool right_is_japanese =
-        i < codepoints.size() &&
-        IsJapaneseScriptType(
-            Util::GetScriptType(
-                codepoints[i]));
+    const char32_t right_japanese =
+        JapaneseNeighborToRight(
+            codepoints,
+            token_end);
 
-    if (left_is_japanese ||
-        right_is_japanese) {
-      result.attached_ascii_alnum_chars +=
-          token_ascii_alnum_chars;
+    if (left_japanese != U'\0' ||
+        right_japanese != U'\0') {
+      for (size_t j = token_begin;
+           j < token_end;
+           ++j) {
+        if (IsAsciiAlphaNum(
+                codepoints[j])) {
+          licensed[j] = true;
+        }
+      }
     }
 
-    if (right_is_japanese) {
-      const char32_t right =
-          codepoints[i];
-
+    if (right_japanese != U'\0') {
       const Util::ScriptType right_type =
-          Util::GetScriptType(right);
+          Util::GetScriptType(
+              right_japanese);
 
       if (right_type == Util::HIRAGANA) {
         result.has_hiragana_attachment =
@@ -236,23 +485,115 @@ MixedScriptStructure AnalyzeMixedScriptStructure(
       }
 
       if (token_is_all_digits &&
-          IsJapaneseNumericUnit(right)) {
+          IsJapaneseNumericUnit(
+              right_japanese)) {
         result.has_numeric_unit_attachment =
             true;
       }
 
       if (IsJapaneseTechnicalNominalSuffix(
-              right)) {
+              right_japanese)) {
         result.has_nominal_suffix_attachment =
             true;
       }
+    }
+
+    AsciiTechnicalToken token;
+    token.begin = token_begin;
+    token.end = token_end;
+    token.ascii_alnum_chars =
+        token_ascii_alnum_chars;
+    token.likely_multiword_component =
+        IsLikelyMultiwordTechnicalComponent(
+            codepoints,
+            token_begin,
+            token_end);
+
+    tokens.push_back(token);
+  }
+
+  // A product/technology name may consist of multiple ASCII tokens separated
+  // by spaces: Visual Studio, OpenAI API, GitHub Actions, Ruby on Rails, etc.
+  // Such a span is licensed as a unit only when every component has a
+  // technical-name shape and the whole span is attached to Japanese.
+  size_t token_index = 0;
+
+  while (token_index < tokens.size()) {
+    if (!tokens[token_index].
+            likely_multiword_component) {
+      ++token_index;
+      continue;
+    }
+
+    size_t group_end = token_index;
+
+    while (group_end + 1 <
+               tokens.size() &&
+           tokens[group_end + 1].
+               likely_multiword_component &&
+           GapContainsOnlyAsciiSpaces(
+               codepoints,
+               tokens[group_end].end,
+               tokens[group_end + 1].
+                   begin)) {
+      ++group_end;
+    }
+
+    if (group_end > token_index) {
+      const char32_t left_japanese =
+          JapaneseNeighborToLeft(
+              codepoints,
+              tokens[token_index].
+                  begin);
+
+      const char32_t right_japanese =
+          JapaneseNeighborToRight(
+              codepoints,
+              tokens[group_end].
+                  end);
+
+      if (left_japanese != U'\0' ||
+          right_japanese != U'\0') {
+        for (size_t t = token_index;
+             t <= group_end;
+             ++t) {
+          for (size_t j =
+                   tokens[t].begin;
+               j < tokens[t].end;
+               ++j) {
+            if (IsAsciiAlphaNum(
+                    codepoints[j])) {
+              licensed[j] = true;
+            }
+          }
+        }
+
+        if (right_japanese != U'\0' &&
+            Util::GetScriptType(
+                right_japanese) ==
+                Util::HIRAGANA) {
+          result.has_hiragana_attachment =
+              true;
+        }
+      }
+    }
+
+    token_index = group_end + 1;
+  }
+
+  for (size_t j = 0;
+       j < codepoints.size();
+       ++j) {
+    if (licensed[j] &&
+        IsAsciiAlphaNum(
+            codepoints[j])) {
+      ++result.licensed_ascii_alnum_chars;
     }
   }
 
   return result;
 }
-
-}  // namespace
+}  // namespace}  // namespace
 
 ZenzContextScriptProfile ZenzContextScriptAnalyzer::Analyze(
     const absl::string_view text) const {
@@ -364,7 +705,7 @@ bool ZenzContextScriptAnalyzer::LooksUsableAsJapaneseContext(
   // direct Japanese boundary. This prevents an unrelated English span from
   // becoming acceptable merely because a short Japanese fragment occurs
   // elsewhere in the context.
-  if (structure.attached_ascii_alnum_chars !=
+  if (structure.licensed_ascii_alnum_chars !=
       structure.ascii_alnum_chars) {
     return false;
   }

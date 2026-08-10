@@ -507,6 +507,104 @@ TEST(ZenzContextScriptAnalyzerTest,
             profile));
   }
 }
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyAcceptsMultiwordTechnicalNames) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "Visual Studioを使う",
+      "Visual Studio Codeで書く",
+      "OpenAI APIを使う",
+      "GitHub Actionsで実行する",
+      "Ruby on Railsを使う",
+      "Windows Subsystem for Linuxを使う",
+      "これはVisual Studio",
+      "Microsoft Visual C++を使う",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyAllowsQuotedTechnicalTermsAttachedToJapanese) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "「Windows11」を使う",
+      "「Visual Studio」を使う",
+      "（OpenAI API）を使う",
+      "これは「GPT-5」",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyStillRejectsOrdinaryEnglishSpans) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "This is Englishです",
+      "hello worldを",
+      "日本語 hello world",
+      "「this is text」を使う",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_FALSE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyDoesNotUseWhitespaceAsGenericAttachment) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "日本語 Windows11",
+      "Windows11 日本語",
+      "日本語 ABCDE",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_FALSE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
 }  // namespace
 }  // namespace session
 }  // namespace mozc
