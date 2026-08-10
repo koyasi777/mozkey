@@ -39,6 +39,15 @@ class ZenzContextScriptAnalyzer {
   bool LooksMostlyJapanese(
       const ZenzContextScriptProfile& profile) const;
 
+  // Candidate policy for natural Japanese context containing embedded ASCII
+  // technical terms, product names, versions and ordinary numbers.
+  //
+  // C3A does not route production sanitization through this method. It is
+  // defined and characterized independently before the production switch.
+  bool LooksUsableAsJapaneseContext(
+      absl::string_view text,
+      const ZenzContextScriptProfile& profile) const;
+
   // Maps the richer Unicode profile onto the existing persistent context
   // class vocabulary. Do not change these strings here without a feedback
   // compatibility/migration design.

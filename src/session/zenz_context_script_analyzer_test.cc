@@ -233,6 +233,280 @@ TEST(ZenzContextScriptAnalyzerTest,
   EXPECT_TRUE(
       analyzer.LooksMostlyJapanese(profile));
 }
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyPreservesExistingAcceptedContexts) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "今日は",
+      "今日はABC",
+      "今日は😀😀",
+      "「日。」",
+      "中文",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_TRUE(
+        analyzer.LooksMostlyJapanese(profile));
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyRecoversCurrentMixedScriptFalseNegatives) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "2026年",
+      "Windows11を使う",
+      "HTTP/2に対応する",
+      "macOS15でも使える",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_FALSE(
+        analyzer.LooksMostlyJapanese(profile));
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyAcceptsNaturalEmbeddedTechnicalTerms) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "Windows11を使う",
+      "GPT-5で生成する",
+      "UTF-8に変換する",
+      "HTTP/2に対応する",
+      "M1で動かす",
+      "v3.2へ更新する",
+      "C++で書く",
+      "macOS15でも使える",
+      "これはWindows11",
+      "ABC日本語",
+      "日本語ABCDE",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyRecognizesJapaneseNumericUnitAttachment) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "2026年",
+      "8月",
+      "10時",
+      "30分",
+      "500円",
+      "3人",
+      "2回",
+      "5件",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyRecognizesJapaneseGrammaticalAttachment) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "Windows11を",
+      "M1で",
+      "UTF-8に",
+      "v3.2へ",
+      "LongLibraryNameを",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyRecognizesTechnicalNominalSuffix) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "v3.2版",
+      "ARM64版",
+      "X型",
+      "Unix系",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyDoesNotLicenseUnattachedEnglishSpan) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "日本語 ABCDE",
+      "This is Englishです",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_FALSE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyDoesNotTreatSingleKanjiAsGenericLicense) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "abcdefghijklmnop日",
+      "abcdefghijklmnop本",
+      "日abcdefghijklmnop",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_FALSE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyDoesNotRelaxAsciiOnlyOrFullWidthLatin) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "Windows11",
+      "2026",
+      "ＡＢＣＤＥを",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_FALSE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyPreservesNonJapaneseAndEmojiRejection) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "日한국어문",
+      "日😀😀😀😀",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_FALSE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
+
+TEST(ZenzContextScriptAnalyzerTest,
+     CandidatePolicyAllowsNormalPunctuationAroundTechnicalTerm) {
+  const ZenzContextScriptAnalyzer analyzer;
+
+  const char* const inputs[] = {
+      "「Windows11を使う」",
+      "（GPT-5で生成する）",
+  };
+
+  for (const char* input : inputs) {
+    SCOPED_TRACE(input);
+
+    const ZenzContextScriptProfile profile =
+        analyzer.Analyze(input);
+
+    EXPECT_TRUE(
+        analyzer.LooksUsableAsJapaneseContext(
+            input,
+            profile));
+  }
+}
 }  // namespace
 }  // namespace session
 }  // namespace mozc
