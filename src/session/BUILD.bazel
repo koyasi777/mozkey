@@ -114,7 +114,7 @@ mozc_cc_library(
     hdrs = ["zenz_context_assembler.h"],
     deps = [
         ":zenz_context_sanitizer",
-        "//base:util",
+        ":zenz_context_selector",
         "@com_google_absl//absl/strings",
     ],
 )

@@ -6,14 +6,15 @@
 
 #include "absl/strings/string_view.h"
 #include "session/zenz_context_sanitizer.h"
+#include "session/zenz_context_selector.h"
 
 namespace mozc {
 namespace session {
 
 // Result for one side of the surrounding context.
 //
-// |prompt_context| contains only text which passed the existing Zenz context
-// sanitizer. Raw surrounding text is intentionally not retained here.
+// |prompt_context| contains only text which passed the Zenz context sanitizer.
+// Raw surrounding text is intentionally not retained here.
 struct ZenzContextAssemblySide {
   std::string prompt_context;
   std::string context_class;
@@ -36,30 +37,26 @@ struct ZenzContextAssemblyResult {
 
 // Selects and sanitizes surrounding context for Zenz.
 //
-// Phase B intentionally preserves the pre-existing Session semantics:
-//   * left context: trailing |left_max_chars| Unicode characters;
-//   * right context: current line only, then leading
-//     |right_max_chars| Unicode characters;
-//   * privacy/classification: existing ZenzContextSanitizer behavior.
+// Directional selection is intentionally performed before privacy/language
+// sanitization:
 //
-// Structural or linguistic policy improvements belong to later phases.
+//   * left context preserves useful discourse within the current paragraph;
+//   * right context prioritizes the immediate syntactic continuation and ends
+//     at a strong paragraph boundary or the first sentence boundary;
+//   * both directions preserve Unicode character budgets;
+//   * only the selected text is passed to ZenzContextSanitizer.
+//
+// This keeps structural selection separate from privacy and script policy.
 class ZenzContextAssembler {
  public:
   ZenzContextAssemblyResult Assemble(
       const ZenzContextAssemblyInput& input) const;
 
  private:
-  static std::string SelectLeftContext(
-      absl::string_view text,
-      size_t max_chars);
-
-  static std::string SelectRightContext(
-      absl::string_view text,
-      size_t max_chars);
-
   static ZenzContextAssemblySide ToAssemblySide(
       const ZenzContextSanitizationResult& result);
 
+  ZenzContextSelector selector_;
   ZenzContextSanitizer sanitizer_;
 };
 
