@@ -1369,7 +1369,7 @@ message DeletionRange {
   optional int32 length = 2;
 }
 
-// Next ID: 29
+// Next ID: 32
 message Output {
   optional uint64 id = 1 [jstype = JS_STRING];
 
@@ -1463,6 +1463,17 @@ message Output {
 
   // Debug-only reason string. Normal UI should not display this.
   optional string zenz_live_correction_debug = 31;
+
+  // Fork-specific request from the server to the client for bounded
+  // surrounding-text acquisition before the next SEND_KEY for this physical
+  // key event. A value of zero, or an unset field, means no extended
+  // acquisition is requested for that direction.
+  //
+  // These are semantic Unicode-character budgets. Platform clients may use a
+  // larger native range internally when required by the platform encoding, but
+  // must bound the text eventually written to Context::zenz_*_text.
+  optional uint32 zenz_preceding_text_request_length = 1001 [default = 0];
+  optional uint32 zenz_following_text_request_length = 1002 [default = 0];
 
   reserved 19;  // Deprecated storage_entry
   reserved 20;  // Deprecated cloud_sync_status
