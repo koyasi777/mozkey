@@ -54,6 +54,7 @@
 #include "win32/tip/tip_private_context.h"
 #include "win32/tip/tip_status.h"
 #include "win32/tip/tip_surrounding_text.h"
+#include "win32/tip/tip_zenz_context_request.h"
 #include "win32/tip/tip_text_service.h"
 #include "win32/tip/tip_thread_context.h"
 
@@ -229,6 +230,10 @@ HRESULT OnTestKey(TipTextService* text_service, ITfContext* context,
     return S_OK;
   }
 
+  // A TestKey path can return before reaching the server. Reset first so a
+  // request from an older physical key can never leak into this key's OnKey.
+  private_context->mutable_zenz_context_request_state()->Reset();
+
   BYTE key_state[256] = {};
   if (!::GetKeyboardState(key_state)) {
     *eaten = FALSE;
@@ -328,6 +333,11 @@ HRESULT OnTestKey(TipTextService* text_service, ITfContext* context,
     return S_OK;
   }
 
+  // Missing request fields mean 0/0, so this also keeps non-server and
+  // old-server behavior safely disabled after the reset above.
+  private_context->mutable_zenz_context_request_state()->UpdateFromOutput(
+      temporal_output);
+
   *private_context->mutable_last_down_key() = next_state.last_down_key;
 
   if (result.should_be_sent_to_server && temporal_output.has_consumed()) {
@@ -354,18 +364,79 @@ HRESULT OnTestKey(TipTextService* text_service, ITfContext* context,
   return S_OK;
 }
 
-void FillMozcContextForOnKey(TipTextService* text_service, ITfContext* context,
-                             Context* mozc_context) {
+void FillMozcContextForOnKey(
+    TipTextService* text_service, ITfContext* context,
+    const TipZenzContextRequest& zenz_context_request, Context* mozc_context) {
   FillMozcContextCommon(text_service, context, mozc_context);
-  TipSurroundingTextInfo info;
-  if (!TipSurroundingText::Get(text_service, context, &info)) {
+
+  // Preserve the legacy generic path exactly. In TSF this is the existing
+  // 20-native-character read. Legacy IMM32 editors keep their existing
+  // document-feed behavior, which is not forced through the TSF limit.
+  TipSurroundingTextInfo generic_info;
+  if (!TipSurroundingText::Get(text_service, context, &generic_info)) {
     return;
   }
-  if (info.has_preceding_text) {
-    mozc_context->set_preceding_text(WideToUtf8(info.preceding_text));
+
+  std::string generic_preceding;
+  if (generic_info.has_preceding_text) {
+    generic_preceding = WideToUtf8(generic_info.preceding_text);
+    mozc_context->set_preceding_text(generic_preceding);
   }
-  if (info.has_following_text) {
-    mozc_context->set_following_text(WideToUtf8(info.following_text));
+
+  std::string generic_following;
+  if (generic_info.has_following_text) {
+    generic_following = WideToUtf8(generic_info.following_text);
+    mozc_context->set_following_text(generic_following);
+  }
+
+  if (zenz_context_request.empty()) {
+    return;
+  }
+
+  const bool needs_extended_acquisition =
+      (zenz_context_request.preceding_length > 0 &&
+       (!generic_info.has_preceding_text ||
+        !HasAtLeastZenzContextCharacters(
+            generic_preceding, zenz_context_request.preceding_length))) ||
+      (zenz_context_request.following_length > 0 &&
+       (!generic_info.has_following_text ||
+        !HasAtLeastZenzContextCharacters(
+            generic_following, zenz_context_request.following_length)));
+
+  TipSurroundingTextInfo extended_info;
+  const bool has_extended_info =
+      needs_extended_acquisition &&
+      TipSurroundingText::GetWithMaxSurroundingLength(
+          text_service, context,
+          GetZenzTsfNativeAcquisitionLength(zenz_context_request),
+          &extended_info);
+
+  if (zenz_context_request.preceding_length > 0) {
+    const bool use_extended_preceding =
+        has_extended_info && extended_info.has_preceding_text;
+    if (use_extended_preceding || generic_info.has_preceding_text) {
+      const std::string source =
+          use_extended_preceding
+              ? WideToUtf8(extended_info.preceding_text)
+              : generic_preceding;
+      mozc_context->set_zenz_preceding_text(
+          TakeTrailingZenzContextCharacters(
+              source, zenz_context_request.preceding_length));
+    }
+  }
+
+  if (zenz_context_request.following_length > 0) {
+    const bool use_extended_following =
+        has_extended_info && extended_info.has_following_text;
+    if (use_extended_following || generic_info.has_following_text) {
+      const std::string source =
+          use_extended_following
+              ? WideToUtf8(extended_info.following_text)
+              : generic_following;
+      mozc_context->set_zenz_following_text(
+          TakeLeadingZenzContextCharacters(
+              source, zenz_context_request.following_length));
+    }
   }
 }
 
@@ -378,6 +449,11 @@ HRESULT OnKey(TipTextService* text_service, ITfContext* context,
     *eaten = FALSE;
     return S_OK;
   }
+
+  // Consume the TestKey request immediately. Any subsequent early return must
+  // not leave the request available for a later, unrelated key event.
+  const TipZenzContextRequest zenz_context_request =
+      private_context->mutable_zenz_context_request_state()->Take();
 
   BYTE key_state[256] = {};
   if (!::GetKeyboardState(key_state)) {
@@ -502,7 +578,8 @@ HRESULT OnKey(TipTextService* text_service, ITfContext* context,
         Win32KeyboardInterface::CreateDefault());
 
     Context mozc_context;
-    FillMozcContextForOnKey(text_service, context, &mozc_context);
+    FillMozcContextForOnKey(text_service, context, zenz_context_request,
+                            &mozc_context);
 
     InputState next_state;
     const KeyEventHandlerResult result = KeyEventHandler::ImeToAsciiEx(

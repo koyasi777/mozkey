@@ -42,6 +42,7 @@
 #include "win32/base/input_state.h"
 #include "win32/base/keyboard.h"
 #include "win32/base/surrogate_pair_observer.h"
+#include "win32/tip/tip_zenz_context_request.h"
 
 namespace mozc {
 namespace win32 {
@@ -65,6 +66,7 @@ class TipPrivateContext {
 
   const commands::Output& last_output() const;
   commands::Output* mutable_last_output();
+  TipZenzContextRequestState* mutable_zenz_context_request_state();
   const VirtualKey& last_down_key() const;
   VirtualKey* mutable_last_down_key();
 
