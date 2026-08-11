@@ -28,21 +28,31 @@ struct TipZenzContextRequest {
   }
 };
 
-// One-shot request state bridging OnTestKey to the matching OnKey.
+// One-shot request state bridging an authoritative TestSendKey result to OnKey.
 //
 // OnTestKey must Reset() before any early return, then UpdateFromOutput() after
-// a successful TestSendKey path. OnKey must Take() at entry. This deliberately
-// does not reuse TipPrivateContext::last_output(), whose value can legitimately
-// survive key events that are not sent to the server.
+// a successful TestSendKey path. A successful output with 0/0 request lengths
+// is still an authoritative result, so presence is tracked independently from
+// the request values. OnKey consumes the state at entry and can distinguish
+// "server returned 0/0" from "no TestSendKey result was available".
 class TipZenzContextRequestState {
  public:
   void Reset();
   void UpdateFromOutput(const commands::Output& output);
+  bool has_result() const { return has_result_; }
   TipZenzContextRequest Take();
 
  private:
   TipZenzContextRequest request_;
+  bool has_result_ = false;
 };
+
+// Returns true only when OnKey must synthesize the missing TestSendKey phase.
+// Use the composition state observed by the same surrounding-text read that is
+// required for the actual SendKey path. This avoids stale-output heuristics.
+bool ShouldRunZenzContextRequestFallback(
+    bool has_test_key_result, bool has_generic_surrounding_text,
+    bool in_composition);
 
 // Returns a conservative TSF native range budget. Windows text ranges are backed
 // by UTF-16 text, so one Unicode scalar may occupy two native code units.

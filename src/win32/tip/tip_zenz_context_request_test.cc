@@ -118,6 +118,58 @@ TEST(TipZenzContextRequestTest, TakesTrailingUnicodeCharacters) {
 }
 
 }  // namespace
+
+TEST(TipZenzContextRequestStateTest, TracksAuthoritativeOutputPresence) {
+  TipZenzContextRequestState state;
+  EXPECT_FALSE(state.has_result());
+
+  commands::Output empty_output;
+  state.UpdateFromOutput(empty_output);
+  EXPECT_TRUE(state.has_result());
+
+  const TipZenzContextRequest empty_request = state.Take();
+  EXPECT_TRUE(empty_request.empty());
+  EXPECT_FALSE(state.has_result());
+
+  commands::Output request_output;
+  request_output.set_zenz_preceding_text_request_length(24);
+  request_output.set_zenz_following_text_request_length(10);
+  state.UpdateFromOutput(request_output);
+  EXPECT_TRUE(state.has_result());
+
+  const TipZenzContextRequest request = state.Take();
+  EXPECT_EQ(request.preceding_length, 24);
+  EXPECT_EQ(request.following_length, 10);
+  EXPECT_FALSE(state.has_result());
+
+  state.UpdateFromOutput(request_output);
+  EXPECT_TRUE(state.has_result());
+  state.Reset();
+  EXPECT_FALSE(state.has_result());
+  EXPECT_TRUE(state.Take().empty());
+}
+
+TEST(TipZenzContextRequestTest, FallbackUsesCurrentCompositionState) {
+  EXPECT_FALSE(ShouldRunZenzContextRequestFallback(
+      /*has_test_key_result=*/true,
+      /*has_generic_surrounding_text=*/true,
+      /*in_composition=*/false));
+
+  EXPECT_FALSE(ShouldRunZenzContextRequestFallback(
+      /*has_test_key_result=*/false,
+      /*has_generic_surrounding_text=*/false,
+      /*in_composition=*/false));
+
+  EXPECT_TRUE(ShouldRunZenzContextRequestFallback(
+      /*has_test_key_result=*/false,
+      /*has_generic_surrounding_text=*/true,
+      /*in_composition=*/false));
+
+  EXPECT_FALSE(ShouldRunZenzContextRequestFallback(
+      /*has_test_key_result=*/false,
+      /*has_generic_surrounding_text=*/true,
+      /*in_composition=*/true));
+}
 }  // namespace tsf
 }  // namespace win32
 }  // namespace mozc

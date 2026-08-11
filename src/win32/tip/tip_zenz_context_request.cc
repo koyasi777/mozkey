@@ -28,6 +28,7 @@ uint32_t ClampRequestLength(uint32_t value) {
 
 void TipZenzContextRequestState::Reset() {
   request_ = TipZenzContextRequest();
+  has_result_ = false;
 }
 
 void TipZenzContextRequestState::UpdateFromOutput(
@@ -36,12 +37,20 @@ void TipZenzContextRequestState::UpdateFromOutput(
       ClampRequestLength(output.zenz_preceding_text_request_length());
   request_.following_length =
       ClampRequestLength(output.zenz_following_text_request_length());
+  has_result_ = true;
 }
 
 TipZenzContextRequest TipZenzContextRequestState::Take() {
   const TipZenzContextRequest request = request_;
   Reset();
   return request;
+}
+
+bool ShouldRunZenzContextRequestFallback(
+    const bool has_test_key_result, const bool has_generic_surrounding_text,
+    const bool in_composition) {
+  return !has_test_key_result && has_generic_surrounding_text &&
+         !in_composition;
 }
 
 size_t GetZenzTsfNativeAcquisitionLength(
