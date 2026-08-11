@@ -60,9 +60,16 @@ bool ShouldRunZenzContextRequestFallback(
 // text from Zenz. Generic preceding/following fields are left untouched.
 void SetZenzContextUnavailable(commands::Context* context);
 
-// Returns a conservative TSF native range budget. Windows text ranges are backed
-// by UTF-16 text, so one Unicode scalar may occupy two native code units.
-size_t GetZenzTsfNativeAcquisitionLength(
+// Conservative per-direction TSF native range budgets. Windows text ranges
+// are backed by UTF-16 text, so one Unicode scalar may occupy two native code
+// units. Keeping the directions separate avoids reading text that Zenz did not
+// request.
+struct TipZenzTsfNativeAcquisitionLengths {
+  size_t preceding = 0;
+  size_t following = 0;
+};
+
+TipZenzTsfNativeAcquisitionLengths GetZenzTsfNativeAcquisitionLengths(
     const TipZenzContextRequest& request);
 
 // Helpers used after converting Windows surrounding text to UTF-8. They count

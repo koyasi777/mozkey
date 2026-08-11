@@ -58,12 +58,16 @@ void SetZenzContextUnavailable(commands::Context* context) {
   context->set_zenz_following_text("");
 }
 
-size_t GetZenzTsfNativeAcquisitionLength(
+TipZenzTsfNativeAcquisitionLengths GetZenzTsfNativeAcquisitionLengths(
     const TipZenzContextRequest& request) {
-  const uint32_t max_semantic_length =
-      std::max(request.preceding_length, request.following_length);
-  return static_cast<size_t>(max_semantic_length) *
-         kMaxUtf16CodeUnitsPerUnicodeCharacter;
+  TipZenzTsfNativeAcquisitionLengths lengths;
+  lengths.preceding =
+      static_cast<size_t>(request.preceding_length) *
+      kMaxUtf16CodeUnitsPerUnicodeCharacter;
+  lengths.following =
+      static_cast<size_t>(request.following_length) *
+      kMaxUtf16CodeUnitsPerUnicodeCharacter;
+  return lengths;
 }
 
 bool HasAtLeastZenzContextCharacters(const std::string_view text,

@@ -61,10 +61,13 @@ constexpr int kMaxCharacterLength = 1024 * 1024;
 class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
  public:
   SurroudingTextUpdater(wil::com_ptr_nothrow<ITfContext> context,
-                        bool move_anchor, int max_surrounding_length)
+                        bool move_anchor, bool retrieve_selected_text,
+                        int max_preceding_length, int max_following_length)
       : context_(std::move(context)),
         move_anchor_(move_anchor),
-        max_surrounding_length_(max_surrounding_length) {}
+        retrieve_selected_text_(retrieve_selected_text),
+        max_preceding_length_(max_preceding_length),
+        max_following_length_(max_following_length) {}
 
   const TipSurroundingTextInfo& result() const { return result_; }
 
@@ -96,9 +99,11 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
         return S_OK;
       }
 
-      result = TipRangeUtil::GetText(selected_range.get(), edit_cookie,
-                                     &result_.selected_text);
-      result_.has_selected_text = SUCCEEDED(result);
+      if (retrieve_selected_text_) {
+        result = TipRangeUtil::GetText(selected_range.get(), edit_cookie,
+                                       &result_.selected_text);
+        result_.has_selected_text = SUCCEEDED(result);
+      }
 
       // For reconversion, the active selection end should be moved to the
       // front character.
@@ -113,13 +118,13 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
 
     const TF_HALTCOND halt_cond = {nullptr, TF_ANCHOR_START, TF_HF_OBJECT};
 
-    {
+    if (max_preceding_length_ > 0) {
       wil::com_ptr_nothrow<ITfRange> preceding_range;
       LONG preceding_range_shifted = 0;
       if (SUCCEEDED(selected_range->Clone(&preceding_range)) &&
           SUCCEEDED(preceding_range->Collapse(edit_cookie, TF_ANCHOR_START)) &&
           SUCCEEDED(preceding_range->ShiftStart(
-              edit_cookie, -max_surrounding_length_, &preceding_range_shifted,
+              edit_cookie, -max_preceding_length_, &preceding_range_shifted,
               &halt_cond))) {
         HRESULT result = TipRangeUtil::GetText(
             preceding_range.get(), edit_cookie, &result_.preceding_text);
@@ -127,13 +132,13 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
       }
     }
 
-    {
+    if (max_following_length_ > 0) {
       wil::com_ptr_nothrow<ITfRange> following_range;
       LONG following_range_shifted = 0;
       if (SUCCEEDED(selected_range->Clone(&following_range)) &&
           SUCCEEDED(following_range->Collapse(edit_cookie, TF_ANCHOR_END)) &&
           SUCCEEDED(following_range->ShiftEnd(
-              edit_cookie, max_surrounding_length_, &following_range_shifted,
+              edit_cookie, max_following_length_, &following_range_shifted,
               &halt_cond))) {
         HRESULT result = TipRangeUtil::GetText(
             following_range.get(), edit_cookie, &result_.following_text);
@@ -147,7 +152,9 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
   wil::com_ptr_nothrow<ITfContext> context_;
   TipSurroundingTextInfo result_;
   bool move_anchor_;
-  int max_surrounding_length_;
+  bool retrieve_selected_text_;
+  int max_preceding_length_;
+  int max_following_length_;
 };
 
 class PrecedingTextDeleter final : public TipComImplements<ITfEditSession> {
@@ -269,13 +276,6 @@ bool GetSurroundingTextImm32(ITfContext* context,
 
 bool TipSurroundingText::Get(TipTextService* text_service, ITfContext* context,
                              TipSurroundingTextInfo* info) {
-  return GetWithMaxSurroundingLength(
-      text_service, context, kDefaultMaxSurroundingLength, info);
-}
-
-bool TipSurroundingText::GetWithMaxSurroundingLength(
-    TipTextService* text_service, ITfContext* context,
-    size_t max_surrounding_length, TipSurroundingTextInfo* info) {
   if (info == nullptr) {
     return false;
   }
@@ -292,29 +292,58 @@ bool TipSurroundingText::GetWithMaxSurroundingLength(
         context, ReconvertString::RequestType::kDocumentFeed, info);
   }
 
-  // When RequestEditSession fails, it does not maintain the reference count.
-  // So we need to ensure that AddRef/Release should be called at least once
-  // per object.
-  const int tsf_range_limit =
-      max_surrounding_length > static_cast<size_t>(kMaxCharacterLength)
-          ? kMaxCharacterLength
-          : static_cast<int>(max_surrounding_length);
   auto updater = MakeComPtr<SurroudingTextUpdater>(
-      full_context, false, tsf_range_limit);
+      full_context, false, true, kDefaultMaxSurroundingLength,
+      kDefaultMaxSurroundingLength);
 
   HRESULT edit_session_result = S_OK;
   const HRESULT hr = full_context->RequestEditSession(
       text_service->GetClientID(), updater.get(), TF_ES_SYNC | TF_ES_READ,
       &edit_session_result);
-  if (FAILED(hr)) {
-    return false;
-  }
-  if (FAILED(edit_session_result)) {
+  if (FAILED(hr) || FAILED(edit_session_result)) {
     return false;
   }
 
   *info = updater->result();
+  return true;
+}
 
+bool TipSurroundingText::GetForZenzContext(
+    TipTextService* text_service, ITfContext* context,
+    size_t max_preceding_length, size_t max_following_length,
+    TipSurroundingTextInfo* info) {
+  if (info == nullptr) {
+    return false;
+  }
+  *info = TipSurroundingTextInfo();
+
+  wil::com_ptr_nothrow<ITfContext> full_context(
+      TipTransitoryExtension::AsFullContext(context));
+  if (full_context == nullptr) {
+    // Zenz deliberately does not use the legacy IMM32 document-feed path.
+    return false;
+  }
+
+  const int preceding_limit =
+      max_preceding_length > static_cast<size_t>(kMaxCharacterLength)
+          ? kMaxCharacterLength
+          : static_cast<int>(max_preceding_length);
+  const int following_limit =
+      max_following_length > static_cast<size_t>(kMaxCharacterLength)
+          ? kMaxCharacterLength
+          : static_cast<int>(max_following_length);
+  auto updater = MakeComPtr<SurroudingTextUpdater>(
+      full_context, false, false, preceding_limit, following_limit);
+
+  HRESULT edit_session_result = S_OK;
+  const HRESULT hr = full_context->RequestEditSession(
+      text_service->GetClientID(), updater.get(), TF_ES_SYNC | TF_ES_READ,
+      &edit_session_result);
+  if (FAILED(hr) || FAILED(edit_session_result)) {
+    return false;
+  }
+
+  *info = updater->result();
   return true;
 }
 
@@ -333,7 +362,8 @@ bool PrepareForReconversionTSF(TipTextService* text_service,
   // So we need to ensure that AddRef/Release should be called at least once
   // per object.
   auto updater = MakeComPtr<SurroudingTextUpdater>(
-      full_context, true, kDefaultMaxSurroundingLength);
+      full_context, true, true, kDefaultMaxSurroundingLength,
+      kDefaultMaxSurroundingLength);
 
   HRESULT edit_session_result = S_OK;
   const HRESULT hr = full_context->RequestEditSession(

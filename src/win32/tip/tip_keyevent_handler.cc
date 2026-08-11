@@ -420,12 +420,13 @@ void FillMozcContextForOnKey(
             generic_following, zenz_context_request.following_length)));
 
   TipSurroundingTextInfo extended_info;
+  const TipZenzTsfNativeAcquisitionLengths native_lengths =
+      GetZenzTsfNativeAcquisitionLengths(zenz_context_request);
   const bool has_extended_info =
       needs_extended_acquisition &&
-      TipSurroundingText::GetWithMaxSurroundingLength(
-          text_service, context,
-          GetZenzTsfNativeAcquisitionLength(zenz_context_request),
-          &extended_info);
+      TipSurroundingText::GetForZenzContext(
+          text_service, context, native_lengths.preceding,
+          native_lengths.following, &extended_info);
   const bool has_trusted_extended_info =
       has_extended_info && !extended_info.used_legacy_imm32_fallback;
 

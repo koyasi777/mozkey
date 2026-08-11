@@ -70,19 +70,32 @@ TEST(TipZenzContextRequestStateTest, DefensivelyClampsServerLengths) {
   EXPECT_EQ(request.following_length, 128);
 }
 
-TEST(TipZenzContextRequestTest, NativeBudgetCoversUtf16SurrogatePairs) {
+TEST(TipZenzContextRequestTest,
+     NativeBudgetsCoverUtf16SurrogatePairsWithoutCrossDirectionReads) {
   TipZenzContextRequest request;
   request.preceding_length = 24;
   request.following_length = 10;
-  EXPECT_EQ(GetZenzTsfNativeAcquisitionLength(request), 48);
+  TipZenzTsfNativeAcquisitionLengths lengths =
+      GetZenzTsfNativeAcquisitionLengths(request);
+  EXPECT_EQ(lengths.preceding, 48);
+  EXPECT_EQ(lengths.following, 20);
 
   request.preceding_length = 0;
   request.following_length = 128;
-  EXPECT_EQ(GetZenzTsfNativeAcquisitionLength(request), 256);
+  lengths = GetZenzTsfNativeAcquisitionLengths(request);
+  EXPECT_EQ(lengths.preceding, 0);
+  EXPECT_EQ(lengths.following, 256);
 
-  request.preceding_length = 0;
+  request.preceding_length = 128;
   request.following_length = 0;
-  EXPECT_EQ(GetZenzTsfNativeAcquisitionLength(request), 0);
+  lengths = GetZenzTsfNativeAcquisitionLengths(request);
+  EXPECT_EQ(lengths.preceding, 256);
+  EXPECT_EQ(lengths.following, 0);
+
+  request = TipZenzContextRequest();
+  lengths = GetZenzTsfNativeAcquisitionLengths(request);
+  EXPECT_EQ(lengths.preceding, 0);
+  EXPECT_EQ(lengths.following, 0);
 }
 
 TEST(TipZenzContextRequestTest, CountsUnicodeCharactersNotUtf8Bytes) {
