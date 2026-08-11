@@ -48,9 +48,14 @@ TipZenzContextRequest TipZenzContextRequestState::Take() {
 
 bool ShouldRunZenzContextRequestFallback(
     const bool has_test_key_result, const bool has_generic_surrounding_text,
-    const bool in_composition) {
+    const bool in_composition, const bool used_legacy_imm32_fallback) {
   return !has_test_key_result && has_generic_surrounding_text &&
-         !in_composition;
+         !in_composition && !used_legacy_imm32_fallback;
+}
+
+void SetZenzContextUnavailable(commands::Context* context) {
+  context->set_zenz_preceding_text("");
+  context->set_zenz_following_text("");
 }
 
 size_t GetZenzTsfNativeAcquisitionLength(

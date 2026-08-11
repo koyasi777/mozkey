@@ -52,7 +52,13 @@ class TipZenzContextRequestState {
 // required for the actual SendKey path. This avoids stale-output heuristics.
 bool ShouldRunZenzContextRequestFallback(
     bool has_test_key_result, bool has_generic_surrounding_text,
-    bool in_composition);
+    bool in_composition, bool used_legacy_imm32_fallback);
+
+// Marks both optional Zenz-specific surrounding-text fields present-but-empty.
+// This prevents server-side Zenz context selection from falling back to the
+// generic Mozc surrounding-text fields when the platform deliberately withholds
+// text from Zenz. Generic preceding/following fields are left untouched.
+void SetZenzContextUnavailable(commands::Context* context);
 
 // Returns a conservative TSF native range budget. Windows text ranges are backed
 // by UTF-16 text, so one Unicode scalar may occupy two native code units.

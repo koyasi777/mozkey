@@ -40,6 +40,11 @@ namespace win32 {
 namespace tsf {
 namespace {
 
+TEST(TipSurroundingTextInfoTest, DefaultsToNoLegacyImm32Fallback) {
+  const TipSurroundingTextInfo info;
+  EXPECT_FALSE(info.used_legacy_imm32_fallback);
+}
+
 TEST(TipSurroundingTextUtilTest, ContainsPasswordInputScope) {
   EXPECT_FALSE(TipSurroundingTextUtil::ContainsPasswordInputScope({}));
   EXPECT_FALSE(TipSurroundingTextUtil::ContainsPasswordInputScope(

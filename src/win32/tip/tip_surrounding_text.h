@@ -56,6 +56,9 @@ struct TipSurroundingTextInfo {
   // True when the current TSF selection is explicitly marked IS_PASSWORD.
   // In this case surrounding text is deliberately not retrieved.
   bool is_password_input_scope = false;
+  // True when surrounding text came from the legacy IMM32 document-feed
+  // fallback rather than a synchronous TSF text-range read.
+  bool used_legacy_imm32_fallback = false;
 };
 
 class TipSurroundingText {

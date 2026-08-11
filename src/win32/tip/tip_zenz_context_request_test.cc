@@ -153,22 +153,51 @@ TEST(TipZenzContextRequestTest, FallbackUsesCurrentCompositionState) {
   EXPECT_FALSE(ShouldRunZenzContextRequestFallback(
       /*has_test_key_result=*/true,
       /*has_generic_surrounding_text=*/true,
-      /*in_composition=*/false));
+      /*in_composition=*/false,
+      /*used_legacy_imm32_fallback=*/false));
 
   EXPECT_FALSE(ShouldRunZenzContextRequestFallback(
       /*has_test_key_result=*/false,
       /*has_generic_surrounding_text=*/false,
-      /*in_composition=*/false));
+      /*in_composition=*/false,
+      /*used_legacy_imm32_fallback=*/false));
 
   EXPECT_TRUE(ShouldRunZenzContextRequestFallback(
       /*has_test_key_result=*/false,
       /*has_generic_surrounding_text=*/true,
-      /*in_composition=*/false));
+      /*in_composition=*/false,
+      /*used_legacy_imm32_fallback=*/false));
 
   EXPECT_FALSE(ShouldRunZenzContextRequestFallback(
       /*has_test_key_result=*/false,
       /*has_generic_surrounding_text=*/true,
-      /*in_composition=*/true));
+      /*in_composition=*/true,
+      /*used_legacy_imm32_fallback=*/false));
+
+  EXPECT_FALSE(ShouldRunZenzContextRequestFallback(
+      /*has_test_key_result=*/false,
+      /*has_generic_surrounding_text=*/true,
+      /*in_composition=*/false,
+      /*used_legacy_imm32_fallback=*/true));
+}
+
+TEST(TipZenzContextRequestTest,
+     SetZenzContextUnavailablePreservesGenericContext) {
+  commands::Context context;
+  context.set_preceding_text("generic-left");
+  context.set_following_text("generic-right");
+
+  EXPECT_FALSE(context.has_zenz_preceding_text());
+  EXPECT_FALSE(context.has_zenz_following_text());
+
+  SetZenzContextUnavailable(&context);
+
+  EXPECT_TRUE(context.has_zenz_preceding_text());
+  EXPECT_TRUE(context.has_zenz_following_text());
+  EXPECT_TRUE(context.zenz_preceding_text().empty());
+  EXPECT_TRUE(context.zenz_following_text().empty());
+  EXPECT_EQ(context.preceding_text(), "generic-left");
+  EXPECT_EQ(context.following_text(), "generic-right");
 }
 }  // namespace tsf
 }  // namespace win32

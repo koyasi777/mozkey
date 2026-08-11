@@ -397,6 +397,14 @@ void FillMozcContextForOnKey(
     mozc_context->set_following_text(generic_following);
   }
 
+  // The IMM32 document-feed fallback has no TSF InputScope signal. Preserve
+  // its generic Mozc context for compatibility, but explicitly prevent Zenz
+  // from falling back to those generic fields.
+  if (generic_info->used_legacy_imm32_fallback) {
+    SetZenzContextUnavailable(mozc_context);
+    return;
+  }
+
   if (zenz_context_request.empty()) {
     return;
   }
@@ -418,10 +426,12 @@ void FillMozcContextForOnKey(
           text_service, context,
           GetZenzTsfNativeAcquisitionLength(zenz_context_request),
           &extended_info);
+  const bool has_trusted_extended_info =
+      has_extended_info && !extended_info.used_legacy_imm32_fallback;
 
   if (zenz_context_request.preceding_length > 0) {
     const bool use_extended_preceding =
-        has_extended_info && extended_info.has_preceding_text;
+        has_trusted_extended_info && extended_info.has_preceding_text;
     if (use_extended_preceding || generic_info->has_preceding_text) {
       const std::string source =
           use_extended_preceding
@@ -435,7 +445,7 @@ void FillMozcContextForOnKey(
 
   if (zenz_context_request.following_length > 0) {
     const bool use_extended_following =
-        has_extended_info && extended_info.has_following_text;
+        has_trusted_extended_info && extended_info.has_following_text;
     if (use_extended_following || generic_info->has_following_text) {
       const std::string source =
           use_extended_following
@@ -589,13 +599,14 @@ HRESULT OnKey(TipTextService* text_service, ITfContext* context,
         TipSurroundingText::Get(text_service, context, &generic_info);
 
     // Some TSF hosts deliver OnKey without the matching OnTestKey. Synthesize
-    // TestSendKey only when this is outside an existing TSF composition.
-    // Legacy IMM32 reports in_composition=false by design, so that path favors
-    // correctness over IPC suppression when TestKey is omitted by the host.
+    // TestSendKey only for trusted TSF surrounding text outside an existing
+    // composition. Legacy IMM32 document-feed text is never acquired for Zenz,
+    // so it does not need a synthetic context-length request.
     if (!generic_info.is_password_input_scope &&
         ShouldRunZenzContextRequestFallback(
             has_test_key_result, has_generic_info,
-            has_generic_info && generic_info.in_composition)) {
+            has_generic_info && generic_info.in_composition,
+            generic_info.used_legacy_imm32_fallback)) {
       Context test_mozc_context;
       FillMozcContextCommon(text_service, context, &test_mozc_context);
 

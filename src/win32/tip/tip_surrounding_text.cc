@@ -251,6 +251,7 @@ bool GetSurroundingTextImm32(ITfContext* context,
     return false;
   }
   info->in_composition = false;
+  info->used_legacy_imm32_fallback = true;
   info->has_preceding_text = true;
   info->preceding_text.assign(ss->preceding_text.begin(),
                               ss->preceding_text.end());
