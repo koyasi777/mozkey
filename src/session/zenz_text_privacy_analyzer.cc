@@ -517,10 +517,9 @@ bool ContainsLiveSensitiveCredentialWord(
 }
 
 // ============================================================
-// Existing context privacy semantics.
+// Historical context privacy semantics retained for regression comparison.
 //
-// These deliberately look less precise than the live policy. C2A preserves
-// them exactly. C2B is where this policy will be improved.
+// These deliberately remain less precise than the refined kContext policy.
 // ============================================================
 
 bool ContainsLegacyContextCredentialWord(

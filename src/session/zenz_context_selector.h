@@ -12,10 +12,6 @@ namespace session {
 // Selects linguistically useful surrounding text before privacy/language
 // sanitization.
 //
-// C4B introduces this as an isolated candidate component. Production
-// ZenzContextAssembler is intentionally not connected to it until a later
-// phase.
-//
 // The two directions are deliberately asymmetric:
 //
 // Left:

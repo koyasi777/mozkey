@@ -6,7 +6,8 @@
 namespace mozc {
 namespace session {
 
-// Privacy policies intentionally remain separate in C2A.
+// Privacy policies remain separate because live text and surrounding context
+// have different compatibility and sensitivity requirements.
 //
 // kLiveText preserves the existing Session key/value privacy policy.
 //
@@ -16,8 +17,8 @@ namespace session {
 // kContext is the refined surrounding-context policy. It protects structured
 // sensitive data instead of treating ordinary short technical text as secret.
 //
-// The sanitizer deliberately remains on kLegacyContext until C2C so this policy
-// can be characterized independently before production behavior changes.
+// kLegacyContext is retained for characterization and regression tests;
+// production surrounding-context sanitization uses kContext.
 enum class ZenzTextPrivacyPolicy {
   kLiveText,
   kLegacyContext,

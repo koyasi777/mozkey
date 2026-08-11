@@ -593,7 +593,7 @@ MixedScriptStructure AnalyzeMixedScriptStructure(
 
   return result;
 }
-}  // namespace}  // namespace
+}  // namespace
 
 ZenzContextScriptProfile ZenzContextScriptAnalyzer::Analyze(
     const absl::string_view text) const {
@@ -680,7 +680,7 @@ bool ZenzContextScriptAnalyzer::LooksMostlyJapanese(
 bool ZenzContextScriptAnalyzer::LooksUsableAsJapaneseContext(
     const absl::string_view text,
     const ZenzContextScriptProfile& profile) const {
-  // Preserve everything already accepted by the C1 policy.
+  // Preserve the conservative mostly-Japanese acceptance path.
   if (LooksMostlyJapanese(profile)) {
     return true;
   }
@@ -781,7 +781,7 @@ std::string ZenzContextScriptAnalyzer::ClassifyForContextClass(
     }
 
     // Non-ASCII punctuation, emoji, variation selectors, etc. intentionally
-    // do not create a new persistent class in this phase.
+    // do not create a new persistent context class.
     return "japanese_only";
   }
 

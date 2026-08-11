@@ -11,9 +11,9 @@ namespace session {
 
 // Unicode-codepoint-level script profile for Zenz surrounding context.
 //
-// The profile intentionally contains more information than the current
-// persistent context_class strings. Persistent feedback compatibility is
-// preserved in Phase C1; richer policy decisions can use this profile later.
+// The profile intentionally contains more information than the persistent
+// context_class strings. Richer analysis is mapped onto the existing class
+// vocabulary so stored feedback remains compatible.
 struct ZenzContextScriptProfile {
   size_t total_chars = 0;
   size_t japanese_script_chars = 0;
@@ -31,19 +31,15 @@ class ZenzContextScriptAnalyzer {
   // Returns whether the context contains enough genuine Japanese-script
   // signal to be used as Zenz linguistic context.
   //
-  // Phase C1 deliberately preserves the previous acceptance envelope as
+  // This deliberately preserves the historical acceptance envelope as
   // closely as possible. The old implementation counted a typical Japanese
   // BMP character as three non-ASCII UTF-8 bytes, so a genuine Japanese
-  // script codepoint is weighted by three here. Policy-threshold tuning is
-  // intentionally deferred to a separate phase.
+  // script codepoint is weighted by three here.
   bool LooksMostlyJapanese(
       const ZenzContextScriptProfile& profile) const;
 
-  // Candidate policy for natural Japanese context containing embedded ASCII
-  // technical terms, product names, versions and ordinary numbers.
-  //
-  // C3A does not route production sanitization through this method. It is
-  // defined and characterized independently before the production switch.
+  // Returns true for natural Japanese context containing embedded ASCII
+  // technical terms, product names, versions, and ordinary numbers.
   bool LooksUsableAsJapaneseContext(
       absl::string_view text,
       const ZenzContextScriptProfile& profile) const;

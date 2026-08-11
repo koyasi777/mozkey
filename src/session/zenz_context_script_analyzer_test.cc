@@ -105,7 +105,7 @@ TEST(ZenzContextScriptAnalyzerTest,
   EXPECT_EQ(profile.emoji_chars, 1);
   EXPECT_TRUE(analyzer.LooksMostlyJapanese(profile));
 
-  // Keep the existing persistent feedback vocabulary in Phase C1.
+  // Keep the existing persistent feedback vocabulary.
   EXPECT_EQ(
       analyzer.ClassifyForContextClass(profile),
       "japanese_only");
