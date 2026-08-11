@@ -33,8 +33,11 @@
 #include <msctf.h>
 
 #include <cstddef>
+#include <inputscope.h>
+
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "win32/tip/tip_text_service.h"
 
@@ -50,6 +53,9 @@ struct TipSurroundingTextInfo {
   bool has_selected_text = false;
   bool has_following_text = false;
   bool in_composition = false;  // context has a composition owned by Mozc.
+  // True when the current TSF selection is explicitly marked IS_PASSWORD.
+  // In this case surrounding text is deliberately not retrieved.
+  bool is_password_input_scope = false;
 };
 
 class TipSurroundingText {
@@ -109,6 +115,10 @@ class TipSurroundingText {
 
 class TipSurroundingTextUtil {
  public:
+  // Returns true when the scope list explicitly contains IS_PASSWORD.
+  static bool ContainsPasswordInputScope(
+      const std::vector<InputScope>& input_scopes);
+
   // Returns true if |text| has more than |characters_in_codepoint| characters.
   // When succeeds, the last |*characters_in_utf16| characters in |text|
   // can be measured as |characters_in_codepoint| in the unit of UCS4.

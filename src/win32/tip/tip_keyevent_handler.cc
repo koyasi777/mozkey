@@ -377,6 +377,14 @@ void FillMozcContextForOnKey(
     return;
   }
 
+  // Password scope is detected inside the same TSF read edit session before
+  // any surrounding text is retrieved. Propagate the field type to the server
+  // as a second privacy layer and never attach generic or extended text.
+  if (generic_info->is_password_input_scope) {
+    mozc_context->set_input_field_type(Context::PASSWORD);
+    return;
+  }
+
   std::string generic_preceding;
   if (generic_info->has_preceding_text) {
     generic_preceding = WideToUtf8(generic_info->preceding_text);
@@ -584,7 +592,8 @@ HRESULT OnKey(TipTextService* text_service, ITfContext* context,
     // TestSendKey only when this is outside an existing TSF composition.
     // Legacy IMM32 reports in_composition=false by design, so that path favors
     // correctness over IPC suppression when TestKey is omitted by the host.
-    if (ShouldRunZenzContextRequestFallback(
+    if (!generic_info.is_password_input_scope &&
+        ShouldRunZenzContextRequestFallback(
             has_test_key_result, has_generic_info,
             has_generic_info && generic_info.in_composition)) {
       Context test_mozc_context;

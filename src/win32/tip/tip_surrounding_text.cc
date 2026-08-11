@@ -39,6 +39,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "base/win32/com.h"
 #include "base/win32/wide_char.h"
@@ -82,6 +83,17 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
                                                  &selected_range, nullptr);
       if (FAILED(result)) {
         return result;
+      }
+
+      // Inspect the current selection's InputScope in this same synchronous
+      // read edit session, before retrieving any selected/preceding/following
+      // text. This avoids relying on the asynchronous focus-scope cache.
+      std::vector<InputScope> input_scopes;
+      if (SUCCEEDED(TipRangeUtil::GetInputScopes(
+              selected_range.get(), edit_cookie, &input_scopes)) &&
+          TipSurroundingTextUtil::ContainsPasswordInputScope(input_scopes)) {
+        result_.is_password_input_scope = true;
+        return S_OK;
       }
 
       result = TipRangeUtil::GetText(selected_range.get(), edit_cookie,
@@ -397,6 +409,15 @@ bool TipSurroundingText::DeletePrecedingText(
   return true;
 }
 
+bool TipSurroundingTextUtil::ContainsPasswordInputScope(
+    const std::vector<InputScope>& input_scopes) {
+  for (const InputScope input_scope : input_scopes) {
+    if (input_scope == IS_PASSWORD) {
+      return true;
+    }
+  }
+  return false;
+}
 bool TipSurroundingTextUtil::MeasureCharactersBackward(
     const std::wstring_view text, const size_t characters_in_codepoint,
     size_t* characters_in_utf16) {
