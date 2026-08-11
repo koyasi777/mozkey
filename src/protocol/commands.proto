@@ -521,10 +521,11 @@ message Context {
 
   // Fork-specific extended surrounding text for Zenz.  These fields are
   // independent from preceding_text/following_text so ordinary Mozc history,
-  // prediction, and rewriting semantics remain unchanged.  Clients should
-  // leave them unset when extended context was not acquired.  Presence is
-  // significant: an explicitly empty value means that the client observed a
-  // structural boundary and must not fall back to generic surrounding text.
+  // prediction, and rewriting semantics remain unchanged.  Clients should leave
+  // them unset when Zenz should fall back to generic surrounding text. Presence
+  // is significant: an explicitly empty value means that the client deliberately
+  // suppresses that fallback, for example after observing a structural boundary
+  // or deciding that platform text must not be exposed to Zenz.
   optional string zenz_preceding_text = 1001;
   optional string zenz_following_text = 1002;
 

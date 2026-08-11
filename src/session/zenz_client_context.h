@@ -11,8 +11,9 @@ namespace session {
 //
 // Extended fields take precedence per side when present.  Presence, rather
 // than non-emptiness, is used so an explicitly empty extended value can
-// represent a client-observed structural boundary without falling back to the
-// generic Mozc context.
+// suppress generic fallback. This represents either a client-observed
+// structural boundary or a deliberate decision not to expose platform text
+// to Zenz.
 struct ZenzClientContextView {
   absl::string_view preceding_text;
   absl::string_view following_text;
