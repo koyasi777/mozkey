@@ -354,6 +354,7 @@ mozc_cc_library(
         ":tip_surrounding_text",
         ":tip_text_service",
         ":tip_thread_context",
+        ":tip_zenz_context_request",
         "//base/win32:wide_char",
         "//client:client_interface",
         "//protocol:commands_cc_proto",
@@ -581,6 +582,7 @@ mozc_cc_library(
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        ":tip_zenz_context_request",
         "//client:client_interface",
         "//protocol:commands_cc_proto",
         "//win32/base:config_snapshot",
@@ -881,5 +883,30 @@ mozc_cc_library(
         "//base/win32:wide_char",
         "//testing:gunit",
         "@com_microsoft_wil//:wil",
+    ],
+)
+
+mozc_cc_library(
+    name = "tip_zenz_context_request",
+    srcs = ["tip_zenz_context_request.cc"],
+    hdrs = ["tip_zenz_context_request.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//base:util",
+        "//protocol:commands_cc_proto",
+    ],
+)
+
+mozc_cc_test(
+    name = "tip_zenz_context_request_test",
+    size = "small",
+    srcs = ["tip_zenz_context_request_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":tip_zenz_context_request",
+        "//protocol:commands_cc_proto",
+        "//testing:gunit_main",
     ],
 )

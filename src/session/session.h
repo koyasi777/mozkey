@@ -51,6 +51,7 @@
 #include "session/ime_context.h"
 #include "session/keymap.h"
 #include "session/zenz_adoption_policy.h"
+#include "session/zenz_context_assembler.h"
 #include "session/zenz_context_sanitizer.h"
 #include "session/zenz_feedback_store.h"
 #include "session/zenz_live_corrector.h"
@@ -436,6 +437,7 @@ class Session {
   std::string zenz_live_left_context_;
   commands::Preedit zenz_live_preedit_output_;
 
+  ZenzContextAssembler zenz_context_assembler_;
   ZenzContextSanitizer zenz_context_sanitizer_;
   ZenzOutputValidator zenz_output_validator_;
   ZenzAdoptionPolicy zenz_adoption_policy_;
@@ -667,8 +669,6 @@ class Session {
 
   void CancelPendingZenzLiveCorrection();
   void ClearZenzLiveCorrectionState();
-  std::string ExtractZenzLeftContext(uint32_t max_chars) const;
-  std::string ExtractZenzRightContext(uint32_t max_chars) const;
 
   // Fill command's output according to the current state.
   void OutputFromState(mozc::commands::Command* command);

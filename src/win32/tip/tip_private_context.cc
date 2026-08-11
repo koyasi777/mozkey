@@ -59,6 +59,7 @@ class TipPrivateContext::InternalState {
   std::unique_ptr<client::ClientInterface> client_;
   SurrogatePairObserver surrogate_pair_observer_;
   commands::Output last_output_;
+  TipZenzContextRequestState zenz_context_request_state_;
   VirtualKey last_down_key_;
   bool has_pending_mode_indicator_key_ = false;
   KeyInformation pending_mode_indicator_key_ = 0;
@@ -121,6 +122,11 @@ const Output& TipPrivateContext::last_output() const {
 
 Output* TipPrivateContext::mutable_last_output() {
   return &state_->last_output_;
+}
+
+TipZenzContextRequestState*
+TipPrivateContext::mutable_zenz_context_request_state() {
+  return &state_->zenz_context_request_state_;
 }
 
 const VirtualKey& TipPrivateContext::last_down_key() const {

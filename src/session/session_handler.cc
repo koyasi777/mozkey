@@ -59,6 +59,7 @@
 #include "session/common.h"
 #include "session/keymap.h"
 #include "session/session.h"
+#include "session/zenz_context_request.h"
 
 #ifndef MOZC_DISABLE_SESSION_WATCHDOG
 #include "base/process.h"
@@ -438,6 +439,27 @@ bool SessionHandler::TestSendKey(commands::Command* command) {
     return false;
   }
   (*session)->TestSendKey(command);
+
+  // Windows TSF calls TEST_SEND_KEY before the matching SEND_KEY.  Expose the
+  // bounded acquisition budget in this response so the platform can acquire
+  // extended Zenz context during the same physical key event without another
+  // config/server round trip.
+  //
+  // Client surrounding text is snapshotted only when entering composition.
+  // Avoid requesting extended platform reads while an existing composition or
+  // conversion is already using its frozen snapshot. DIRECT is included to
+  // cover an indirect IME-on key that can enter precomposition on SEND_KEY.
+  const session::ImeContext::State state = (*session)->context().state();
+  const bool may_snapshot_client_context =
+      state == session::ImeContext::DIRECT ||
+      state == session::ImeContext::PRECOMPOSITION;
+
+  const session::ZenzContextRequest request = session::GetZenzContextRequest(
+      (*session)->context().GetConfig(),
+      (*session)->context().composer().GetInputFieldType(),
+      may_snapshot_client_context);
+  session::AttachZenzContextRequest(request, command->mutable_output());
+
   return true;
 }
 

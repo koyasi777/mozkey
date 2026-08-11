@@ -519,6 +519,16 @@ message Context {
   // Latter part of surrounding text.
   optional string following_text = 2;
 
+  // Fork-specific extended surrounding text for Zenz.  These fields are
+  // independent from preceding_text/following_text so ordinary Mozc history,
+  // prediction, and rewriting semantics remain unchanged.  Clients should leave
+  // them unset when Zenz should fall back to generic surrounding text. Presence
+  // is significant: an explicitly empty value means that the client deliberately
+  // suppresses that fallback, for example after observing a structural boundary
+  // or deciding that platform text must not be exposed to Zenz.
+  optional string zenz_preceding_text = 1001;
+  optional string zenz_following_text = 1002;
+
   // If this is true, suggestion feature is disabled regardless the
   // configuration.  If this is false, suggestion feature is followed
   // by the user's configuration.  If you want to omit interim
@@ -1360,7 +1370,7 @@ message DeletionRange {
   optional int32 length = 2;
 }
 
-// Next ID: 29
+// Next ID: 32
 message Output {
   optional uint64 id = 1 [jstype = JS_STRING];
 
@@ -1454,6 +1464,17 @@ message Output {
 
   // Debug-only reason string. Normal UI should not display this.
   optional string zenz_live_correction_debug = 31;
+
+  // Fork-specific request from the server to the client for bounded
+  // surrounding-text acquisition before the next SEND_KEY for this physical
+  // key event. A value of zero, or an unset field, means no extended
+  // acquisition is requested for that direction.
+  //
+  // These are semantic Unicode-character budgets. Platform clients may use a
+  // larger native range internally when required by the platform encoding, but
+  // must bound the text eventually written to Context::zenz_*_text.
+  optional uint32 zenz_preceding_text_request_length = 1001 [default = 0];
+  optional uint32 zenz_following_text_request_length = 1002 [default = 0];
 
   reserved 19;  // Deprecated storage_entry
   reserved 20;  // Deprecated cloud_sync_status

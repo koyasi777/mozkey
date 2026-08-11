@@ -33,8 +33,11 @@
 #include <msctf.h>
 
 #include <cstddef>
+#include <inputscope.h>
+
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "win32/tip/tip_text_service.h"
 
@@ -50,6 +53,12 @@ struct TipSurroundingTextInfo {
   bool has_selected_text = false;
   bool has_following_text = false;
   bool in_composition = false;  // context has a composition owned by Mozc.
+  // True when the current TSF selection is explicitly marked IS_PASSWORD.
+  // In this case surrounding text is deliberately not retrieved.
+  bool is_password_input_scope = false;
+  // True when surrounding text came from the legacy IMM32 document-feed
+  // fallback rather than a synchronous TSF text-range read.
+  bool used_legacy_imm32_fallback = false;
 };
 
 class TipSurroundingText {
@@ -67,6 +76,15 @@ class TipSurroundingText {
   //     http://blogs.msdn.com/b/tsfaware/archive/2007/05/17/rules-of-text-services.aspx
   static bool Get(TipTextService* text_service, ITfContext* context,
                   TipSurroundingTextInfo* info);
+
+  // Retrieves only the TSF surrounding-text directions requested by Zenz.
+  // Unlike Get(), this method does not read selected text and does not fall
+  // back to the legacy IMM32 document-feed path. The two native UTF-16 range
+  // budgets are independent so an unrequested direction is not read.
+  static bool GetForZenzContext(
+      TipTextService* text_service, ITfContext* context,
+      size_t max_preceding_length, size_t max_following_length,
+      TipSurroundingTextInfo* info);
 
   // A variant of TipSurroundingText::Get. One difference is that this method
   // moves the anchor position of the selection at the end of the range.
@@ -97,6 +115,10 @@ class TipSurroundingText {
 
 class TipSurroundingTextUtil {
  public:
+  // Returns true when the scope list explicitly contains IS_PASSWORD.
+  static bool ContainsPasswordInputScope(
+      const std::vector<InputScope>& input_scopes);
+
   // Returns true if |text| has more than |characters_in_codepoint| characters.
   // When succeeds, the last |*characters_in_utf16| characters in |text|
   // can be measured as |characters_in_codepoint| in the unit of UCS4.

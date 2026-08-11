@@ -861,7 +861,6 @@ constexpr uint32_t kMaxZenzLiveCorrectionDelayMsec = 5000;
 constexpr uint32_t kDefaultZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kMinZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kMaxZenzLiveCorrectionMinKeyLength = 20;
-constexpr uint32_t kDefaultZenzLiveCorrectionRightContextLength = 10;
 constexpr uint32_t kMaxZenzLiveCorrectionRightContextLength = 128;
 constexpr uint32_t kDefaultZenzAutoBlockRejectThreshold = 3;
 constexpr uint32_t kMinZenzAutoBlockRejectThreshold = 1;
@@ -2977,9 +2976,7 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   SET_CHECKBOX(zenzLiveCorrectionRightContextCheckBox,
                use_zenz_live_correction_right_context);
   const uint32_t zenz_live_correction_right_context_length =
-      config.has_zenz_live_correction_right_context_length()
-          ? config.zenz_live_correction_right_context_length()
-          : kDefaultZenzLiveCorrectionRightContextLength;
+      config.zenz_live_correction_right_context_length();
   zenzLiveCorrectionRightContextLengthSpinBox->setValue(
       static_cast<int>(
           std::clamp(zenz_live_correction_right_context_length,

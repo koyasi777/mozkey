@@ -78,25 +78,92 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "zenz_context_script_analyzer",
+    srcs = ["zenz_context_script_analyzer.cc"],
+    hdrs = ["zenz_context_script_analyzer.h"],
+    deps = [
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_text_privacy_analyzer",
+    srcs = ["zenz_text_privacy_analyzer.cc"],
+    hdrs = ["zenz_text_privacy_analyzer.h"],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_context_sanitizer",
+    srcs = ["zenz_context_sanitizer.cc"],
+    hdrs = ["zenz_context_sanitizer.h"],
+    deps = [
+        ":zenz_context_script_analyzer",
+        ":zenz_text_privacy_analyzer",
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_client_context",
+    srcs = ["zenz_client_context.cc"],
+    hdrs = ["zenz_client_context.h"],
+    deps = [
+        "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_context_assembler",
+    srcs = ["zenz_context_assembler.cc"],
+    hdrs = ["zenz_context_assembler.h"],
+    deps = [
+        ":zenz_context_sanitizer",
+        ":zenz_context_selector",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_context_selector",
+    srcs = ["zenz_context_selector.cc"],
+    hdrs = ["zenz_context_selector.h"],
+    deps = [
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_prompt_builder",
+    srcs = ["zenz_prompt_builder.cc"],
+    hdrs = ["zenz_prompt_builder.h"],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
     name = "session",
     srcs = [
         "session.cc",
         "zenz_client_factory.cc",
-        "zenz_context_sanitizer.cc",
         "zenz_live_corrector.cc",
         "zenz_named_pipe_client.cc",
         "zenz_output_validator.cc",
-        "zenz_prompt_builder.cc",
         "zenz_unix_socket_client.cc",
     ],
     hdrs = [
         "session.h",
         "zenz_client_factory.h",
-        "zenz_context_sanitizer.h",
         "zenz_live_corrector.h",
         "zenz_named_pipe_client.h",
         "zenz_output_validator.h",
-        "zenz_prompt_builder.h",
         "zenz_unix_socket_client.h",
     ],
     visibility = [
@@ -107,7 +174,12 @@ mozc_cc_library(
         ":key_event_transformer",
         ":keymap",
         ":zenz_adoption_policy",
+        ":zenz_client_context",
+        ":zenz_context_assembler",
+        ":zenz_context_sanitizer",
         ":zenz_feedback_store",
+        ":zenz_prompt_builder",
+        ":zenz_text_privacy_analyzer",
         "//base:clock",
         "//base:util",
         "//composer",
@@ -162,6 +234,77 @@ mozc_cc_test(
     srcs = ["zenz_adoption_policy_test.cc"],
     deps = [
         ":zenz_adoption_policy",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_script_analyzer_test",
+    size = "small",
+    srcs = ["zenz_context_script_analyzer_test.cc"],
+    deps = [
+        ":zenz_context_script_analyzer",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_text_privacy_analyzer_test",
+    size = "small",
+    srcs = ["zenz_text_privacy_analyzer_test.cc"],
+    deps = [
+        ":zenz_text_privacy_analyzer",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_sanitizer_test",
+    size = "small",
+    srcs = ["zenz_context_sanitizer_test.cc"],
+    deps = [
+        ":zenz_context_sanitizer",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_prompt_builder_test",
+    size = "small",
+    srcs = ["zenz_prompt_builder_test.cc"],
+    deps = [
+        ":zenz_prompt_builder",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_client_context_test",
+    size = "small",
+    srcs = ["zenz_client_context_test.cc"],
+    deps = [
+        ":zenz_client_context",
+        "//protocol:commands_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_assembler_test",
+    size = "small",
+    srcs = ["zenz_context_assembler_test.cc"],
+    deps = [
+        ":zenz_context_assembler",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_selector_test",
+    size = "small",
+    srcs = ["zenz_context_selector_test.cc"],
+    deps = [
+        ":zenz_context_selector",
         "//testing:gunit_main",
     ],
 )
@@ -268,6 +411,7 @@ mozc_cc_library(
     deps = [
         ":keymap",
         ":session",
+        ":zenz_context_request",
         "//base:clock",
         "//base:stopwatch",
         "//base:util",
@@ -785,5 +929,27 @@ mozc_cc_test(
         "//protocol:config_cc_proto",
         "//testing:gunit_main",
         "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_context_request",
+    srcs = ["zenz_context_request.cc"],
+    hdrs = ["zenz_context_request.h"],
+    deps = [
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_context_request_test",
+    size = "small",
+    srcs = ["zenz_context_request_test.cc"],
+    deps = [
+        ":zenz_context_request",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//testing:gunit_main",
     ],
 )

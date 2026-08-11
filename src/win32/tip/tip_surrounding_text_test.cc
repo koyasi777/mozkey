@@ -40,6 +40,20 @@ namespace win32 {
 namespace tsf {
 namespace {
 
+TEST(TipSurroundingTextInfoTest, DefaultsToNoLegacyImm32Fallback) {
+  const TipSurroundingTextInfo info;
+  EXPECT_FALSE(info.used_legacy_imm32_fallback);
+}
+
+TEST(TipSurroundingTextUtilTest, ContainsPasswordInputScope) {
+  EXPECT_FALSE(TipSurroundingTextUtil::ContainsPasswordInputScope({}));
+  EXPECT_FALSE(TipSurroundingTextUtil::ContainsPasswordInputScope(
+      std::vector<InputScope>{IS_DEFAULT, IS_URL}));
+  EXPECT_TRUE(TipSurroundingTextUtil::ContainsPasswordInputScope(
+      std::vector<InputScope>{IS_PASSWORD}));
+  EXPECT_TRUE(TipSurroundingTextUtil::ContainsPasswordInputScope(
+      std::vector<InputScope>{IS_URL, IS_PASSWORD, IS_HIRAGANA}));
+}
 TEST(TipSurroundingTextUtilTest, MeasureCharactersBackward) {
   {
     constexpr char kSource[] = "abcde";
