@@ -409,9 +409,9 @@ mozc_cc_library(
         "//ios:__pkg__",
     ],
     deps = [
-        ":zenz_context_request",
         ":keymap",
         ":session",
+        ":zenz_context_request",
         "//base:clock",
         "//base:stopwatch",
         "//base:util",
@@ -931,6 +931,7 @@ mozc_cc_test(
         "@com_google_absl//absl/strings",
     ],
 )
+
 mozc_cc_library(
     name = "zenz_context_request",
     srcs = ["zenz_context_request.cc"],
