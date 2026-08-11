@@ -10,9 +10,6 @@ namespace mozc {
 namespace session {
 namespace {
 
-constexpr uint32_t kDefaultPrecedingLength = 24;
-constexpr uint32_t kDefaultFollowingLength = 10;
-
 // Platform acquisition is intentionally bounded even though the historical
 // Session-side left-context setting has no equivalent clamp.
 constexpr uint32_t kMaxAcquisitionLength = 128;
@@ -33,9 +30,7 @@ ZenzContextRequest GetZenzContextRequest(
   }
 
   const uint32_t configured_preceding_length =
-      config.has_zenz_live_correction_left_context_length()
-          ? config.zenz_live_correction_left_context_length()
-          : kDefaultPrecedingLength;
+      config.zenz_live_correction_left_context_length();
   request.preceding_length =
       std::min(configured_preceding_length, kMaxAcquisitionLength);
 
@@ -44,9 +39,7 @@ ZenzContextRequest GetZenzContextRequest(
   }
 
   const uint32_t configured_following_length =
-      config.has_zenz_live_correction_right_context_length()
-          ? config.zenz_live_correction_right_context_length()
-          : kDefaultFollowingLength;
+      config.zenz_live_correction_right_context_length();
   request.following_length =
       std::min(configured_following_length, kMaxAcquisitionLength);
 

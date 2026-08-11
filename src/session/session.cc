@@ -202,8 +202,6 @@ constexpr uint32_t kDefaultZenzLiveCorrectionDelayMsec = 1000;
 constexpr uint32_t kDefaultZenzLiveCorrectionTimeoutMsec = 180;
 constexpr uint32_t kDefaultZenzLiveCorrectionPollMsec = 24;
 constexpr uint32_t kDefaultZenzLiveCorrectionMinKeyLength = 2;
-constexpr uint32_t kDefaultZenzLiveCorrectionLeftContextLength = 24;
-constexpr uint32_t kDefaultZenzLiveCorrectionRightContextLength = 10;
 constexpr uint32_t kMaxZenzLiveCorrectionRightContextLength = 128;
 constexpr uint32_t kMaxZenzLiveCorrectionDelayMsec = 5000;
 constexpr uint32_t kMaxZenzLiveCorrectionTimeoutMsec = 1000;
@@ -2045,9 +2043,6 @@ uint32_t GetZenzLiveCorrectionMinKeyLength(const config::Config& config) {
 
 uint32_t GetZenzLiveCorrectionLeftContextLength(
     const config::Config& config) {
-  if (!config.has_zenz_live_correction_left_context_length()) {
-    return kDefaultZenzLiveCorrectionLeftContextLength;
-  }
   return config.zenz_live_correction_left_context_length();
 }
 
@@ -2058,9 +2053,7 @@ uint32_t GetZenzLiveCorrectionRightContextLength(
   }
 
   const uint32_t length =
-      config.has_zenz_live_correction_right_context_length()
-          ? config.zenz_live_correction_right_context_length()
-          : kDefaultZenzLiveCorrectionRightContextLength;
+      config.zenz_live_correction_right_context_length();
   return std::min<uint32_t>(length,
                             kMaxZenzLiveCorrectionRightContextLength);
 }

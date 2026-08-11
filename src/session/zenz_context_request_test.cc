@@ -63,14 +63,28 @@ TEST(ZenzContextRequestTest, PasswordRequestsNothing) {
   EXPECT_EQ(request.following_length, 0);
 }
 
-TEST(ZenzContextRequestTest, UsesEffectiveDefaultLengths) {
+TEST(ZenzContextRequestTest, UsesProtoDefaultLengths) {
   config::Config config = EnabledConfig();
+  EXPECT_FALSE(config.has_zenz_live_correction_left_context_length());
+  EXPECT_FALSE(config.has_zenz_live_correction_right_context_length());
 
   const ZenzContextRequest request =
       GetZenzContextRequest(config, commands::Context::NORMAL, true);
 
   EXPECT_EQ(request.preceding_length, 24);
-  EXPECT_EQ(request.following_length, 10);
+  EXPECT_EQ(request.following_length, 24);
+}
+
+TEST(ZenzContextRequestTest, ExplicitRightContextLengthIsPreserved) {
+  config::Config config = EnabledConfig();
+  config.set_use_zenz_live_correction_right_context(true);
+  config.set_zenz_live_correction_right_context_length(16);
+
+  const ZenzContextRequest request =
+      GetZenzContextRequest(config, commands::Context::NORMAL, true);
+
+  EXPECT_EQ(request.preceding_length, 24);
+  EXPECT_EQ(request.following_length, 16);
 }
 
 TEST(ZenzContextRequestTest, DisabledRightContextRequestsOnlyPreceding) {
@@ -84,7 +98,7 @@ TEST(ZenzContextRequestTest, DisabledRightContextRequestsOnlyPreceding) {
   EXPECT_EQ(request.following_length, 0);
 }
 
-TEST(ZenzContextRequestTest, ExplicitlyEnabledRightContextUsesFallbackLength) {
+TEST(ZenzContextRequestTest, ExplicitlyEnabledRightContextUsesProtoDefaultLength) {
   config::Config config = EnabledConfig();
   config.set_use_zenz_live_correction_right_context(true);
 
@@ -92,7 +106,7 @@ TEST(ZenzContextRequestTest, ExplicitlyEnabledRightContextUsesFallbackLength) {
       GetZenzContextRequest(config, commands::Context::NORMAL, true);
 
   EXPECT_EQ(request.preceding_length, 24);
-  EXPECT_EQ(request.following_length, 10);
+  EXPECT_EQ(request.following_length, 24);
 }
 
 TEST(ZenzContextRequestTest, ClampsBothDirectionsForAcquisition) {
