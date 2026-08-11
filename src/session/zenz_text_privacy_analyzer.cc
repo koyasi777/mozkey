@@ -516,13 +516,10 @@ bool ContainsLiveSensitiveCredentialWord(
   return false;
 }
 
-// ============================================================
-// Historical context privacy semantics retained for regression comparison.
-//
-// These deliberately remain less precise than the refined kContext policy.
-// ============================================================
-
-bool ContainsLegacyContextCredentialWord(
+// Credential words protected by the historical surrounding-context policy.
+// The refined context policy keeps these signals in addition to the live-text
+// vocabulary so the privacy boundary does not regress.
+bool ContainsHistoricalContextCredentialWord(
     absl::string_view text) {
   const std::string lower =
       ToLowerAscii(text);
@@ -549,114 +546,6 @@ bool ContainsLegacyContextCredentialWord(
             lower,
             word)) {
       return true;
-    }
-  }
-
-  return false;
-}
-
-bool LooksLikeLegacyContextUrl(
-    absl::string_view text) {
-  const std::string lower =
-      ToLowerAscii(text);
-
-  return ContainsAsciiSubstring(
-             lower,
-             "http://") ||
-         ContainsAsciiSubstring(
-             lower,
-             "https://") ||
-         ContainsAsciiSubstring(
-             lower,
-             "www.") ||
-         ContainsAsciiSubstring(
-             lower,
-             "mailto:");
-}
-
-bool LooksLikeLegacyContextEmail(
-    absl::string_view text) {
-  const std::string lower =
-      ToLowerAscii(text);
-
-  return ContainsAsciiSubstring(
-             lower,
-             "@") &&
-         ContainsAsciiSubstring(
-             lower,
-             ".");
-}
-
-bool LooksLikeLegacyContextPath(
-    absl::string_view text) {
-  const std::string lower =
-      ToLowerAscii(text);
-
-  return ContainsAsciiSubstring(
-             lower,
-             "c:\\") ||
-         ContainsAsciiSubstring(
-             lower,
-             "\\users\\") ||
-         ContainsAsciiSubstring(
-             lower,
-             "/home/") ||
-         ContainsAsciiSubstring(
-             lower,
-             "/users/");
-}
-
-bool LooksLikeLegacyContextSecretPrefix(
-    absl::string_view text) {
-  const std::string lower =
-      ToLowerAscii(text);
-
-  return ContainsAsciiSubstring(
-             lower,
-             "sk-") ||
-         ContainsAsciiSubstring(
-             lower,
-             "pk_") ||
-         ContainsAsciiSubstring(
-             lower,
-             "ghp_") ||
-         ContainsAsciiSubstring(
-             lower,
-             "xoxb-");
-}
-
-bool ContainsLegacyLongVisibleAsciiRun(
-    absl::string_view text) {
-  size_t run = 0;
-
-  for (const unsigned char c : text) {
-    if (IsAsciiVisible(c)) {
-      ++run;
-
-      if (run >= 8) {
-        return true;
-      }
-    } else {
-      run = 0;
-    }
-  }
-
-  return false;
-}
-
-bool ContainsLegacyLongDigitRun(
-    absl::string_view text) {
-  size_t run = 0;
-
-  for (const unsigned char c : text) {
-    if (IsAsciiDigit(c)) {
-      ++run;
-
-      if (run >= 4) {
-        return true;
-      }
-    } else {
-      run = 0;
     }
   }
 
@@ -712,7 +601,7 @@ bool ContainsContextSensitiveCredentialWord(
     absl::string_view text) {
   // Preserve every credential word recognized by either historical context
   // privacy or the more complete live policy.
-  return ContainsLegacyContextCredentialWord(text) ||
+  return ContainsHistoricalContextCredentialWord(text) ||
          ContainsLiveSensitiveCredentialWord(text);
 }
 
@@ -793,59 +682,7 @@ ZenzTextPrivacyAnalysis AnalyzeContextText(
 
   return {};
 }
-ZenzTextPrivacyAnalysis AnalyzeLegacyContext(
-    absl::string_view text) {
-  if (ContainsLegacyContextCredentialWord(
-          text)) {
-    return {
-        ZenzTextPrivacySignal::
-            kCredentialWord};
-  }
 
-  if (LooksLikeLegacyContextUrl(
-          text)) {
-    return {
-        ZenzTextPrivacySignal::
-            kUrlOrDomainLike};
-  }
-
-  if (LooksLikeLegacyContextEmail(
-          text)) {
-    return {
-        ZenzTextPrivacySignal::
-            kEmailLike};
-  }
-
-  if (LooksLikeLegacyContextPath(
-          text)) {
-    return {
-        ZenzTextPrivacySignal::
-            kPathLike};
-  }
-
-  if (LooksLikeLegacyContextSecretPrefix(
-          text)) {
-    return {
-        ZenzTextPrivacySignal::
-            kSecretPrefix};
-  }
-
-  if (ContainsLegacyLongVisibleAsciiRun(
-          text)) {
-    return {
-        ZenzTextPrivacySignal::
-            kLegacyLongVisibleAscii};
-  }
-
-  if (ContainsLegacyLongDigitRun(
-          text)) {
-    return {
-        ZenzTextPrivacySignal::
-            kLegacyLongDigitRun};
-  }
-
-  return {};
-}
 
 }  // namespace
 
@@ -878,14 +715,6 @@ ZenzTextPrivacyAnalysis::reason() const {
     case ZenzTextPrivacySignal::
         kCredentialWord:
       return "credential_word";
-
-    case ZenzTextPrivacySignal::
-        kLegacyLongVisibleAscii:
-      return "legacy_long_visible_ascii";
-
-    case ZenzTextPrivacySignal::
-        kLegacyLongDigitRun:
-      return "legacy_long_digit_run";
   }
 
   return "unspecified";
@@ -899,11 +728,6 @@ ZenzTextPrivacyAnalyzer::Analyze(
     case ZenzTextPrivacyPolicy::
         kLiveText:
       return AnalyzeLiveText(text);
-
-    case ZenzTextPrivacyPolicy::
-        kLegacyContext:
-      return AnalyzeLegacyContext(text);
-
     case ZenzTextPrivacyPolicy::
         kContext:
       return AnalyzeContextText(text);

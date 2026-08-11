@@ -11,17 +11,10 @@ namespace session {
 //
 // kLiveText preserves the existing Session key/value privacy policy.
 //
-// kLegacyContext preserves the historical context sanitizer policy, including
-// the broad four-digit and eight-visible-ASCII fallbacks.
-//
-// kContext is the refined surrounding-context policy. It protects structured
+// kContext is the surrounding-context policy. It protects structured
 // sensitive data instead of treating ordinary short technical text as secret.
-//
-// kLegacyContext is retained for characterization and regression tests;
-// production surrounding-context sanitization uses kContext.
 enum class ZenzTextPrivacyPolicy {
   kLiveText,
-  kLegacyContext,
   kContext,
 };
 
@@ -33,8 +26,6 @@ enum class ZenzTextPrivacySignal {
   kSecretPrefix,
   kTokenLike,
   kCredentialWord,
-  kLegacyLongVisibleAscii,
-  kLegacyLongDigitRun,
 };
 
 struct ZenzTextPrivacyAnalysis {
