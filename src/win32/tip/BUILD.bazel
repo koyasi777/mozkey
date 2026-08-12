@@ -341,6 +341,17 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "tip_mode_indicator_key",
+    hdrs = ["tip_mode_indicator_key.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//win32/base:input_state",
+        "//win32/base:keyboard",
+    ],
+)
+
+mozc_cc_library(
     name = "tip_keyevent_handler",
     srcs = ["tip_keyevent_handler.cc"],
     hdrs = ["tip_keyevent_handler.h"],
@@ -348,6 +359,7 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":tip_edit_session",
+        ":tip_mode_indicator_key",
         ":tip_input_mode_manager",
         ":tip_private_context_h",
         ":tip_status",
@@ -868,6 +880,18 @@ mozc_cc_test(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":tip_input_mode_manager",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "tip_mode_indicator_key_test",
+    size = "small",
+    srcs = ["tip_mode_indicator_key_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":tip_mode_indicator_key",
         "//testing:gunit_main",
     ],
 )
