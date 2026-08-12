@@ -359,8 +359,8 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":tip_edit_session",
-        ":tip_mode_indicator_key",
         ":tip_input_mode_manager",
+        ":tip_mode_indicator_key",
         ":tip_private_context_h",
         ":tip_status",
         ":tip_surrounding_text",
