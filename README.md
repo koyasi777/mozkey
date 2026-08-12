@@ -13,14 +13,15 @@
   <img alt="Based on Mozc" src="https://img.shields.io/badge/based%20on-Mozc-88A2DD">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-Zenz-53D4C7">
   <img alt="Release build" src="https://img.shields.io/badge/release-Windows%20MSI-178B8B">
-  <img alt="macOS/Linux status" src="https://img.shields.io/badge/macOS%20%2F%20Linux-untested-lightgrey">
+  <img alt="macOS status" src="https://img.shields.io/badge/macOS-Zenz%20tested-2EA44F">
+  <img alt="Linux status" src="https://img.shields.io/badge/Linux-untested-lightgrey">
 </p>
 
 <br>
 
 Mozkey（もずきー）は [google/mozc](https://github.com/google/mozc) をベースにした非公式フォークです。
 
-本 fork は、主に自分の Windows 環境で日常的に使うために、Mozc に入力補助・ライブ変換・文脈補正・ローカル Zenz 補正・オフライン配布向けの調整を加えたものです。
+本 fork は、主に自分の Windows / macOS 環境で日常的に使うために、Mozc に入力補助・ライブ変換・文脈補正・ローカル Zenz 補正・オフライン配布向けの調整を加えたものです。
 
 本プロジェクトは Google 日本語入力ではありません。
 Google または google/mozc の公式配布物ではありません。
@@ -34,9 +35,11 @@ upstream Mozc との追従性および既存インストールとの互換性を
 ダウンロード / インストール
 --------------------------
 
-現時点で公開しているビルド済みパッケージと実機確認済み環境は Windows です。
+現時点で Releases から公開しているビルド済みパッケージは Windows 向けです。
 
-macOS / Linux については、upstream Mozc 自体は対応していますが、この fork で追加した機能、ビルド設定、Zenz 同梱構成、インストーラーまわりについては、まだ実機確認できていません。
+Windows に加え、macOS でもこの fork の Zenz 文脈取得とローカル runtime を実機で検証しています。macOS では、Zenz runtime を含む PKG の build / install、`mozc_zenz_scorer` / `llama-server` の起動、およびカーソル前後の Zenz context acquisition を確認しています。
+
+Linux については、upstream Mozc 自体は対応していますが、この fork 固有の Zenz 構成や追加機能はまだ実機確認できていません。
 
 Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mozkey/releases) からダウンロードできます。
 
@@ -99,7 +102,10 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - `には` や `してたの` のような自然な機能語かな列が、`二は` や `して他の` のような 1 文字漢字候補に過剰変換される挙動を抑制
 - `にじ` のような 2 文字ひらがな入力で、`に|じ` のような短すぎる文節分割が全体候補を隠す挙動を抑制
 - llama.cpp ベースのローカル Zenz live correction pipeline を追加
-- Zenz 補正は `mozc_server` から named pipe 経由で `mozc_zenz_scorer.exe` に依頼し、`llama-server.exe` の localhost endpoint でローカル推論
+- Zenz 文脈処理を共通化し、通常 Mozc の `preceding_text` / `following_text` とは分離した `zenz_preceding_text` / `zenz_following_text` を使用
+- Zenz が必要とする preceding / following の長さを Server から Client へ通知し、Windows TSF / macOS IMK では要求された方向・長さだけ surrounding text を追加取得
+- Zenz の前方・後方文脈を用途に応じて独立して選択し、Unicode-aware な文字種判定と privacy filtering を共通処理として適用
+- Windows 版では、Zenz 補正を `mozc_server` から named pipe 経由で `mozc_zenz_scorer.exe` に依頼し、`llama-server.exe` の localhost endpoint でローカル推論
 - Zenz 補正開始までの遅延時間を設定画面から変更可能。デフォルトは 1000 ms
 - Zenz 補正開始の最小文字数を設定画面から変更可能
 - Zenz 補正結果のローカル feedback learning を追加。設定画面から ON/OFF 可能
@@ -124,7 +130,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Zenz prompt に使う左文脈は sanitizer を通し、URL、email、file path、token、長い数字列など sensitive-like な文脈は prompt に含めない
 - Zenz feedback は full-sequence 単位だけを保存し、raw left context や segment-local feedback は保存せず、非可逆な context class のみを保存
 - Zenz model / llama.cpp runtime の third-party license notice を MSI に同梱
-- 自分の Windows 開発環境向けのビルド調整
+- 自分の Windows / macOS 開発環境向けのビルド調整
 
 <br>
 
@@ -139,9 +145,9 @@ upstream 由来の使用統計・クラッシュレポート送信オプショ�
 
 Windows 向けリリースバイナリについては、Mozc core runtime executable が `winhttp.dll`, `wininet.dll`, `urlmon.dll` などの代表的なネットワーク関連 DLL を import していないことを検査します。
 
-この fork では、llama.cpp ベースのローカル Zenz 推論 runtime を同梱する場合があります。同梱される `llama-server.exe` はローカル推論用の server として使用され、`127.0.0.1` のみに bind することを前提としています。外部ネットワークサービスを公開したり、入力内容を外部サーバーへ送信したりする目的のものではありません。
+この fork では、llama.cpp ベースのローカル Zenz 推論 runtime を同梱する場合があります。Zenz runtime はローカル推論用として使用し、外部ネットワークサービスを公開したり、入力内容を外部サーバーへ送信したりする目的のものではありません。
 
-Zenz helper process は、同梱された `llama-server.exe` と localhost endpoint のみで通信します。この local HTTP endpoint は推論処理を分離するための内部的なプロセス境界であり、外部ネットワークアクセスを目的としたものではありません。
+Windows 向け Zenz 同梱構成では、`llama-server.exe` を `127.0.0.1` のみに bind するローカル推論 server として使用します。Windows 版の Zenz helper process は、同梱された `llama-server.exe` と localhost endpoint のみで通信します。この local HTTP endpoint は推論処理を分離するための内部的なプロセス境界であり、外部ネットワークアクセスを目的としたものではありません。
 
 Zenz の localhost 通信は、固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
@@ -233,7 +239,9 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 ライブ変換と Zenz ライブ補正の両方を有効にすると、まず通常の Mozc ライブ変換結果を表示し、その後でローカルの Zenz runtime に非同期で補正を依頼します。
 
-Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
+Windows 版では、Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
+
+Zenz に渡す surrounding context は、通常 Mozc の generic context とは分離した専用 field を使用します。Server は Zenz 補正に必要な preceding / following length を Client へ通知し、Windows TSF と macOS IMK は要求された方向・長さだけを追加取得して、`zenz_preceding_text` / `zenz_following_text` として渡します。通常 Mozc の surrounding text semantics は変更しません。
 
 Zenz 補正は設定可能なデバウンス時間の後に実行されます。デフォルトは 1000 ms です。また、Zenz 補正を開始する最小文字数も設定画面から変更できます。Zenz 結果が返る前に入力内容が変わった場合、古い結果は generation / key の検査により破棄されます。
 
@@ -248,6 +256,8 @@ Zenz 出力は表示前に検証されます。空出力、短すぎる入力、
 Zenz が保護対象の表記を落としたり変更したりし、placeholder 復元や安全な repair でも必要な出現数を満たせない場合、その Zenz 結果は採用せず、通常の Mozc ライブ変換結果を表示します。保護対象はユーザー辞書に登録されている全候補ではなく、現在の通常ライブ変換結果に実際に現れた表記です。
 
 Zenz ライブ補正は password field では実行されません。また、入力途中の raw romaji のように日本語文字シグナルを含まない読みは補正対象外です。日本語文字を含む英字混じりの入力は、privacy gate を通る場合に限り補正対象になり得ます。
+
+Windows TSF の password input scope と macOS の Secure Event Input では、application の surrounding text を Zenz 用に取得せず、Zenz extended context acquisition も実行しません。
 
 Zenz feedback learning は任意機能です。有効な場合でも、Zenz 補正結果が表示されただけでは保存されません。Enter や句読点・記号の単打確定などで、表示中の Zenz 結果が明示的に確定された場合だけ、accepted feedback の候補として保留されます。
 
@@ -277,9 +287,9 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 - `topic`: `U+EE04` topic として、現在の話題を渡します。experimental なフィールドです。
 - `style`: `U+EE05` style として、文体や用途を渡します。experimental なフィールドです。
 - `settings`: `U+EE06` settings として、変換方針の短いヒントを渡します。experimental なフィールドです。
-- 右文脈: クライアントからカーソル右側テキストが渡された場合、`U+EE07` right context として Zenzai v3.2 の prompt に含めます。
+- 右文脈: Zenz 専用のカーソル右側テキストが利用可能な場合、`U+EE07` right context として Zenzai v3.2 の prompt に含めます。
 
-`profile`、`topic`、`style`、`settings` は空欄なら prompt に含めません。右文脈はユーザーが固定文を入力する欄ではなく、対応クライアントから `following_text` が渡された場合だけ自動で使われます。
+`profile`、`topic`、`style`、`settings` は空欄なら prompt に含めません。右文脈はユーザーが固定文を入力する欄ではありません。Windows TSF / macOS IMK では、Server が要求した必要量をカーソル右側から自動取得し、`zenz_following_text` として渡します。
 
 
 ### 確定済み左文脈を使った変換補正
@@ -508,6 +518,23 @@ daily local 辞書は主に以下を元に生成できます。
 * [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 
+### macOS Zenz 対応 PKG のビルド
+
+macOS で Zenz runtime を含む PKG を作る場合は、`llama-server` と GGUF model を `src/mac/installer/zenz_runtime/` に staging したうえで、通常の release build に `--define=macos_zenz_runtime=1` を追加します。
+
+```bash
+cd src
+
+bazelisk build \
+  --config=oss_macos \
+  --config=release_build \
+  --define=macos_zenz_runtime=1 \
+  //mac:package \
+  --verbose_failures
+```
+
+`--define=macos_zenz_runtime=1` を付けない package build は、Zenz runtime を含む配布用 macOS PKG としては扱いません。
+
 Note
 ----
 
@@ -523,7 +550,7 @@ upstream 提案向けの変更は `pr/*` branches に整理しています。
 
 This repository is my personal fork of [google/mozc](https://github.com/google/mozc).
 
-This fork is mainly maintained for my own Windows environment and adds input assistance, live conversion, context-aware conversion, local Zenz correction, and offline-distribution-oriented adjustments to Mozc.
+This fork is mainly maintained for my own Windows / macOS environments and adds input assistance, live conversion, context-aware conversion, local Zenz correction, and offline-distribution-oriented adjustments to Mozc.
 
 This build is not an official google/mozc distribution.
 
@@ -545,11 +572,12 @@ not import common networking libraries such as `winhttp.dll`, `wininet.dll`, or
 `urlmon.dll`.
 
 This fork may also bundle a local Zenz inference runtime based on llama.cpp.
-The bundled `llama-server.exe` is used as a local-only inference server and is
-expected to bind to `127.0.0.1`. It is not intended to expose an external
-network service or send user input to external servers.
+The Zenz runtime is used for local inference and is not intended to expose an
+external network service or send user input to external servers.
 
-The Zenz helper process communicates with the bundled `llama-server.exe` only
+In the Windows Zenz-bundled configuration, `llama-server.exe` is used as a
+local-only inference server and is expected to bind to `127.0.0.1`. On Windows,
+the Zenz helper process communicates with the bundled `llama-server.exe` only
 through a localhost endpoint. This local HTTP endpoint is used as an internal
 process boundary for inference and is not intended for external network access.
 
@@ -589,9 +617,11 @@ See also:
 Download / Install
 ------------------
 
-At the moment, prebuilt packages and real-machine testing are available only for Windows.
+At the moment, prebuilt packages published from Releases are available for Windows.
 
-macOS / Linux are supported by upstream Mozc itself, but this fork's added features, build settings, Zenz-bundled configuration, and installer-related behavior have not yet been tested on real macOS / Linux environments.
+In addition to Windows, the Zenz context / runtime path has been tested on real macOS hardware. On macOS, a Zenz-runtime-enabled PKG has been built and installed, `mozc_zenz_scorer` / `llama-server` startup has been verified, and preceding / following Zenz context acquisition has been tested.
+
+Linux is supported by upstream Mozc itself, but this fork-specific Zenz configuration and added features have not yet been tested on a real Linux environment.
 
 Windows MSI packages are available from [Releases](https://github.com/koyasi777/mozkey/releases).
 
@@ -659,7 +689,10 @@ Main features added in this fork
 - Reduces over-conversion of natural functional kana sequences such as `には` and `してたの`
 - Reduces cases where short two-character hiragana inputs such as `にじ` are split too aggressively
 - Adds a local Zenz live correction pipeline based on llama.cpp
-- Sends Zenz correction requests from `mozc_server` to `mozc_zenz_scorer.exe` through a named pipe, and performs local inference through the localhost endpoint of `llama-server.exe`
+- Uses dedicated `zenz_preceding_text` / `zenz_following_text` fields for Zenz context without changing the normal Mozc `preceding_text` / `following_text` semantics
+- Lets the Server request the required preceding / following lengths and lets Windows TSF / macOS IMK acquire only the requested directions and lengths
+- Selects preceding and following Zenz context independently and applies shared Unicode-aware script analysis and privacy filtering
+- On Windows, sends Zenz correction requests from `mozc_server` to `mozc_zenz_scorer.exe` through a named pipe and performs local inference through the localhost endpoint of `llama-server.exe`
 - Allows configuring the Zenz correction debounce delay from the config dialog. The default is 1000 ms
 - Allows configuring the minimum number of characters to start Zenz correction
 - Adds optional local feedback learning for Zenz correction results
@@ -684,7 +717,7 @@ Main features added in this fork
 - Sanitizes left context before using it in Zenz prompts, and excludes sensitive-like context such as URLs, email addresses, file paths, tokens, and long digit sequences
 - Stores only full-sequence Zenz feedback with non-reversible context classes, never raw left context or segment-local feedback
 - Bundles third-party license notices for the Zenz model and llama.cpp runtime in the MSI
-- Includes build adjustments for my own Windows development environment
+- Includes build adjustments for my own Windows / macOS development environments
 
 Examples
 --------
@@ -745,11 +778,19 @@ When both live conversion and Zenz live correction are enabled, this fork first
 shows the normal Mozc live conversion result and then asynchronously asks a local
 Zenz runtime to refine the visible preedit.
 
-The Zenz request is sent from `mozc_server` to `mozc_zenz_scorer.exe` through a
-Windows named pipe. The scorer then calls the bundled `llama-server.exe` on a
-localhost endpoint for local inference. The localhost transport is hardened so
-that it does not rely on a fixed endpoint, and internal requests include
-protection against accidental or stale local endpoint mismatches.
+On Windows, the Zenz request is sent from `mozc_server` to
+`mozc_zenz_scorer.exe` through a Windows named pipe. The scorer then calls the
+bundled `llama-server.exe` on a localhost endpoint for local inference. The
+localhost transport is hardened so that it does not rely on a fixed endpoint,
+and internal requests include protection against accidental or stale local
+endpoint mismatches.
+
+Surrounding context for Zenz uses dedicated fields separate from the normal Mozc
+generic context. The Server reports the required preceding / following lengths
+to the client; Windows TSF and macOS IMK then acquire only the requested
+directions and lengths and attach them as `zenz_preceding_text` /
+`zenz_following_text`. The normal Mozc surrounding-text semantics are left
+unchanged.
 
 Zenz correction is delayed by a configurable debounce interval. The default
 delay is 1000 ms. The minimum number of characters required to start Zenz
@@ -794,6 +835,10 @@ Zenz live correction is disabled for password fields and for composition text
 that has no Japanese-script signal, such as intermediate raw romaji input.
 Japanese text mixed with ASCII can still be eligible when it passes the privacy
 gate.
+
+For Windows TSF password input scopes and macOS Secure Event Input, application
+surrounding text is not acquired for Zenz and extended Zenz context acquisition
+is skipped.
 
 Zenz feedback learning is optional. When enabled, a displayed Zenz result is not
 stored just because it was shown. It becomes a pending accepted feedback only
@@ -871,9 +916,9 @@ Zenz live correction can pass additional condition fields using the special-toke
 - `topic`: passed as `U+EE04` topic. This field is experimental.
 - `style`: passed as `U+EE05` style. This field is experimental.
 - `settings`: passed as `U+EE06` settings. This field is experimental.
-- Right context: when the client supplies text on the right side of the caret, it is passed as `U+EE07` right context for Zenzai v3.2.
+- Right context: when dedicated Zenz text on the right side of the caret is available, it is passed as `U+EE07` right context for Zenzai v3.2.
 
-Empty `profile`, `topic`, `style`, and `settings` fields are omitted from the prompt. Right context is not a fixed user-entered phrase; it is used automatically only when the client supplies `following_text`.
+Empty `profile`, `topic`, `style`, and `settings` fields are omitted from the prompt. Right context is not a fixed user-entered phrase. On Windows TSF / macOS IMK, the Server requests the required amount and the client automatically acquires text on the right side of the caret and supplies it as `zenz_following_text`.
 
 ### Context-aware conversion after committed text
 
@@ -1155,6 +1200,26 @@ See:
 
 * [Koyasi Dictionary Data](src/data/dictionary_koyasi/README.md)
 * [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+### Building a Zenz-enabled macOS PKG
+
+To build a macOS PKG that includes the Zenz runtime, stage `llama-server` and
+the GGUF model under `src/mac/installer/zenz_runtime/`, then add
+`--define=macos_zenz_runtime=1` to the release build.
+
+```bash
+cd src
+
+bazelisk build \
+  --config=oss_macos \
+  --config=release_build \
+  --define=macos_zenz_runtime=1 \
+  //mac:package \
+  --verbose_failures
+```
+
+A package built without `--define=macos_zenz_runtime=1` should not be treated
+as a distributable Zenz-enabled macOS PKG.
 
 Note
 ----
