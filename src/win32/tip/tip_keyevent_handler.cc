@@ -42,7 +42,6 @@
 #include "base/win32/wide_char.h"
 #include "client/client_interface.h"
 #include "protocol/commands.pb.h"
-#include "session/key_info_util.h"
 #include "win32/base/conversion_mode_util.h"
 #include "win32/base/deleter.h"
 #include "win32/base/input_state.h"
@@ -51,6 +50,7 @@
 #include "win32/base/surrogate_pair_observer.h"
 #include "win32/tip/tip_edit_session.h"
 #include "win32/tip/tip_input_mode_manager.h"
+#include "win32/tip/tip_mode_indicator_key.h"
 #include "win32/tip/tip_private_context.h"
 #include "win32/tip/tip_status.h"
 #include "win32/tip/tip_surrounding_text.h"
@@ -115,27 +115,12 @@ void ShowModeIndicatorAndUpdateUI(TipTextService* text_service,
   }
 }
 
-bool IsNoOpModeIndicatorKey(const InputBehavior& behavior,
-                            const InputState& current_state,
-                            const KeyEventHandlerResult& result) {
-  if (!result.has_key_information) {
-    return false;
-  }
-
-  if (current_state.open) {
-    return KeyInfoUtil::ContainsKeyInformation(
-        behavior.active_mode_ime_on_keys, result.key_information);
-  }
-
-  return KeyInfoUtil::ContainsKeyInformation(
-      behavior.direct_mode_ime_off_keys, result.key_information);
-}
-
 bool UpdateNoOpModeIndicatorKeyState(
     TipTextService* text_service, TipPrivateContext* private_context,
-    TipInputModeManager* input_mode_manager, bool is_key_down,
-    const InputBehavior& behavior, const InputState& current_state,
-    const KeyEventHandlerResult& result, bool is_on_key) {
+    TipInputModeManager* input_mode_manager, const VirtualKey& key,
+    bool is_key_down, const InputBehavior& behavior,
+    const InputState& current_state, const KeyEventHandlerResult& result,
+    bool is_on_key) {
   if (!result.has_key_information) {
     if (is_key_down) {
       private_context->ClearPendingModeIndicatorKey();
@@ -144,7 +129,9 @@ bool UpdateNoOpModeIndicatorKeyState(
   }
 
   if (is_key_down) {
-    if (IsNoOpModeIndicatorKey(behavior, current_state, result)) {
+    if (IsNoOpModeIndicatorKey(
+            key, behavior, current_state, result.has_key_information,
+            result.key_information)) {
       private_context->SetPendingModeIndicatorKey(result.key_information);
     } else {
       private_context->ClearPendingModeIndicatorKey();
@@ -353,7 +340,7 @@ HRESULT OnTestKey(TipTextService* text_service, ITfContext* context,
   }
 
   if (UpdateNoOpModeIndicatorKeyState(
-          text_service, private_context, input_mode_manager, is_key_down,
+          text_service, private_context, input_mode_manager, vk, is_key_down,
           behavior, input_state, result,
           /*is_on_key=*/false)) {
     *eaten = TRUE;
@@ -666,7 +653,7 @@ HRESULT OnKey(TipTextService* text_service, ITfContext* context,
 
     const bool handled_noop_mode_indicator_key =
         UpdateNoOpModeIndicatorKeyState(
-            text_service, private_context, input_mode_manager, is_key_down,
+            text_service, private_context, input_mode_manager, vk, is_key_down,
             behavior, ime_state, result,
             /*is_on_key=*/true);
 
