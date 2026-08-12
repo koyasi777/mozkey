@@ -170,6 +170,10 @@
 }
 
 - (NSAttributedString *)attributedSubstringFromRange:(NSRange)range {
+  counters_["attributedSubstringFromRange:"]++;
+  counters_[std::string("attributedSubstringFromRange:") +
+            std::to_string(range.location) + ":" +
+            std::to_string(range.length)]++;
   return [attributedString_ attributedSubstringFromRange:range];
 }
 
@@ -197,6 +201,7 @@ namespace {
 
 using ::testing::_;
 using ::testing::DoAll;
+using ::testing::InSequence;
 using ::testing::Mock;
 using ::testing::NotNull;
 using ::testing::Return;
@@ -1006,12 +1011,16 @@ TEST_F(MozcImkInputControllerTest, handleConfig) {
   config.set_preedit_method(config::Config::KANA);
   config.set_yen_sign_character(config::Config::BACKSLASH);
   config.set_use_japanese_layout(true);
+  config.set_use_live_conversion(true);
+  config.set_use_zenz_live_correction(true);
   EXPECT_CALL(*mock_mozc_client_, GetConfig(NotNull()))
       .WillOnce(DoAll(SetArgPointee<0>(config), Return(true)));
 
   [controller_ handleConfig];
   EXPECT_EQ(controller_.keyCodeMap.inputMode, KANA);
   EXPECT_EQ(controller_.yenSignCharacter, config::Config::BACKSLASH);
+  EXPECT_TRUE(controller_.useLiveConversionForTest);
+  EXPECT_TRUE(controller_.useZenzContextAcquisitionForTest);
   EXPECT_EQ([mock_client_ getCounter:"overrideKeyboardWithKeyboardNamed:"], 1);
   EXPECT_TRUE([@"com.apple.keylayout.US" isEqualToString:mock_client_.overriddenLayout])
       << [mock_client_.overriddenLayout UTF8String];
@@ -1193,6 +1202,312 @@ TEST_F(MozcImkInputControllerTest, DoubleTapEisuCommitRawText) {
               SendCommandWithContext(Type(commands::SessionCommand::COMMIT_RAW_TEXT), _, NotNull()))
       .WillOnce(Return(true));
   EXPECT_EQ(SendKeyEvent(kVK_JIS_Eisu, controller_, mock_client_), YES);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       ZenzContextPreflightAttachesRequestedDirectionalContext) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useZenzContextAcquisitionForTest = true;
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:@"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"]];
+  mock_client_.expectedRange = NSMakeRange(30, 0);
+
+  commands::Output testOutput;
+  testOutput.set_zenz_preceding_text_request_length(24);
+  testOutput.set_zenz_following_text_request_length(3);
+  commands::Output sendOutput;
+  sendOutput.set_consumed(true);
+  commands::Context testContext;
+  commands::Context sendContext;
+
+  {
+    InSequence sequence;
+    EXPECT_CALL(*mock_mozc_client_,
+                TestSendKeyWithContext(
+                    HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+        .WillOnce(DoAll(SaveArg<1>(&testContext),
+                        SetArgPointee<2>(testOutput), Return(true)));
+    EXPECT_CALL(*mock_mozc_client_,
+                SendKeyWithContext(
+                    HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+        .WillOnce(DoAll(SaveArg<1>(&sendContext),
+                        SetArgPointee<2>(sendOutput), Return(true)));
+  }
+
+  EXPECT_TRUE(SendKeyEvent(kVK_Tab, controller_, mock_client_));
+  EXPECT_EQ(testContext.preceding_text(), "ABCDEFGHIJKLMNOPQRST");
+  EXPECT_FALSE(testContext.has_zenz_preceding_text());
+  EXPECT_FALSE(testContext.has_zenz_following_text());
+
+  EXPECT_EQ(sendContext.preceding_text(), "ABCDEFGHIJKLMNOPQRST");
+  EXPECT_EQ(sendContext.zenz_preceding_text(),
+            "6789ABCDEFGHIJKLMNOPQRST");
+  EXPECT_EQ(sendContext.zenz_following_text(), "UVW");
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:"], 3);
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:10:20"], 1);
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:0:30"], 1);
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:30:7"], 1);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       ZenzContextPreflightDoesNotReadZeroRequestDirection) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useZenzContextAcquisitionForTest = true;
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:@"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"]];
+  mock_client_.expectedRange = NSMakeRange(20, 0);
+
+  commands::Output testOutput;
+  testOutput.set_zenz_following_text_request_length(3);
+  commands::Output sendOutput;
+  sendOutput.set_consumed(true);
+  commands::Context sendContext;
+
+  EXPECT_CALL(*mock_mozc_client_,
+              TestSendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SetArgPointee<2>(testOutput), Return(true)));
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SaveArg<1>(&sendContext),
+                      SetArgPointee<2>(sendOutput), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_Tab, controller_, mock_client_));
+  EXPECT_FALSE(sendContext.has_zenz_preceding_text());
+  EXPECT_EQ(sendContext.zenz_following_text(), "KLM");
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:"], 2);
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:0:20"], 1);
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:20:7"], 1);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       ZenzContextPreflightFailureFallsBackToGenericSend) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useZenzContextAcquisitionForTest = true;
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:@"abcdefghij"]];
+  mock_client_.expectedRange = NSMakeRange(5, 0);
+
+  commands::Output sendOutput;
+  sendOutput.set_consumed(true);
+  commands::Context sendContext;
+
+  EXPECT_CALL(*mock_mozc_client_,
+              TestSendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SaveArg<1>(&sendContext),
+                      SetArgPointee<2>(sendOutput), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_Tab, controller_, mock_client_));
+  EXPECT_EQ(sendContext.preceding_text(), "abcde");
+  EXPECT_FALSE(sendContext.has_zenz_preceding_text());
+  EXPECT_FALSE(sendContext.has_zenz_following_text());
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:"], 1);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       LongDocumentStillAcquiresBoundedZenzContext) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useZenzContextAcquisitionForTest = true;
+  controller_.secureEventInputStateForTest = 0;
+
+  NSMutableString *document =
+      [NSMutableString stringWithCapacity:1200];
+  for (int i = 0; i < 1100; ++i) {
+    [document appendString:@"L"];
+  }
+  for (int i = 0; i < 100; ++i) {
+    [document appendString:@"R"];
+  }
+
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:document]];
+  mock_client_.expectedRange = NSMakeRange(1100, 0);
+
+  commands::Output testOutput;
+  testOutput.set_zenz_preceding_text_request_length(4);
+  testOutput.set_zenz_following_text_request_length(5);
+
+  commands::Output sendOutput;
+  sendOutput.set_consumed(true);
+  commands::Context testContext;
+  commands::Context sendContext;
+
+  EXPECT_CALL(*mock_mozc_client_,
+              TestSendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SaveArg<1>(&testContext),
+                      SetArgPointee<2>(testOutput), Return(true)));
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SaveArg<1>(&sendContext),
+                      SetArgPointee<2>(sendOutput), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_Tab, controller_, mock_client_));
+
+  EXPECT_FALSE(testContext.has_preceding_text());
+  EXPECT_FALSE(sendContext.has_preceding_text());
+
+  EXPECT_EQ(sendContext.zenz_preceding_text(), "LLLL");
+  EXPECT_EQ(sendContext.zenz_following_text(), "RRRRR");
+
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:"], 2);
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:1091:9"], 1);
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:1100:11"], 1);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       SecureEventInputSuppressesAllSurroundingContext) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useZenzContextAcquisitionForTest = true;
+  controller_.secureEventInputStateForTest = 1;
+
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:@"secret-neighboring-application-text"]];
+  mock_client_.expectedRange = NSMakeRange(10, 0);
+
+  commands::Output sendOutput;
+  sendOutput.set_consumed(true);
+  commands::Context sendContext;
+
+  EXPECT_CALL(*mock_mozc_client_, TestSendKeyWithContext(_, _, _)).Times(0);
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SaveArg<1>(&sendContext),
+                      SetArgPointee<2>(sendOutput), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_Tab, controller_, mock_client_));
+
+  ASSERT_TRUE(sendContext.has_input_field_type());
+  EXPECT_EQ(sendContext.input_field_type(), commands::Context::PASSWORD);
+  EXPECT_FALSE(sendContext.has_preceding_text());
+  EXPECT_FALSE(sendContext.has_following_text());
+  EXPECT_FALSE(sendContext.has_zenz_preceding_text());
+  EXPECT_FALSE(sendContext.has_zenz_following_text());
+
+  EXPECT_EQ([mock_client_ getCounter:"selectedRange"], 0);
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:"], 0);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       NonSecureOverridePreservesZenzContextPreflight) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useZenzContextAcquisitionForTest = true;
+  controller_.secureEventInputStateForTest = 0;
+
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:@"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"]];
+  mock_client_.expectedRange = NSMakeRange(20, 0);
+
+  commands::Output testOutput;
+  testOutput.set_zenz_following_text_request_length(3);
+  commands::Output sendOutput;
+  sendOutput.set_consumed(true);
+  commands::Context sendContext;
+
+  EXPECT_CALL(*mock_mozc_client_,
+              TestSendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SetArgPointee<2>(testOutput), Return(true)));
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SaveArg<1>(&sendContext),
+                      SetArgPointee<2>(sendOutput), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_Tab, controller_, mock_client_));
+
+  EXPECT_FALSE(sendContext.has_input_field_type());
+  EXPECT_EQ(sendContext.preceding_text(), "0123456789ABCDEFGHIJ");
+  EXPECT_EQ(sendContext.zenz_following_text(), "KLM");
+}
+
+TEST_F(MozcImkInputControllerTest,
+       ZenzContextPreflightIsSkippedWhenFeatureGateIsDisabled) {
+  controller_.mode = commands::HIRAGANA;
+  controller_.useZenzContextAcquisitionForTest = false;
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:@"abcdefghij"]];
+  mock_client_.expectedRange = NSMakeRange(5, 0);
+
+  commands::Output sendOutput;
+  sendOutput.set_consumed(true);
+  commands::Context sendContext;
+
+  EXPECT_CALL(*mock_mozc_client_, TestSendKeyWithContext(_, _, _)).Times(0);
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::TAB), _, NotNull()))
+      .WillOnce(DoAll(SaveArg<1>(&sendContext),
+                      SetArgPointee<2>(sendOutput), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_Tab, controller_, mock_client_));
+  EXPECT_EQ(sendContext.preceding_text(), "abcde");
+  EXPECT_FALSE(sendContext.has_zenz_preceding_text());
+  EXPECT_FALSE(sendContext.has_zenz_following_text());
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:"], 1);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       ZenzContextPrecedingReadDropsLeadingLowSurrogate) {
+  const unichar characters[] = {'A', 0xD83D, 0xDE00, 'B', 'C'};
+  NSString *nativeText = [NSString stringWithCharacters:characters length:5];
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:nativeText]];
+  mock_client_.expectedRange = NSMakeRange(5, 0);
+
+  commands::Context context;
+  EXPECT_TRUE([controller_ fillZenzSurroundingContext:&context
+                                               client:(id)mock_client_
+                                      precedingLength:1
+                                      followingLength:0]);
+
+  ASSERT_TRUE(context.has_zenz_preceding_text());
+  EXPECT_EQ(context.zenz_preceding_text(), "C");
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:2:3"], 1);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       ZenzContextFollowingReadDropsTrailingHighSurrogate) {
+  const unichar characters[] = {'A', 'B', 0xD83D, 0xDE00, 'C'};
+  NSString *nativeText = [NSString stringWithCharacters:characters length:5];
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:nativeText]];
+  mock_client_.expectedRange = NSMakeRange(0, 0);
+
+  commands::Context context;
+  EXPECT_TRUE([controller_ fillZenzSurroundingContext:&context
+                                               client:(id)mock_client_
+                                      precedingLength:0
+                                      followingLength:1]);
+
+  ASSERT_TRUE(context.has_zenz_following_text());
+  EXPECT_EQ(context.zenz_following_text(), "A");
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:0:3"], 1);
+}
+
+TEST_F(MozcImkInputControllerTest,
+       ZenzContextBoundarySetsExplicitEmptyWithoutNativeRead) {
+  [mock_client_ setAttributedString:[[NSAttributedString alloc]
+      initWithString:@"abcde"]];
+  mock_client_.expectedRange = NSMakeRange(0, 0);
+
+  commands::Context context;
+  EXPECT_TRUE([controller_ fillZenzSurroundingContext:&context
+                                               client:(id)mock_client_
+                                      precedingLength:4
+                                      followingLength:0]);
+  EXPECT_TRUE(context.has_zenz_preceding_text());
+  EXPECT_TRUE(context.zenz_preceding_text().empty());
+  EXPECT_FALSE(context.has_zenz_following_text());
+  EXPECT_EQ([mock_client_ getCounter:"attributedSubstringFromRange:"], 0);
 }
 
 TEST_F(MozcImkInputControllerTest, fillSurroundingContext) {

@@ -103,6 +103,10 @@
 
   /** True when the current config enables live conversion. */
   bool useLiveConversion_;
+  /** True when a Zenz context-length preflight is useful for this config. */
+  bool useZenzContextAcquisition_;
+  /** -1 uses Carbon; 0/1 are deterministic test overrides. */
+  int secureEventInputStateForTest_;
 
   /** Latest delayed callback requested by Output::Callback. */
   std::unique_ptr<mozc::commands::SessionCommand> delayedSessionCommand_;
@@ -129,6 +133,8 @@
 @property(readwrite, assign) NSRange replacementRange;
 @property(readwrite, retain) id imkClientForTest;
 @property(readwrite, assign) bool useLiveConversionForTest;
+@property(readwrite, assign) bool useZenzContextAcquisitionForTest;
+@property(readwrite, assign) int secureEventInputStateForTest;
 
 /** Sets the RendererReceiver used by all instances of the controller.
  * the RendererReceiver is a singleton object used as a proxy to receive messages from
@@ -272,6 +278,12 @@
  * @return YES if context was filled; NO otherwise.
  */
 - (BOOL)fillSurroundingContext:(mozc::commands::Context *)context client:(id<IMKTextInput>)client;
+
+/** Fills bounded Zenz-specific context requested by TEST_SEND_KEY. */
+- (BOOL)fillZenzSurroundingContext:(mozc::commands::Context *)context
+                            client:(id<IMKTextInput>)client
+                   precedingLength:(uint32_t)precedingLength
+                   followingLength:(uint32_t)followingLength;
 
 @end
 

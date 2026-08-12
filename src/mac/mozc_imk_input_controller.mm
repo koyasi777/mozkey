@@ -43,12 +43,14 @@
 #include <map>
 #include <memory>
 #include <new>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
 
 #import "mac/KeyCodeMap.h"
 #import "mac/renderer_receiver.h"
+#include "mac/zenz_context_acquisition.h"
 
 #include "absl/log/log.h"
 #include "absl/strings/string_view.h"
@@ -93,9 +95,11 @@ RendererReceiver *gRendererReceiver = nil;
 constexpr NSTimeInterval kDoubleTapInterval = 0.5;
 
 constexpr int kMaxSurroundingLength = 20;
-// In some apllications when the client's text length is large, getting the
-// surrounding text takes too much time. So we set this limitation.
-constexpr int kGetSurroundingTextClientLengthLimit = 1000;
+// Legacy generic surrounding-context acquisition keeps the historical client
+// length cap because some applications make attributedSubstringFromRange:
+// expensive on large documents. Zenz-specific acquisition is independently
+// bounded to a small native range and does not inherit this document-size cap.
+constexpr int kGenericSurroundingTextClientLengthLimit = 1000;
 
 constexpr absl::string_view kRomanModeId = "com.apple.inputmethod.Roman";
 constexpr absl::string_view kKatakanaModeId = "com.apple.inputmethod.Japanese.Katakana";
@@ -256,6 +260,35 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
   }
   return utf16_offset;
 }
+bool IsHighSurrogate(unichar value) {
+  return value >= 0xD800 && value <= 0xDBFF;
+}
+
+bool IsLowSurrogate(unichar value) {
+  return value >= 0xDC00 && value <= 0xDFFF;
+}
+
+NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
+  if (text == nil) {
+    return nil;
+  }
+
+  NSUInteger begin = 0;
+  NSUInteger end = [text length];
+
+  if (begin < end && IsLowSurrogate([text characterAtIndex:begin])) {
+    ++begin;
+  }
+  if (begin < end && IsHighSurrogate([text characterAtIndex:end - 1])) {
+    --end;
+  }
+
+  if (begin == 0 && end == [text length]) {
+    return text;
+  }
+  return [text substringWithRange:NSMakeRange(begin, end - begin)];
+}
+
 }  // namespace
 
 @implementation MozcImkInputController
@@ -267,6 +300,8 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
 @synthesize replacementRange = replacementRange_;
 @synthesize imkClientForTest = imkClientForTest_;
 @synthesize useLiveConversionForTest = useLiveConversion_;
+@synthesize useZenzContextAcquisitionForTest = useZenzContextAcquisition_;
+@synthesize secureEventInputStateForTest = secureEventInputStateForTest_;
 - (mozc::client::ClientInterface *)mozcClient {
   return mozcClient_.get();
 }
@@ -308,24 +343,35 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
   liveConversionAnchorLeft_ = 0;
   hasLiveConversionAnchorLeft_ = false;
   useLiveConversion_ = false;
-  mozcRenderer_ = mozc::renderer::RendererClient::Create();
-  mozcClient_ = mozc::client::ClientFactory::NewClient();
+  useZenzContextAcquisition_ = false;
+  secureEventInputStateForTest_ = (server == nil) ? 0 : -1;
+  // Unit tests inject mock renderer/client objects immediately after
+  // construction. Avoid creating production process/IPC dependencies in the
+  // server == nil test environment.
+  if (server != nil) {
+    mozcRenderer_ = mozc::renderer::RendererClient::Create();
+    mozcClient_ = mozc::client::ClientFactory::NewClient();
+  }
   lastKeyDownTime_ = 0;
   lastKeyCode_ = 0;
 
   // We don't check the return value of NSBundle because it fails during tests.
   [[NSBundle mainBundle] loadNibNamed:@"Config" owner:self topLevelObjects:nil];
-  if (!originalString_ || !composedString_ || !mozcRenderer_ || !mozcClient_) {
+  const bool hasRuntimeDependencies =
+      server == nil || (mozcRenderer_ != nullptr && mozcClient_ != nullptr);
+  if (!originalString_ || !composedString_ || !hasRuntimeDependencies) {
     self = nil;
   } else {
     DLOG(INFO) << [[NSString
         stringWithFormat:@"initWithServer: %@ %@ %@", server, delegate, inputClient] UTF8String];
-    if (!mozcRenderer_->Activate()) {
+    if (mozcRenderer_ && !mozcRenderer_->Activate()) {
       LOG(ERROR) << "Cannot activate renderer";
       mozcRenderer_.reset();
     }
     [self setupClientBundle:inputClient];
-    [self setupCapability];
+    if (mozcClient_) {
+      [self setupCapability];
+    }
     RendererCommand::ApplicationInfo *applicationInfo = rendererCommand_.mutable_application_info();
     applicationInfo->set_process_id(::getpid());
     // thread_id and receiver_handle are not used currently in Mac but
@@ -450,6 +496,9 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
   [keyCodeMap_ setInputMode:input_mode];
   yenSignCharacter_ = config.yen_sign_character();
   useLiveConversion_ = config.use_live_conversion();
+  // Avoid an extra TEST_SEND_KEY round trip for ordinary Mozc input.
+  useZenzContextAcquisition_ =
+      useLiveConversion_ && config.use_zenz_live_correction();
 
   if (config.use_japanese_layout()) {
     // Apple does not have "Japanese" layout actually -- here sets
@@ -1013,7 +1062,7 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
 - (BOOL)fillSurroundingContext:(mozc::commands::Context *)context client:(id<IMKTextInput>)client {
   NSInteger totalLength = [client length];
   if (totalLength == 0 || totalLength == NSNotFound ||
-      totalLength > kGetSurroundingTextClientLengthLimit) {
+      totalLength > kGenericSurroundingTextClientLengthLimit) {
     return false;
   }
   NSRange selectedRange = [client selectedRange];
@@ -1031,6 +1080,117 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
     DLOG(INFO) << "preceding_text: \"" << context->preceding_text() << "\"";
   }
   return true;
+}
+
+- (BOOL)fillZenzSurroundingContext:(mozc::commands::Context *)context
+                            client:(id<IMKTextInput>)client
+                   precedingLength:(uint32_t)precedingLength
+                   followingLength:(uint32_t)followingLength {
+  if (context == nullptr || client == nil) {
+    return false;
+  }
+  if (precedingLength == 0 && followingLength == 0) {
+    return true;
+  }
+
+  const NSUInteger totalLength = [client length];
+  if (totalLength == NSNotFound) {
+    return false;
+  }
+
+  const NSRange selectedRange = [client selectedRange];
+  if (selectedRange.location == NSNotFound ||
+      selectedRange.length == NSNotFound) {
+    return false;
+  }
+
+  const std::optional<mozc::mac::ZenzContextNativeRanges> ranges =
+      mozc::mac::GetZenzContextNativeRanges(
+          static_cast<size_t>(totalLength),
+          static_cast<size_t>(selectedRange.location),
+          static_cast<size_t>(selectedRange.length), precedingLength,
+          followingLength);
+  if (!ranges.has_value()) {
+    return false;
+  }
+
+  bool succeeded = true;
+
+  if (precedingLength > 0 && ranges->preceding.has_value()) {
+    if (context->has_preceding_text() &&
+        mozc::Util::CharsLen(context->preceding_text()) >= precedingLength) {
+      context->set_zenz_preceding_text(
+          mozc::mac::TakeTrailingZenzContextCharacters(
+              context->preceding_text(), precedingLength));
+    } else {
+      const mozc::mac::ZenzContextNativeRange range = *ranges->preceding;
+      if (range.length == 0) {
+        context->set_zenz_preceding_text("");
+      } else {
+        @try {
+          NSString *nativeText =
+              [[client attributedSubstringFromRange:NSMakeRange(
+                           static_cast<NSUInteger>(range.location),
+                           static_cast<NSUInteger>(range.length))]
+                  string];
+          nativeText = TrimIncompleteZenzSurrogateEdges(nativeText);
+          const char *utf8 =
+              nativeText == nil ? nullptr : [nativeText UTF8String];
+          if (utf8 == nullptr) {
+            succeeded = false;
+          } else {
+            context->set_zenz_preceding_text(
+                mozc::mac::TakeTrailingZenzContextCharacters(
+                    utf8, precedingLength));
+          }
+        } @catch (NSException *exception) {
+          LOG(ERROR)
+              << "Exception while acquiring Zenz preceding context from ["
+              << clientBundle_ << "]: " << [[exception reason] UTF8String];
+          succeeded = false;
+        }
+      }
+    }
+  }
+
+  if (followingLength > 0 && ranges->following.has_value()) {
+    const mozc::mac::ZenzContextNativeRange range = *ranges->following;
+    if (range.length == 0) {
+      context->set_zenz_following_text("");
+    } else {
+      @try {
+        NSString *nativeText =
+            [[client attributedSubstringFromRange:NSMakeRange(
+                         static_cast<NSUInteger>(range.location),
+                         static_cast<NSUInteger>(range.length))]
+                string];
+        nativeText = TrimIncompleteZenzSurrogateEdges(nativeText);
+        const char *utf8 =
+            nativeText == nil ? nullptr : [nativeText UTF8String];
+        if (utf8 == nullptr) {
+          succeeded = false;
+        } else {
+          context->set_zenz_following_text(
+              mozc::mac::TakeLeadingZenzContextCharacters(
+                  utf8, followingLength));
+        }
+      } @catch (NSException *exception) {
+        LOG(ERROR)
+            << "Exception while acquiring Zenz following context from ["
+            << clientBundle_ << "]: " << [[exception reason] UTF8String];
+        succeeded = false;
+      }
+    }
+  }
+
+  return succeeded;
+}
+
+- (BOOL)isSecureEventInputEnabledForContext {
+  if (secureEventInputStateForTest_ >= 0) {
+    return secureEventInputStateForTest_ != 0;
+  }
+  return IsSecureEventInputEnabled();
 }
 
 - (BOOL)handleEvent:(NSEvent *)event client:(id)sender {
@@ -1129,10 +1289,43 @@ NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offs
   }
   keyEvent.set_mode(mode_);
 
-  if ([composedString_ length] == 0 && CanSelectedRange(clientBundle_) &&
-      CanSurroundingText(clientBundle_)) {
+  const bool secureEventInput =
+      [self isSecureEventInputEnabledForContext];
+
+  const bool canAcquireSurroundingContext =
+      [composedString_ length] == 0 &&
+      CanSelectedRange(clientBundle_) &&
+      CanSurroundingText(clientBundle_);
+
+  if (secureEventInput) {
+    // Match the Windows password-scope privacy boundary. Do not inspect
+    // application surrounding text while macOS Secure Event Input is active.
+    context.set_input_field_type(mozc::commands::Context::PASSWORD);
+  } else if (canAcquireSurroundingContext) {
+    // Preserve the historical generic-context behavior as a best-effort path.
     [self fillSurroundingContext:&context client:sender];
   }
+
+  // Zenz-specific acquisition is independently bounded, so a legacy generic
+  // context failure (for example, a document longer than 1000 UTF-16 units)
+  // must not suppress the TEST_SEND_KEY preflight.
+  if (!secureEventInput && useZenzContextAcquisition_ &&
+      canAcquireSurroundingContext) {
+    Output testOutput;
+    if (mozcClient_->TestSendKeyWithContext(keyEvent, context, &testOutput)) {
+      const uint32_t precedingLength =
+          testOutput.zenz_preceding_text_request_length();
+      const uint32_t followingLength =
+          testOutput.zenz_following_text_request_length();
+      if (precedingLength > 0 || followingLength > 0) {
+        [self fillZenzSurroundingContext:&context
+                                  client:sender
+                         precedingLength:precedingLength
+                         followingLength:followingLength];
+      }
+    }
+  }
+
   if (!mozcClient_->SendKeyWithContext(keyEvent, context, &output)) {
     return NO;
   }
