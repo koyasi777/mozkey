@@ -30,6 +30,8 @@
 load(
     "//:build_defs.bzl",
     "MOZC_TAGS",
+    "mozc_cc_library",
+    "mozc_cc_test",
     "mozc_macos_application",
     "mozc_macos_bundle",
     "mozc_objc_library",
@@ -160,6 +162,23 @@ mozc_objc_library(
     ],
 )
 
+mozc_cc_library(
+    name = "zenz_context_acquisition",
+    srcs = ["zenz_context_acquisition.cc"],
+    hdrs = ["zenz_context_acquisition.h"],
+    deps = ["//base:util"],
+)
+
+mozc_cc_test(
+    name = "zenz_context_acquisition_test",
+    size = "small",
+    srcs = ["zenz_context_acquisition_test.cc"],
+    deps = [
+        ":zenz_context_acquisition",
+        "//testing:gunit_main",
+    ],
+)
+
 mozc_objc_library(
     name = "mozc_imk_input_controller",
     srcs = ["mozc_imk_input_controller.mm"],
@@ -178,6 +197,7 @@ mozc_objc_library(
         ":common",
         ":keycode_map",
         ":renderer_receiver",
+        ":zenz_context_acquisition",
         "//base:const",
         "//base:process",
         "//base:util",
