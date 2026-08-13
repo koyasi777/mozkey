@@ -830,6 +830,19 @@
     </message>
     <message>
         <location filename="config_dialog.cc" line="0"/>
+        <source>When you reset %1 settings, any changes you've made will be reverted to the default settings. Do you want to reset settings? The following items are not reset with this operation.
+ - Personalization data
+ - Input history
+ - Administrator settings</source>
+        <translation>%1 の設定を初期値に戻しますか？
+変更した設定は初期値に戻ります。
+なお、以下の項目はこの操作ではリセットされません。
+・学習履歴
+・入力履歴
+・管理者設定</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
         <source>Failed to get %1 InputTip.</source>
         <translation>%1 の InputTip を取得できませんでした。</translation>
     </message>
