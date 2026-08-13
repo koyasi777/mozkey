@@ -4148,7 +4148,7 @@ void ConfigDialog::ResetToDefaults() {
     // nice to have GET_DEFAULT_CONFIG command
     const bool was_suppressed = suppress_apply_button_update_;
     suppress_apply_button_update_ = true;
-    ConvertFromProto(config::ConfigHandler::DefaultConfig());
+    ConvertFromProto(config::ConfigHandler::GetProductDefaultConfig());
     UpdateDependentControls();
     suppress_apply_button_update_ = was_suppressed;
     EnableApplyButton();

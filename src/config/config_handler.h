@@ -75,6 +75,11 @@ class ConfigHandler {
   // These functions are also thread-safe.
   static void GetDefaultConfig(Config* config);
 
+  // Returns user-facing Mozkey product defaults.  Unlike DefaultConfig(), this
+  // includes Mozkey-specific settings used for a fresh profile and
+  // "Reset to defaults".
+  static Config GetProductDefaultConfig();
+
   static const Config& DefaultConfig();
   static std::shared_ptr<const config::Config> GetSharedDefaultConfig();
 
