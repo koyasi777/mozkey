@@ -2824,7 +2824,7 @@ TEST_F(SessionTest, SpaceDuringLiveConversionKeepsNormalCandidateNavigation) {
   EXPECT_PREEDIT("阿", command);
 }
 
-TEST_F(SessionTest, DownDuringLiveConversionKeepsNormalCandidateNavigation) {
+TEST_F(SessionTest, DownDuringLiveConversionFocusesPredictionCandidates) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2859,8 +2859,15 @@ TEST_F(SessionTest, DownDuringLiveConversionKeepsNormalCandidateNavigation) {
   ASSERT_TRUE(EnsurePreedit("亜", command));
   Mock::VerifyAndClearExpectations(converter.get());
 
+  Segments prediction_segments;
+  Segment* prediction_segment = prediction_segments.add_segment();
+  prediction_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", prediction_segment);
+  AddCandidate("あ", "ありがたい", prediction_segment);
+
   EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
-      .Times(0);
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<2>(prediction_segments), Return(true)));
 
   command.Clear();
   EXPECT_TRUE(SendSpecialKey(commands::KeyEvent::DOWN, &session, &command));
@@ -2870,7 +2877,20 @@ TEST_F(SessionTest, DownDuringLiveConversionKeepsNormalCandidateNavigation) {
   EXPECT_FALSE(session_peer.live_conversion_active_());
   EXPECT_FALSE(command.output().live_conversion());
   ASSERT_TRUE(command.output().has_candidate_window());
-  EXPECT_PREEDIT("阿", command);
+  ASSERT_TRUE(command.output().candidate_window().has_focused_index());
+  EXPECT_EQ(command.output().candidate_window().focused_index(), 0);
+  EXPECT_PREEDIT("ありがとう", command);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  command.Clear();
+  EXPECT_TRUE(SendSpecialKey(commands::KeyEvent::DOWN, &session, &command));
+
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_TRUE(command.output().candidate_window().has_focused_index());
+  EXPECT_EQ(command.output().candidate_window().focused_index(), 1);
+  EXPECT_PREEDIT("ありがたい", command);
 }
 
 TEST_F(SessionTest,

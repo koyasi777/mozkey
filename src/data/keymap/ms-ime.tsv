@@ -89,7 +89,7 @@ Conversion	Ctrl Up	ConvertPrev
 Conversion	Ctrl x	ConvertNext
 Conversion	Ctrl z	Cancel
 Conversion	Delete	Cancel
-Conversion	Down	ConvertNext
+Conversion	Down	PredictAndConvert
 Conversion	Eisu	ToggleAlphanumericMode
 Conversion	End	SegmentFocusLast
 Conversion	Enter	Commit
