@@ -66,6 +66,46 @@ namespace {
 
 constexpr absl::string_view kFileNamePrefix = "user://config";
 
+constexpr uint32_t kMozkeyDefaultDirectCommitKey =
+    Config::DIRECT_COMMIT_KUTEN |
+    Config::DIRECT_COMMIT_TOUTEN |
+    Config::DIRECT_COMMIT_QUESTION_MARK |
+    Config::DIRECT_COMMIT_EXCLAMATION_MARK |
+    Config::DIRECT_COMMIT_OPEN_BRACKET |
+    Config::DIRECT_COMMIT_CLOSE_BRACKET;
+
+// Applies Mozkey-specific product defaults only to fields that have not been
+// explicitly stored.  Keep this shared by normalization and the user-facing
+// product-default accessor so that a fresh profile, an older profile missing
+// newer fields, and "Reset to defaults" all resolve to the same values without
+// overwriting explicit user choices.
+void ApplyMozkeyProductDefaults(Config* config) {
+  if (!config->has_use_live_conversion()) {
+    config->set_use_live_conversion(true);
+  }
+  if (!config->has_show_candidate_window_on_initial_conversion()) {
+    config->set_show_candidate_window_on_initial_conversion(true);
+  }
+  if (!config->has_use_direct_commit()) {
+    config->set_use_direct_commit(true);
+  }
+  if (!config->has_direct_commit_key()) {
+    config->set_direct_commit_key(kMozkeyDefaultDirectCommitKey);
+  }
+  if (!config->has_use_zenz_live_correction()) {
+    config->set_use_zenz_live_correction(true);
+  }
+  if (!config->has_use_zenz_feedback_learning()) {
+    config->set_use_zenz_feedback_learning(true);
+  }
+  if (!config->has_use_zenz_live_correction_right_context()) {
+    config->set_use_zenz_live_correction_right_context(true);
+  }
+  if (!config->has_use_realtime_conversion()) {
+    config->set_use_realtime_conversion(false);
+  }
+}
+
 void AddCharacterFormRule(const absl::string_view group,
                           const Config::CharacterForm preedit_form,
                           const Config::CharacterForm conversion_form,
@@ -146,27 +186,7 @@ void NormalizeConfig(Config* config) {
     config->set_use_emoji_conversion(true);
   }
 
-  if (!config->has_use_live_conversion()) {
-    config->set_use_live_conversion(true);
-  }
-
-  if (!config->has_show_candidate_window_on_initial_conversion()) {
-    config->set_show_candidate_window_on_initial_conversion(true);
-  }
-
-  if (!config->has_use_direct_commit()) {
-    config->set_use_direct_commit(true);
-  }
-
-  if (!config->has_direct_commit_key()) {
-    config->set_direct_commit_key(
-        Config::DIRECT_COMMIT_KUTEN |
-        Config::DIRECT_COMMIT_TOUTEN |
-        Config::DIRECT_COMMIT_QUESTION_MARK |
-        Config::DIRECT_COMMIT_EXCLAMATION_MARK |
-        Config::DIRECT_COMMIT_OPEN_BRACKET |
-        Config::DIRECT_COMMIT_CLOSE_BRACKET);
-  }
+  ApplyMozkeyProductDefaults(config);
 }
 
 class ConfigHandlerImpl final {
@@ -317,6 +337,12 @@ void ConfigHandler::SetConfig(Config config) {
 // static
 void ConfigHandler::GetDefaultConfig(Config* config) {
   *config = DefaultConfig();
+}
+
+Config ConfigHandler::GetProductDefaultConfig() {
+  Config config = DefaultConfig();
+  ApplyMozkeyProductDefaults(&config);
+  return config;
 }
 
 std::shared_ptr<const Config> ConfigHandler::GetSharedDefaultConfig() {

@@ -266,6 +266,8 @@ message Config {
     DIRECT_COMMIT_CLOSE_BRACKET = 128;
     DIRECT_COMMIT_MIDDLE_DOT = 256;
   }
+  // Mozkey enables direct commit by default in ConfigHandler and initially
+  // selects `、。？！「」`.
   optional bool use_direct_commit = 1001 [default = false];
 
   // can't use DirectCommitKey as a type since
@@ -318,6 +320,7 @@ message Config {
   // Use live conversion.
   // If this is true, the current composition is converted on every character
   // input without committing the previous live conversion result.
+  // Mozkey enables this by default in ConfigHandler.
   optional bool use_live_conversion = 69 [default = false];
 
   // Delay in milliseconds before applying live conversion after character input.
@@ -331,12 +334,12 @@ message Config {
 
   // When live conversion is disabled, the initial Convert command in
   // composition mode opens the conversion candidate window without advancing
-  // the focused candidate.
+  // the focused candidate. Mozkey enables this by default in ConfigHandler.
   optional bool show_candidate_window_on_initial_conversion = 72
       [default = false];
 
-  // Experimental: use asynchronous zenz live correction after normal live
-  // conversion. This is intentionally default-off until the feature is verified.
+  // Use asynchronous zenz live correction after normal live conversion.
+  // Mozkey enables this by default in ConfigHandler.
   optional bool use_zenz_live_correction = 1003 [default = false];
 
   // Debounce in milliseconds before submitting a zenz live correction request
@@ -365,9 +368,10 @@ message Config {
   // Debug logging for zenz live correction.
   optional bool zenz_live_correction_debug = 1010 [default = false];
 
-  // Experimental: record and reuse local feedback for zenz live correction.
+  // Record and reuse local feedback for zenz live correction.
   // This stores only local TSV data and never sends feedback outside the machine.
-  // Raw left context is not stored.
+  // Raw left context is not stored. Mozkey enables this by default in
+  // ConfigHandler.
   optional bool use_zenz_feedback_learning = 1011 [default = false];
 
   // When enabled, repeated divergent commits of the same full-sequence Zenz
@@ -390,7 +394,8 @@ message Config {
   optional string zenz_live_correction_settings = 1015 [default = ""];
 
   // Zenzai v3.2 right-context support. The actual text is taken from
-  // commands::Context::following_text when the client supplies it.
+  // commands::Context::following_text when the client supplies it. Mozkey keeps
+  // this enabled in its product defaults.
   optional bool use_zenz_live_correction_right_context = 1016
       [default = true];
   optional uint32 zenz_live_correction_right_context_length = 1017
@@ -446,7 +451,9 @@ message Config {
   // you haven't typed before.
   optional bool use_dictionary_suggest = 101 [default = true];
 
-  // Use realtime conversion feature.
+  // Use realtime conversion feature. Mozkey disables this by default in
+  // ConfigHandler because normal live conversion already provides inline
+  // conversion results.
   optional bool use_realtime_conversion = 102 [default = true];
 
   // Size of suggestions.
