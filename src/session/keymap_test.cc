@@ -1020,6 +1020,31 @@ TEST_F(KeyMapTest, ParseCompositionModeLegacyCommandStringsForConversionState) {
             command);
 }
 
+TEST_F(KeyMapTest, ConversionDownBindings) {
+  commands::KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Down", &key_event));
+
+  ConversionState::Commands command;
+
+  {  // MSIME
+    KeyMapManager manager(GetDefaultConfig(config::Config::MSIME));
+    EXPECT_TRUE(manager.GetCommandConversion(key_event, &command));
+    EXPECT_EQ(command, ConversionState::PREDICT_AND_CONVERT);
+  }
+
+  {  // Kotoeri
+    KeyMapManager manager(GetDefaultConfig(config::Config::KOTOERI));
+    EXPECT_TRUE(manager.GetCommandConversion(key_event, &command));
+    EXPECT_EQ(command, ConversionState::PREDICT_AND_CONVERT);
+  }
+
+  {  // ATOK keeps its native Down behavior.
+    KeyMapManager manager(GetDefaultConfig(config::Config::ATOK));
+    EXPECT_TRUE(manager.GetCommandConversion(key_event, &command));
+    EXPECT_EQ(command, ConversionState::COMMIT_SEGMENT);
+  }
+}
+
 TEST_F(KeyMapTest, ShiftTabToConvertPrev) {
   // http://b/2973471
   // Shift+TAB does not work on a suggestion window
