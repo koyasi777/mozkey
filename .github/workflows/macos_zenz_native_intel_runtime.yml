@@ -22,7 +22,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify build host
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -eux
           test "$(/usr/bin/uname -m)" = "arm64"
@@ -31,7 +31,7 @@ jobs:
           /usr/bin/xcodebuild -version
 
       - name: Build pinned x86_64 llama-server
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -euo pipefail
 
@@ -69,9 +69,6 @@ jobs:
                                tokenizer_pre == "mellum"  ||
                                tokenizer_pre == "modern-bert") {
           PATCH
-
-          # Remove YAML indentation from the literal patch.
-          sed -i '' 's/^          //' "$PATCH"
 
           ACTUAL_PATCH_SHA="$(
             /usr/bin/shasum -a 256 "$PATCH" |
@@ -202,7 +199,7 @@ jobs:
           } > "$GITHUB_WORKSPACE/runtime-artifact/BUILD-CONTRACT.txt"
 
       - name: Download pinned Zenz model
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -euo pipefail
 
@@ -226,7 +223,7 @@ jobs:
           test "$ACTUAL" = "$EXPECTED"
 
       - name: Audit runtime artifact
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -eux
 
@@ -268,7 +265,7 @@ jobs:
           path: runtime
 
       - name: Verify native Intel environment and payload
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -eux
 
@@ -291,7 +288,7 @@ jobs:
           /usr/bin/sw_vers
 
       - name: Native production-like llama-server inference
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -euo pipefail
 
@@ -460,7 +457,7 @@ jobs:
 
       - name: Final native Intel audit
         if: always()
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           echo "===== NATIVE INTEL FINAL AUDIT ====="
           echo "Host = $(/usr/bin/uname -m)"
