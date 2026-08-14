@@ -444,6 +444,31 @@ jobs:
                   start_new_session=True,
               )
 
+          def health(timeout_seconds):
+              connection = http.client.HTTPConnection(
+                  "127.0.0.1",
+                  port,
+                  timeout=timeout_seconds,
+              )
+
+              try:
+                  connection.request(
+                      "GET",
+                      "/health",
+                  )
+
+                  response = connection.getresponse()
+
+                  payload = response.read().decode(
+                      "utf-8",
+                      "replace",
+                  )
+
+                  return response.status, payload
+
+              finally:
+                  connection.close()
+
           def completion(timeout_seconds):
               body = json.dumps(
                   {
@@ -486,7 +511,7 @@ jobs:
 
           success = False
           last_error = None
-          deadline = time.monotonic() + 120
+          deadline = time.monotonic() + 180
 
           try:
               while time.monotonic() < deadline:
@@ -499,7 +524,22 @@ jobs:
                       )
 
                   try:
-                      status, payload = completion(5)
+                      health_status, health_payload = health(5)
+
+                      print(
+                          f"Health HTTP status = {health_status}"
+                      )
+
+                      if health_status != 200:
+                          last_error = (
+                              f"Health HTTP {health_status}: "
+                              f"{health_payload[:1000]}"
+                          )
+
+                          time.sleep(1)
+                          continue
+
+                      status, payload = completion(60)
 
                       print(f"HTTP status = {status}")
 
@@ -750,6 +790,31 @@ jobs:
                   start_new_session=True,
               )
 
+          def health(timeout_seconds):
+              connection = http.client.HTTPConnection(
+                  "127.0.0.1",
+                  port,
+                  timeout=timeout_seconds,
+              )
+
+              try:
+                  connection.request(
+                      "GET",
+                      "/health",
+                  )
+
+                  response = connection.getresponse()
+
+                  payload = response.read().decode(
+                      "utf-8",
+                      "replace",
+                  )
+
+                  return response.status, payload
+
+              finally:
+                  connection.close()
+
           def completion(timeout_seconds):
               body = json.dumps(
                   {
@@ -792,7 +857,7 @@ jobs:
 
           success = False
           last_error = None
-          deadline = time.monotonic() + 120
+          deadline = time.monotonic() + 180
 
           try:
               while time.monotonic() < deadline:
@@ -806,7 +871,22 @@ jobs:
                       )
 
                   try:
-                      status, payload = completion(5)
+                      health_status, health_payload = health(5)
+
+                      print(
+                          f"Health HTTP status = {health_status}"
+                      )
+
+                      if health_status != 200:
+                          last_error = (
+                              f"Health HTTP {health_status}: "
+                              f"{health_payload[:1000]}"
+                          )
+
+                          time.sleep(1)
+                          continue
+
+                      status, payload = completion(60)
 
                       print(f"HTTP status = {status}")
 
