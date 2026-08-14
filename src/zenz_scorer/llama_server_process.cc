@@ -44,7 +44,7 @@ constexpr int kMaximumReadinessTimeoutMsec = 10 * 60 * 1000;
 constexpr int kMinimumProbeIntervalMsec = 10;
 constexpr int kMaximumProbeIntervalMsec = 5000;
 constexpr int kMinimumProbeTimeoutMsec = 50;
-constexpr int kMaximumProbeTimeoutMsec = 10000;
+constexpr int kMaximumProbeTimeoutMsec = 30000;
 constexpr int kGracefulStopTimeoutMsec = 2000;
 constexpr int kStopPollIntervalMsec = 25;
 constexpr size_t kMaximumCapturedOutputBytes = 4096;
@@ -525,10 +525,13 @@ bool LlamaServerProcess::WaitUntilReady(std::string* error) {
     LlamaHttpCompletionRequest request;
     request.port = port_;
     request.api_key = api_key_;
-    request.n_predict = 8;
+    // Readiness only needs to prove that authenticated inference can finish.
+    // Use the minimum supported generation size so cold-start validation does
+    // not spend time producing tokens that will be discarded.
+    request.n_predict = 4;
     request.timeout_msec = static_cast<uint32_t>(std::min(
         options_.readiness_probe_timeout_msec, remaining_msec));
-    request.max_output_chars = 8;
+    request.max_output_chars = 4;
     request.prompt = kReadinessPrompt;
 
     const LlamaHttpCompletionResponse response =

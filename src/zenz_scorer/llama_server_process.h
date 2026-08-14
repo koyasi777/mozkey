@@ -24,7 +24,7 @@ struct LlamaServerProcessOptions {
   // finish useful work instead of repeatedly cancelling in-flight inference.
   int readiness_timeout_msec = 180000;
   int readiness_probe_interval_msec = 250;
-  int readiness_probe_timeout_msec = 10000;
+  int readiness_probe_timeout_msec = 30000;
 
   // Appended after the normal llama-server arguments.  Production callers
   // should normally leave this empty.  It exists so process behavior can be
