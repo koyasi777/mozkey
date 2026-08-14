@@ -1,0 +1,931 @@
+name: macOS Zenz Universal dual-native validation
+
+on:
+  push:
+    branches:
+      - feature/macos-zenz-universal-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build_and_native_arm64:
+    name: Build Universal and validate on Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 55
+
+    steps:
+      - name: Checkout Mozkey
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify Apple Silicon host
+        shell: /bin/zsh {0}
+        run: |
+          set -eux
+          test "$(/usr/bin/uname -m)" = "arm64"
+          /usr/bin/sw_vers
+          /usr/bin/xcodebuild -version
+          cmake --version
+
+      - name: Build pinned arm64 and x86_64 runtimes
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          UPSTREAM_COMMIT="6b5224cfccdb9caf4c0a0a87692fddad22c7e969"
+          EXPECTED_PATCH_SHA="6db5c11b2da8415d6b37200ec6aa4f3fdcdde8efb1e7a71375fe331a7b0e829a"
+          EXPECTED_PATCHED_SOURCE_SHA="36d8d6db0603a511ea4a490a8f0da28e2054327e3d4fe9b9e1481a2150eb1317"
+
+          ROOT="$RUNNER_TEMP/mozkey-zenz-universal"
+          SRC="$ROOT/source"
+          ARM_BUILD="$ROOT/build-arm64"
+          X86_BUILD="$ROOT/build-x86_64"
+          TOOLCHAIN="$ROOT/x86_64-macos12-toolchain.cmake"
+          PATCH="$ROOT/zenz.patch"
+          OUT="$GITHUB_WORKSPACE/universal-artifact"
+
+          mkdir -p "$ROOT" "$OUT"
+
+          git clone \
+            --quiet \
+            --depth 1 \
+            --branch b10268 \
+            https://github.com/ggml-org/llama.cpp.git \
+            "$SRC"
+
+          test "$(git -C "$SRC" rev-parse HEAD)" = "$UPSTREAM_COMMIT"
+
+          cat > "$PATCH" <<'PATCH'
+          diff --git a/src/llama-vocab.cpp b/src/llama-vocab.cpp
+          index 4a01dfd..8e1581b 100644
+          --- a/src/llama-vocab.cpp
+          +++ b/src/llama-vocab.cpp
+          @@ -2178,6 +2178,7 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
+                               tokenizer_pre == "gigachat"   ||
+                               tokenizer_pre == "jina-v2-es" ||
+                               tokenizer_pre == "jina-v2-de" ||
+          +                    tokenizer_pre == "gpt2-small-japanese-char" ||
+                               tokenizer_pre == "a.x-4.0" ||
+                               tokenizer_pre == "mellum"  ||
+                               tokenizer_pre == "modern-bert") {
+          PATCH
+
+          PATCH_SHA="$(
+            /usr/bin/shasum -a 256 "$PATCH" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Patch SHA256 = $PATCH_SHA"
+          test "$PATCH_SHA" = "$EXPECTED_PATCH_SHA"
+
+          cat > "$TOOLCHAIN" <<'CMAKE'
+          set(CMAKE_SYSTEM_NAME Darwin)
+          set(CMAKE_SYSTEM_PROCESSOR x86_64)
+
+          set(CMAKE_C_COMPILER "/usr/bin/cc")
+          set(CMAKE_CXX_COMPILER "/usr/bin/c++")
+
+          set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "" FORCE)
+          set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "" FORCE)
+          CMAKE
+
+          COMMON_ARGS=(
+            -DCMAKE_BUILD_TYPE=Release
+            -DBUILD_SHARED_LIBS=OFF
+            -DGGML_ACCELERATE=ON
+            -DGGML_BLAS=OFF
+            -DGGML_CCACHE=OFF
+            -DGGML_CPU_KLEIDIAI=OFF
+            -DGGML_METAL=ON
+            -DGGML_METAL_EMBED_LIBRARY=ON
+            -DGGML_NATIVE=OFF
+            -DGGML_OPENMP=OFF
+            -DLLAMA_BUILD_COMMON=ON
+            -DLLAMA_BUILD_EXAMPLES=OFF
+            -DLLAMA_BUILD_MTMD=OFF
+            -DLLAMA_BUILD_SERVER=ON
+            -DLLAMA_BUILD_TESTS=OFF
+            -DLLAMA_BUILD_TOOLS=ON
+            -DLLAMA_BUILD_UI=OFF
+            -DLLAMA_LLGUIDANCE=OFF
+            -DLLAMA_OPENSSL=OFF
+            -DLLAMA_SUBPROCESS=ON
+            -DLLAMA_USE_PREBUILT_UI=OFF
+            -DLLAMA_USE_SYSTEM_GGML=OFF
+          )
+
+          #
+          # Configure BOTH build directories while the source tree is clean.
+          # This preserves LLAMA_COMMIT = 6b5224c in generated build-info.
+          #
+          cmake \
+            -S "$SRC" \
+            -B "$ARM_BUILD" \
+            "${COMMON_ARGS[@]}" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            | tee "$ROOT/configure-arm64.log"
+
+          cmake \
+            -S "$SRC" \
+            -B "$X86_BUILD" \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DHOST_CXX_COMPILER=/usr/bin/c++ \
+            "${COMMON_ARGS[@]}" \
+            | tee "$ROOT/configure-x86_64.log"
+
+          grep -F \
+            'UI: building llama-ui-embed with host compiler' \
+            "$ROOT/configure-x86_64.log"
+
+          grep -F \
+            'LLAMA_COMMIT = "6b5224c"' \
+            "$ARM_BUILD/common/build-info.cpp"
+
+          grep -F \
+            'LLAMA_BUILD_TARGET = "Darwin arm64"' \
+            "$ARM_BUILD/common/build-info.cpp"
+
+          grep -F \
+            'LLAMA_COMMIT = "6b5224c"' \
+            "$X86_BUILD/common/build-info.cpp"
+
+          grep -F \
+            'LLAMA_BUILD_TARGET = "Darwin x86_64"' \
+            "$X86_BUILD/common/build-info.cpp"
+
+          #
+          # Apply the exact Zenz compatibility patch once both configurations
+          # have captured the clean upstream Git identity.
+          #
+          git -C "$SRC" apply --check "$PATCH"
+          git -C "$SRC" apply "$PATCH"
+
+          test "$(
+            /usr/bin/shasum -a 256 "$SRC/src/llama-vocab.cpp" |
+              /usr/bin/awk '{print $1}'
+          )" = "$EXPECTED_PATCHED_SOURCE_SHA"
+
+          CPU_COUNT="$(
+            /usr/sbin/sysctl -n hw.logicalcpu
+          )"
+
+          cmake \
+            --build "$ARM_BUILD" \
+            --config Release \
+            --target llama-server \
+            --parallel "$CPU_COUNT"
+
+          cmake \
+            --build "$X86_BUILD" \
+            --config Release \
+            --target llama-server \
+            --parallel "$CPU_COUNT"
+
+          ARM="$ARM_BUILD/bin/llama-server"
+          X86="$X86_BUILD/bin/llama-server"
+
+          test -f "$ARM"
+          test -f "$X86"
+
+          test "$(/usr/bin/lipo -archs "$ARM")" = "arm64"
+          test "$(/usr/bin/lipo -archs "$X86")" = "x86_64"
+
+          extract_minos() {
+            /usr/bin/otool -l "$1" |
+              /usr/bin/awk '
+                /LC_BUILD_VERSION/ {
+                  found = 1
+                  next
+                }
+
+                found && $1 == "minos" {
+                  print $2
+                  exit
+                }
+              '
+          }
+
+          test "$(extract_minos "$ARM")" = "12.0"
+          test "$(extract_minos "$X86")" = "12.0"
+
+          check_system_only() {
+            local unexpected
+
+            unexpected="$(
+              /usr/bin/otool -L "$1" |
+                /usr/bin/awk 'NR > 1 {print $1}' |
+                /usr/bin/grep -Ev '^(/System/Library/|/usr/lib/)' ||
+                true
+            )"
+
+            test -z "$unexpected"
+          }
+
+          check_system_only "$ARM"
+          check_system_only "$X86"
+
+          /usr/bin/strings "$ARM" |
+            /usr/bin/grep -F \
+              'gpt2-small-japanese-char'
+
+          /usr/bin/strings "$X86" |
+            /usr/bin/grep -F \
+              'gpt2-small-japanese-char'
+
+          ARM_SHA="$(
+            /usr/bin/shasum -a 256 "$ARM" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          X86_SHA="$(
+            /usr/bin/shasum -a 256 "$X86" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Generated arm64 SHA  = $ARM_SHA"
+          echo "Generated x86_64 SHA = $X86_SHA"
+
+          UNIVERSAL="$OUT/llama-server"
+
+          /usr/bin/lipo \
+            -create \
+            "$ARM" \
+            "$X86" \
+            -output "$UNIVERSAL"
+
+          chmod 0755 "$UNIVERSAL"
+
+          ARCHS="$(/usr/bin/lipo -archs "$UNIVERSAL")"
+
+          echo "Universal architectures = $ARCHS"
+
+          print -- "$ARCHS" |
+            /usr/bin/grep -qw arm64
+
+          print -- "$ARCHS" |
+            /usr/bin/grep -qw x86_64
+
+          #
+          # Prove that lipo preserved both original slices byte-for-byte
+          # before the final Universal signature is created.
+          #
+          /usr/bin/lipo \
+            "$UNIVERSAL" \
+            -thin arm64 \
+            -output "$ROOT/extracted-arm64"
+
+          /usr/bin/lipo \
+            "$UNIVERSAL" \
+            -thin x86_64 \
+            -output "$ROOT/extracted-x86_64"
+
+          EXTRACTED_ARM_SHA="$(
+            /usr/bin/shasum -a 256 "$ROOT/extracted-arm64" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          EXTRACTED_X86_SHA="$(
+            /usr/bin/shasum -a 256 "$ROOT/extracted-x86_64" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Extracted arm64 SHA  = $EXTRACTED_ARM_SHA"
+          echo "Extracted x86_64 SHA = $EXTRACTED_X86_SHA"
+
+          test "$EXTRACTED_ARM_SHA" = "$ARM_SHA"
+          test "$EXTRACTED_X86_SHA" = "$X86_SHA"
+
+          PRE_SIGN_SHA="$(
+            /usr/bin/shasum -a 256 "$UNIVERSAL" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Universal pre-sign SHA = $PRE_SIGN_SHA"
+
+          #
+          # Signing order under validation:
+          #
+          # thin builds
+          #   -> lipo Universal
+          #   -> sign final Universal
+          #
+          # CI uses ad-hoc signing only. Release signing remains separate.
+          #
+          /usr/bin/codesign \
+            --force \
+            --sign - \
+            "$UNIVERSAL"
+
+          /usr/bin/codesign \
+            --verify \
+            --verbose=4 \
+            "$UNIVERSAL"
+
+          SIGNED_SHA="$(
+            /usr/bin/shasum -a 256 "$UNIVERSAL" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Universal signed SHA = $SIGNED_SHA"
+
+          test "$SIGNED_SHA" != "$PRE_SIGN_SHA"
+
+          /usr/bin/file "$UNIVERSAL"
+          /usr/bin/lipo -info "$UNIVERSAL"
+
+          /usr/bin/otool \
+            -arch arm64 \
+            -L "$UNIVERSAL"
+
+          /usr/bin/otool \
+            -arch x86_64 \
+            -L "$UNIVERSAL"
+
+          {
+            echo "source_commit=$UPSTREAM_COMMIT"
+            echo "source_tag=b10268"
+            echo "patch_sha256=$EXPECTED_PATCH_SHA"
+            echo "patched_source_sha256=$EXPECTED_PATCHED_SOURCE_SHA"
+            echo "arm64_thin_sha256=$ARM_SHA"
+            echo "x86_64_thin_sha256=$X86_SHA"
+            echo "universal_pre_sign_sha256=$PRE_SIGN_SHA"
+            echo "universal_signed_sha256=$SIGNED_SHA"
+            echo "architectures=$ARCHS"
+            echo "minimum_macos=12.0"
+            echo "signature=adhoc-after-lipo"
+          } > "$OUT/BUILD-CONTRACT.txt"
+
+      - name: Download pinned Zenz model
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          MODEL="$GITHUB_WORKSPACE/universal-artifact/zenz-v3.2-small-Q5_K_M.gguf"
+          EXPECTED="29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673"
+
+          /usr/bin/curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --output "$MODEL" \
+            "https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf/resolve/c67e03e07d215c869f591b274c1631170d3e11fe/ggml-model-Q5_K_M.gguf?download=true"
+
+          ACTUAL="$(
+            /usr/bin/shasum -a 256 "$MODEL" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Model SHA256 = $ACTUAL"
+
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Native Apple Silicon Universal inference
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import http.client
+          import json
+          import os
+          import signal
+          import socket
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          root = Path("universal-artifact").resolve()
+          llama = root / "llama-server"
+          model = root / "zenz-v3.2-small-Q5_K_M.gguf"
+          log_path = root / "native-arm64-universal.log"
+
+          api_key = "mozkey-universal-arm64-ci"
+
+          with socket.socket(
+              socket.AF_INET,
+              socket.SOCK_STREAM,
+          ) as sock:
+              sock.bind(("127.0.0.1", 0))
+              port = sock.getsockname()[1]
+
+          command = [
+              "/usr/bin/arch",
+              "-arm64",
+              str(llama),
+              "-m",
+              str(model),
+              "-c",
+              "256",
+              "-t",
+              "4",
+              "--host",
+              "127.0.0.1",
+              "--port",
+              str(port),
+              "--api-key",
+              api_key,
+          ]
+
+          print("Command:")
+          print(" ".join(command[:-1] + ["<redacted>"]))
+
+          with log_path.open("wb") as log:
+              process = subprocess.Popen(
+                  command,
+                  stdin=subprocess.DEVNULL,
+                  stdout=log,
+                  stderr=subprocess.STDOUT,
+                  start_new_session=True,
+              )
+
+          def completion(timeout_seconds):
+              body = json.dumps(
+                  {
+                      "prompt": "\uee02\uee00テスト\uee01",
+                      "n_predict": 8,
+                      "stream": False,
+                  },
+                  ensure_ascii=False,
+              ).encode("utf-8")
+
+              connection = http.client.HTTPConnection(
+                  "127.0.0.1",
+                  port,
+                  timeout=timeout_seconds,
+              )
+
+              try:
+                  connection.request(
+                      "POST",
+                      "/completion",
+                      body=body,
+                      headers={
+                          "Authorization": f"Bearer {api_key}",
+                          "Content-Type": "application/json",
+                          "Content-Length": str(len(body)),
+                      },
+                  )
+
+                  response = connection.getresponse()
+
+                  payload = response.read().decode(
+                      "utf-8",
+                      "replace",
+                  )
+
+                  return response.status, payload
+
+              finally:
+                  connection.close()
+
+          success = False
+          last_error = None
+          deadline = time.monotonic() + 120
+
+          try:
+              while time.monotonic() < deadline:
+                  return_code = process.poll()
+
+                  if return_code is not None:
+                      raise RuntimeError(
+                          "llama-server exited early "
+                          f"with code {return_code}"
+                      )
+
+                  try:
+                      status, payload = completion(5)
+
+                      print(f"HTTP status = {status}")
+
+                      if status == 200:
+                          parsed = json.loads(payload)
+
+                          if "content" not in parsed:
+                              raise RuntimeError(
+                                  "response has no content: "
+                                  + payload[:1000]
+                              )
+
+                          print(
+                              "Completion content = "
+                              + repr(parsed["content"][:200])
+                          )
+
+                          success = True
+                          break
+
+                      last_error = (
+                          f"HTTP {status}: "
+                          f"{payload[:1000]}"
+                      )
+
+                  except Exception as exc:
+                      last_error = repr(exc)
+
+                  time.sleep(1)
+
+              if not success:
+                  raise RuntimeError(
+                      "arm64 Universal inference "
+                      f"failed: {last_error}"
+                  )
+
+          except Exception:
+              print(
+                  "\n===== LLAMA LOG =====",
+                  file=sys.stderr,
+              )
+
+              if log_path.exists():
+                  print(
+                      log_path.read_text(
+                          encoding="utf-8",
+                          errors="replace",
+                      )[-12000:],
+                      file=sys.stderr,
+                  )
+
+              raise
+
+          finally:
+              if process.poll() is None:
+                  try:
+                      os.killpg(
+                          process.pid,
+                          signal.SIGTERM,
+                      )
+                  except ProcessLookupError:
+                      pass
+
+                  try:
+                      process.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      try:
+                          os.killpg(
+                              process.pid,
+                              signal.SIGKILL,
+                          )
+                      except ProcessLookupError:
+                          pass
+
+                      process.wait(timeout=10)
+
+          print(
+              "Native Apple Silicon Universal inference = PASS"
+          )
+          PY
+
+      - name: Audit Universal artifact
+        shell: /bin/zsh {0}
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/universal-artifact"
+
+          /usr/bin/file llama-server
+          /usr/bin/lipo -archs llama-server
+          /usr/bin/lipo -info llama-server
+
+          /usr/bin/codesign \
+            --verify \
+            --verbose=4 \
+            llama-server
+
+          /usr/bin/otool \
+            -arch arm64 \
+            -L llama-server
+
+          /usr/bin/otool \
+            -arch x86_64 \
+            -L llama-server
+
+          /usr/bin/shasum -a 256 \
+            llama-server \
+            zenz-v3.2-small-Q5_K_M.gguf
+
+          cat BUILD-CONTRACT.txt
+
+      - name: Upload exact Universal runtime
+        uses: actions/upload-artifact@v6
+        with:
+          name: mozkey-zenz-universal-runtime
+          path: universal-artifact/
+          if-no-files-found: error
+          retention-days: 7
+
+  native_intel_universal:
+    name: Validate same Universal binary on native Intel
+    needs: build_and_native_arm64
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+
+    steps:
+      - name: Download exact Universal artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: mozkey-zenz-universal-runtime
+          path: universal-artifact
+
+      - name: Verify Intel host and exact Universal payload
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          test "$(/usr/bin/uname -m)" = "x86_64"
+
+          cd universal-artifact
+
+          chmod 0755 llama-server
+
+          ARCHS="$(
+            /usr/bin/lipo -archs llama-server
+          )"
+
+          echo "Architectures = $ARCHS"
+
+          print -- "$ARCHS" |
+            /usr/bin/grep -qw arm64
+
+          print -- "$ARCHS" |
+            /usr/bin/grep -qw x86_64
+
+          /usr/bin/codesign \
+            --verify \
+            --verbose=4 \
+            llama-server
+
+          EXPECTED_SIGNED_SHA="$(
+            /usr/bin/awk \
+              -F= \
+              '$1 == "universal_signed_sha256" {
+                print $2
+              }' \
+              BUILD-CONTRACT.txt
+          )"
+
+          ACTUAL_SIGNED_SHA="$(
+            /usr/bin/shasum -a 256 llama-server |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Expected Universal SHA = $EXPECTED_SIGNED_SHA"
+          echo "Actual Universal SHA   = $ACTUAL_SIGNED_SHA"
+
+          test "$ACTUAL_SIGNED_SHA" = "$EXPECTED_SIGNED_SHA"
+
+          test "$(
+            /usr/bin/shasum -a 256 \
+              zenz-v3.2-small-Q5_K_M.gguf |
+            /usr/bin/awk '{print $1}'
+          )" = "29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673"
+
+          /usr/bin/file llama-server
+          /usr/bin/sw_vers
+
+          /usr/bin/otool \
+            -arch x86_64 \
+            -L llama-server
+
+      - name: Native Intel Universal inference
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import http.client
+          import json
+          import os
+          import signal
+          import socket
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          root = Path("universal-artifact").resolve()
+          llama = root / "llama-server"
+          model = root / "zenz-v3.2-small-Q5_K_M.gguf"
+          log_path = root / "native-intel-universal.log"
+
+          api_key = "mozkey-universal-intel-ci"
+
+          with socket.socket(
+              socket.AF_INET,
+              socket.SOCK_STREAM,
+          ) as sock:
+              sock.bind(("127.0.0.1", 0))
+              port = sock.getsockname()[1]
+
+          command = [
+              str(llama),
+              "-m",
+              str(model),
+              "-c",
+              "256",
+              "-t",
+              "4",
+              "--host",
+              "127.0.0.1",
+              "--port",
+              str(port),
+              "--api-key",
+              api_key,
+          ]
+
+          print("Command:")
+          print(" ".join(command[:-1] + ["<redacted>"]))
+
+          with log_path.open("wb") as log:
+              process = subprocess.Popen(
+                  command,
+                  stdin=subprocess.DEVNULL,
+                  stdout=log,
+                  stderr=subprocess.STDOUT,
+                  start_new_session=True,
+              )
+
+          def completion(timeout_seconds):
+              body = json.dumps(
+                  {
+                      "prompt": "\uee02\uee00テスト\uee01",
+                      "n_predict": 8,
+                      "stream": False,
+                  },
+                  ensure_ascii=False,
+              ).encode("utf-8")
+
+              connection = http.client.HTTPConnection(
+                  "127.0.0.1",
+                  port,
+                  timeout=timeout_seconds,
+              )
+
+              try:
+                  connection.request(
+                      "POST",
+                      "/completion",
+                      body=body,
+                      headers={
+                          "Authorization": f"Bearer {api_key}",
+                          "Content-Type": "application/json",
+                          "Content-Length": str(len(body)),
+                      },
+                  )
+
+                  response = connection.getresponse()
+
+                  payload = response.read().decode(
+                      "utf-8",
+                      "replace",
+                  )
+
+                  return response.status, payload
+
+              finally:
+                  connection.close()
+
+          success = False
+          last_error = None
+          deadline = time.monotonic() + 120
+
+          try:
+              while time.monotonic() < deadline:
+                  return_code = process.poll()
+
+                  if return_code is not None:
+                      raise RuntimeError(
+                          "Universal llama-server "
+                          "exited early with code "
+                          f"{return_code}"
+                      )
+
+                  try:
+                      status, payload = completion(5)
+
+                      print(f"HTTP status = {status}")
+
+                      if status == 200:
+                          parsed = json.loads(payload)
+
+                          if "content" not in parsed:
+                              raise RuntimeError(
+                                  "response has no content: "
+                                  + payload[:1000]
+                              )
+
+                          print(
+                              "Completion content = "
+                              + repr(parsed["content"][:200])
+                          )
+
+                          success = True
+                          break
+
+                      last_error = (
+                          f"HTTP {status}: "
+                          f"{payload[:1000]}"
+                      )
+
+                  except Exception as exc:
+                      last_error = repr(exc)
+
+                  time.sleep(1)
+
+              if not success:
+                  raise RuntimeError(
+                      "Intel Universal inference "
+                      f"failed: {last_error}"
+                  )
+
+          except Exception:
+              print(
+                  "\n===== LLAMA LOG =====",
+                  file=sys.stderr,
+              )
+
+              if log_path.exists():
+                  print(
+                      log_path.read_text(
+                          encoding="utf-8",
+                          errors="replace",
+                      )[-12000:],
+                      file=sys.stderr,
+                  )
+
+              raise
+
+          finally:
+              if process.poll() is None:
+                  try:
+                      os.killpg(
+                          process.pid,
+                          signal.SIGTERM,
+                      )
+                  except ProcessLookupError:
+                      pass
+
+                  try:
+                      process.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      try:
+                          os.killpg(
+                              process.pid,
+                              signal.SIGKILL,
+                          )
+                      except ProcessLookupError:
+                          pass
+
+                      process.wait(timeout=10)
+
+          print(
+              "Native Intel Universal inference = PASS"
+          )
+          PY
+
+      - name: Final native Intel Universal audit
+        if: always()
+        shell: /bin/zsh {0}
+        run: |
+          echo "===== NATIVE INTEL UNIVERSAL FINAL AUDIT ====="
+          echo "Host = $(/usr/bin/uname -m)"
+          /usr/bin/sw_vers
+
+          echo
+          echo "===== UNIVERSAL ====="
+          /usr/bin/file \
+            universal-artifact/llama-server \
+            2>/dev/null || true
+
+          /usr/bin/lipo \
+            -archs \
+            universal-artifact/llama-server \
+            2>/dev/null || true
+
+          /usr/bin/codesign \
+            --verify \
+            --verbose=4 \
+            universal-artifact/llama-server \
+            2>&1 || true
+
+          /usr/bin/shasum -a 256 \
+            universal-artifact/llama-server \
+            universal-artifact/zenz-v3.2-small-Q5_K_M.gguf \
+            2>/dev/null || true
+
+          echo
+          echo "===== BUILD CONTRACT ====="
+          cat \
+            universal-artifact/BUILD-CONTRACT.txt \
+            2>/dev/null || true
+
+          echo
+          echo "===== INTEL INFERENCE LOG ====="
+          tail -n 200 \
+            universal-artifact/native-intel-universal.log \
+            2>/dev/null || true
