@@ -1,0 +1,482 @@
+name: macOS Zenz native Intel runtime validation
+
+on:
+  push:
+    branches:
+      - feature/macos-zenz-universal-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build_x86_64_runtime:
+    name: Build x86_64 runtime on Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Mozkey
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify build host
+        shell: zsh
+        run: |
+          set -eux
+          test "$(/usr/bin/uname -m)" = "arm64"
+          /usr/bin/sw_vers
+          cmake --version
+          /usr/bin/xcodebuild -version
+
+      - name: Build pinned x86_64 llama-server
+        shell: zsh
+        run: |
+          set -euo pipefail
+
+          UPSTREAM_COMMIT="6b5224cfccdb9caf4c0a0a87692fddad22c7e969"
+          EXPECTED_PATCH_SHA="6db5c11b2da8415d6b37200ec6aa4f3fdcdde8efb1e7a71375fe331a7b0e829a"
+
+          ROOT="$RUNNER_TEMP/mozkey-llama-x86"
+          SRC="$ROOT/source"
+          BUILD="$ROOT/build"
+          TOOLCHAIN="$ROOT/x86_64-macos12-toolchain.cmake"
+          PATCH="$ROOT/zenz.patch"
+
+          mkdir -p "$ROOT"
+
+          git clone \
+            --quiet \
+            --depth 1 \
+            --branch b10268 \
+            https://github.com/ggml-org/llama.cpp.git \
+            "$SRC"
+
+          test "$(git -C "$SRC" rev-parse HEAD)" = "$UPSTREAM_COMMIT"
+
+          cat > "$PATCH" <<'PATCH'
+          diff --git a/src/llama-vocab.cpp b/src/llama-vocab.cpp
+          index 4a01dfd..8e1581b 100644
+          --- a/src/llama-vocab.cpp
+          +++ b/src/llama-vocab.cpp
+          @@ -2178,6 +2178,7 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
+                               tokenizer_pre == "gigachat"   ||
+                               tokenizer_pre == "jina-v2-es" ||
+                               tokenizer_pre == "jina-v2-de" ||
+          +                    tokenizer_pre == "gpt2-small-japanese-char" ||
+                               tokenizer_pre == "a.x-4.0" ||
+                               tokenizer_pre == "mellum"  ||
+                               tokenizer_pre == "modern-bert") {
+          PATCH
+
+          # Remove YAML indentation from the literal patch.
+          sed -i '' 's/^          //' "$PATCH"
+
+          ACTUAL_PATCH_SHA="$(
+            /usr/bin/shasum -a 256 "$PATCH" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Patch SHA256 = $ACTUAL_PATCH_SHA"
+          test "$ACTUAL_PATCH_SHA" = "$EXPECTED_PATCH_SHA"
+
+          cat > "$TOOLCHAIN" <<'CMAKE'
+          set(CMAKE_SYSTEM_NAME Darwin)
+          set(CMAKE_SYSTEM_PROCESSOR x86_64)
+
+          set(CMAKE_C_COMPILER "/usr/bin/cc")
+          set(CMAKE_CXX_COMPILER "/usr/bin/c++")
+
+          set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "" FORCE)
+          set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "" FORCE)
+          CMAKE
+
+          cmake \
+            -S "$SRC" \
+            -B "$BUILD" \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHOST_CXX_COMPILER=/usr/bin/c++ \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_ACCELERATE=ON \
+            -DGGML_BLAS=OFF \
+            -DGGML_CCACHE=OFF \
+            -DGGML_CPU_KLEIDIAI=OFF \
+            -DGGML_METAL=ON \
+            -DGGML_METAL_EMBED_LIBRARY=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DLLAMA_BUILD_COMMON=ON \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_MTMD=OFF \
+            -DLLAMA_BUILD_SERVER=ON \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_BUILD_UI=OFF \
+            -DLLAMA_LLGUIDANCE=OFF \
+            -DLLAMA_OPENSSL=OFF \
+            -DLLAMA_SUBPROCESS=ON \
+            -DLLAMA_USE_PREBUILT_UI=OFF \
+            -DLLAMA_USE_SYSTEM_GGML=OFF \
+            | tee "$ROOT/configure.log"
+
+          grep -F \
+            'UI: building llama-ui-embed with host compiler' \
+            "$ROOT/configure.log"
+
+          grep -F \
+            'LLAMA_COMMIT = "6b5224c"' \
+            "$BUILD/common/build-info.cpp"
+
+          git -C "$SRC" apply --check "$PATCH"
+          git -C "$SRC" apply "$PATCH"
+
+          test "$(
+            /usr/bin/shasum -a 256 "$SRC/src/llama-vocab.cpp" |
+              /usr/bin/awk '{print $1}'
+          )" = "36d8d6db0603a511ea4a490a8f0da28e2054327e3d4fe9b9e1481a2150eb1317"
+
+          cmake \
+            --build "$BUILD" \
+            --config Release \
+            --target llama-server \
+            --parallel "$(/usr/sbin/sysctl -n hw.logicalcpu)"
+
+          LLAMA="$BUILD/bin/llama-server"
+          HOST_HELPER="$BUILD/tools/ui/llama-ui-embed-host"
+
+          test -f "$LLAMA"
+          test -f "$HOST_HELPER"
+
+          test "$(/usr/bin/lipo -archs "$HOST_HELPER")" = "arm64"
+          test "$(/usr/bin/lipo -archs "$LLAMA")" = "x86_64"
+
+          MINOS="$(
+            /usr/bin/otool -l "$LLAMA" |
+              /usr/bin/awk '
+                /LC_BUILD_VERSION/ {
+                  in_build = 1
+                  next
+                }
+                in_build && $1 == "minos" {
+                  print $2
+                  exit
+                }
+              '
+          )"
+
+          test "$MINOS" = "12.0"
+
+          UNEXPECTED="$(
+            /usr/bin/otool -L "$LLAMA" |
+              /usr/bin/awk 'NR > 1 {print $1}' |
+              /usr/bin/grep -Ev '^(/System/Library/|/usr/lib/)' ||
+              true
+          )"
+
+          test -z "$UNEXPECTED"
+
+          /usr/bin/strings "$LLAMA" |
+            /usr/bin/grep -F \
+              'gpt2-small-japanese-char'
+
+          mkdir -p "$GITHUB_WORKSPACE/runtime-artifact"
+
+          install \
+            -m 0755 \
+            "$LLAMA" \
+            "$GITHUB_WORKSPACE/runtime-artifact/llama-server"
+
+          {
+            echo "source_commit=$UPSTREAM_COMMIT"
+            echo "source_tag=b10268"
+            echo "patch_sha256=$EXPECTED_PATCH_SHA"
+            echo "arch=x86_64"
+            echo "min_macos=12.0"
+            echo "llama_sha256=$(
+              /usr/bin/shasum -a 256 \
+                "$GITHUB_WORKSPACE/runtime-artifact/llama-server" |
+              /usr/bin/awk '{print $1}'
+            )"
+          } > "$GITHUB_WORKSPACE/runtime-artifact/BUILD-CONTRACT.txt"
+
+      - name: Download pinned Zenz model
+        shell: zsh
+        run: |
+          set -euo pipefail
+
+          MODEL="$GITHUB_WORKSPACE/runtime-artifact/zenz-v3.2-small-Q5_K_M.gguf"
+          EXPECTED="29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673"
+
+          /usr/bin/curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --output "$MODEL" \
+            "https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf/resolve/c67e03e07d215c869f591b274c1631170d3e11fe/ggml-model-Q5_K_M.gguf?download=true"
+
+          ACTUAL="$(
+            /usr/bin/shasum -a 256 "$MODEL" |
+              /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Model SHA256 = $ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Audit runtime artifact
+        shell: zsh
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/runtime-artifact"
+
+          /usr/bin/file llama-server
+          /usr/bin/lipo -archs llama-server
+          /usr/bin/otool -L llama-server
+          /usr/bin/shasum -a 256 \
+            llama-server \
+            zenz-v3.2-small-Q5_K_M.gguf
+
+          cat BUILD-CONTRACT.txt
+
+      - name: Upload x86_64 runtime
+        uses: actions/upload-artifact@v6
+        with:
+          name: mozkey-zenz-x86_64-runtime
+          path: runtime-artifact/
+          if-no-files-found: error
+          retention-days: 7
+
+  native_intel_runtime:
+    name: Native Intel model-load and completion
+    needs: build_x86_64_runtime
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Mozkey
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download x86_64 runtime
+        uses: actions/download-artifact@v6
+        with:
+          name: mozkey-zenz-x86_64-runtime
+          path: runtime
+
+      - name: Verify native Intel environment and payload
+        shell: zsh
+        run: |
+          set -eux
+
+          test "$(/usr/bin/uname -m)" = "x86_64"
+
+          chmod 0755 runtime/llama-server
+
+          test "$(
+            /usr/bin/lipo -archs runtime/llama-server
+          )" = "x86_64"
+
+          test "$(
+            /usr/bin/shasum -a 256 \
+              runtime/zenz-v3.2-small-Q5_K_M.gguf |
+            /usr/bin/awk '{print $1}'
+          )" = "29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673"
+
+          /usr/bin/file runtime/llama-server
+          /usr/bin/otool -L runtime/llama-server
+          /usr/bin/sw_vers
+
+      - name: Native production-like llama-server inference
+        shell: zsh
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import http.client
+          import json
+          import os
+          import signal
+          import socket
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          root = Path("runtime").resolve()
+          llama = root / "llama-server"
+          model = root / "zenz-v3.2-small-Q5_K_M.gguf"
+          log_path = root / "native-intel-llama.log"
+
+          api_key = "mozkey-native-intel-ci"
+
+          with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+              sock.bind(("127.0.0.1", 0))
+              port = sock.getsockname()[1]
+
+          command = [
+              str(llama),
+              "-m",
+              str(model),
+              "-c",
+              "256",
+              "-t",
+              "4",
+              "--host",
+              "127.0.0.1",
+              "--port",
+              str(port),
+              "--api-key",
+              api_key,
+          ]
+
+          print("Command:")
+          print(" ".join(command[:-1] + ["<redacted>"]))
+
+          def completion(timeout_seconds):
+              body = json.dumps(
+                  {
+                      "prompt": "\uee02\uee00テスト\uee01",
+                      "n_predict": 8,
+                      "stream": False,
+                  },
+                  ensure_ascii=False,
+              ).encode("utf-8")
+
+              connection = http.client.HTTPConnection(
+                  "127.0.0.1",
+                  port,
+                  timeout=timeout_seconds,
+              )
+
+              try:
+                  connection.request(
+                      "POST",
+                      "/completion",
+                      body=body,
+                      headers={
+                          "Authorization": f"Bearer {api_key}",
+                          "Content-Type": "application/json",
+                          "Content-Length": str(len(body)),
+                      },
+                  )
+                  response = connection.getresponse()
+                  payload = response.read().decode("utf-8", "replace")
+                  return response.status, payload
+              finally:
+                  connection.close()
+
+          with log_path.open("wb") as log:
+              process = subprocess.Popen(
+                  command,
+                  stdin=subprocess.DEVNULL,
+                  stdout=log,
+                  stderr=subprocess.STDOUT,
+                  start_new_session=True,
+              )
+
+          success = False
+          last_error = None
+          deadline = time.monotonic() + 120
+
+          try:
+              while time.monotonic() < deadline:
+                  return_code = process.poll()
+                  if return_code is not None:
+                      raise RuntimeError(
+                          f"llama-server exited early with code {return_code}"
+                      )
+
+                  try:
+                      status, payload = completion(5)
+                      print(f"HTTP status = {status}")
+
+                      if status == 200:
+                          parsed = json.loads(payload)
+
+                          if "content" not in parsed:
+                              raise RuntimeError(
+                                  "completion response has no content field: "
+                                  + payload[:1000]
+                              )
+
+                          print(
+                              "Completion content = "
+                              + repr(parsed["content"][:200])
+                          )
+                          success = True
+                          break
+
+                      last_error = f"HTTP {status}: {payload[:1000]}"
+                  except Exception as exc:
+                      last_error = repr(exc)
+
+                  time.sleep(1)
+
+              if not success:
+                  raise RuntimeError(
+                      "production-like readiness/completion did not succeed: "
+                      + str(last_error)
+                  )
+
+          except Exception:
+              print("\n===== LLAMA SERVER LOG =====", file=sys.stderr)
+
+              if log_path.exists():
+                  print(
+                      log_path.read_text(
+                          encoding="utf-8",
+                          errors="replace",
+                      )[-12000:],
+                      file=sys.stderr,
+                  )
+
+              raise
+
+          finally:
+              if process.poll() is None:
+                  try:
+                      os.killpg(process.pid, signal.SIGTERM)
+                  except ProcessLookupError:
+                      pass
+
+                  try:
+                      process.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      try:
+                          os.killpg(process.pid, signal.SIGKILL)
+                      except ProcessLookupError:
+                          pass
+                      process.wait(timeout=10)
+
+          if not success:
+              raise SystemExit(1)
+
+          print("Native Intel production-like inference = PASS")
+          PY
+
+      - name: Final native Intel audit
+        if: always()
+        shell: zsh
+        run: |
+          echo "===== NATIVE INTEL FINAL AUDIT ====="
+          echo "Host = $(/usr/bin/uname -m)"
+          /usr/bin/sw_vers
+          echo
+          /usr/bin/file runtime/llama-server || true
+          /usr/bin/lipo -archs runtime/llama-server || true
+          /usr/bin/shasum -a 256 \
+            runtime/llama-server \
+            runtime/zenz-v3.2-small-Q5_K_M.gguf \
+            2>/dev/null || true
+
+          echo
+          echo "===== BUILD CONTRACT ====="
+          cat runtime/BUILD-CONTRACT.txt 2>/dev/null || true
+
+          echo
+          echo "===== LLAMA LOG TAIL ====="
+          tail -n 200 runtime/native-intel-llama.log 2>/dev/null || true
