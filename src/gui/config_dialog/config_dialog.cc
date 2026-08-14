@@ -31,6 +31,8 @@
 #include "gui/config_dialog/config_dialog.h"
 
 #include <QAbstractItemView>
+#include <QAbstractScrollArea>
+#include <QAbstractSpinBox>
 #include <QByteArray>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -54,6 +56,7 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <algorithm>
 #include <cstdint>
 #include <istream>
@@ -114,6 +117,34 @@ void Connect(const QList<T *> &objects, const char *signal,
        itr != objects.end(); ++itr) {
     QObject::connect(*itr, signal, receiver, slot);
   }
+}
+
+QAbstractScrollArea *FindAncestorScrollArea(QWidget *widget) {
+  for (QWidget *parent = widget->parentWidget(); parent != nullptr;
+       parent = parent->parentWidget()) {
+    if (QAbstractScrollArea *scroll_area =
+            qobject_cast<QAbstractScrollArea *>(parent)) {
+      return scroll_area;
+    }
+  }
+  return nullptr;
+}
+
+void ForwardWheelEventToScrollArea(QWidget *source, QWheelEvent *event) {
+  QAbstractScrollArea *scroll_area = FindAncestorScrollArea(source);
+  if (scroll_area == nullptr) {
+    return;
+  }
+
+  QWidget *viewport = scroll_area->viewport();
+  const QPointF viewport_position =
+      viewport->mapFromGlobal(event->globalPosition().toPoint());
+  QWheelEvent forwarded_event(
+      viewport_position, event->globalPosition(), event->pixelDelta(),
+      event->angleDelta(), event->buttons(), event->modifiers(), event->phase(),
+      event->inverted(), Qt::MouseEventNotSynthesized,
+      event->pointingDevice());
+  QCoreApplication::sendEvent(viewport, &forwarded_event);
 }
 
 int FindComboBoxItemByData(QComboBox *combo_box, const QString &data) {
@@ -539,6 +570,14 @@ ConfigDialog::ConfigDialog()
           SLOT(EnableApplyButton()));
   // 'Apply' button is disabled on launching.
   configDialogButtonBox->button(QDialogButtonBox::Apply)->setEnabled(false);
+
+  // Prevent mouse-wheel and trackpad scrolling from silently changing
+  // combo-box and spin-box values anywhere in this dialog.  Install the
+  // filter on the application so controls created later by item delegates are
+  // covered too.
+  if (QCoreApplication *application = QCoreApplication::instance()) {
+    application->installEventFilter(this);
+  }
 
   // When clicking these messages, CheckBoxs corresponding
   // to them should be toggled.
@@ -4300,6 +4339,22 @@ void ConfigDialog::EnableApplyButton() {
 
 // Catch MouseButtonRelease event to toggle the CheckBoxes
 bool ConfigDialog::eventFilter(QObject *obj, QEvent *event) {
+  if (event->type() == QEvent::Wheel) {
+    QWidget *widget = qobject_cast<QWidget *>(obj);
+    if (widget != nullptr && isAncestorOf(widget) &&
+        (qobject_cast<QComboBox *>(widget) != nullptr ||
+         qobject_cast<QAbstractSpinBox *>(widget) != nullptr)) {
+      // QComboBox and QAbstractSpinBox normally consume wheel gestures to
+      // change their value.  In a settings dialog this is easy to trigger
+      // accidentally while scrolling.  Keep the setting unchanged and, when
+      // the control lives in a scroll area, forward the same gesture to that
+      // scroll area instead.
+      ForwardWheelEventToScrollArea(widget,
+                                    static_cast<QWheelEvent *>(event));
+      return true;
+    }
+  }
+
   if (event->type() == QEvent::MouseButtonRelease) {
     if (obj == incognitoModeMessage) {
       incognitoModeCheckBox->toggle();
