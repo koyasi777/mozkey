@@ -29,7 +29,9 @@ using ::mozc::zenz::ZenzWireResponseHeader;
 constexpr uint32_t kGeneration = 0x5A4E5A31;
 constexpr uint32_t kRequestTimeoutMsec = 60000;
 constexpr uint32_t kMaximumOutputChars = 64;
-constexpr int kStartupTimeoutMsec = 180000;
+// The package verifier must outlive the production scorer's bounded cold-start
+// readiness window so it can observe the socket after a near-deadline success.
+constexpr int kStartupTimeoutMsec = 240000;
 
 constexpr char kProbePrompt[] =
     "\xEE\xB8\x82\xEE\xB8\x80\xE3\x83\x86\xE3\x82\xB9\xE3\x83\x88"
