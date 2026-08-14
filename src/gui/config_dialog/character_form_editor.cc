@@ -165,6 +165,19 @@ void CharacterFormEditor::Load(const config::Config &config) {
   }
 
   horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+  // The Advanced tab itself scrolls vertically.  Size this nested table to
+  // its normal contents so users do not have to operate two vertical scroll
+  // areas for the usual character-form rule set.  Cap unusually large custom
+  // configurations so the table can still scroll internally when necessary.
+  constexpr int kMaxVisibleRows = 16;
+  const int visible_rows =
+      rowCount() < kMaxVisibleRows ? rowCount() : kMaxVisibleRows;
+  int content_height = horizontalHeader()->height() + 2 * frameWidth();
+  for (int row = 0; row < visible_rows; ++row) {
+    content_height += rowHeight(row);
+  }
+  setFixedHeight(content_height);
 }
 
 void CharacterFormEditor::Save(config::Config *config) {

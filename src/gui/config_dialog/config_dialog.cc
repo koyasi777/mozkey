@@ -49,6 +49,7 @@
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QSpinBox>
+#include <QStyle>
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -289,7 +290,9 @@ ConfigDialog::ConfigDialog()
   inputSupportScrollArea->viewport()->setStyleSheet(QString());
   inputSupportScrollAreaWidgetContents->setStyleSheet(QString());
 
-  setWindowFlags(Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
+  Qt::WindowFlags flags = windowFlags();
+  flags &= ~Qt::WindowContextHelpButtonHint;
+  setWindowFlags(flags);
   setWindowModality(Qt::NonModal);
 
 #ifdef _WIN32
@@ -576,6 +579,24 @@ ConfigDialog::ConfigDialog()
 #else   // _WIN32
   IMEHotKeyDisabledCheckBox->setVisible(false);
 #endif  // _WIN32
+
+  // QScrollArea breaks the minimum-width chain from its scroll widget to the
+  // surrounding dialog.  Synchronize the Advanced tab's minimum width only
+  // after translated labels, config-backed table contents, and all
+  // platform-specific visibility have reached their final initial state.
+  // Keep an as-needed horizontal scrollbar as a safety valve for unusual font,
+  // translation, or accessibility configurations.
+  inputSupportContentLayout->invalidate();
+  inputSupportContentLayout->activate();
+  const int input_support_minimum_width =
+      inputSupportScrollAreaWidgetContents->minimumSizeHint().width();
+  if (input_support_minimum_width > 0) {
+    const int scrollbar_extent = inputSupportScrollArea->style()->pixelMetric(
+        QStyle::PM_ScrollBarExtent, nullptr, inputSupportScrollArea);
+    inputSupportScrollArea->setMinimumWidth(
+        input_support_minimum_width + scrollbar_extent +
+        2 * inputSupportScrollArea->frameWidth());
+  }
 
   RecordCurrentStateAsApplied();
   suppress_apply_button_update_ = false;
@@ -2318,15 +2339,15 @@ void ConfigDialog::InitializeWindowsImeIconStyleControls() {
   group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
   QVBoxLayout* group_layout = new QVBoxLayout(group);
-  group_layout->setSpacing(10);
-  group_layout->setContentsMargins(0, 0, 5, 0);
+  group_layout->setSpacing(0);
+  group_layout->setContentsMargins(0, 0, 0, 0);
 
   QWidget* header = new QWidget(group);
   header->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
   QHBoxLayout* header_layout = new QHBoxLayout(header);
   header_layout->setSpacing(6);
-  header_layout->setContentsMargins(0, 0, 0, 0);
+  header_layout->setContentsMargins(9, 9, 9, 9);
 
   QLabel* title = new QLabel(TrConfigDialog("IME icon"), header);
   title->setObjectName(QStringLiteral("windowsImeIconStyleTitle"));
@@ -2345,7 +2366,7 @@ void ConfigDialog::InitializeWindowsImeIconStyleControls() {
   body->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
   QGridLayout* body_layout = new QGridLayout(body);
-  body_layout->setContentsMargins(12, 0, 0, 0);
+  body_layout->setContentsMargins(24, 9, 24, 9);
 
   QLabel* label = new QLabel(TrConfigDialog("IME icon style"), body);
   label->setObjectName(QStringLiteral("windowsImeIconStyleLabel"));
@@ -2381,7 +2402,7 @@ void ConfigDialog::InitializeWindowsImeIconStyleControls() {
       group);
   note->setObjectName(QStringLiteral("windowsImeIconStyleNote"));
   note->setWordWrap(true);
-  note->setContentsMargins(12, 0, 5, 0);
+  note->setContentsMargins(24, 0, 24, 9);
   group_layout->addWidget(note);
 
   const int insert_index = verticalLayout->indexOf(miscAdministrationWidget);
@@ -2402,27 +2423,20 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   candidateRubyFontLabel->hide();
   candidateRubyFontComboBox->hide();
 
-  constexpr int kRendererAppearanceGroupX = 30;
-  constexpr int kRendererAppearanceGroupY = 1146;
-  constexpr int kRendererAppearanceGroupWidth = 441;
-#ifdef _WIN32
-  constexpr int kRendererAppearanceToPreeditMargin = 18;
-#endif  // _WIN32
-  constexpr int kInputSupportBottomMargin = 30;
-
   QWidget* group = new QWidget(inputSupportScrollAreaWidgetContents);
   group->setObjectName(QStringLiteral("rendererAppearanceGroupBox"));
-  group->setGeometry(kRendererAppearanceGroupX, kRendererAppearanceGroupY,
-                     kRendererAppearanceGroupWidth, 1);
+  group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
   QVBoxLayout* root_layout = new QVBoxLayout(group);
+  // Keep the renderer section in the same layout system as the static
+  // Advanced-tab groups.  Use layout margins instead of a dialog-wide
+  // stylesheet so native checkbox and frame rendering stays untouched.
   root_layout->setContentsMargins(0, 0, 0, 0);
-  root_layout->setSpacing(6);
+  root_layout->setSpacing(0);
 
   QWidget* section = new QWidget(group);
-  section->setFixedHeight(60);
   QHBoxLayout* section_layout = new QHBoxLayout(section);
-  section_layout->setContentsMargins(0, 20, 0, 16);
+  section_layout->setContentsMargins(9, 9, 9, 9);
   QLabel* section_label =
       new QLabel(tr("Candidate, suggestion, and ruby window appearance"),
                  section);
@@ -2442,6 +2456,13 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                    SLOT(ResetRendererAppearanceControls()));
   root_layout->addWidget(section);
 
+  QWidget* body = new QWidget(group);
+  body->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+  QVBoxLayout* body_layout = new QVBoxLayout(body);
+  body_layout->setContentsMargins(24, 9, 24, 9);
+  body_layout->setSpacing(6);
+  root_layout->addWidget(body);
+
   QGridLayout* font_layout = new QGridLayout();
   font_layout->setContentsMargins(0, 0, 0, 0);
   font_layout->setHorizontalSpacing(8);
@@ -2456,7 +2477,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   font_layout->addWidget(font_label, 0, 0);
   font_layout->addWidget(candidateRubyFontComboBox, 0, 1);
   font_layout->setColumnStretch(1, 1);
-  root_layout->addLayout(font_layout);
+  body_layout->addLayout(font_layout);
 
   QGroupBox* font_weight_box = new QGroupBox(tr("Font weight"), group);
   font_weight_box->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -2488,7 +2509,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                       "suggestWindowFontWeightComboBox");
   add_font_weight_row(2, tr("Ruby window"),
                       "rubyWindowFontWeightComboBox");
-  root_layout->addWidget(font_weight_box);
+  body_layout->addWidget(font_weight_box);
 
   QWidget* color_grid_widget = new QWidget(group);
   color_grid_widget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -2496,7 +2517,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   grid->setContentsMargins(0, 0, 0, 0);
   grid->setHorizontalSpacing(8);
   grid->setVerticalSpacing(2);
-  root_layout->addWidget(color_grid_widget);
+  body_layout->addWidget(color_grid_widget);
 
   auto add_color_theme_combo = [](QComboBox* combo, bool allow_follow) {
     if (allow_follow) {
@@ -2588,7 +2609,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
     grid->setRowStretch(row, 0);
   }
 
-  root_layout->addSpacing(12);
+  body_layout->addSpacing(12);
 
   QGroupBox* ruby_spacing_box =
       new QGroupBox(tr("Ruby window spacing and gap"), group);
@@ -2631,9 +2652,9 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
       tr("Distance between the ruby window and the text being composed."),
       "rubyWindowCompositionGapSpinBox", 32, 4);
   ruby_spacing_layout->setColumnStretch(0, 1);
-  root_layout->addWidget(ruby_spacing_box);
+  body_layout->addWidget(ruby_spacing_box);
 
-  root_layout->addSpacing(12);
+  body_layout->addSpacing(12);
 
   QWidget* shadow_grid_widget = new QWidget(group);
   shadow_grid_widget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -2641,7 +2662,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   shadow_grid->setContentsMargins(0, 0, 0, 0);
   shadow_grid->setHorizontalSpacing(8);
   shadow_grid->setVerticalSpacing(6);
-  root_layout->addWidget(shadow_grid_widget);
+  body_layout->addWidget(shadow_grid_widget);
 
   auto add_shadow_spin = [&](int row, int column, const char* name, int min,
                              int max, const QString& suffix, int value) {
@@ -2816,7 +2837,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
     }
     load_layout->addStretch();
     box_layout->addLayout(load_layout);
-    root_layout->addWidget(box);
+    body_layout->addWidget(box);
   };
 
   auto add_ruby_palette_group = [&]() {
@@ -2846,7 +2867,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                     SLOT(LoadRendererCandidateAppearance()));
     load_layout->addStretch();
     box_layout->addLayout(load_layout);
-    root_layout->addWidget(box);
+    body_layout->addWidget(box);
   };
 
   add_candidate_palette_group(tr("Candidate window custom colors"),
@@ -2855,25 +2876,11 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                               QStringLiteral("suggestWindow"), true);
   add_ruby_palette_group();
 
-  root_layout->activate();
-  const int appearance_height = root_layout->sizeHint().height();
-  group->setGeometry(kRendererAppearanceGroupX, kRendererAppearanceGroupY,
-                     kRendererAppearanceGroupWidth, appearance_height);
-#ifdef _WIN32
-  preeditDisplayColorGroupBox->move(
-      kRendererAppearanceGroupX,
-      group->y() + group->height() + kRendererAppearanceToPreeditMargin);
-  inputSupportScrollAreaWidgetContents->resize(
-      485, preeditDisplayColorGroupBox->y() +
-               preeditDisplayColorGroupBox->height() +
-               kInputSupportBottomMargin);
-#else
-  // The preedit color section is Windows TSF-specific.  On macOS, terminate
-  // the scrollable content immediately after the renderer appearance section
-  // so that hiding the preedit section does not leave a large blank area.
-  inputSupportScrollAreaWidgetContents->resize(
-      485, group->y() + group->height() + kInputSupportBottomMargin);
-#endif  // _WIN32
+  const int insert_index =
+      inputSupportContentLayout->indexOf(preeditDisplayColorGroupBox);
+  inputSupportContentLayout->insertWidget(
+      insert_index >= 0 ? insert_index : inputSupportContentLayout->count(),
+      group);
 }
 
 void ConfigDialog::ConvertFromProto(const config::Config &config) {
