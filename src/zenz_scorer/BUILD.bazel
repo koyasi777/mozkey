@@ -155,3 +155,16 @@ mozc_cc_binary(
         "//conditions:default": [],
     }),
 )
+
+# Package-level release verification helper. Keep it in //zenz_scorer so it
+# consumes the same package-scoped Zenz wire/socket interfaces as the
+# production scorer without broadening //zenz target visibility.
+mozc_cc_binary(
+    name = "zenz_runtime_package_probe",
+    srcs = ["zenz_runtime_package_probe.cc"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "//zenz:unix_socket_path",
+        "//zenz:wire_protocol",
+    ],
+)

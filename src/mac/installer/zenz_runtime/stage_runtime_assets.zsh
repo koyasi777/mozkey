@@ -5,25 +5,108 @@ setopt pipe_fail
 
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:${PATH:-}"
 
-expected_llama_hash="e24e6b0928bd06fdefe68ea7c013acff1e5067a9318cf619c8b50e4712f7f931"
-expected_model_hash="29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673"
+EXPECTED_FORMAT="mozkey-macos-zenz-runtime-v1"
+
+EXPECTED_LLAMA_REPOSITORY="https://github.com/ggml-org/llama.cpp.git"
+EXPECTED_LLAMA_TAG="b10268"
+EXPECTED_LLAMA_COMMIT="6b5224cfccdb9caf4c0a0a87692fddad22c7e969"
+EXPECTED_PATCH_SHA256="6db5c11b2da8415d6b37200ec6aa4f3fdcdde8efb1e7a71375fe331a7b0e829a"
+EXPECTED_PATCHED_SOURCE_SHA256="36d8d6db0603a511ea4a490a8f0da28e2054327e3d4fe9b9e1481a2150eb1317"
+
+EXPECTED_MODEL_REPOSITORY="Miwa-Keita/zenz-v3.2-small-gguf"
+EXPECTED_MODEL_REVISION="c67e03e07d215c869f591b274c1631170d3e11fe"
+EXPECTED_MODEL_REMOTE_FILE="ggml-model-Q5_K_M.gguf"
+EXPECTED_MODEL_OUTPUT_FILE="zenz-v3.2-small-Q5_K_M.gguf"
+EXPECTED_MODEL_SHA256="29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673"
+
+EXPECTED_MINIMUM_MACOS="12.0"
+EXPECTED_ARCHITECTURES="x86_64,arm64"
 
 die() {
   print -u2 -- "ERROR: $*"
   exit 1
 }
 
-sha256() {
+sha256_file() {
   /usr/bin/shasum -a 256 "$1" |
     /usr/bin/awk '{print $1}'
 }
 
-script_dir="${0:A:h}"
+contract_value() {
+  local contract="$1"
+  local key="$2"
+
+  local count
+  count="$(
+    /usr/bin/awk \
+      -F= \
+      -v key="$key" \
+      '$1 == key {count++} END {print count + 0}' \
+      "$contract"
+  )"
+
+  [[ "$count" == "1" ]] ||
+    die "BUILD-CONTRACT key must appear exactly once: $key"
+
+  /usr/bin/awk \
+    -F= \
+    -v key="$key" \
+    '$1 == key {
+      print substr($0, index($0, "=") + 1)
+      exit
+    }' \
+    "$contract"
+}
+
+extract_minos() {
+  /usr/bin/otool -l "$1" |
+    /usr/bin/awk '
+      /LC_BUILD_VERSION/ {
+        found = 1
+        next
+      }
+
+      found && $1 == "minos" {
+        print $2
+        exit
+      }
+    '
+}
+
+check_system_only() {
+  local binary="$1"
+  local unexpected
+
+  unexpected="$(
+    /usr/bin/otool -L "$binary" |
+      /usr/bin/awk 'NR > 1 {print $1}' |
+      /usr/bin/grep -Ev '^(/System/Library/|/usr/lib/)' ||
+      true
+  )"
+
+  [[ -z "$unexpected" ]] || {
+    print -u2 -- "Unexpected non-system dynamic libraries in $binary:"
+    print -u2 -- "$unexpected"
+    return 1
+  }
+}
+
+check_tokenizer_marker() {
+  /usr/bin/strings "$1" |
+    /usr/bin/grep -F \
+      'gpt2-small-japanese-char' \
+      >/dev/null
+}
+
+script_path="${0:A}"
+script_dir="${script_path:h}"
+builder="$script_dir/build_universal_runtime.zsh"
+
 source_root="${1:-${MOZKEY_ZENZ_RUNTIME_SOURCE:-}}"
 
 if [[ -z "$source_root" ]]; then
   print -u2 -- "Usage:"
-  print -u2 -- "  $0 /path/to/mozkey-macos-zenz-runtime"
+  print -u2 -- "  $0 /path/to/formal-runtime-output"
   print -u2 -- ""
   print -u2 -- "Alternatively set MOZKEY_ZENZ_RUNTIME_SOURCE."
   exit 2
@@ -32,112 +115,171 @@ fi
 source_root="${source_root:A}"
 
 source_llama="$source_root/llama-server"
-source_model="$source_root/models/zenz-v3.2-small-Q5_K_M.gguf"
+source_model="$source_root/models/$EXPECTED_MODEL_OUTPUT_FILE"
+source_contract="$source_root/BUILD-CONTRACT.txt"
 
 destination_llama="$script_dir/llama-server"
-destination_model="$script_dir/models/zenz-v3.2-small-Q5_K_M.gguf"
+destination_model="$script_dir/models/$EXPECTED_MODEL_OUTPUT_FILE"
+destination_contract="$script_dir/BUILD-CONTRACT.txt"
 
-required_tools=(
-  /usr/bin/shasum
-  /usr/bin/awk
-  /usr/bin/install
-  /usr/bin/file
-  /usr/bin/lipo
-  /usr/bin/otool
-  /usr/bin/grep
-  /usr/bin/stat
-  /usr/bin/xattr
-  /usr/bin/git
-  /bin/mkdir
-)
+for required_file in \
+  "$builder" \
+  "$source_llama" \
+  "$source_model" \
+  "$source_contract"; do
 
-echo "===== TOOL CHECK ====="
-
-for tool_file in "${required_tools[@]}"; do
-  [[ -x "$tool_file" ]] ||
-    die "Missing or non-executable tool: $tool_file"
-
-  echo "$tool_file"
+  [[ -f "$required_file" ]] ||
+    die "Required file missing: $required_file"
 done
 
-echo "===== SOURCE FILE CHECK ====="
+echo "===== VERIFY FORMAL BUILD CONTRACT ====="
 
-[[ -f "$source_llama" ]] ||
-  die "Missing llama-server: $source_llama"
+format="$(contract_value "$source_contract" format)"
+builder_sha="$(contract_value "$source_contract" builder_script_sha256)"
+llama_repository="$(contract_value "$source_contract" llama_cpp_repository)"
+llama_tag="$(contract_value "$source_contract" llama_cpp_tag)"
+llama_commit="$(contract_value "$source_contract" llama_cpp_commit)"
+patch_sha="$(contract_value "$source_contract" zenz_patch_sha256)"
+patched_source_sha="$(
+  contract_value "$source_contract" patched_llama_vocab_sha256
+)"
+model_repository="$(contract_value "$source_contract" model_repository)"
+model_revision="$(contract_value "$source_contract" model_revision)"
+model_remote_file="$(contract_value "$source_contract" model_remote_file)"
+model_output_file="$(contract_value "$source_contract" model_output_file)"
+contract_model_sha="$(contract_value "$source_contract" model_sha256)"
+minimum_macos="$(contract_value "$source_contract" minimum_macos)"
+architectures="$(contract_value "$source_contract" architectures)"
+arm_sha="$(contract_value "$source_contract" arm64_thin_sha256)"
+x86_sha="$(contract_value "$source_contract" x86_64_thin_sha256)"
+universal_sha="$(
+  contract_value "$source_contract" universal_unsigned_sha256
+)"
+signing="$(contract_value "$source_contract" signing)"
 
-[[ -f "$source_model" ]] ||
-  die "Missing model: $source_model"
+[[ "$format" == "$EXPECTED_FORMAT" ]] ||
+  die "Unexpected BUILD-CONTRACT format"
 
-/usr/bin/stat -f '%Sp %z %N' \
+[[ "$builder_sha" == "$(sha256_file "$builder")" ]] ||
+  die "Runtime was not built by the current tracked builder script"
+
+[[ "$llama_repository" == "$EXPECTED_LLAMA_REPOSITORY" ]] ||
+  die "Unexpected llama.cpp repository"
+
+[[ "$llama_tag" == "$EXPECTED_LLAMA_TAG" ]] ||
+  die "Unexpected llama.cpp tag"
+
+[[ "$llama_commit" == "$EXPECTED_LLAMA_COMMIT" ]] ||
+  die "Unexpected llama.cpp commit"
+
+[[ "$patch_sha" == "$EXPECTED_PATCH_SHA256" ]] ||
+  die "Unexpected Zenz patch identity"
+
+[[ "$patched_source_sha" == "$EXPECTED_PATCHED_SOURCE_SHA256" ]] ||
+  die "Unexpected patched llama-vocab.cpp identity"
+
+[[ "$model_repository" == "$EXPECTED_MODEL_REPOSITORY" ]] ||
+  die "Unexpected model repository"
+
+[[ "$model_revision" == "$EXPECTED_MODEL_REVISION" ]] ||
+  die "Unexpected model revision"
+
+[[ "$model_remote_file" == "$EXPECTED_MODEL_REMOTE_FILE" ]] ||
+  die "Unexpected model source filename"
+
+[[ "$model_output_file" == "$EXPECTED_MODEL_OUTPUT_FILE" ]] ||
+  die "Unexpected model output filename"
+
+[[ "$contract_model_sha" == "$EXPECTED_MODEL_SHA256" ]] ||
+  die "Unexpected model SHA in BUILD-CONTRACT"
+
+[[ "$minimum_macos" == "$EXPECTED_MINIMUM_MACOS" ]] ||
+  die "Unexpected minimum macOS contract"
+
+[[ "$architectures" == "$EXPECTED_ARCHITECTURES" ]] ||
+  die "Unexpected architecture contract"
+
+[[ "$signing" == "downstream_after_lipo" ]] ||
+  die "Unexpected signing contract"
+
+echo "Format             = $format"
+echo "Builder SHA256     = $builder_sha"
+echo "llama.cpp commit   = $llama_commit"
+echo "Patch SHA256       = $patch_sha"
+echo "Model revision     = $model_revision"
+echo "arm64 thin SHA256  = $arm_sha"
+echo "x86_64 thin SHA256 = $x86_sha"
+echo "Universal SHA256   = $universal_sha"
+
+echo
+echo "===== VERIFY SOURCE UNIVERSAL RUNTIME ====="
+
+actual_universal_sha="$(sha256_file "$source_llama")"
+actual_model_sha="$(sha256_file "$source_model")"
+
+[[ "$actual_universal_sha" == "$universal_sha" ]] ||
+  die "Universal binary does not match BUILD-CONTRACT"
+
+[[ "$actual_model_sha" == "$EXPECTED_MODEL_SHA256" ]] ||
+  die "Model SHA-256 mismatch"
+
+archs="$(/usr/bin/lipo -archs "$source_llama")"
+
+print -- "$archs" |
+  /usr/bin/grep -qw arm64 ||
+  die "Universal runtime has no arm64 slice"
+
+print -- "$archs" |
+  /usr/bin/grep -qw x86_64 ||
+  die "Universal runtime has no x86_64 slice"
+
+tmp_dir="$(
+  /usr/bin/mktemp -d \
+    "${TMPDIR:-/tmp}/mozkey-stage-runtime.XXXXXX"
+)"
+
+cleanup() {
+  /bin/rm -rf "$tmp_dir"
+}
+
+trap cleanup EXIT
+
+arm="$tmp_dir/llama-server.arm64"
+x86="$tmp_dir/llama-server.x86_64"
+
+/usr/bin/lipo \
   "$source_llama" \
-  "$source_model"
+  -thin arm64 \
+  -output "$arm"
 
-echo "===== SOURCE HASH CHECK ====="
+/usr/bin/lipo \
+  "$source_llama" \
+  -thin x86_64 \
+  -output "$x86"
 
-actual_llama_hash="$(sha256 "$source_llama")"
-actual_model_hash="$(sha256 "$source_model")"
+[[ "$(sha256_file "$arm")" == "$arm_sha" ]] ||
+  die "arm64 slice does not match BUILD-CONTRACT"
 
-echo "llama-server"
-echo "  Actual   = $actual_llama_hash"
-echo "  Expected = $expected_llama_hash"
+[[ "$(sha256_file "$x86")" == "$x86_sha" ]] ||
+  die "x86_64 slice does not match BUILD-CONTRACT"
 
-echo "model"
-echo "  Actual   = $actual_model_hash"
-echo "  Expected = $expected_model_hash"
+for thin in "$arm" "$x86"; do
+  [[ "$(extract_minos "$thin")" == "$EXPECTED_MINIMUM_MACOS" ]] ||
+    die "Runtime slice deployment target mismatch: $thin"
 
-[[ "$actual_llama_hash" == "$expected_llama_hash" ]] ||
-  die "llama-server SHA-256 mismatch"
+  check_system_only "$thin" ||
+    die "Runtime slice dynamic-library contract failed: $thin"
 
-[[ "$actual_model_hash" == "$expected_model_hash" ]] ||
-  die "model SHA-256 mismatch"
+  check_tokenizer_marker "$thin" ||
+    die "Runtime slice tokenizer marker missing: $thin"
+done
 
-echo "===== LLAMA BINARY AUDIT ====="
+echo "Source runtime identity = EXACT"
+echo "Source model identity   = EXACT"
+echo "Source runtime structure = PASS"
 
-/usr/bin/file "$source_llama"
-
-architectures="$(/usr/bin/lipo -archs "$source_llama")"
-
-echo "Architectures = $architectures"
-
-[[ "$architectures" == "arm64" ]] ||
-  die "llama-server must be arm64"
-
-minimum_macos="$(
-  /usr/bin/otool -l "$source_llama" |
-    /usr/bin/awk '
-      /LC_BUILD_VERSION/ {
-        in_build = 1
-        next
-      }
-
-      in_build && $1 == "minos" {
-        print $2
-        exit
-      }
-    '
-)"
-
-echo "Minimum macOS = $minimum_macos"
-
-[[ "$minimum_macos" == "12.0" ]] ||
-  die "Unexpected deployment target: $minimum_macos"
-
-unexpected_dylibs="$(
-  /usr/bin/otool -L "$source_llama" |
-    /usr/bin/awk 'NR > 1 {print $1}' |
-    /usr/bin/grep -Ev '^(/System/Library/|/usr/lib/)' ||
-    true
-)"
-
-if [[ -n "$unexpected_dylibs" ]]; then
-  print -u2 -- "Unexpected non-system dynamic libraries:"
-  print -u2 -- "$unexpected_dylibs"
-  exit 1
-fi
-
-echo "Dynamic libraries = system libraries only"
-
-echo "===== STAGE RUNTIME ASSETS ====="
+echo
+echo "===== STAGE FORMAL RUNTIME ASSETS ====="
 
 /bin/mkdir -p "$script_dir/models"
 
@@ -151,23 +293,26 @@ echo "===== STAGE RUNTIME ASSETS ====="
   "$source_model" \
   "$destination_model"
 
+/usr/bin/install \
+  -m 0644 \
+  "$source_contract" \
+  "$destination_contract"
+
 /usr/bin/xattr -c "$destination_llama" 2>/dev/null || true
 /usr/bin/xattr -c "$destination_model" 2>/dev/null || true
+/usr/bin/xattr -c "$destination_contract" 2>/dev/null || true
 
-echo "===== DESTINATION VERIFICATION ====="
+echo
+echo "===== VERIFY STAGED IDENTITIES ====="
 
-destination_llama_hash="$(sha256 "$destination_llama")"
-destination_model_hash="$(sha256 "$destination_model")"
+[[ "$(sha256_file "$destination_llama")" == "$universal_sha" ]] ||
+  die "Staged Universal binary mismatch"
 
-[[ "$destination_llama_hash" == "$expected_llama_hash" ]] ||
-  die "Staged llama-server SHA-256 mismatch"
+[[ "$(sha256_file "$destination_model")" == "$EXPECTED_MODEL_SHA256" ]] ||
+  die "Staged model mismatch"
 
-[[ "$destination_model_hash" == "$expected_model_hash" ]] ||
-  die "Staged model SHA-256 mismatch"
-
-/usr/bin/stat -f '%Sp %z %N' \
-  "$destination_llama" \
-  "$destination_model"
+[[ "$(sha256_file "$destination_contract")" == "$(sha256_file "$source_contract")" ]] ||
+  die "Staged BUILD-CONTRACT mismatch"
 
 repo_root="$(
   /usr/bin/git \
@@ -179,29 +324,37 @@ repo_root="$(
 )"
 
 if [[ -n "$repo_root" ]]; then
-  llama_relative="${destination_llama#$repo_root/}"
-  model_relative="${destination_model#$repo_root/}"
+  for destination in \
+    "$destination_llama" \
+    "$destination_model" \
+    "$destination_contract"; do
 
-  /usr/bin/git \
-    -C "$repo_root" \
-    check-ignore \
-    -q \
-    "$llama_relative" ||
-    die "Staged llama-server is not ignored by Git"
+    relative="${destination#$repo_root/}"
 
-  /usr/bin/git \
-    -C "$repo_root" \
-    check-ignore \
-    -q \
-    "$model_relative" ||
-    die "Staged model is not ignored by Git"
-
-  echo "Git ignore check = passed"
+    /usr/bin/git \
+      -C "$repo_root" \
+      check-ignore \
+      -q \
+      "$relative" ||
+      die "Staged runtime file is not ignored by Git: $relative"
+  done
 fi
 
-echo "===== RESULT ====="
+echo "Git ignore contract = PASS"
 
-echo "llama-server SHA256 = $destination_llama_hash"
-echo "model SHA256        = $destination_model_hash"
 echo
-echo "macOS Zenz runtime assets staged successfully"
+echo "===== RESULT ====="
+echo "Source root            = $source_root"
+echo "llama.cpp commit       = $llama_commit"
+echo "Builder SHA256         = $builder_sha"
+echo "Universal SHA256       = $universal_sha"
+echo "arm64 thin SHA256      = $arm_sha"
+echo "x86_64 thin SHA256     = $x86_sha"
+echo "Model SHA256           = $actual_model_sha"
+echo "Architectures          = arm64 + x86_64"
+echo "Minimum macOS          = $EXPECTED_MINIMUM_MACOS"
+echo "Dynamic libraries      = SYSTEM ONLY"
+echo "Tokenizer marker       = PRESENT BOTH SLICES"
+echo "BUILD-CONTRACT staged  = YES"
+echo
+echo "Formal macOS Zenz Universal runtime assets staged successfully."

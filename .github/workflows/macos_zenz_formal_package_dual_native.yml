@@ -1,0 +1,341 @@
+name: macOS Zenz formal package dual-native validation
+
+on:
+  push:
+    branches:
+      - feature/macos-zenz-universal-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_verify_arm64:
+    name: Build formal PKG and verify on Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Mozkey
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Verify Apple Silicon build host
+        shell: /bin/zsh {0}
+        run: |
+          set -eux
+          test "$(/usr/bin/uname -m)" = "arm64"
+          /usr/bin/sw_vers
+          /usr/bin/xcodebuild -version
+          cmake --version
+          bazelisk version
+
+      - name: Prepare daily dictionary
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          $ErrorActionPreference = "Stop"
+          ./tools/dictionary/prepare_daily_dictionary.ps1
+
+      - name: Restore dependency cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: zenz-formal-update-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install dependencies
+        working-directory: ./src
+        run: |
+          python3 build_tools/update_deps.py
+
+      - name: Build Universal Qt
+        working-directory: ./src
+        run: |
+          python3 build_tools/build_qt.py \
+            --release \
+            --confirm_license \
+            --macos_cpus=x86_64,arm64
+
+      - name: Build formal Universal Zenz runtime from pinned source
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          RUNTIME="$RUNNER_TEMP/mozkey-zenz-formal-runtime"
+          rm -rf "$RUNTIME"
+
+          src/mac/installer/zenz_runtime/build_universal_runtime.zsh \
+            "$RUNTIME"
+
+          test -f "$RUNTIME/llama-server"
+          test -f "$RUNTIME/BUILD-CONTRACT.txt"
+          test -f "$RUNTIME/models/zenz-v3.2-small-Q5_K_M.gguf"
+
+          echo "===== FORMAL RUNTIME CONTRACT ====="
+          cat "$RUNTIME/BUILD-CONTRACT.txt"
+
+          echo "===== FORMAL RUNTIME IDENTITIES ====="
+          /usr/bin/shasum -a 256 \
+            "$RUNTIME/llama-server" \
+            "$RUNTIME/BUILD-CONTRACT.txt" \
+            "$RUNTIME/models/zenz-v3.2-small-Q5_K_M.gguf"
+
+      - name: Stage formal runtime
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          RUNTIME="$RUNNER_TEMP/mozkey-zenz-formal-runtime"
+
+          src/mac/installer/zenz_runtime/stage_runtime_assets.zsh \
+            "$RUNTIME"
+
+          test -f src/mac/installer/zenz_runtime/llama-server
+          test -f src/mac/installer/zenz_runtime/BUILD-CONTRACT.txt
+          test -f \
+            src/mac/installer/zenz_runtime/models/zenz-v3.2-small-Q5_K_M.gguf
+
+      - name: Build exact formal Universal Zenz PKG
+        working-directory: ./src
+        run: |
+          bazelisk \
+            --output_user_root="$HOME/.cache/bazel_mozkey_zenz_formal_pkg" \
+            build \
+            --config=oss_macos \
+            --config=release_build \
+            --macos_cpus=x86_64,arm64 \
+            --define=macos_zenz_runtime=1 \
+            //mac:package \
+            --verbose_failures
+
+      - name: Capture exact package artifact
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          ARTIFACT="$GITHUB_WORKSPACE/formal-package"
+          mkdir -p "$ARTIFACT"
+
+          install \
+            -m 0644 \
+            src/bazel-bin/mac/Mozc.pkg \
+            "$ARTIFACT/Mozc_Zenz_Universal_formal_dev.pkg"
+
+          install \
+            -m 0644 \
+            src/mac/installer/zenz_runtime/BUILD-CONTRACT.txt \
+            "$ARTIFACT/BUILD-CONTRACT.txt"
+
+          PACKAGE_SHA="$(
+            /usr/bin/shasum -a 256 \
+              "$ARTIFACT/Mozc_Zenz_Universal_formal_dev.pkg" |
+            /usr/bin/awk '{print $1}'
+          )"
+
+          CONTRACT_SHA="$(
+            /usr/bin/shasum -a 256 \
+              "$ARTIFACT/BUILD-CONTRACT.txt" |
+            /usr/bin/awk '{print $1}'
+          )"
+
+          {
+            echo "package_sha256=$PACKAGE_SHA"
+            echo "build_contract_sha256=$CONTRACT_SHA"
+            echo "source_commit=$GITHUB_SHA"
+          } > "$ARTIFACT/ARTIFACT-CONTRACT.txt"
+
+          echo "Package SHA256       = $PACKAGE_SHA"
+          echo "BUILD-CONTRACT SHA256= $CONTRACT_SHA"
+          cat "$ARTIFACT/ARTIFACT-CONTRACT.txt"
+
+      - name: Verify exact package on Apple Silicon
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          ARTIFACT="$GITHUB_WORKSPACE/formal-package"
+
+          MOZKEY_ZENZ_EXPECTED_CONTRACT="$ARTIFACT/BUILD-CONTRACT.txt" \
+          MOZKEY_ZENZ_VERIFY_BAZEL_ROOT="$HOME/.cache/bazel_mozkey_zenz_formal_pkg" \
+            src/mac/installer/zenz_runtime/verify_release_package.zsh \
+            "$ARTIFACT/Mozc_Zenz_Universal_formal_dev.pkg" \
+            "$ARTIFACT/arm64-verify"
+
+          install \
+            -m 0644 \
+            "$ARTIFACT/arm64-verify/audit.txt" \
+            "$ARTIFACT/arm64-audit.txt"
+
+      - name: Upload exact formal package
+        uses: actions/upload-artifact@v6
+        with:
+          name: mozkey-zenz-formal-universal-package
+          path: |
+            formal-package/Mozc_Zenz_Universal_formal_dev.pkg
+            formal-package/BUILD-CONTRACT.txt
+            formal-package/ARTIFACT-CONTRACT.txt
+            formal-package/arm64-audit.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Final Apple Silicon audit
+        if: always()
+        shell: /bin/zsh {0}
+        run: |
+          echo "===== APPLE SILICON FINAL AUDIT ====="
+          echo "Host = $(/usr/bin/uname -m)"
+          /usr/bin/sw_vers
+
+          echo
+          echo "===== ARTIFACT CONTRACT ====="
+          cat formal-package/ARTIFACT-CONTRACT.txt 2>/dev/null || true
+
+          echo
+          echo "===== ARM64 PACKAGE AUDIT ====="
+          cat formal-package/arm64-audit.txt 2>/dev/null || true
+
+  verify_same_package_on_native_intel:
+    name: Verify same formal PKG on native Intel
+    needs: build_and_verify_arm64
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout identical Mozkey commit
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Download exact formal package
+        uses: actions/download-artifact@v6
+        with:
+          name: mozkey-zenz-formal-universal-package
+          path: formal-package
+
+      - name: Verify Intel host and exact artifact identity
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          test "$(/usr/bin/uname -m)" = "x86_64"
+
+          ARTIFACT="$GITHUB_WORKSPACE/formal-package"
+          CONTRACT="$ARTIFACT/ARTIFACT-CONTRACT.txt"
+
+          EXPECTED_PACKAGE_SHA="$(
+            /usr/bin/awk \
+              -F= \
+              '$1 == "package_sha256" {print $2}' \
+              "$CONTRACT"
+          )"
+
+          EXPECTED_CONTRACT_SHA="$(
+            /usr/bin/awk \
+              -F= \
+              '$1 == "build_contract_sha256" {print $2}' \
+              "$CONTRACT"
+          )"
+
+          EXPECTED_SOURCE_COMMIT="$(
+            /usr/bin/awk \
+              -F= \
+              '$1 == "source_commit" {print $2}' \
+              "$CONTRACT"
+          )"
+
+          ACTUAL_PACKAGE_SHA="$(
+            /usr/bin/shasum -a 256 \
+              "$ARTIFACT/Mozc_Zenz_Universal_formal_dev.pkg" |
+            /usr/bin/awk '{print $1}'
+          )"
+
+          ACTUAL_CONTRACT_SHA="$(
+            /usr/bin/shasum -a 256 \
+              "$ARTIFACT/BUILD-CONTRACT.txt" |
+            /usr/bin/awk '{print $1}'
+          )"
+
+          echo "Expected package SHA = $EXPECTED_PACKAGE_SHA"
+          echo "Actual package SHA   = $ACTUAL_PACKAGE_SHA"
+          echo "Expected contract SHA= $EXPECTED_CONTRACT_SHA"
+          echo "Actual contract SHA  = $ACTUAL_CONTRACT_SHA"
+          echo "Expected source SHA  = $EXPECTED_SOURCE_COMMIT"
+          echo "Checkout source SHA  = $GITHUB_SHA"
+
+          test "$ACTUAL_PACKAGE_SHA" = "$EXPECTED_PACKAGE_SHA"
+          test "$ACTUAL_CONTRACT_SHA" = "$EXPECTED_CONTRACT_SHA"
+          test "$GITHUB_SHA" = "$EXPECTED_SOURCE_COMMIT"
+
+          /usr/bin/sw_vers
+
+      - name: Restore dependency cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: zenz-formal-update-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install dependencies for native verifier probe
+        working-directory: ./src
+        run: |
+          python3 build_tools/update_deps.py
+
+      - name: Verify exact same package on native Intel
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+
+          ARTIFACT="$GITHUB_WORKSPACE/formal-package"
+
+          MOZKEY_ZENZ_EXPECTED_CONTRACT="$ARTIFACT/BUILD-CONTRACT.txt" \
+          MOZKEY_ZENZ_VERIFY_BAZEL_ROOT="$HOME/.cache/bazel_mozkey_zenz_intel_verify" \
+            src/mac/installer/zenz_runtime/verify_release_package.zsh \
+            "$ARTIFACT/Mozc_Zenz_Universal_formal_dev.pkg" \
+            "$ARTIFACT/intel-verify"
+
+          install \
+            -m 0644 \
+            "$ARTIFACT/intel-verify/audit.txt" \
+            "$ARTIFACT/intel-audit.txt"
+
+      - name: Upload native Intel audit
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mozkey-zenz-formal-native-intel-audit
+          path: |
+            formal-package/ARTIFACT-CONTRACT.txt
+            formal-package/intel-audit.txt
+            formal-package/intel-verify/packaged-scorer.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final native Intel audit
+        if: always()
+        shell: /bin/zsh {0}
+        run: |
+          echo "===== NATIVE INTEL FINAL AUDIT ====="
+          echo "Host = $(/usr/bin/uname -m)"
+          /usr/bin/sw_vers
+
+          echo
+          echo "===== ARTIFACT CONTRACT ====="
+          cat formal-package/ARTIFACT-CONTRACT.txt 2>/dev/null || true
+
+          echo
+          echo "===== INTEL PACKAGE AUDIT ====="
+          cat formal-package/intel-audit.txt 2>/dev/null || true
+
+          echo
+          echo "===== PACKAGED SCORER LOG TAIL ====="
+          tail -n 300 \
+            formal-package/intel-verify/packaged-scorer.log \
+            2>/dev/null || true

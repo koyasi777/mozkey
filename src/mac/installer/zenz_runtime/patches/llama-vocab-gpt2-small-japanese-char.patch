@@ -1,0 +1,12 @@
+diff --git a/src/llama-vocab.cpp b/src/llama-vocab.cpp
+index 4a01dfd..8e1581b 100644
+--- a/src/llama-vocab.cpp
++++ b/src/llama-vocab.cpp
+@@ -2178,6 +2178,7 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
+                     tokenizer_pre == "gigachat"   ||
+                     tokenizer_pre == "jina-v2-es" ||
+                     tokenizer_pre == "jina-v2-de" ||
++                    tokenizer_pre == "gpt2-small-japanese-char" ||
+                     tokenizer_pre == "a.x-4.0" ||
+                     tokenizer_pre == "mellum"  ||
+                     tokenizer_pre == "modern-bert") {
