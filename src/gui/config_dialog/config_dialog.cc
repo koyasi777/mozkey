@@ -356,7 +356,7 @@ ConfigDialog::ConfigDialog()
   suggestionsSizeSpinBox->setRange(1, 9);
 
   liveConversionDelaySpinBox->setRange(0, 1000);
-  liveConversionDelaySpinBox->setSingleStep(5);
+  liveConversionDelaySpinBox->setSingleStep(1);
   liveConversionDelaySpinBox->setSuffix(QString::fromUtf8(" ms"));
   liveConversionDelaySpinBox->setSpecialValueText(QString::fromUtf8("即時"));
 
@@ -365,7 +365,7 @@ ConfigDialog::ConfigDialog()
   liveConversionMinKeyLengthSpinBox->setSuffix(QString::fromUtf8(" 文字"));
 
   zenzLiveCorrectionDelaySpinBox->setRange(0, 5000);
-  zenzLiveCorrectionDelaySpinBox->setSingleStep(100);
+  zenzLiveCorrectionDelaySpinBox->setSingleStep(1);
   zenzLiveCorrectionDelaySpinBox->setSuffix(QString::fromUtf8(" ms"));
   zenzLiveCorrectionDelaySpinBox->setSpecialValueText(QString::fromUtf8("即時"));
 
@@ -2593,7 +2593,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
     QSpinBox* size_spin = new QSpinBox(group);
     size_spin->setObjectName(QString::fromLatin1(size_name));
     size_spin->setRange(80, 200);
-    size_spin->setSingleStep(5);
+    size_spin->setSingleStep(1);
     size_spin->setSuffix(QStringLiteral(" %"));
     size_spin->setValue(100);
     size_spin->setMinimumHeight(24);
