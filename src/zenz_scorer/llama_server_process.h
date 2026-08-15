@@ -18,9 +18,13 @@ struct LlamaServerProcessOptions {
   std::string model_path;
   int context_size = 256;
   int threads = 4;
-  int readiness_timeout_msec = 60000;
+
+  // Cold start includes model loading and the first authenticated completion.
+  // Keep each completion probe long enough for slower supported hosts to
+  // finish useful work instead of repeatedly cancelling in-flight inference.
+  int readiness_timeout_msec = 180000;
   int readiness_probe_interval_msec = 250;
-  int readiness_probe_timeout_msec = 1000;
+  int readiness_probe_timeout_msec = 30000;
 
   // Appended after the normal llama-server arguments.  Production callers
   // should normally leave this empty.  It exists so process behavior can be

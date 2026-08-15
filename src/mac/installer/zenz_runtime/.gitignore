@@ -2,3 +2,4 @@
 # before every package build; do not commit these large binary files.
 /llama-server
 /models/zenz-v3.2-small-Q5_K_M.gguf
+/BUILD-CONTRACT.txt

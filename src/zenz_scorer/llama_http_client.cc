@@ -32,7 +32,7 @@ namespace {
 
 constexpr uint32_t kDefaultTimeoutMsec = 5000;
 constexpr uint32_t kMinTimeoutMsec = 50;
-constexpr uint32_t kMaxTimeoutMsec = 5000;
+constexpr uint32_t kMaxTimeoutMsec = 30000;
 constexpr uint32_t kDefaultMaxOutputChars = 256;
 constexpr uint32_t kMaxOutputChars = 256;
 constexpr int kDefaultNPredict = 64;

@@ -1,9 +1,10 @@
+load("@build_bazel_rules_apple//apple:apple.bzl", "apple_universal_binary")
+
 package(default_visibility = ["//visibility:private"])
 
 config_setting(
-    name = "macos_arm64_with_runtime",
+    name = "macos_with_runtime",
     constraint_values = [
-        "@platforms//cpu:arm64",
         "@platforms//os:macos",
     ],
     define_values = {
@@ -14,11 +15,10 @@ config_setting(
 filegroup(
     name = "llama_server",
     srcs = select({
-        ":macos_arm64_with_runtime": ["llama-server"],
+        ":macos_with_runtime": ["llama-server"],
         "//conditions:default": [],
     }),
     target_compatible_with = [
-        "@platforms//cpu:arm64",
         "@platforms//os:macos",
     ],
     visibility = ["//mac:__pkg__"],
@@ -27,13 +27,51 @@ filegroup(
 filegroup(
     name = "model",
     srcs = select({
-        ":macos_arm64_with_runtime": ["models/zenz-v3.2-small-Q5_K_M.gguf"],
+        ":macos_with_runtime": ["models/zenz-v3.2-small-Q5_K_M.gguf"],
         "//conditions:default": [],
     }),
     target_compatible_with = [
-        "@platforms//cpu:arm64",
         "@platforms//os:macos",
     ],
+    visibility = ["//mac:__pkg__"],
+)
+
+filegroup(
+    name = "build_contract",
+    srcs = select({
+        ":macos_with_runtime": ["BUILD-CONTRACT.txt"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = [
+        "@platforms//os:macos",
+    ],
+    visibility = ["//mac:__pkg__"],
+)
+
+# Keep the cross-platform scorer target itself architecture-agnostic. The
+# macOS packaging layer is responsible for producing one same-path Universal
+# executable for the final app bundle.
+apple_universal_binary(
+    name = "mozc_zenz_scorer_macos_universal",
+    binary = "//zenz_scorer:mozc_zenz_scorer",
+    forced_cpus = [
+        "x86_64",
+        "arm64",
+    ],
+    minimum_deployment_os_version = "12.0",
+    minimum_os_version = "12.0",
+    platform_type = "macos",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+genrule(
+    name = "mozc_zenz_scorer_runtime",
+    srcs = [":mozc_zenz_scorer_macos_universal"],
+    outs = ["mozc_zenz_scorer"],
+    cmd = "/bin/cp $< $@ && /bin/chmod 0755 $@",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
     visibility = ["//mac:__pkg__"],
 )
 
