@@ -1,14 +1,20 @@
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
-    "llama-server.exe",
-    "ggml.dll",
-    "ggml-base.dll",
-    "ggml-cpu.dll",
-    "llama.dll",
+    "arm64/llama-server.exe",
+    "x64/llama-server.exe",
     "models/zenz-v3.2-small-Q5_K_M.gguf",
     "licenses/THIRD_PARTY_NOTICES.md",
     "licenses/Apache-2.0.txt",
     "licenses/llama.cpp-MIT.txt",
     "licenses/zenz-v3.2-small-gguf.txt",
+    "WINDOWS_ZENZ_RUNTIME_CONTRACT.md",
 ])
+
+filegroup(
+    name = "llama-server.exe",
+    srcs = select({
+        "@platforms//cpu:arm64": ["arm64/llama-server.exe"],
+        "@platforms//cpu:x86_64": ["x64/llama-server.exe"],
+    }),
+)

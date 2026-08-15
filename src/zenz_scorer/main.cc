@@ -903,6 +903,10 @@ bool LaunchLlamaServer(const Options& options,
   cmd += std::to_wstring(options.ctx);
   cmd += L" -t ";
   cmd += std::to_wstring(options.threads);
+  // Keep the llama-server execution contract deterministic across upstream
+  // versions.  Mozkey has one local scorer client and does not need multiple
+  // parallel server slots.
+  cmd += L" --parallel 1";
   cmd += L" --host 127.0.0.1 --port ";
   cmd += std::to_wstring(port);
   // The API key is defense-in-depth for accidental or stale localhost servers.

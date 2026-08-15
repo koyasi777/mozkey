@@ -173,10 +173,6 @@
 
       <ComponentRef Id="ZenzScorer" />
       <ComponentRef Id="ZenzLlamaServer" />
-      <ComponentRef Id="ZenzGgmlDll" />
-      <ComponentRef Id="ZenzGgmlBaseDll" />
-      <ComponentRef Id="ZenzGgmlCpuDll" />
-      <ComponentRef Id="ZenzLlamaDll" />
       <ComponentRef Id="ZenzModel" />
       <ComponentRef Id="ZenzThirdPartyNotices" />
       <ComponentRef Id="ZenzApacheLicense" />
@@ -318,18 +314,6 @@
         </Component>
         <Component Id="ZenzLlamaServer">
           <File Id="llama_server_exe" Name="llama-server.exe" DiskId="1" Checksum="yes" Source="$(var.ZenzLlamaServerPath)" Vital="yes" KeyPath="yes" />
-        </Component>
-        <Component Id="ZenzGgmlDll">
-          <File Id="ggml_dll" Name="ggml.dll" DiskId="1" Checksum="yes" Source="$(var.ZenzGgmlDllPath)" Vital="yes" KeyPath="yes" />
-        </Component>
-        <Component Id="ZenzGgmlBaseDll">
-          <File Id="ggml_base_dll" Name="ggml-base.dll" DiskId="1" Checksum="yes" Source="$(var.ZenzGgmlBaseDllPath)" Vital="yes" KeyPath="yes" />
-        </Component>
-        <Component Id="ZenzGgmlCpuDll">
-          <File Id="ggml_cpu_dll" Name="ggml-cpu.dll" DiskId="1" Checksum="yes" Source="$(var.ZenzGgmlCpuDllPath)" Vital="yes" KeyPath="yes" />
-        </Component>
-        <Component Id="ZenzLlamaDll">
-          <File Id="llama_dll" Name="llama.dll" DiskId="1" Checksum="yes" Source="$(var.ZenzLlamaDllPath)" Vital="yes" KeyPath="yes" />
         </Component>
 
         <Directory Id="ZenzModelsDir" Name="models">
