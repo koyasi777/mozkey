@@ -288,3 +288,44 @@ MOZKEY_ZENZ_EXPECTED_CONTRACT="$PWD/mac/installer/zenz_runtime/BUILD-CONTRACT.tx
 
 The same verifier is intended to run against the exact same package artifact
 on both an Apple Silicon runner and a native Intel runner.
+
+## CI and release boundary
+
+`.github/workflows/macos_zenz_formal_package_dual_native.yml` is the retained
+formal architecture/runtime package gate. It builds the runtime through the
+tracked builder, stages it through the tracked staging contract, builds one
+Universal Zenz-enabled `.pkg`, verifies that package on Apple Silicon, records
+the package / BUILD-CONTRACT / source-commit identities, and then verifies the
+exact same package artifact on a native Intel runner.
+
+The generic `.github/workflows/macos.yaml` package jobs remain intentionally
+separate. They verify normal macOS buildability without requiring the
+Git-excluded Zenz runtime assets and must not be treated as the distributable
+Zenz release gate.
+
+The formal CI package gate validates nested executable signatures, but it does
+not by itself establish the final Developer ID package-signing or notarization
+state. Production signing/notarization remains a downstream release step. The
+runtime builder therefore continues to emit an unsigned Universal
+`llama-server`; the package pipeline signs nested helpers only after `lipo`,
+before signing their parent app.
+
+## Updating the llama.cpp pin
+
+Do not replace the current llama.cpp pin with a moving branch or unverified
+`HEAD`. A llama.cpp update is a separate audited change.
+
+For a re-pin:
+
+1. select and record an exact upstream tag/commit;
+2. determine whether the tracked `gpt2-small-japanese-char` compatibility patch
+   is still required, already upstream, or must be adapted;
+3. update the builder/staging/verifier source identities together;
+4. rebuild arm64 and x86_64 from the same source/build policy;
+5. recreate the Universal runtime and BUILD-CONTRACT;
+6. run native Apple Silicon and native Intel verification; and
+7. require the same final package artifact to pass the dual-native package gate
+   before accepting the new pin.
+
+The currently pinned b10268 / `6b5224cfccdb9caf4c0a0a87692fddad22c7e969`
+runtime remains the known-good baseline until such a re-pin completes.
