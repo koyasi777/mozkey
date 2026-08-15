@@ -52,12 +52,43 @@ jobs:
           if (-not (Test-Path $vswhere)) { throw "vswhere.exe missing" }
           if (-not (Test-Path $setup)) { throw "Visual Studio Installer missing" }
 
-          $vsPath = (& $vswhere -latest -products Microsoft.VisualStudio.Product.BuildTools -property installationPath).Trim()
+          function Get-VsWhereValue {
+            param([string[]]$Arguments)
+
+            # vswhere returns no stdout when no matching instance/component exists.
+            # Under PowerShell, calling .Trim() directly on that null result throws
+            # before the intended fallback/install path can run.
+            $lines = @(
+              & $vswhere @Arguments 2>$null |
+                ForEach-Object { [string]$_ }
+            )
+
+            if ($LASTEXITCODE -ne 0) {
+              return ""
+            }
+
+            return (($lines -join [Environment]::NewLine).Trim())
+          }
+
+          $vsPath = Get-VsWhereValue @(
+            "-latest",
+            "-products", "Microsoft.VisualStudio.Product.BuildTools",
+            "-property", "installationPath"
+          )
+
           if (-not $vsPath) {
             # Hosted images may expose Enterprise instead of BuildTools.
-            $vsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+            $vsPath = Get-VsWhereValue @(
+              "-latest",
+              "-products", "*",
+              "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+              "-property", "installationPath"
+            )
           }
-          if (-not $vsPath) { throw "Visual Studio 2022 installation not found" }
+
+          if (-not $vsPath) {
+            throw "Visual Studio 2022 installation not found"
+          }
 
           $components = @(
             "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
@@ -65,7 +96,12 @@ jobs:
           )
 
           foreach ($component in $components) {
-            $hit = (& $vswhere -latest -products * -requires $component -property installationPath 2>$null).Trim()
+            $hit = Get-VsWhereValue @(
+              "-latest",
+              "-products", "*",
+              "-requires", $component,
+              "-property", "installationPath"
+            )
             if (-not $hit) {
               Write-Host "Adding $component"
               $args = @(
