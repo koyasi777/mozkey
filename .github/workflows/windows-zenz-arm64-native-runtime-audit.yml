@@ -356,7 +356,7 @@ jobs:
           path: ${{ runner.temp }}\mozkey-arm64-runtime
 
       - name: Native ARM64 runtime and canonical Zenz audit
-        shell: powershell
+        shell: pwsh
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
