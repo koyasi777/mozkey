@@ -3,7 +3,10 @@ name: macOS Zenz formal package dual-native validation
 on:
   push:
     branches:
-      - feature/macos-zenz-universal-runtime
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:

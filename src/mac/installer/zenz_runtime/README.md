@@ -298,6 +298,11 @@ Universal Zenz-enabled `.pkg`, verifies that package on Apple Silicon, records
 the package / BUILD-CONTRACT / source-commit identities, and then verifies the
 exact same package artifact on a native Intel runner.
 
+The formal package gate runs for pull requests targeting `main`, pushes to
+`main`, and manual dispatch. It intentionally has no path filter: changes
+outside the runtime directory can still affect the final app/package graph, so
+the formal release boundary is validated as a whole.
+
 The generic `.github/workflows/macos.yaml` package jobs remain intentionally
 separate. They verify normal macOS buildability without requiring the
 Git-excluded Zenz runtime assets and must not be treated as the distributable
