@@ -27,8 +27,11 @@ using ::mozc::zenz::ZenzWireRequestHeader;
 using ::mozc::zenz::ZenzWireResponseHeader;
 
 constexpr uint32_t kGeneration = 0x5A4E5A31;
-constexpr uint32_t kRequestTimeoutMsec = 60000;
-constexpr uint32_t kMaximumOutputChars = 64;
+// This verifies one real scorer -> llama-server inference, not interactive
+// latency. Match the scorer's bounded maximum request deadline while keeping
+// generation minimal enough for slower hosted native runners.
+constexpr uint32_t kRequestTimeoutMsec = 30000;
+constexpr uint32_t kMaximumOutputChars = 4;
 // The package verifier must outlive the production scorer's bounded cold-start
 // readiness window so it can observe the socket after a near-deadline success.
 constexpr int kStartupTimeoutMsec = 240000;
