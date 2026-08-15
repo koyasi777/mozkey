@@ -77,7 +77,7 @@ jobs:
               ) -join " "
               $p = Start-Process -FilePath $setup -ArgumentList $args -Wait -PassThru
               if ($p.ExitCode -notin @(0, 3010)) {
-                throw "Visual Studio Installer failed for $component: $($p.ExitCode)"
+                throw "Visual Studio Installer failed for ${component}: $($p.ExitCode)"
               }
             }
           }
