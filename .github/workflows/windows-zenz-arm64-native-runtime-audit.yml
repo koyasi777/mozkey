@@ -1,0 +1,610 @@
+name: Windows Zenz ARM64 native runtime audit
+
+on:
+  push:
+    branches:
+      - feature/windows-zenz-native-arm64-runtime
+    paths:
+      - .github/workflows/windows-zenz-arm64-native-runtime-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-arm64-cross:
+    name: Cross-build exact ARM64 runtime
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Mozkey
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify audited base
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = "c986db2c611c7255ba92b1d44fc6ac3fb6b098bf"
+          git fetch origin main
+          $originMain = (git rev-parse origin/main).Trim()
+          $mergeBase = (git merge-base origin/main HEAD).Trim()
+          Write-Host "HEAD        = $(git rev-parse HEAD)"
+          Write-Host "origin/main = $originMain"
+          Write-Host "merge-base  = $mergeBase"
+          if ($originMain -ne $expected) {
+            throw "origin/main changed from audited base: $originMain"
+          }
+          if ($mergeBase -ne $expected) {
+            throw "feature branch is not based exactly on audited main: $mergeBase"
+          }
+
+      - name: Ensure VS2022 ARM64 and Clang components
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $setup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe missing" }
+          if (-not (Test-Path $setup)) { throw "Visual Studio Installer missing" }
+
+          $vsPath = (& $vswhere -latest -products Microsoft.VisualStudio.Product.BuildTools -property installationPath).Trim()
+          if (-not $vsPath) {
+            # Hosted images may expose Enterprise instead of BuildTools.
+            $vsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          }
+          if (-not $vsPath) { throw "Visual Studio 2022 installation not found" }
+
+          $components = @(
+            "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
+            "Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Llvm.Clang"
+          )
+
+          foreach ($component in $components) {
+            $hit = (& $vswhere -latest -products * -requires $component -property installationPath 2>$null).Trim()
+            if (-not $hit) {
+              Write-Host "Adding $component"
+              $args = @(
+                "modify",
+                "--installPath", ('"{0}"' -f $vsPath),
+                "--add", $component,
+                "--passive",
+                "--norestart"
+              ) -join " "
+              $p = Start-Process -FilePath $setup -ArgumentList $args -Wait -PassThru
+              if ($p.ExitCode -notin @(0, 3010)) {
+                throw "Visual Studio Installer failed for $component: $($p.ExitCode)"
+              }
+            }
+          }
+
+          $clang = Join-Path $vsPath "VC\Tools\Llvm\x64\bin\clang.exe"
+          $clangxx = Join-Path $vsPath "VC\Tools\Llvm\x64\bin\clang++.exe"
+          if (-not (Test-Path $clang) -or -not (Test-Path $clangxx)) {
+            throw "Visual Studio Clang binaries missing"
+          }
+
+          & $clang --version
+          "VS_PATH=$vsPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CLANG_BIN=$(Split-Path -Parent $clang)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Cross-build exact b10437 ARM64 runtime
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+
+          $repoUrl = "https://github.com/ggml-org/llama.cpp.git"
+          $tag = "b10437"
+          $commit = "16d222fc5ead59d20039501a37251c9ed457a454"
+          $preset = "arm64-windows-llvm+static-release"
+
+          $expectedPatchSha = "6DB5C11B2DA8415D6B37200EC6AA4F3FDCDDE8EFB1E7A71375FE331A7B0E829A"
+          $expectedVocabSha = "7E07061170256C9F5A5ACF6AE30D5C6E5A0CBB89D706EEDAE95AC5F9B46230F1"
+          $expectedModelSha = "29C223D4C23327B80FD13EBB5AB2555057A46317997D5DA391584FFBEF0DB673"
+
+          function Get-PEMachine([string]$Path) {
+            $fs = [System.IO.File]::OpenRead($Path)
+            $br = New-Object System.IO.BinaryReader($fs)
+            try {
+              if ($br.ReadUInt16() -ne 0x5A4D) { return "NOT_PE" }
+              $fs.Seek(0x3C, [System.IO.SeekOrigin]::Begin) | Out-Null
+              $offset = $br.ReadUInt32()
+              $fs.Seek($offset, [System.IO.SeekOrigin]::Begin) | Out-Null
+              if ($br.ReadUInt32() -ne 0x00004550) { return "INVALID_PE" }
+              $machine = $br.ReadUInt16()
+              if ($machine -eq 0xAA64) { return "ARM64" }
+              if ($machine -eq 0x8664) { return "x64" }
+              return ("0x{0:X4}" -f $machine)
+            }
+            finally {
+              $br.Dispose()
+            }
+          }
+
+          function Test-Marker([string]$Path, [string]$Marker) {
+            $bytes = [System.IO.File]::ReadAllBytes($Path)
+            $needle = [System.Text.Encoding]::UTF8.GetBytes($Marker)
+            for ($i = 0; $i -le $bytes.Length - $needle.Length; $i++) {
+              $ok = $true
+              for ($j = 0; $j -lt $needle.Length; $j++) {
+                if ($bytes[$i + $j] -ne $needle[$j]) {
+                  $ok = $false
+                  break
+                }
+              }
+              if ($ok) { return $true }
+            }
+            return $false
+          }
+
+          $model = Join-Path $env:GITHUB_WORKSPACE "src\win32\installer\zenz_runtime\models\zenz-v3.2-small-Q5_K_M.gguf"
+          if ((Get-FileHash $model -Algorithm SHA256).Hash -ne $expectedModelSha) {
+            throw "Zenz model hash mismatch"
+          }
+
+          $root = Join-Path $env:RUNNER_TEMP "mozkey-zenz-arm64-build"
+          $src = Join-Path $root "llama.cpp"
+          if (Test-Path $root) { Remove-Item $root -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+
+          git config --global core.autocrlf true
+          git clone --quiet --depth 1 --branch $tag $repoUrl $src
+          $actual = (git -C $src rev-parse HEAD).Trim()
+          if ($actual -ne $commit) { throw "llama.cpp commit mismatch: $actual" }
+
+          $vocabPath = Join-Path $src "src\llama-vocab.cpp"
+          $vocab = [System.IO.File]::ReadAllText($vocabPath)
+          if ($vocab.Contains("gpt2-small-japanese-char")) {
+            throw "Tokenizer marker already exists upstream; contract changed"
+          }
+
+          $pattern = '(tokenizer_pre\s*==\s*"jina-v2-de"\s*\|\|\r?\n)(\s*)(tokenizer_pre\s*==\s*"a\.x-4\.0"\s*\|\|)'
+          if ([regex]::Matches($vocab, $pattern).Count -ne 1) {
+            throw "Tokenizer mapping anchor changed"
+          }
+
+          $replacement = '$1$2tokenizer_pre == "gpt2-small-japanese-char" ||' + [Environment]::NewLine + '$2$3'
+          $patched = [regex]::Replace($vocab, $pattern, $replacement, 1)
+          [System.IO.File]::WriteAllText(
+            $vocabPath,
+            $patched,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
+
+          $patchFile = Join-Path $root "tokenizer.patch"
+          git -C $src diff -- src/llama-vocab.cpp | Out-File -FilePath $patchFile -Encoding utf8
+          $patchSha = (Get-FileHash $patchFile -Algorithm SHA256).Hash
+          $vocabSha = (Get-FileHash $vocabPath -Algorithm SHA256).Hash
+
+          Write-Host "Patch SHA256 = $patchSha"
+          Write-Host "Vocab SHA256 = $vocabSha"
+
+          # PowerShell 5.1 Out-File may add a BOM/change line endings; the source
+          # identity is the authoritative cross-runner gate. Patch hash is logged.
+          if ($vocabSha -ne $expectedVocabSha) {
+            throw "Patched llama-vocab.cpp hash mismatch: $vocabSha"
+          }
+
+          $vcvarsall = Join-Path $env:VS_PATH "VC\Auxiliary\Build\vcvarsall.bat"
+          $clangxx = Join-Path $env:CLANG_BIN "clang++.exe"
+
+          $ninja = (Get-Command ninja.exe -ErrorAction SilentlyContinue).Source
+          if (-not $ninja) {
+            $ninja = Join-Path $env:VS_PATH "Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
+          }
+          if (-not (Test-Path $ninja)) { throw "ninja.exe missing" }
+          $ninjaDir = Split-Path -Parent $ninja
+
+          $hostWrapper = Join-Path $root "host-clangxx-x64.cmd"
+          @"
+          @echo off
+          call "$vcvarsall" amd64 >nul 2>&1
+          if errorlevel 1 exit /b %errorlevel%
+          set "PATH=$env:CLANG_BIN;%PATH%"
+          "$clangxx" %*
+          exit /b %errorlevel%
+          "@ | Set-Content -LiteralPath $hostWrapper -Encoding ascii
+
+          $hostWrapperCmake = $hostWrapper -replace '\\','/'
+          $buildDir = Join-Path $src ("build-" + $preset)
+          $configureLog = Join-Path $root "configure.log"
+          $buildLog = Join-Path $root "build.log"
+
+          $flags = @(
+            "-DHOST_CXX_COMPILER=$hostWrapperCmake",
+            "-DGGML_OPENMP=OFF",
+            "-DGGML_NATIVE=OFF",
+            "-DGGML_BLAS=OFF",
+            "-DGGML_CPU_KLEIDIAI=OFF",
+            "-DBUILD_SHARED_LIBS=OFF",
+            "-DLLAMA_BUILD_TESTS=OFF",
+            "-DLLAMA_BUILD_EXAMPLES=OFF",
+            "-DLLAMA_BUILD_APP=OFF",
+            "-DLLAMA_BUILD_MTMD=OFF",
+            "-DLLAMA_BUILD_UI=OFF",
+            "-DLLAMA_USE_PREBUILT_UI=OFF",
+            "-DLLAMA_OPENSSL=OFF",
+            "-DLLAMA_LLGUIDANCE=OFF"
+          ) -join " "
+
+          $driver = Join-Path $root "build.cmd"
+          @"
+          @echo off
+          call "$vcvarsall" amd64_arm64
+          if errorlevel 1 exit /b %errorlevel%
+          set "PATH=$env:CLANG_BIN;$ninjaDir;%PATH%"
+          cd /d "$src"
+          cmake --preset $preset $flags > "$configureLog" 2>&1
+          if errorlevel 1 exit /b %errorlevel%
+          cmake --build "$buildDir" --target llama-server -j > "$buildLog" 2>&1
+          exit /b %errorlevel%
+          "@ | Set-Content -LiteralPath $driver -Encoding ascii
+
+          & cmd.exe /d /s /c "`"$driver`""
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content $configureLog -Tail 100 -ErrorAction SilentlyContinue
+            Get-Content $buildLog -Tail 200 -ErrorAction SilentlyContinue
+            throw "ARM64 cross-build failed"
+          }
+
+          $exe = @(Get-ChildItem $buildDir -Filter llama-server.exe -File -Recurse)
+          if ($exe.Count -ne 1) { throw "Expected one llama-server.exe; found $($exe.Count)" }
+          $exe = $exe[0].FullName
+
+          if ((Get-PEMachine $exe) -ne "ARM64") { throw "Output is not ARM64 PE" }
+          if (-not (Test-Marker $exe "gpt2-small-japanese-char")) {
+            throw "Tokenizer marker missing from ARM64 binary"
+          }
+
+          $binDir = Split-Path -Parent $exe
+          $forbidden = @("ggml.dll","ggml-base.dll","ggml-cpu.dll","llama.dll")
+          foreach ($name in $forbidden) {
+            if (Test-Path (Join-Path $binDir $name)) {
+              throw "Unexpected dynamic runtime dependency beside executable: $name"
+            }
+          }
+
+          $artifact = Join-Path $env:RUNNER_TEMP "mozkey-arm64-runtime-artifact"
+          New-Item -ItemType Directory -Force -Path $artifact | Out-Null
+          Copy-Item $exe (Join-Path $artifact "llama-server.exe") -Force
+          Copy-Item $configureLog (Join-Path $artifact "configure.log") -Force
+          Copy-Item $buildLog (Join-Path $artifact "build.log") -Force
+
+          $sha = (Get-FileHash (Join-Path $artifact "llama-server.exe") -Algorithm SHA256).Hash
+          $size = (Get-Item (Join-Path $artifact "llama-server.exe")).Length
+          @"
+          source_tag=$tag
+          source_commit=$commit
+          patched_vocab_sha256=$vocabSha
+          tokenizer_patch_expected_sha256=$expectedPatchSha
+          model_sha256=$expectedModelSha
+          pe=ARM64
+          llama_server_sha256=$sha
+          llama_server_size=$size
+          build_preset=$preset
+          runtime_policy=ggml/llama static; CPU only
+          native_execution_validated=NO
+          "@ | Set-Content -LiteralPath (Join-Path $artifact "build-info.txt") -Encoding utf8
+
+          Write-Host "ARM64 artifact SHA256 = $sha"
+          Write-Host "ARM64 artifact size   = $size"
+
+      - name: Upload ARM64 runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mozkey-zenz-arm64-runtime-candidate
+          path: ${{ runner.temp }}\mozkey-arm64-runtime-artifact
+          if-no-files-found: error
+          retention-days: 7
+
+  test-arm64-native:
+    name: Native ARM64 Zenz semantic audit
+    needs: build-arm64-cross
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Mozkey model
+        uses: actions/checkout@v4
+
+      - name: Download exact cross-built ARM64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: mozkey-zenz-arm64-runtime-candidate
+          path: ${{ runner.temp }}\mozkey-arm64-runtime
+
+      - name: Native ARM64 runtime and canonical Zenz audit
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+
+          $expectedModelSha = "29C223D4C23327B80FD13EBB5AB2555057A46317997D5DA391584FFBEF0DB673"
+          $exe = Join-Path $env:RUNNER_TEMP "mozkey-arm64-runtime\llama-server.exe"
+          $model = Join-Path $env:GITHUB_WORKSPACE "src\win32\installer\zenz_runtime\models\zenz-v3.2-small-Q5_K_M.gguf"
+          $outDir = Join-Path $env:RUNNER_TEMP "mozkey-arm64-native-audit"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          function Get-PEMachine([string]$Path) {
+            $fs = [System.IO.File]::OpenRead($Path)
+            $br = New-Object System.IO.BinaryReader($fs)
+            try {
+              if ($br.ReadUInt16() -ne 0x5A4D) { return "NOT_PE" }
+              $fs.Seek(0x3C,[System.IO.SeekOrigin]::Begin) | Out-Null
+              $offset = $br.ReadUInt32()
+              $fs.Seek($offset,[System.IO.SeekOrigin]::Begin) | Out-Null
+              if ($br.ReadUInt32() -ne 0x00004550) { return "INVALID_PE" }
+              $m = $br.ReadUInt16()
+              if ($m -eq 0xAA64) { return "ARM64" }
+              if ($m -eq 0x8664) { return "x64" }
+              return ("0x{0:X4}" -f $m)
+            }
+            finally { $br.Dispose() }
+          }
+
+          function Invoke-HttpJson {
+            param(
+              [string]$Method,
+              [string]$Url,
+              [string]$ApiKey = "",
+              [string]$Body = "",
+              [int]$TimeoutSeconds = 60
+            )
+
+            $req = [System.Net.HttpWebRequest]::Create($Url)
+            $req.Method = $Method
+            $req.Timeout = $TimeoutSeconds * 1000
+            $req.ReadWriteTimeout = $TimeoutSeconds * 1000
+            $req.Accept = "application/json"
+
+            if ($ApiKey) {
+              $req.Headers["Authorization"] = "Bearer $ApiKey"
+            }
+
+            if ($Body -and $Method -ne "GET") {
+              $bytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
+              $req.ContentType = "application/json; charset=utf-8"
+              $req.ContentLength = $bytes.Length
+              $stream = $req.GetRequestStream()
+              try { $stream.Write($bytes,0,$bytes.Length) }
+              finally { $stream.Dispose() }
+            }
+
+            try {
+              $resp = [System.Net.HttpWebResponse]$req.GetResponse()
+            }
+            catch [System.Net.WebException] {
+              if ($_.Exception.Response) {
+                $resp = [System.Net.HttpWebResponse]$_.Exception.Response
+              } else {
+                throw
+              }
+            }
+
+            try {
+              $reader = New-Object System.IO.StreamReader($resp.GetResponseStream(), [System.Text.Encoding]::UTF8)
+              try { $text = $reader.ReadToEnd() }
+              finally { $reader.Dispose() }
+              return [pscustomobject]@{
+                StatusCode = [int]$resp.StatusCode
+                Text = $text
+              }
+            }
+            finally { $resp.Dispose() }
+          }
+
+          function Get-FreeTcpPort {
+            $listener = New-Object System.Net.Sockets.TcpListener([Net.IPAddress]::Loopback,0)
+            $listener.Start()
+            try { return ([Net.IPEndPoint]$listener.LocalEndpoint).Port }
+            finally { $listener.Stop() }
+          }
+
+          Write-Host "PROCESSOR_ARCHITECTURE = $env:PROCESSOR_ARCHITECTURE"
+          Write-Host "PROCESSOR_IDENTIFIER   = $env:PROCESSOR_IDENTIFIER"
+          if ($env:PROCESSOR_ARCHITECTURE -ne "ARM64") {
+            throw "Runner is not native ARM64"
+          }
+
+          if (-not (Test-Path $exe)) { throw "ARM64 runtime artifact missing" }
+          if ((Get-PEMachine $exe) -ne "ARM64") { throw "Downloaded runtime is not ARM64" }
+
+          $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash
+          $modelSha = (Get-FileHash $model -Algorithm SHA256).Hash
+          if ($modelSha -ne $expectedModelSha) { throw "Model hash mismatch" }
+
+          Write-Host "llama-server SHA256 = $exeSha"
+          Write-Host "model SHA256        = $modelSha"
+
+          foreach ($dll in @("MSVCP140.dll","VCRUNTIME140.dll","VCRUNTIME140_1.dll")) {
+            $path = Join-Path $env:WINDIR "System32\$dll"
+            Write-Host "$dll present = $(Test-Path $path)"
+          }
+
+          $versionOut = Join-Path $outDir "version.stdout.txt"
+          $versionErr = Join-Path $outDir "version.stderr.txt"
+          $vp = Start-Process -FilePath $exe -ArgumentList @("--version") `
+            -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $versionOut `
+            -RedirectStandardError $versionErr
+          Write-Host "llama-server --version ExitCode = $($vp.ExitCode)"
+          if ($vp.ExitCode -ne 0) {
+            Get-Content $versionOut -ErrorAction SilentlyContinue
+            Get-Content $versionErr -ErrorAction SilentlyContinue
+            throw "Native ARM64 --version failed"
+          }
+
+          $port = Get-FreeTcpPort
+          $apiKey = "mozkey-arm64-native-" + [guid]::NewGuid().ToString("N")
+          $stdout = Join-Path $outDir "server.stdout.log"
+          $stderr = Join-Path $outDir "server.stderr.log"
+
+          $args = @(
+            "-m", "`"$model`"",
+            "-c", "256",
+            "-t", "4",
+            "--parallel", "1",
+            "--host", "127.0.0.1",
+            "--port", "$port",
+            "--api-key", $apiKey
+          )
+
+          $proc = Start-Process -FilePath $exe -ArgumentList $args `
+            -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr
+
+          try {
+            $ready = $false
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            while ($sw.Elapsed.TotalSeconds -lt 180) {
+              if ($proc.HasExited) {
+                throw "Native ARM64 llama-server exited early: $($proc.ExitCode)"
+              }
+              try {
+                $r = Invoke-HttpJson -Method GET -Url "http://127.0.0.1:$port/health" -TimeoutSeconds 5
+                if ($r.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $ready) { throw "Native ARM64 llama-server did not become healthy" }
+
+            Write-Host "Native ARM64 /health = PASS"
+
+            $unauthBody = @{
+              prompt = ([string][char]0xEE02 + [string][char]0xEE00 + "ニホンゴ" + [string][char]0xEE01)
+              n_predict = 1
+              temperature = 0.0
+            } | ConvertTo-Json -Compress
+
+            $unauth = Invoke-HttpJson -Method POST -Url "http://127.0.0.1:$port/completion" -Body $unauthBody
+            Write-Host "Unauthenticated /completion HTTP = $($unauth.StatusCode)"
+            if ($unauth.StatusCode -ne 401) {
+              throw "API-key enforcement failed"
+            }
+
+            $vectors = @(
+              [pscustomobject]@{Name="weather"; Context=""; Kana="キョウハイイテンキデスネ"; Content="今日はいい天気で"; Tokens="490,304,253,242,242,865,442,246"; Tokenize="172,120,204,172,120,202,436,504,400,623,280,280,367,259,436,406,271,545,172,120,203"},
+              [pscustomobject]@{Name="dentist"; Context="歯が痛いので"; Kana="ハイシャ"; Content="歯医者"; Tokens="1381,932,429,3"; Tokenize="172,120,204,1381,254,1283,242,240,246,172,120,202,623,280,330,453,172,120,203"},
+              [pscustomobject]@{Name="scrap_car"; Context="車が壊れたので"; Kana="ハイシャ"; Content="廃車"; Tokens="1534,660,3"; Tokenize="172,120,204,660,254,1627,262,249,240,246,172,120,202,623,280,330,453,172,120,203"},
+              [pscustomobject]@{Name="japanese_input"; Context=""; Kana="ニホンゴニュウリョク"; Content="日本語入力"; Tokens="304,358,698,428,550,3"; Tokenize="172,120,204,172,120,202,444,677,259,796,444,450,400,296,504,299,172,120,203"},
+              [pscustomobject]@{Name="meeting"; Context="会議の資料を"; Kana="カクニンシマシタ"; Content="確認しました"; Tokens="713,725,244,257,244,249,3"; Tokenize="172,120,204,394,896,240,817,599,251,172,120,202,350,299,444,259,330,384,330,327,172,120,203"},
+              [pscustomobject]@{Name="github"; Context="GitHubのPRを"; Kana="マージシマシタ"; Content="マージしました"; Tokens="384,256,354,244,257,244,249,3"; Tokenize="172,120,204,42,76,87,43,88,69,240,51,53,251,172,120,202,384,256,354,330,384,330,327,172,120,203"},
+              [pscustomobject]@{Name="consult"; Context="体調について医師に"; Kana="ソウダンシマシタ"; Content="相談しました"; Tokens="686,1036,244,257,244,249,3"; Tokenize="172,120,204,489,749,243,328,242,245,932,984,243,172,120,202,647,400,449,259,330,384,330,327,172,120,203"},
+              [pscustomobject]@{Name="rain"; Context="今日は"; Kana="アメデス"; Content="雨です"; Tokens="1530,246,255,3"; Tokenize="172,120,204,490,304,253,172,120,202,298,381,406,271,172,120,203"},
+              [pscustomobject]@{Name="enemy"; Context="彼は"; Kana="テンテキデス"; Content="天敵です"; Tokens="865,1462,246,255,3"; Tokenize="172,120,204,798,253,172,120,202,367,259,367,436,406,271,172,120,203"},
+              [pscustomobject]@{Name="forecast"; Context="明日の"; Kana="テンキヨホウ"; Content="天気予報"; Tokens="865,442,699,611,3"; Tokenize="172,120,204,634,304,240,172,120,202,367,259,436,1140,677,400,172,120,203"},
+              [pscustomobject]@{Name="bridge"; Context="橋を渡って"; Kana="ハシノムコウヘイク"; Content="橋の向こうへ行く"; Tokens="1332,240,681,268,266,588,380,272"; Tokenize="172,120,204,1332,251,1315,261,245,172,120,202,623,330,653,399,363,400,987,280,299,172,120,203"},
+              [pscustomobject]@{Name="local_llm"; Context=""; Kana="ローカルエルエルエムデニホンゴヘンカン"; Content="lawからllm"; Tokens="79,68,90,260,267,79,79,80"; Tokenize="172,120,204,172,120,202,342,256,350,279,460,279,460,279,460,399,406,444,677,259,796,987,259,350,259,172,120,203"}
+            )
+
+            $rows = @()
+            $contextMarker = [string][char]0xEE02
+            $inputStart = [string][char]0xEE00
+            $outputStart = [string][char]0xEE01
+
+            foreach ($v in $vectors) {
+              $prompt = $contextMarker + $v.Context + $inputStart + $v.Kana + $outputStart
+
+              $tokenBody = @{
+                content = $prompt
+                add_special = $false
+                parse_special = $true
+                with_pieces = $true
+              } | ConvertTo-Json -Compress
+
+              $tok = Invoke-HttpJson -Method POST -Url "http://127.0.0.1:$port/tokenize" -ApiKey $apiKey -Body $tokenBody
+              if ($tok.StatusCode -ne 200) { throw "$($v.Name): /tokenize HTTP $($tok.StatusCode)" }
+              $tj = $tok.Text | ConvertFrom-Json
+              $ids = @()
+              foreach ($token in @($tj.tokens)) {
+                if ($token -is [int] -or $token -is [long]) { $ids += [int]$token }
+                elseif ($null -ne $token.id) { $ids += [int]$token.id }
+              }
+              $tokenizeText = $ids -join ","
+
+              $completionBody = [ordered]@{
+                prompt = $prompt
+                n_predict = 8
+                temperature = 0.0
+                top_k = 1
+                top_p = 1.0
+                stream = $false
+                cache_prompt = $true
+                n_probs = 0
+                return_tokens = $true
+                stop = @(
+                  [string][char]0xEE00,[string][char]0xEE01,[string][char]0xEE02,[string][char]0xEE03,
+                  [string][char]0xEE04,[string][char]0xEE05,[string][char]0xEE06,[string][char]0xEE07,
+                  [string][char]0xEE08,[string][char]0xEE09,[string][char]0xEE0A,[string][char]0xEE0B,
+                  [string][char]0xEE0C,[string][char]0xEE0D,[string][char]0xEE0E,[string][char]0xEE0F,
+                  "`n","`r"
+                )
+              } | ConvertTo-Json -Compress
+
+              $cr = Invoke-HttpJson -Method POST -Url "http://127.0.0.1:$port/completion" -ApiKey $apiKey -Body $completionBody
+              if ($cr.StatusCode -ne 200) { throw "$($v.Name): /completion HTTP $($cr.StatusCode)" }
+              $cj = $cr.Text | ConvertFrom-Json
+              $content = [string]$cj.content
+              $tokens = @($cj.tokens | ForEach-Object { [int]$_ }) -join ","
+
+              $row = [pscustomobject]@{
+                Test = $v.Name
+                TokenizeExact = ($tokenizeText -ceq $v.Tokenize)
+                ContentExact = ($content -ceq $v.Content)
+                CompletionTokensExact = ($tokens -ceq $v.Tokens)
+                Content = $content
+                Tokens = $tokens
+              }
+              $rows += $row
+
+              Write-Host ("{0,-14} tokenize={1} content={2} tokens={3} [{4}]" -f `
+                $v.Name, $row.TokenizeExact, $row.ContentExact, $row.CompletionTokensExact, $content)
+            }
+
+            $rows | Export-Csv -LiteralPath (Join-Path $outDir "canonical_results.csv") -NoTypeInformation -Encoding UTF8
+
+            $tokenizePass = @($rows | Where-Object TokenizeExact).Count
+            $contentPass = @($rows | Where-Object ContentExact).Count
+            $completionTokenPass = @($rows | Where-Object CompletionTokensExact).Count
+
+            Write-Host ""
+            Write-Host "===== NATIVE ARM64 RESULT ====="
+            Write-Host "Runner architecture            = $env:PROCESSOR_ARCHITECTURE"
+            Write-Host "PE architecture                = $(Get-PEMachine $exe)"
+            Write-Host "Model SHA256 exact             = $($modelSha -eq $expectedModelSha)"
+            Write-Host "Health                          = PASS"
+            Write-Host "API-key enforcement            = PASS"
+            Write-Host "Tokenizer baseline exact       = $tokenizePass/12"
+            Write-Host "Production content exact       = $contentPass/12"
+            Write-Host "Production token exact         = $completionTokenPass/12"
+            Write-Host "Native ARM64 semantic gate     = $(if($tokenizePass -eq 12 -and $contentPass -eq 12 -and $completionTokenPass -eq 12){'PASS'}else{'FAIL'})"
+
+            if ($tokenizePass -ne 12 -or $contentPass -ne 12 -or $completionTokenPass -ne 12) {
+              throw "Native ARM64 canonical semantic differential detected"
+            }
+          }
+          finally {
+            if ($proc -and -not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Upload native ARM64 audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mozkey-zenz-arm64-native-audit
+          path: ${{ runner.temp }}\mozkey-arm64-native-audit
+          if-no-files-found: warn
+          retention-days: 7
