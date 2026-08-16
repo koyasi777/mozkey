@@ -43,7 +43,9 @@ Linux については、upstream Mozc 自体は対応していますが、この
 
 Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mozkey/releases) からダウンロードできます。
 
-- 通常の 64-bit Windows では、Releases にある最新の `Mozkey_v*_x64.msi` を使用してください。
+- 通常の x64 Windows では、Releases にある最新の `Mozkey_v*_x64.msi` を使用してください。
+- Windows on Arm（ARM64）では、その release に ARM64 と明記された MSI が含まれる場合は ARM64 版を使用してください。ARM64 MSI は Mozkey 本体、`mozc_zenz_scorer.exe`、`llama-server.exe` を native ARM64 payload として構成します。
+- `universal` MSI は x64 / ARM64 の全実行ファイルを dual-native 化した whole-product package ではありません。通常の配布選択では architecture-specific な x64 / ARM64 MSI を優先してください。
 - 本 fork のリリースは個人用の experimental build として公開しています。
 - Zenz 同梱版は、ローカル推論 runtime と GGUF model を含むため、従来の offline MSI よりファイルサイズが大きくなります。
 - Windows 向けリリース MSI には、ローカル生成した `daily` system dictionary profile を同梱する場合があります。
@@ -159,7 +161,7 @@ Zenz feedback learning は、完全な読み、完全な候補、粗い文脈ク
 
 ソースからビルドする場合、ビルド依存関係の取得にネットワーク接続が必要になる場合があります。これは、インストール済み IME の実行時通信とは別です。
 
-Windows 版では、追加のオフライン防御層として、インストーラーが Mozc の実行ファイルに outbound 通信をブロックする Windows Firewall rule を追加します。これらの rule はアンインストール時に削除されます。
+Windows 版では、追加のオフライン防御層として、インストーラーが Mozc の実行ファイルに outbound 通信をブロックする Windows Firewall rule を追加します。Zenz 同梱構成では `mozc_zenz_scorer.exe` と `llama-server.exe` も対象です。これらの rule はアンインストール時に削除されます。
 
 関連ドキュメント:
 
@@ -625,8 +627,9 @@ Building from source may require network access to download build dependencies.
 This is separate from runtime behavior of the installed IME.
 
 On Windows, the installer also adds outbound Windows Firewall block rules for
-Mozc runtime executables as an additional offline hardening layer. These rules
-are removed during uninstall.
+Mozc runtime executables as an additional offline hardening layer. For
+Zenz-bundled builds, the rules also cover `mozc_zenz_scorer.exe` and
+`llama-server.exe`. These rules are removed during uninstall.
 
 See also:
 
@@ -645,7 +648,9 @@ Linux is supported by upstream Mozc itself, but this fork-specific Zenz configur
 
 Windows MSI packages are available from [Releases](https://github.com/koyasi777/mozkey/releases).
 
-- On ordinary 64-bit Windows, use the latest `Mozkey_v*_x64.msi` from Releases.
+- On x64 Windows, use the latest `Mozkey_v*_x64.msi` from Releases.
+- On Windows on Arm (ARM64), when a release contains an MSI explicitly labeled ARM64, use the ARM64 package. The ARM64 MSI packages Mozkey, `mozc_zenz_scorer.exe`, and `llama-server.exe` as native ARM64 payloads.
+- The `universal` MSI is not a dual-native whole-product package containing native x64 and ARM64 versions of every executable. Prefer the architecture-specific x64 / ARM64 MSI for normal release installation.
 - For the Zenz-bundled build, choose an MSI whose file name contains `zenz` or `zenz_offline`.
 - Releases from this fork are published as personal experimental builds.
 - Zenz-bundled builds are larger than the traditional offline MSI because they include a local inference runtime and a GGUF model.

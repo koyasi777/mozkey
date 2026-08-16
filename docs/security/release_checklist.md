@@ -241,6 +241,8 @@ C:\Program Files (x86)\Mozc\mozc_tool.exe
 C:\Program Files (x86)\Mozc\mozc_renderer.exe
 C:\Program Files (x86)\Mozc\mozc_broker.exe
 C:\Program Files (x86)\Mozc\mozc_cache_service.exe
+C:\Program Files (x86)\Mozc\mozc_zenz_scorer.exe
+C:\Program Files (x86)\Mozc\llama-server.exe
 ```
 
 - [ ] Firewall rules are outbound block rules
@@ -267,6 +269,38 @@ Get-NetFirewallRule -DisplayName "Mozc Offline - Block *" -ErrorAction SilentlyC
 ```
 
 Expected after uninstall: no rules are returned.
+
+## Architecture / package lifecycle checks
+
+For architecture-specific Windows Zenz releases:
+
+- [ ] x64 MSI contains x64 `mozc_zenz_scorer.exe` and x64 `llama-server.exe`
+- [ ] ARM64 MSI contains ARM64 `mozc_zenz_scorer.exe` and ARM64 `llama-server.exe`
+- [ ] bundled model SHA256 matches `WINDOWS_ZENZ_RUNTIME_CONTRACT.md`
+- [ ] ARM64 MSI is tested on a native `windows-11-arm` runner from the exact
+      package artifact that would be released
+- [ ] installed ARM64 `llama-server.exe --version` succeeds
+- [ ] installed ARM64 canonical Zenz semantic gate passes
+- [ ] installed scorer named-pipe context E2E passes
+- [ ] scorer-owned llama listener is loopback-only
+- [ ] scorer / llama have no non-loopback TCP connection during the audit
+
+For a published upgrade:
+
+- [ ] ProductVersion is greater than the previous published release
+- [ ] ProductCode differs from the previous package
+- [ ] Mozc UpgradeCode remains `{DD94B570-B5E2-4100-9D42-61930C611D8A}`
+- [ ] normal MSI upgrade from the previous release succeeds without forced
+      `REINSTALL=ALL REINSTALLMODE=amus`
+- [ ] legacy Zenz runtime files that are no longer part of the current package
+      are removed by the upgrade
+- [ ] post-upgrade Zenz scorer E2E passes
+- [ ] uninstall removes current Zenz payload, product registration, and firewall
+      rules
+
+Development CI artifacts may intentionally exercise same-version upgrade
+mechanics, but this does not replace the ProductVersion-increase requirement for
+a published release.
 
 ## Runtime checks
 

@@ -32,7 +32,13 @@
 - equivalent-contract native GitHub ARM64 gate: PASS
   - workflow run: https://github.com/koyasi777/mozkey/actions/runs/31893874478
   - workflow commit: `daa13a4df3c4b2ce4da5a51dcb2a29aa3f7f248f`
-- exact final-MSI native validation: pending package gate.
+- exact final-MSI native validation: PASS
+  - CI job: `Native ARM64 installed MSI Zenz audit`
+  - the exact same-run ARM64 MSI is installed on native `windows-11-arm`
+  - installed `llama-server.exe` is ARM64 and matches the fixed runtime SHA256
+  - installed `mozc_zenz_scorer.exe` is ARM64
+  - the installed model matches the fixed model SHA256
+  - native `llama-server --version`, the canonical 12-case semantic gate, and the scorer named-pipe context gate pass from installed files
 
 ## Build/runtime policy
 
@@ -58,3 +64,49 @@
 - ARM64 MSI: ARM64 Mozkey + ARM64 scorer + ARM64 llama-server + ARM64 CRT
 - the Zenz model is architecture-independent and has one fixed SHA256.
 - universal MSI is not treated as a dual-native whole-product package in this phase.
+
+## Installed security gate
+
+The final ARM64 MSI is also validated on native `windows-11-arm` with the
+installed payload, not source-tree binaries:
+
+- the seven Mozc outbound/block Windows Firewall rules are installed and point
+  to the actual installed executables
+- the Zenz scorer-to-llama path continues to pass with the firewall rules enabled
+- scorer-owned `llama-server.exe` listens on loopback only
+- scorer / llama have no non-loopback TCP connection during the audit
+- uninstall removes the Zenz payload and the Mozc firewall rules
+
+## Installer lifecycle gate
+
+The native ARM64 lifecycle audit rebuilds the W2-predecessor package from the
+audited baseline commit `c986db2c611c7255ba92b1d44fc6ac3fb6b098bf` and verifies
+a normal MSI lifecycle on native `windows-11-arm`:
+
+- the predecessor contains the historical x64 `llama-server.exe` and the four
+  legacy ggml / llama DLLs
+- installing the current MSI over that predecessor replaces the ProductCode
+  while preserving the Mozc UpgradeCode
+- the upgraded payload contains the native ARM64 llama/scorer runtime
+- the four legacy runtime DLLs are removed
+- the post-upgrade scorer context E2E gate passes
+- a second install of the exact current MSI does not duplicate firewall rules
+- final uninstall removes product registration, Zenz payload, and firewall rules
+- forced `REINSTALL=ALL REINSTALLMODE=amus` is not part of the normal lifecycle
+  contract
+
+Development CI artifacts can have the same ProductVersion while validating the
+upgrade mechanics. A published release must increase ProductVersion relative to
+the previous published release, use a new ProductCode, and preserve the Mozc
+UpgradeCode.
+
+## Current install-directory compatibility note
+
+The current WiX layout keeps `MozcDir` under `ProgramFilesFolder\Mozc` for
+compatibility with the existing product layout. On 64-bit Windows this can
+resolve to `C:\Program Files (x86)\Mozc`. Runtime architecture is therefore
+verified from PE identity and hashes, not inferred from the directory name.
+
+Changing this directory contract to `ProgramFiles64Folder` is outside this
+runtime-architecture phase because it affects installer compatibility and must
+be handled with its own upgrade/lifecycle audit.

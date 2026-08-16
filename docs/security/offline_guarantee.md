@@ -127,10 +127,19 @@ The rules target Mozc executable files such as:
 - mozc_renderer.exe
 - mozc_broker.exe
 - mozc_cache_service.exe
+- mozc_zenz_scorer.exe
+- llama-server.exe
 
 The rules are outbound-only. They are removed during uninstall. Firewall rule
 creation and removal are best-effort operations; installation and uninstall do
 not fail solely because local policy rejects firewall changes.
+
+The native ARM64 installed-MSI CI gate verifies all seven rules against the
+actual installed executable paths. With the rules enabled, the scorer-to-llama
+localhost E2E gate must still pass, scorer-owned `llama-server.exe` must listen
+on loopback only, and the Zenz scorer / llama processes must have no
+non-loopback TCP connection during the audit. The same gate verifies that
+uninstall removes the rules.
 
 The TIP DLL is not managed by a firewall rule because Windows Firewall program
 rules are executable-oriented. Instead, TIP DLL network capability is checked by
