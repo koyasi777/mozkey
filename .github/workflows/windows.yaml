@@ -386,7 +386,8 @@ jobs:
         with:
           name: Mozc64_arm64.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
-          if-no-files-found: warn      - name: Build W2-predecessor ARM64 lifecycle baseline
+          if-no-files-found: warn
+      - name: Build W2-predecessor ARM64 lifecycle baseline
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
