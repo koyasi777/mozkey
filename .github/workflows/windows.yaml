@@ -437,9 +437,34 @@ jobs:
             throw "This job is not running on native Windows ARM64."
           }
 
-          $installDir = Join-Path ${env:ProgramFiles} "Mozc"
-          if (Test-Path $installDir) {
-            throw "Mozc install directory already exists before audit: $installDir"
+          # installer_oss_64bit.wxs currently uses ProgramFilesFolder, not
+          # ProgramFiles64Folder.  On 64-bit Windows, Windows Installer maps
+          # ProgramFilesFolder to the 32-bit Program Files location.  Do not
+          # hard-code either location here; discover the exact installed path.
+          $installDir = $null
+
+          $programRoots = @(
+            [Environment]::GetEnvironmentVariable("ProgramFiles")
+            [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+            [Environment]::GetEnvironmentVariable("ProgramW6432")
+          ) |
+            Where-Object { $_ } |
+            ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd("\") } |
+            Select-Object -Unique
+
+          $installCandidates = @(
+            $programRoots | ForEach-Object { Join-Path $_ "Mozc" }
+          )
+
+          Write-Host "Program roots:"
+          $programRoots | ForEach-Object { Write-Host "  $_" }
+          Write-Host "Mozc install candidates:"
+          $installCandidates | ForEach-Object { Write-Host "  $_" }
+
+          foreach ($candidate in $installCandidates) {
+            if (Test-Path $candidate) {
+              throw "Mozc install candidate already exists before audit: $candidate"
+            }
           }
 
           $installLog = Join-Path $evidence "install.log"
@@ -722,9 +747,61 @@ jobs:
             }
             $installed = $true
 
-            if (-not (Test-Path $installDir -PathType Container)) {
-              throw "Expected install directory missing: $installDir"
+            Write-Host ""
+            Write-Host "===== RESOLVE ACTUAL MSI INSTALL DIRECTORY ====="
+
+            $candidateRows = @()
+            $matchingDirs = @()
+
+            foreach ($candidate in $installCandidates) {
+              $llamaCandidate = Join-Path $candidate "llama-server.exe"
+              $scorerCandidate = Join-Path $candidate "mozc_zenz_scorer.exe"
+              $modelCandidate = Join-Path $candidate "models\zenz-v3.2-small-Q5_K_M.gguf"
+
+              $row = [pscustomobject]@{
+                Directory = $candidate
+                DirectoryExists = (Test-Path $candidate -PathType Container)
+                LlamaExists = (Test-Path $llamaCandidate -PathType Leaf)
+                ScorerExists = (Test-Path $scorerCandidate -PathType Leaf)
+                ModelExists = (Test-Path $modelCandidate -PathType Leaf)
+              }
+              $candidateRows += $row
+
+              if ($row.DirectoryExists -and
+                  $row.LlamaExists -and
+                  $row.ScorerExists -and
+                  $row.ModelExists) {
+                $matchingDirs += $candidate
+              }
             }
+
+            $candidateRows |
+              Format-Table -AutoSize |
+              Out-String |
+              Write-Host
+
+            $candidateRows |
+              Export-Csv (Join-Path $evidence "install-location-candidates.csv") `
+                -NoTypeInformation -Encoding utf8
+
+            $msiFolderLines = @(
+              Select-String -Path $installLog `
+                -Pattern "ProgramFilesFolder|ProgramFiles64Folder|MozcDir" `
+                -ErrorAction SilentlyContinue |
+                ForEach-Object { $_.Line }
+            )
+            $msiFolderLines |
+              Set-Content (Join-Path $evidence "install-folder-properties.txt") `
+                -Encoding utf8
+
+            if ($matchingDirs.Count -ne 1) {
+              Write-Host "Matching installed Mozc directories = $($matchingDirs.Count)"
+              $matchingDirs | ForEach-Object { Write-Host "  $_" }
+              throw "Could not resolve exactly one installed Mozc directory from MSI payload identity."
+            }
+
+            $installDir = $matchingDirs[0]
+            Write-Host "Resolved install directory = $installDir"
 
             $llama = Join-Path $installDir "llama-server.exe"
             $scorer = Join-Path $installDir "mozc_zenz_scorer.exe"
@@ -1162,14 +1239,18 @@ jobs:
                 Add-Content $summary "uninstall=$uninstallResult" -Encoding utf8
               }
 
-              foreach ($zenzPath in @(
-                (Join-Path $installDir "llama-server.exe"),
-                (Join-Path $installDir "mozc_zenz_scorer.exe"),
-                (Join-Path $installDir "models\zenz-v3.2-small-Q5_K_M.gguf")
-              )) {
-                if (Test-Path $zenzPath) {
-                  Write-Error "Installed Zenz payload remains after uninstall: $zenzPath"
+              if ($installDir) {
+                foreach ($zenzPath in @(
+                  (Join-Path $installDir "llama-server.exe"),
+                  (Join-Path $installDir "mozc_zenz_scorer.exe"),
+                  (Join-Path $installDir "models\zenz-v3.2-small-Q5_K_M.gguf")
+                )) {
+                  if (Test-Path $zenzPath) {
+                    Write-Error "Installed Zenz payload remains after uninstall: $zenzPath"
+                  }
                 }
+              } else {
+                Write-Host "Install directory was not resolved; payload cleanup paths cannot be checked."
               }
 
               if ($uninstallResult -ne "PASS") {
