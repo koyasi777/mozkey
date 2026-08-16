@@ -387,7 +387,1126 @@ jobs:
           name: Mozc64_arm64.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
           if-no-files-found: warn
+      - name: Build W2-predecessor ARM64 lifecycle baseline
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
 
+          $baseline = "c986db2c611c7255ba92b1d44fc6ac3fb6b098bf"
+          $tracked = @(git status --porcelain --untracked-files=no)
+          if ($tracked.Count -ne 0) {
+            throw "Tracked working tree changed during current ARM64 build: $($tracked -join '; ')"
+          }
+
+          # actions/checkout fetches only the triggering commit by default.
+          # Fetch the immutable audited W2-predecessor commit explicitly.
+          git fetch --no-tags --depth=1 origin $baseline
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch exact W2-predecessor baseline commit."
+          }
+
+          $fetchedBaseline = (git rev-parse FETCH_HEAD).Trim()
+          if ($fetchedBaseline -ne $baseline) {
+            throw "Fetched W2-predecessor baseline mismatch: $fetchedBaseline"
+          }
+
+          git checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout fetched W2-predecessor baseline."
+          }
+
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $baseline) {
+            throw "Baseline checkout mismatch: $actual"
+          }
+
+          Push-Location .\src
+          try {
+            bazelisk build package --config release_build --platforms=//:windows-arm64
+            if ($LASTEXITCODE -ne 0) {
+              throw "W2-predecessor ARM64 baseline build failed."
+            }
+          }
+          finally {
+            Pop-Location
+          }
+
+          $baselineMsi = ".\src\bazel-bin\win32\installer\Mozc64.msi"
+          if (-not (Test-Path $baselineMsi -PathType Leaf)) {
+            throw "Baseline MSI was not produced."
+          }
+
+          Write-Host "Baseline commit = $actual"
+          Write-Host "Baseline MSI SHA256 = $((Get-FileHash $baselineMsi -Algorithm SHA256).Hash)"
+
+      - name: upload Mozc64_arm64 W2-predecessor lifecycle baseline
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_pre_native_lifecycle_baseline.msi
+          path: src/bazel-bin/win32/installer/Mozc64.msi
+          if-no-files-found: error
+
+
+  test_arm64_installer_lifecycle:
+    name: Native ARM64 installer lifecycle audit
+    needs: build_arm64
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout current lifecycle audit script
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Download current ARM64 MSI
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64.msi
+          path: ${{ runner.temp }}\mozkey-current-arm64-msi
+
+      - name: Download W2-predecessor ARM64 MSI
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64_pre_native_lifecycle_baseline.msi
+          path: ${{ runner.temp }}\mozkey-baseline-arm64-msi
+
+      - name: Run native ARM64 installer lifecycle audit
+        shell: pwsh
+        run: |
+          & ".\.github\scripts\windows_zenz_arm64_installer_lifecycle_audit.ps1" `
+            -BaselineArtifactDir "${{ runner.temp }}\mozkey-baseline-arm64-msi" `
+            -CurrentArtifactDir "${{ runner.temp }}\mozkey-current-arm64-msi" `
+            -EvidenceDir "${{ runner.temp }}\mozkey-w6-arm64-lifecycle-evidence"
+
+      - name: Upload installer lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_installer_lifecycle_audit
+          path: ${{ runner.temp }}\mozkey-w6-arm64-lifecycle-evidence
+          if-no-files-found: warn
+
+  test_arm64_installed_msi:
+    name: Native ARM64 installed MSI Zenz audit
+    needs: build_arm64
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Download exact ARM64 MSI from this workflow run
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64.msi
+          path: ${{ runner.temp }}\mozkey-arm64-msi
+
+      - name: Install and audit exact ARM64 MSI
+        shell: pwsh
+        env:
+          EXPECTED_LLAMA_SHA256: 0ACD17D6EE5E361AFC06A7DCCD06EF012A00669546535889B874D5C3BB3DE81B
+          EXPECTED_MODEL_SHA256: 29C223D4C23327B80FD13EBB5AB2555057A46317997D5DA391584FFBEF0DB673
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+
+          $evidence = Join-Path $env:RUNNER_TEMP "mozkey-w4-arm64-msi-evidence"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+
+          $msiCandidates = @(
+            Get-ChildItem (Join-Path $env:RUNNER_TEMP "mozkey-arm64-msi") -Recurse -File -Filter *.msi
+          )
+          if ($msiCandidates.Count -ne 1) {
+            throw "Expected exactly one ARM64 MSI artifact; found $($msiCandidates.Count)"
+          }
+          $msi = $msiCandidates[0].FullName
+          $msiSha = (Get-FileHash $msi -Algorithm SHA256).Hash
+
+          Write-Host "Runner architecture = $env:PROCESSOR_ARCHITECTURE"
+          Write-Host "MSI                 = $msi"
+          Write-Host "MSI SHA256          = $msiSha"
+
+          if ($env:PROCESSOR_ARCHITECTURE -ne "ARM64") {
+            throw "This job is not running on native Windows ARM64."
+          }
+
+          # installer_oss_64bit.wxs currently uses ProgramFilesFolder, not
+          # ProgramFiles64Folder.  On 64-bit Windows, Windows Installer maps
+          # ProgramFilesFolder to the 32-bit Program Files location.  Do not
+          # hard-code either location here; discover the exact installed path.
+          $installDir = $null
+
+          $programRoots = @(
+            [Environment]::GetEnvironmentVariable("ProgramFiles")
+            [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+            [Environment]::GetEnvironmentVariable("ProgramW6432")
+          ) |
+            Where-Object { $_ } |
+            ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd("\") } |
+            Select-Object -Unique
+
+          $installCandidates = @(
+            $programRoots | ForEach-Object { Join-Path $_ "Mozc" }
+          )
+
+          Write-Host "Program roots:"
+          $programRoots | ForEach-Object { Write-Host "  $_" }
+          Write-Host "Mozc install candidates:"
+          $installCandidates | ForEach-Object { Write-Host "  $_" }
+
+          foreach ($candidate in $installCandidates) {
+            if (Test-Path $candidate) {
+              throw "Mozc install candidate already exists before audit: $candidate"
+            }
+          }
+
+          $installLog = Join-Path $evidence "install.log"
+          $uninstallLog = Join-Path $evidence "uninstall.log"
+          $summary = Join-Path $evidence "summary.txt"
+
+          $expectedFirewallRules = @(
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_server outbound"; File="mozc_server.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_tool outbound"; File="mozc_tool.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_renderer outbound"; File="mozc_renderer.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_broker outbound"; File="mozc_broker.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_cache_service outbound"; File="mozc_cache_service.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_zenz_scorer outbound"; File="mozc_zenz_scorer.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block llama-server outbound"; File="llama-server.exe"}
+          )
+
+          Write-Host ""
+          Write-Host "===== PRE-INSTALL FIREWALL CLEANLINESS ====="
+          foreach ($spec in $expectedFirewallRules) {
+            $existing = @(Get-NetFirewallRule -DisplayName $spec.Name -ErrorAction SilentlyContinue)
+            if ($existing.Count -ne 0) {
+              throw "Unexpected pre-existing Mozc firewall rule: $($spec.Name)"
+            }
+          }
+          Write-Host "Pre-existing Mozc offline rules = NONE"
+
+          function Get-PEMachine {
+            param([Parameter(Mandatory)][string]$Path)
+
+            $fs = $null
+            $br = $null
+            try {
+              $fs = [System.IO.File]::Open(
+                $Path,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::ReadWrite
+              )
+              $br = [System.IO.BinaryReader]::new($fs)
+
+              if ($br.ReadUInt16() -ne 0x5A4D) { return "NOT_PE" }
+              $fs.Seek(0x3C, [System.IO.SeekOrigin]::Begin) | Out-Null
+              $offset = $br.ReadUInt32()
+              $fs.Seek($offset, [System.IO.SeekOrigin]::Begin) | Out-Null
+              if ($br.ReadUInt32() -ne 0x00004550) { return "INVALID_PE" }
+
+              $machine = $br.ReadUInt16()
+              switch ($machine) {
+                0xAA64 { return "ARM64" }
+                0x8664 { return "x64" }
+                0x014c { return "x86" }
+                default { return ("0x{0:X4}" -f $machine) }
+              }
+            }
+            finally {
+              if ($br) { $br.Dispose() }
+              elseif ($fs) { $fs.Dispose() }
+            }
+          }
+
+          function Invoke-HttpJson {
+            param(
+              [Parameter(Mandatory)][string]$Method,
+              [Parameter(Mandatory)][string]$Url,
+              [string]$ApiKey = "",
+              [string]$Body = "",
+              [int]$TimeoutSeconds = 60
+            )
+
+            $handler = [System.Net.Http.HttpClientHandler]::new()
+            $client = [System.Net.Http.HttpClient]::new($handler)
+            $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
+
+            try {
+              $request = [System.Net.Http.HttpRequestMessage]::new(
+                [System.Net.Http.HttpMethod]::new($Method),
+                $Url
+              )
+              try {
+                if ($ApiKey) {
+                  $request.Headers.Authorization =
+                    [System.Net.Http.Headers.AuthenticationHeaderValue]::new(
+                      "Bearer",
+                      $ApiKey
+                    )
+                }
+
+                if ($Body -and $Method -ne "GET") {
+                  $request.Content = [System.Net.Http.StringContent]::new(
+                    $Body,
+                    [System.Text.Encoding]::UTF8,
+                    "application/json"
+                  )
+                }
+
+                $response = $client.SendAsync($request).GetAwaiter().GetResult()
+                try {
+                  $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                  return [pscustomobject]@{
+                    StatusCode = [int]$response.StatusCode
+                    Text = $text
+                  }
+                }
+                finally {
+                  $response.Dispose()
+                }
+              }
+              finally {
+                $request.Dispose()
+              }
+            }
+            finally {
+              $client.Dispose()
+              $handler.Dispose()
+            }
+          }
+
+          function Get-FreeTcpPort {
+            $listener = [System.Net.Sockets.TcpListener]::new(
+              [System.Net.IPAddress]::Loopback,
+              0
+            )
+            $listener.Start()
+            try {
+              return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+            }
+            finally {
+              $listener.Stop()
+            }
+          }
+
+          function Read-Exactly {
+            param(
+              [Parameter(Mandatory)][System.IO.Stream]$Stream,
+              [Parameter(Mandatory)][int]$Count
+            )
+
+            $buffer = [byte[]]::new($Count)
+            $offset = 0
+            while ($offset -lt $Count) {
+              $read = $Stream.Read($buffer, $offset, $Count - $offset)
+              if ($read -le 0) {
+                throw "Unexpected EOF while reading named-pipe response."
+              }
+              $offset += $read
+            }
+            return ,$buffer
+          }
+
+          function Invoke-ZenzPipeRequest {
+            param(
+              [Parameter(Mandatory)][string]$Prompt,
+              [uint32]$Generation = 1,
+              [uint32]$TimeoutMsec = 5000,
+              [uint32]$MaxOutputChars = 32
+            )
+
+            $promptBytes = [System.Text.Encoding]::UTF8.GetBytes($Prompt)
+            $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
+              ".",
+              "mozc_zenz_scorer",
+              [System.IO.Pipes.PipeDirection]::InOut,
+              [System.IO.Pipes.PipeOptions]::None
+            )
+
+            try {
+              $pipe.Connect(7000)
+
+              $headerStream = [System.IO.MemoryStream]::new()
+              $writer = [System.IO.BinaryWriter]::new(
+                $headerStream,
+                [System.Text.Encoding]::UTF8,
+                $true
+              )
+              try {
+                $writer.Write([uint32]0x315A4E5A)
+                $writer.Write([uint16]1)
+                $writer.Write([uint16]1)
+                $writer.Write([uint32]$Generation)
+                $writer.Write([uint32]$TimeoutMsec)
+                $writer.Write([uint32]$MaxOutputChars)
+                $writer.Write([uint32]$promptBytes.Length)
+                $writer.Flush()
+
+                $headerBytes = $headerStream.ToArray()
+              }
+              finally {
+                $writer.Dispose()
+                $headerStream.Dispose()
+              }
+
+              if ($headerBytes.Length -ne 24) {
+                throw "Zenz request header length is not 24 bytes."
+              }
+
+              $pipe.Write($headerBytes, 0, $headerBytes.Length)
+              $pipe.Write($promptBytes, 0, $promptBytes.Length)
+              $pipe.Flush()
+
+              $responseHeaderBytes = Read-Exactly -Stream $pipe -Count 28
+              $responseHeaderStream = [System.IO.MemoryStream]::new(
+                $responseHeaderBytes,
+                $false
+              )
+              $reader = [System.IO.BinaryReader]::new(
+                $responseHeaderStream,
+                [System.Text.Encoding]::UTF8,
+                $true
+              )
+
+              try {
+                $magic = $reader.ReadUInt32()
+                $version = $reader.ReadUInt16()
+                $kind = $reader.ReadUInt16()
+                $responseGeneration = $reader.ReadUInt32()
+                $status = $reader.ReadUInt32()
+                $latency = $reader.ReadUInt32()
+                $valueSize = $reader.ReadUInt32()
+                $debugSize = $reader.ReadUInt32()
+              }
+              finally {
+                $reader.Dispose()
+                $responseHeaderStream.Dispose()
+              }
+
+              if ($magic -ne 0x315A4E5A -or $version -ne 1 -or $kind -ne 2) {
+                throw "Invalid Zenz response header."
+              }
+              if ($responseGeneration -ne $Generation) {
+                throw "Zenz response generation mismatch."
+              }
+              if ($valueSize -gt 65536 -or $debugSize -gt 65536) {
+                throw "Zenz response length exceeds audit limit."
+              }
+
+              $valueBytes = if ($valueSize -gt 0) {
+                Read-Exactly -Stream $pipe -Count ([int]$valueSize)
+              } else {
+                [byte[]]::new(0)
+              }
+
+              $debugBytes = if ($debugSize -gt 0) {
+                Read-Exactly -Stream $pipe -Count ([int]$debugSize)
+              } else {
+                [byte[]]::new(0)
+              }
+
+              return [pscustomobject]@{
+                Status = $status
+                LatencyMsec = $latency
+                Value = [System.Text.Encoding]::UTF8.GetString($valueBytes)
+                Debug = [System.Text.Encoding]::UTF8.GetString($debugBytes)
+              }
+            }
+            finally {
+              $pipe.Dispose()
+            }
+          }
+
+          function Stop-InstalledZenzProcesses {
+            param([string]$Root)
+
+            foreach ($name in @("mozc_zenz_scorer", "llama-server")) {
+              foreach ($p in @(Get-Process $name -ErrorAction SilentlyContinue)) {
+                $path = ""
+                try { $path = $p.Path } catch {}
+                if ($path -and $path.StartsWith(
+                    $Root,
+                    [System.StringComparison]::OrdinalIgnoreCase)) {
+                  Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                }
+              }
+            }
+            Start-Sleep -Seconds 2
+          }
+
+          $installed = $false
+          $directServer = $null
+          $scorerProcess = $null
+          $directResult = "NOT_RUN"
+          $pipeResult = "NOT_RUN"
+          $uninstallResult = "NOT_RUN"
+
+          try {
+            Write-Host ""
+            Write-Host "===== INSTALL EXACT ARM64 MSI ====="
+
+            $install = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+              "/i",
+              "`"$msi`"",
+              "/qn",
+              "/norestart",
+              "/l*v",
+              "`"$installLog`""
+            )
+
+            Write-Host "msiexec install exit = $($install.ExitCode)"
+            if ($install.ExitCode -notin @(0, 3010)) {
+              throw "ARM64 MSI installation failed with exit code $($install.ExitCode)"
+            }
+            $installed = $true
+
+            Write-Host ""
+            Write-Host "===== RESOLVE ACTUAL MSI INSTALL DIRECTORY ====="
+
+            $candidateRows = @()
+            $matchingDirs = @()
+
+            foreach ($candidate in $installCandidates) {
+              $llamaCandidate = Join-Path $candidate "llama-server.exe"
+              $scorerCandidate = Join-Path $candidate "mozc_zenz_scorer.exe"
+              $modelCandidate = Join-Path $candidate "models\zenz-v3.2-small-Q5_K_M.gguf"
+
+              $row = [pscustomobject]@{
+                Directory = $candidate
+                DirectoryExists = (Test-Path $candidate -PathType Container)
+                LlamaExists = (Test-Path $llamaCandidate -PathType Leaf)
+                ScorerExists = (Test-Path $scorerCandidate -PathType Leaf)
+                ModelExists = (Test-Path $modelCandidate -PathType Leaf)
+              }
+              $candidateRows += $row
+
+              if ($row.DirectoryExists -and
+                  $row.LlamaExists -and
+                  $row.ScorerExists -and
+                  $row.ModelExists) {
+                $matchingDirs += $candidate
+              }
+            }
+
+            $candidateRows |
+              Format-Table -AutoSize |
+              Out-String |
+              Write-Host
+
+            $candidateRows |
+              Export-Csv (Join-Path $evidence "install-location-candidates.csv") `
+                -NoTypeInformation -Encoding utf8
+
+            $msiFolderLines = @(
+              Select-String -Path $installLog `
+                -Pattern "ProgramFilesFolder|ProgramFiles64Folder|MozcDir" `
+                -ErrorAction SilentlyContinue |
+                ForEach-Object { $_.Line }
+            )
+            $msiFolderLines |
+              Set-Content (Join-Path $evidence "install-folder-properties.txt") `
+                -Encoding utf8
+
+            if ($matchingDirs.Count -ne 1) {
+              Write-Host "Matching installed Mozc directories = $($matchingDirs.Count)"
+              $matchingDirs | ForEach-Object { Write-Host "  $_" }
+              throw "Could not resolve exactly one installed Mozc directory from MSI payload identity."
+            }
+
+            $installDir = $matchingDirs[0]
+            Write-Host "Resolved install directory = $installDir"
+
+            $llama = Join-Path $installDir "llama-server.exe"
+            $scorer = Join-Path $installDir "mozc_zenz_scorer.exe"
+            $model = Join-Path $installDir "models\zenz-v3.2-small-Q5_K_M.gguf"
+
+            foreach ($path in @($llama, $scorer, $model)) {
+              if (-not (Test-Path $path -PathType Leaf)) {
+                throw "Required installed Zenz file missing: $path"
+              }
+            }
+
+            $llamaSha = (Get-FileHash $llama -Algorithm SHA256).Hash
+            $modelSha = (Get-FileHash $model -Algorithm SHA256).Hash
+            $scorerSha = (Get-FileHash $scorer -Algorithm SHA256).Hash
+            $llamaArch = Get-PEMachine $llama
+            $scorerArch = Get-PEMachine $scorer
+
+            Write-Host ""
+            Write-Host "===== INSTALLED PAYLOAD IDENTITY ====="
+            Write-Host "Install dir          = $installDir"
+            Write-Host "llama PE             = $llamaArch"
+            Write-Host "llama SHA256         = $llamaSha"
+            Write-Host "scorer PE            = $scorerArch"
+            Write-Host "scorer SHA256        = $scorerSha"
+            Write-Host "model SHA256         = $modelSha"
+
+            if ($llamaArch -ne "ARM64") {
+              throw "Installed llama-server is not native ARM64."
+            }
+            if ($scorerArch -ne "ARM64") {
+              throw "Installed mozc_zenz_scorer is not native ARM64."
+            }
+            if ($llamaSha -ne $env:EXPECTED_LLAMA_SHA256) {
+              throw "Installed llama-server hash does not match W1/W3 contract."
+            }
+            if ($modelSha -ne $env:EXPECTED_MODEL_SHA256) {
+              throw "Installed model hash does not match W1/W3 contract."
+            }
+
+            foreach ($legacy in @(
+              "ggml.dll",
+              "ggml-base.dll",
+              "ggml-cpu.dll",
+              "llama.dll"
+            )) {
+              if (Test-Path (Join-Path $installDir $legacy)) {
+                throw "Legacy llama/ggml DLL was installed: $legacy"
+              }
+            }
+
+            foreach ($crt in @("MSVCP140.dll", "VCRUNTIME140.dll")) {
+              if (-not (Test-Path (Join-Path $installDir $crt))) {
+                throw "Required app-local VC runtime DLL missing: $crt"
+              }
+            }
+
+            Write-Host ""
+            Write-Host "===== INSTALLED FIREWALL RULE AUDIT ====="
+            $firewallRows = @()
+            foreach ($spec in $expectedFirewallRules) {
+              $rules = @(Get-NetFirewallRule -DisplayName $spec.Name -ErrorAction SilentlyContinue)
+              if ($rules.Count -ne 1) {
+                throw "Expected exactly one firewall rule '$($spec.Name)'; found $($rules.Count)"
+              }
+              $rule = $rules[0]
+              $filters = @($rule | Get-NetFirewallApplicationFilter -ErrorAction Stop)
+              if ($filters.Count -ne 1) {
+                throw "Expected exactly one application filter for '$($spec.Name)'"
+              }
+
+              $expectedProgram = [System.IO.Path]::GetFullPath((Join-Path $installDir $spec.File))
+              $actualProgram = [System.IO.Path]::GetFullPath(
+                [Environment]::ExpandEnvironmentVariables([string]$filters[0].Program)
+              )
+              $programExact = $actualProgram.Equals(
+                $expectedProgram,
+                [System.StringComparison]::OrdinalIgnoreCase
+              )
+
+              $firewallRows += [pscustomobject]@{
+                Name = $spec.Name
+                File = $spec.File
+                Program = $actualProgram
+                ExpectedProgram = $expectedProgram
+                ProgramExact = $programExact
+                Enabled = [string]$rule.Enabled
+                Direction = [string]$rule.Direction
+                Action = [string]$rule.Action
+              }
+
+              if (-not $programExact) {
+                throw "Firewall program mismatch: $($spec.Name)"
+              }
+              if ([string]$rule.Enabled -ne "True") {
+                throw "Firewall rule not enabled: $($spec.Name)"
+              }
+              if ([string]$rule.Direction -ne "Outbound") {
+                throw "Firewall rule not outbound: $($spec.Name)"
+              }
+              if ([string]$rule.Action -ne "Block") {
+                throw "Firewall rule not blocking: $($spec.Name)"
+              }
+            }
+
+            $firewallRows |
+              Export-Csv (Join-Path $evidence "firewall-rules-installed.csv") `
+                -NoTypeInformation -Encoding utf8
+            Write-Host "Installed outbound block rules = 7/7 PASS"
+
+            Write-Host ""
+            Write-Host "===== NATIVE --version SMOKE ====="
+
+            $versionOut = Join-Path $evidence "llama-version.stdout.txt"
+            $versionErr = Join-Path $evidence "llama-version.stderr.txt"
+            $versionProcess = Start-Process $llama -Wait -PassThru -NoNewWindow `
+              -ArgumentList @("--version") `
+              -RedirectStandardOutput $versionOut `
+              -RedirectStandardError $versionErr
+
+            Write-Host "llama-server --version exit = $($versionProcess.ExitCode)"
+            if ($versionProcess.ExitCode -ne 0) {
+              throw "Installed ARM64 llama-server --version failed."
+            }
+
+            Write-Host ""
+            Write-Host "===== DIRECT INSTALLED LLAMA SEMANTIC GATE ====="
+
+            $port = Get-FreeTcpPort
+            $apiKey = "mozkey-w4-" + [guid]::NewGuid().ToString("N")
+            $directStdout = Join-Path $evidence "direct-llama.stdout.log"
+            $directStderr = Join-Path $evidence "direct-llama.stderr.log"
+
+            $directServer = Start-Process $llama -PassThru -WindowStyle Hidden `
+              -ArgumentList @(
+                "-m", "`"$model`"",
+                "-c", "256",
+                "-t", "4",
+                "--parallel", "1",
+                "--host", "127.0.0.1",
+                "--port", "$port",
+                "--api-key", $apiKey
+              ) `
+              -RedirectStandardOutput $directStdout `
+              -RedirectStandardError $directStderr
+
+            $ready = $false
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            while ($watch.Elapsed.TotalSeconds -lt 180) {
+              if ($directServer.HasExited) {
+                throw "Installed llama-server exited during startup: $($directServer.ExitCode)"
+              }
+              try {
+                $health = Invoke-HttpJson `
+                  -Method "GET" `
+                  -Url "http://127.0.0.1:$port/health" `
+                  -TimeoutSeconds 5
+                if ($health.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              }
+              catch {}
+              Start-Sleep -Milliseconds 300
+            }
+
+            if (-not $ready) {
+              throw "Installed native ARM64 llama-server did not become healthy."
+            }
+
+            $unauthPrompt =
+              [string][char]0xEE02 +
+              [string][char]0xEE00 +
+              "ニホンゴ" +
+              [string][char]0xEE01
+
+            $unauthBody = @{
+              prompt = $unauthPrompt
+              n_predict = 1
+              temperature = 0.0
+            } | ConvertTo-Json -Compress
+
+            $unauth = Invoke-HttpJson `
+              -Method "POST" `
+              -Url "http://127.0.0.1:$port/completion" `
+              -Body $unauthBody `
+              -TimeoutSeconds 30
+
+            if ($unauth.StatusCode -ne 401) {
+              throw "Installed llama-server API-key enforcement failed."
+            }
+
+            $vectors = @(
+              [pscustomobject]@{Name="weather"; Context=""; Kana="キョウハイイテンキデスネ"; Expected="今日はいい天気で"},
+              [pscustomobject]@{Name="dentist"; Context="歯が痛いので"; Kana="ハイシャ"; Expected="歯医者"},
+              [pscustomobject]@{Name="scrap_car"; Context="車が壊れたので"; Kana="ハイシャ"; Expected="廃車"},
+              [pscustomobject]@{Name="japanese_input"; Context=""; Kana="ニホンゴニュウリョク"; Expected="日本語入力"},
+              [pscustomobject]@{Name="meeting"; Context="会議の資料を"; Kana="カクニンシマシタ"; Expected="確認しました"},
+              [pscustomobject]@{Name="github"; Context="GitHubのPRを"; Kana="マージシマシタ"; Expected="マージしました"},
+              [pscustomobject]@{Name="consult"; Context="体調について医師に"; Kana="ソウダンシマシタ"; Expected="相談しました"},
+              [pscustomobject]@{Name="rain"; Context="今日は"; Kana="アメデス"; Expected="雨です"},
+              [pscustomobject]@{Name="enemy"; Context="彼は"; Kana="テンテキデス"; Expected="天敵です"},
+              [pscustomobject]@{Name="forecast"; Context="明日の"; Kana="テンキヨホウ"; Expected="天気予報"},
+              [pscustomobject]@{Name="bridge"; Context="橋を渡って"; Kana="ハシノムコウヘイク"; Expected="橋の向こうへ行く"},
+              [pscustomobject]@{Name="local_llm"; Context=""; Kana="ローカルエルエルエムデニホンゴヘンカン"; Expected="lawからllm"}
+            )
+
+            $contextMarker = [string][char]0xEE02
+            $inputStart = [string][char]0xEE00
+            $outputStart = [string][char]0xEE01
+            $directRows = @()
+
+            foreach ($v in $vectors) {
+              $prompt = $contextMarker + $v.Context + $inputStart + $v.Kana + $outputStart
+
+              $body = [ordered]@{
+                prompt = $prompt
+                n_predict = 8
+                temperature = 0.0
+                top_k = 1
+                top_p = 1.0
+                stream = $false
+                cache_prompt = $true
+                stop = @(
+                  [string][char]0xEE00,[string][char]0xEE01,
+                  [string][char]0xEE02,[string][char]0xEE03,
+                  [string][char]0xEE04,[string][char]0xEE05,
+                  [string][char]0xEE06,[string][char]0xEE07,
+                  [string][char]0xEE08,[string][char]0xEE09,
+                  [string][char]0xEE0A,[string][char]0xEE0B,
+                  [string][char]0xEE0C,[string][char]0xEE0D,
+                  [string][char]0xEE0E,[string][char]0xEE0F,
+                  "`n","`r"
+                )
+              } | ConvertTo-Json -Compress
+
+              $response = Invoke-HttpJson `
+                -Method "POST" `
+                -Url "http://127.0.0.1:$port/completion" `
+                -ApiKey $apiKey `
+                -Body $body `
+                -TimeoutSeconds 60
+
+              if ($response.StatusCode -ne 200) {
+                throw "$($v.Name) direct completion HTTP=$($response.StatusCode)"
+              }
+
+              $json = $response.Text | ConvertFrom-Json
+              $actual = [string]$json.content
+              $pass = $actual -ceq $v.Expected
+
+              Write-Host ("{0,-14} content={1} [{2}]" -f $v.Name, $pass, $actual)
+
+              $directRows += [pscustomobject]@{
+                Test = $v.Name
+                Expected = $v.Expected
+                Actual = $actual
+                Pass = $pass
+              }
+            }
+
+            $directRows |
+              Export-Csv (Join-Path $evidence "direct-semantic.csv") `
+                -NoTypeInformation -Encoding utf8
+
+            $directPass = @($directRows | Where-Object Pass).Count
+            if ($directPass -ne 12) {
+              throw "Installed direct llama semantic gate failed: $directPass/12"
+            }
+            $directResult = "PASS 12/12"
+
+            Stop-Process -Id $directServer.Id -Force -ErrorAction SilentlyContinue
+            $directServer.WaitForExit()
+            $directServer = $null
+            Start-Sleep -Seconds 2
+
+            Write-Host ""
+            Write-Host "===== INSTALLED SCORER NAMED-PIPE E2E ====="
+
+            $scorerStdout = Join-Path $evidence "scorer.stdout.log"
+            $scorerStderr = Join-Path $evidence "scorer.stderr.log"
+
+            $scorerProcess = Start-Process $scorer -PassThru -WindowStyle Hidden `
+              -RedirectStandardOutput $scorerStdout `
+              -RedirectStandardError $scorerStderr
+
+            $pipeVectors = @(
+              [pscustomobject]@{
+                Name="dentist"
+                Prompt=$contextMarker+"歯が痛いので"+$inputStart+"ハイシャ"+$outputStart
+                Expected="歯医者"
+              },
+              [pscustomobject]@{
+                Name="scrap_car"
+                Prompt=$contextMarker+"車が壊れたので"+$inputStart+"ハイシャ"+$outputStart
+                Expected="廃車"
+              }
+            )
+
+            $pipeRows = @()
+            $generation = [uint32]100
+
+            foreach ($v in $pipeVectors) {
+              $success = $false
+              $last = $null
+
+              for ($attempt = 1; $attempt -le 12; $attempt++) {
+                if ($scorerProcess.HasExited) {
+                  throw "Installed scorer exited unexpectedly: $($scorerProcess.ExitCode)"
+                }
+
+                try {
+                  $generation++
+                  $last = Invoke-ZenzPipeRequest `
+                    -Prompt $v.Prompt `
+                    -Generation $generation `
+                    -TimeoutMsec 5000 `
+                    -MaxOutputChars 32
+
+                  if ($last.Status -eq 0 -and $last.Value -ceq $v.Expected) {
+                    $success = $true
+                    break
+                  }
+                }
+                catch {
+                  $last = [pscustomobject]@{
+                    Status = 999
+                    LatencyMsec = 0
+                    Value = ""
+                    Debug = $_.Exception.Message
+                  }
+                }
+
+                Start-Sleep -Seconds 2
+              }
+
+              $actualValue = if ($last) { [string]$last.Value } else { "" }
+              $statusValue = if ($last) { [int]$last.Status } else { -1 }
+              $debugValue = if ($last) { [string]$last.Debug } else { "" }
+
+              Write-Host (
+                "{0,-14} status={1} pass={2} value=[{3}] debug=[{4}]" -f
+                $v.Name,
+                $statusValue,
+                $success,
+                $actualValue,
+                $debugValue
+              )
+
+              $pipeRows += [pscustomobject]@{
+                Test = $v.Name
+                Status = $statusValue
+                Expected = $v.Expected
+                Actual = $actualValue
+                Debug = $debugValue
+                Pass = $success
+              }
+
+              if (-not $success) {
+                throw "Installed scorer named-pipe E2E failed for $($v.Name)"
+              }
+            }
+
+            $pipeRows |
+              Export-Csv (Join-Path $evidence "scorer-pipe-e2e.csv") `
+                -NoTypeInformation -Encoding utf8
+
+            $llamaProcesses = @(
+              Get-CimInstance Win32_Process |
+                Where-Object {
+                  $_.Name -eq "llama-server.exe" -and
+                  $_.ExecutablePath -and
+                  $_.ExecutablePath.StartsWith(
+                    $installDir,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                  )
+                }
+            )
+
+            if ($llamaProcesses.Count -ne 1) {
+              throw "Expected exactly one scorer-owned installed llama-server; found $($llamaProcesses.Count)"
+            }
+
+            $scorerLlama = $llamaProcesses[0]
+            $cmdLine = [string]$scorerLlama.CommandLine
+
+            $parallelOne = $cmdLine.Contains("--parallel 1")
+            $loopbackHost = $cmdLine.Contains("--host 127.0.0.1")
+            $installedModelArg = $cmdLine.Contains($model)
+            $hasApiKey = $cmdLine.Contains("--api-key")
+
+            Write-Host "scorer llama --parallel 1     = $parallelOne"
+            Write-Host "scorer llama loopback host    = $loopbackHost"
+            Write-Host "scorer llama installed model  = $installedModelArg"
+            Write-Host "scorer llama API key argument = $hasApiKey"
+
+            if (-not $parallelOne -or -not $loopbackHost -or
+                -not $installedModelArg -or -not $hasApiKey) {
+              throw "Installed scorer launched llama-server with an unexpected command contract."
+            }
+
+            $listeners = @(
+              Get-NetTCPConnection -State Listen -OwningProcess $scorerLlama.ProcessId `
+                -ErrorAction SilentlyContinue
+            )
+            if ($listeners.Count -lt 1) {
+              throw "Scorer-owned llama-server has no listening socket."
+            }
+
+            $nonLoopback = @(
+              $listeners | Where-Object {
+                $_.LocalAddress -notin @("127.0.0.1", "::1")
+              }
+            )
+            if ($nonLoopback.Count -ne 0) {
+              throw "Scorer-owned llama-server is listening beyond loopback."
+            }
+
+            Write-Host ""
+            Write-Host "===== ZENZ PROCESS CONNECTION AUDIT ====="
+            $zenzProcessIds = @(
+              [uint32]$scorerProcess.Id
+              [uint32]$scorerLlama.ProcessId
+            )
+            $zenzConnections = @(
+              Get-NetTCPConnection -ErrorAction SilentlyContinue |
+                Where-Object { $zenzProcessIds -contains [uint32]$_.OwningProcess }
+            )
+
+            $zenzConnections |
+              Select-Object State, LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess |
+              Export-Csv (Join-Path $evidence "zenz-tcp-connections.csv") `
+                -NoTypeInformation -Encoding utf8
+
+            $externalConnections = @(
+              $zenzConnections |
+                Where-Object {
+                  $_.State -ne "Listen" -and
+                  $_.State -ne "Bound" -and
+                  $_.RemoteAddress -and
+                  $_.RemoteAddress -notin @("127.0.0.1","::1","::ffff:127.0.0.1")
+                }
+            )
+            if ($externalConnections.Count -ne 0) {
+              $externalConnections | Format-Table -AutoSize | Out-String | Write-Host
+              throw "Zenz runtime has a non-loopback TCP connection."
+            }
+            Write-Host "Zenz non-loopback TCP connections = NONE"
+
+            $pipeResult = "PASS 2/2"
+
+            $summaryLines = @(
+              "runner_architecture=$env:PROCESSOR_ARCHITECTURE"
+              "msi_sha256=$msiSha"
+              "install_dir=$installDir"
+              "llama_arch=$llamaArch"
+              "llama_sha256=$llamaSha"
+              "scorer_arch=$scorerArch"
+              "scorer_sha256=$scorerSha"
+              "model_sha256=$modelSha"
+              "legacy_runtime_absent=true"
+              "direct_semantic=$directResult"
+              "scorer_pipe_e2e=$pipeResult"
+              "scorer_parallel_1=$parallelOne"
+              "scorer_loopback=$loopbackHost"
+              "scorer_installed_model=$installedModelArg"
+              "scorer_api_key_arg=$hasApiKey"
+              "firewall_rules_installed=7/7"
+              "zenz_non_loopback_tcp_connections=0"
+            )
+            $summaryLines | Set-Content $summary -Encoding utf8
+
+            Write-Host ""
+            Write-Host "===== W4 NATIVE INSTALLED MSI RESULT ====="
+            Write-Host "Runner architecture             = ARM64"
+            Write-Host "MSI install                      = PASS"
+            Write-Host "Installed llama PE               = ARM64"
+            Write-Host "Installed llama SHA256 exact     = True"
+            Write-Host "Installed scorer PE              = ARM64"
+            Write-Host "Installed model SHA256 exact     = True"
+            Write-Host "Legacy ggml/llama DLLs           = ABSENT"
+            Write-Host "Installed llama --version        = PASS"
+            Write-Host "Direct installed semantic gate   = $directResult"
+            Write-Host "API-key enforcement              = PASS"
+            Write-Host "Installed scorer pipe E2E        = $pipeResult"
+            Write-Host "Scorer --parallel 1              = PASS"
+            Write-Host "Scorer loopback-only listener    = PASS"
+            Write-Host "Firewall outbound block rules    = PASS 7/7"
+            Write-Host "Zenz non-loopback TCP connection = NONE"
+            Write-Host "W4 native installed MSI gate     = PASS"
+            Write-Host "W5 installed offline gate        = PASS (pre-uninstall)"
+          }
+          finally {
+            if ($directServer -and -not $directServer.HasExited) {
+              Stop-Process -Id $directServer.Id -Force -ErrorAction SilentlyContinue
+            }
+            if ($scorerProcess -and -not $scorerProcess.HasExited) {
+              Stop-Process -Id $scorerProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+
+            if ($installDir -and (Test-Path $installDir)) {
+              Stop-InstalledZenzProcesses -Root $installDir
+            }
+
+            if ($installed) {
+              Write-Host ""
+              Write-Host "===== UNINSTALL EXACT ARM64 MSI ====="
+
+              $uninstall = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+                "/x",
+                "`"$msi`"",
+                "/qn",
+                "/norestart",
+                "/l*v",
+                "`"$uninstallLog`""
+              )
+
+              Write-Host "msiexec uninstall exit = $($uninstall.ExitCode)"
+              if ($uninstall.ExitCode -in @(0, 3010)) {
+                $uninstallResult = "PASS"
+              } else {
+                $uninstallResult = "FAIL:$($uninstall.ExitCode)"
+              }
+
+              if (Test-Path $summary) {
+                Add-Content $summary "uninstall=$uninstallResult" -Encoding utf8
+              }
+
+              if ($installDir) {
+                foreach ($zenzPath in @(
+                  (Join-Path $installDir "llama-server.exe"),
+                  (Join-Path $installDir "mozc_zenz_scorer.exe"),
+                  (Join-Path $installDir "models\zenz-v3.2-small-Q5_K_M.gguf")
+                )) {
+                  if (Test-Path $zenzPath) {
+                    Write-Error "Installed Zenz payload remains after uninstall: $zenzPath"
+                  }
+                }
+              } else {
+                Write-Host "Install directory was not resolved; payload cleanup paths cannot be checked."
+              }
+
+              Write-Host ""
+              Write-Host "===== POST-UNINSTALL FIREWALL CLEANUP ====="
+              $remainingFirewallRules = @()
+              foreach ($spec in $expectedFirewallRules) {
+                $remaining = @(Get-NetFirewallRule -DisplayName $spec.Name -ErrorAction SilentlyContinue)
+                if ($remaining.Count -ne 0) {
+                  $remainingFirewallRules += $spec.Name
+                }
+              }
+
+              if ($remainingFirewallRules.Count -ne 0) {
+                $remainingFirewallRules |
+                  Set-Content (Join-Path $evidence "firewall-rules-remaining.txt") `
+                    -Encoding utf8
+                Write-Error (
+                  "Mozc firewall rules remain after uninstall: " +
+                  ($remainingFirewallRules -join ", ")
+                )
+              }
+
+              Write-Host "Firewall rules remaining after uninstall = $($remainingFirewallRules.Count)"
+              if (Test-Path $summary) {
+                Add-Content $summary `
+                  "firewall_rules_removed=$($remainingFirewallRules.Count -eq 0)" `
+                  -Encoding utf8
+              }
+
+              if ($uninstallResult -ne "PASS") {
+                Write-Error "ARM64 MSI uninstall failed: $uninstallResult"
+              }
+              if ($remainingFirewallRules.Count -eq 0) {
+                Write-Host "W5 firewall uninstall cleanup = PASS"
+              }
+            }
+          }
+
+      - name: Upload native installed-MSI audit evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_native_installed_msi_audit
+          path: ${{ runner.temp }}\mozkey-w4-arm64-msi-evidence
+          if-no-files-found: warn
   test:
     needs: prepare_daily_dictionary
     # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md

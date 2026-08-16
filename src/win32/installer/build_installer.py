@@ -150,10 +150,6 @@ def run_wix4(args) -> None:
 
   zenz_scorer = pathlib.Path(args.zenz_scorer).resolve()
   zenz_llama_server = pathlib.Path(args.zenz_llama_server).resolve()
-  zenz_ggml_dll = pathlib.Path(args.zenz_ggml_dll).resolve()
-  zenz_ggml_base_dll = pathlib.Path(args.zenz_ggml_base_dll).resolve()
-  zenz_ggml_cpu_dll = pathlib.Path(args.zenz_ggml_cpu_dll).resolve()
-  zenz_llama_dll = pathlib.Path(args.zenz_llama_dll).resolve()
   zenz_model = pathlib.Path(args.zenz_model).resolve()
 
   wix_path = pathlib.Path(args.wix_path).resolve()
@@ -200,10 +196,6 @@ def run_wix4(args) -> None:
       '-define', f'CustomActions64Path={custom_action}',
       '-define', f'ZenzScorerPath={zenz_scorer}',
       '-define', f'ZenzLlamaServerPath={zenz_llama_server}',
-      '-define', f'ZenzGgmlDllPath={zenz_ggml_dll}',
-      '-define', f'ZenzGgmlBaseDllPath={zenz_ggml_base_dll}',
-      '-define', f'ZenzGgmlCpuDllPath={zenz_ggml_cpu_dll}',
-      '-define', f'ZenzLlamaDllPath={zenz_llama_dll}',
       '-define', f'ZenzModelPath={zenz_model}',
       '-define', f'DocumentsDir={document_dir}',
       '-define', f'QtDir={qt_dir}',
@@ -239,10 +231,6 @@ def main():
   parser.add_argument('--custom_action', type=str)
   parser.add_argument('--zenz_scorer', type=str)
   parser.add_argument('--zenz_llama_server', type=str)
-  parser.add_argument('--zenz_ggml_dll', type=str)
-  parser.add_argument('--zenz_ggml_base_dll', type=str)
-  parser.add_argument('--zenz_ggml_cpu_dll', type=str)
-  parser.add_argument('--zenz_llama_dll', type=str)
   parser.add_argument('--zenz_model', type=str)
   parser.add_argument('--icon_path', type=str)
   parser.add_argument('--credit_file', type=str)
