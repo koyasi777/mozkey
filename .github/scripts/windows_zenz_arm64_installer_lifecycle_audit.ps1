@@ -74,7 +74,7 @@ function Get-MsiProperty {
     if (-not $record) {
       throw "MSI property not found: $Name"
     }
-    return [string]$record.StringData(1)
+    return ([string]$record.StringData(1)).Trim()
   }
   finally {
     foreach ($obj in @($record, $view, $database, $installer)) {
