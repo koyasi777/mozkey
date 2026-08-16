@@ -386,6 +386,94 @@ jobs:
         with:
           name: Mozc64_arm64.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
+          if-no-files-found: warn      - name: Build W2-predecessor ARM64 lifecycle baseline
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $baseline = "c986db2c611c7255ba92b1d44fc6ac3fb6b098bf"
+          $tracked = @(git status --porcelain --untracked-files=no)
+          if ($tracked.Count -ne 0) {
+            throw "Tracked working tree changed during current ARM64 build: $($tracked -join '; ')"
+          }
+
+          git checkout --detach $baseline
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout W2-predecessor baseline."
+          }
+
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $baseline) {
+            throw "Baseline checkout mismatch: $actual"
+          }
+
+          Push-Location .\src
+          try {
+            bazelisk build package --config release_build --platforms=//:windows-arm64
+            if ($LASTEXITCODE -ne 0) {
+              throw "W2-predecessor ARM64 baseline build failed."
+            }
+          }
+          finally {
+            Pop-Location
+          }
+
+          $baselineMsi = ".\src\bazel-bin\win32\installer\Mozc64.msi"
+          if (-not (Test-Path $baselineMsi -PathType Leaf)) {
+            throw "Baseline MSI was not produced."
+          }
+
+          Write-Host "Baseline commit = $actual"
+          Write-Host "Baseline MSI SHA256 = $((Get-FileHash $baselineMsi -Algorithm SHA256).Hash)"
+
+      - name: upload Mozc64_arm64 W2-predecessor lifecycle baseline
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_pre_native_lifecycle_baseline.msi
+          path: src/bazel-bin/win32/installer/Mozc64.msi
+          if-no-files-found: error
+
+
+  test_arm64_installer_lifecycle:
+    name: Native ARM64 installer lifecycle audit
+    needs: build_arm64
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout current lifecycle audit script
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Download current ARM64 MSI
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64.msi
+          path: ${{ runner.temp }}\mozkey-current-arm64-msi
+
+      - name: Download W2-predecessor ARM64 MSI
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64_pre_native_lifecycle_baseline.msi
+          path: ${{ runner.temp }}\mozkey-baseline-arm64-msi
+
+      - name: Run native ARM64 installer lifecycle audit
+        shell: pwsh
+        run: |
+          & ".\.github\scripts\windows_zenz_arm64_installer_lifecycle_audit.ps1" `
+            -BaselineArtifactDir "${{ runner.temp }}\mozkey-baseline-arm64-msi" `
+            -CurrentArtifactDir "${{ runner.temp }}\mozkey-current-arm64-msi" `
+            -EvidenceDir "${{ runner.temp }}\mozkey-w6-arm64-lifecycle-evidence"
+
+      - name: Upload installer lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_installer_lifecycle_audit
+          path: ${{ runner.temp }}\mozkey-w6-arm64-lifecycle-evidence
           if-no-files-found: warn
 
   test_arm64_installed_msi:
