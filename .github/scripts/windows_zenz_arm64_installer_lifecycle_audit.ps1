@@ -69,12 +69,16 @@ function Get-MsiProperty {
     $database = $installer.OpenDatabase($Path, 0)
     $query = "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Name'"
     $view = $database.OpenView($query)
-    $view.Execute()
+    [void]$view.Execute()
     $record = $view.Fetch()
     if (-not $record) {
       throw "MSI property not found: $Name"
     }
-    return ([string]$record.StringData(1)).Trim()
+    [string]$value = ([string]$record.StringData(1)).Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) {
+      throw "MSI property is empty: $Name"
+    }
+    return $value
   }
   finally {
     foreach ($obj in @($record, $view, $database, $installer)) {
@@ -469,6 +473,25 @@ $baselineVersion = Get-MsiProperty $baselineMsi "ProductVersion"
 $currentVersion = Get-MsiProperty $currentMsi "ProductVersion"
 $baselineUpgrade = Get-MsiProperty $baselineMsi "UpgradeCode"
 $currentUpgrade = Get-MsiProperty $currentMsi "UpgradeCode"
+
+$metadataScalars = [ordered]@{
+  BaselineProductCode = $baselineProduct
+  CurrentProductCode = $currentProduct
+  BaselineProductVersion = $baselineVersion
+  CurrentProductVersion = $currentVersion
+  BaselineUpgradeCode = $baselineUpgrade
+  CurrentUpgradeCode = $currentUpgrade
+}
+foreach ($entry in $metadataScalars.GetEnumerator()) {
+  if ($entry.Value -isnot [string]) {
+    $actualType = if ($null -eq $entry.Value) {
+      "<null>"
+    } else {
+      $entry.Value.GetType().FullName
+    }
+    throw "MSI metadata is not a scalar string: $($entry.Key) type=$actualType"
+  }
+}
 
 Write-Host "===== W6 MSI METADATA ====="
 Write-Host "Baseline MSI SHA256  = $baselineSha"
