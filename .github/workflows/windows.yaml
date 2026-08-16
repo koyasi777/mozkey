@@ -400,15 +400,15 @@ jobs:
           }
 
           # actions/checkout fetches only the triggering commit by default.
-          # Fetch the exact audited main tip explicitly before switching source.
-          git fetch --no-tags --depth=1 origin main
+          # Fetch the immutable audited W2-predecessor commit explicitly.
+          git fetch --no-tags --depth=1 origin $baseline
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to fetch W2-predecessor baseline from origin/main."
+            throw "Failed to fetch exact W2-predecessor baseline commit."
           }
 
           $fetchedBaseline = (git rev-parse FETCH_HEAD).Trim()
           if ($fetchedBaseline -ne $baseline) {
-            throw "origin/main moved from the audited W2 baseline: $fetchedBaseline"
+            throw "Fetched W2-predecessor baseline mismatch: $fetchedBaseline"
           }
 
           git checkout --detach FETCH_HEAD

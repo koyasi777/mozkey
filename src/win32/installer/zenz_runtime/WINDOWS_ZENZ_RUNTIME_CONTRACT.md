@@ -29,7 +29,8 @@
 - SHA256: `0ACD17D6EE5E361AFC06A7DCCD06EF012A00669546535889B874D5C3BB3DE81B`
 - build basis: upstream `arm64-windows-llvm+static-release` preset with Clang target `arm64-pc-windows-msvc`
 - local cross-build structural gate: PASS
-- equivalent-contract native GitHub ARM64 gate: PASS
+- historical W1 candidate native GitHub ARM64 gate: PASS
+  - this validated the exact ARM64 runtime candidate before MSI integration
   - workflow run: https://github.com/koyasi777/mozkey/actions/runs/31893874478
   - workflow commit: `daa13a4df3c4b2ce4da5a51dcb2a29aa3f7f248f`
 - exact final-MSI native validation: PASS
