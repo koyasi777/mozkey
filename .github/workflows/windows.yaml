@@ -399,9 +399,21 @@ jobs:
             throw "Tracked working tree changed during current ARM64 build: $($tracked -join '; ')"
           }
 
-          git checkout --detach $baseline
+          # actions/checkout fetches only the triggering commit by default.
+          # Fetch the exact audited main tip explicitly before switching source.
+          git fetch --no-tags --depth=1 origin main
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to checkout W2-predecessor baseline."
+            throw "Failed to fetch W2-predecessor baseline from origin/main."
+          }
+
+          $fetchedBaseline = (git rev-parse FETCH_HEAD).Trim()
+          if ($fetchedBaseline -ne $baseline) {
+            throw "origin/main moved from the audited W2 baseline: $fetchedBaseline"
+          }
+
+          git checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout fetched W2-predecessor baseline."
           }
 
           $actual = (git rev-parse HEAD).Trim()
