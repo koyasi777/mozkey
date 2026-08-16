@@ -1090,23 +1090,24 @@ jobs:
 
             $pipeResult = "PASS 2/2"
 
-            @"
-            runner_architecture=$env:PROCESSOR_ARCHITECTURE
-            msi_sha256=$msiSha
-            install_dir=$installDir
-            llama_arch=$llamaArch
-            llama_sha256=$llamaSha
-            scorer_arch=$scorerArch
-            scorer_sha256=$scorerSha
-            model_sha256=$modelSha
-            legacy_runtime_absent=true
-            direct_semantic=$directResult
-            scorer_pipe_e2e=$pipeResult
-            scorer_parallel_1=$parallelOne
-            scorer_loopback=$loopbackHost
-            scorer_installed_model=$installedModelArg
-            scorer_api_key_arg=$hasApiKey
-            "@ | Set-Content $summary -Encoding utf8
+            $summaryLines = @(
+              "runner_architecture=$env:PROCESSOR_ARCHITECTURE"
+              "msi_sha256=$msiSha"
+              "install_dir=$installDir"
+              "llama_arch=$llamaArch"
+              "llama_sha256=$llamaSha"
+              "scorer_arch=$scorerArch"
+              "scorer_sha256=$scorerSha"
+              "model_sha256=$modelSha"
+              "legacy_runtime_absent=true"
+              "direct_semantic=$directResult"
+              "scorer_pipe_e2e=$pipeResult"
+              "scorer_parallel_1=$parallelOne"
+              "scorer_loopback=$loopbackHost"
+              "scorer_installed_model=$installedModelArg"
+              "scorer_api_key_arg=$hasApiKey"
+            )
+            $summaryLines | Set-Content $summary -Encoding utf8
 
             Write-Host ""
             Write-Host "===== W4 NATIVE INSTALLED MSI RESULT ====="
