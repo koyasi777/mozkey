@@ -47,6 +47,8 @@
 - scorer launches `llama-server` with `--parallel 1`
 - server binds to `127.0.0.1`
 - scorer supplies a generated API key
+- the Windows installer installs enabled outbound/block firewall rules for `mozc_zenz_scorer.exe` and `llama-server.exe`, in addition to the existing Mozc runtime rules
+- the firewall rules must not break scorer-to-llama loopback inference and must be removed during uninstall
 - no `ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll`, or `llama.dll` is packaged
 - `MSVCP140.dll` / `VCRUNTIME140*.dll` remain dynamic dependencies and are supplied through the existing architecture-specific MSI CRT payload.
 

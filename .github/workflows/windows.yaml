@@ -471,6 +471,26 @@ jobs:
           $uninstallLog = Join-Path $evidence "uninstall.log"
           $summary = Join-Path $evidence "summary.txt"
 
+          $expectedFirewallRules = @(
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_server outbound"; File="mozc_server.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_tool outbound"; File="mozc_tool.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_renderer outbound"; File="mozc_renderer.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_broker outbound"; File="mozc_broker.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_cache_service outbound"; File="mozc_cache_service.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block mozc_zenz_scorer outbound"; File="mozc_zenz_scorer.exe"}
+            [pscustomobject]@{Name="Mozc Offline - Block llama-server outbound"; File="llama-server.exe"}
+          )
+
+          Write-Host ""
+          Write-Host "===== PRE-INSTALL FIREWALL CLEANLINESS ====="
+          foreach ($spec in $expectedFirewallRules) {
+            $existing = @(Get-NetFirewallRule -DisplayName $spec.Name -ErrorAction SilentlyContinue)
+            if ($existing.Count -ne 0) {
+              throw "Unexpected pre-existing Mozc firewall rule: $($spec.Name)"
+            }
+          }
+          Write-Host "Pre-existing Mozc offline rules = NONE"
+
           function Get-PEMachine {
             param([Parameter(Mandatory)][string]$Path)
 
@@ -859,6 +879,59 @@ jobs:
             }
 
             Write-Host ""
+            Write-Host "===== INSTALLED FIREWALL RULE AUDIT ====="
+            $firewallRows = @()
+            foreach ($spec in $expectedFirewallRules) {
+              $rules = @(Get-NetFirewallRule -DisplayName $spec.Name -ErrorAction SilentlyContinue)
+              if ($rules.Count -ne 1) {
+                throw "Expected exactly one firewall rule '$($spec.Name)'; found $($rules.Count)"
+              }
+              $rule = $rules[0]
+              $filters = @($rule | Get-NetFirewallApplicationFilter -ErrorAction Stop)
+              if ($filters.Count -ne 1) {
+                throw "Expected exactly one application filter for '$($spec.Name)'"
+              }
+
+              $expectedProgram = [System.IO.Path]::GetFullPath((Join-Path $installDir $spec.File))
+              $actualProgram = [System.IO.Path]::GetFullPath(
+                [Environment]::ExpandEnvironmentVariables([string]$filters[0].Program)
+              )
+              $programExact = $actualProgram.Equals(
+                $expectedProgram,
+                [System.StringComparison]::OrdinalIgnoreCase
+              )
+
+              $firewallRows += [pscustomobject]@{
+                Name = $spec.Name
+                File = $spec.File
+                Program = $actualProgram
+                ExpectedProgram = $expectedProgram
+                ProgramExact = $programExact
+                Enabled = [string]$rule.Enabled
+                Direction = [string]$rule.Direction
+                Action = [string]$rule.Action
+              }
+
+              if (-not $programExact) {
+                throw "Firewall program mismatch: $($spec.Name)"
+              }
+              if ([string]$rule.Enabled -ne "True") {
+                throw "Firewall rule not enabled: $($spec.Name)"
+              }
+              if ([string]$rule.Direction -ne "Outbound") {
+                throw "Firewall rule not outbound: $($spec.Name)"
+              }
+              if ([string]$rule.Action -ne "Block") {
+                throw "Firewall rule not blocking: $($spec.Name)"
+              }
+            }
+
+            $firewallRows |
+              Export-Csv (Join-Path $evidence "firewall-rules-installed.csv") `
+                -NoTypeInformation -Encoding utf8
+            Write-Host "Installed outbound block rules = 7/7 PASS"
+
+            Write-Host ""
             Write-Host "===== NATIVE --version SMOKE ====="
 
             $versionOut = Join-Path $evidence "llama-version.stdout.txt"
@@ -1166,6 +1239,37 @@ jobs:
               throw "Scorer-owned llama-server is listening beyond loopback."
             }
 
+            Write-Host ""
+            Write-Host "===== ZENZ PROCESS CONNECTION AUDIT ====="
+            $zenzProcessIds = @(
+              [uint32]$scorerProcess.Id
+              [uint32]$scorerLlama.ProcessId
+            )
+            $zenzConnections = @(
+              Get-NetTCPConnection -ErrorAction SilentlyContinue |
+                Where-Object { $zenzProcessIds -contains [uint32]$_.OwningProcess }
+            )
+
+            $zenzConnections |
+              Select-Object State, LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess |
+              Export-Csv (Join-Path $evidence "zenz-tcp-connections.csv") `
+                -NoTypeInformation -Encoding utf8
+
+            $externalConnections = @(
+              $zenzConnections |
+                Where-Object {
+                  $_.State -ne "Listen" -and
+                  $_.State -ne "Bound" -and
+                  $_.RemoteAddress -and
+                  $_.RemoteAddress -notin @("127.0.0.1","::1","::ffff:127.0.0.1")
+                }
+            )
+            if ($externalConnections.Count -ne 0) {
+              $externalConnections | Format-Table -AutoSize | Out-String | Write-Host
+              throw "Zenz runtime has a non-loopback TCP connection."
+            }
+            Write-Host "Zenz non-loopback TCP connections = NONE"
+
             $pipeResult = "PASS 2/2"
 
             $summaryLines = @(
@@ -1184,6 +1288,8 @@ jobs:
               "scorer_loopback=$loopbackHost"
               "scorer_installed_model=$installedModelArg"
               "scorer_api_key_arg=$hasApiKey"
+              "firewall_rules_installed=7/7"
+              "zenz_non_loopback_tcp_connections=0"
             )
             $summaryLines | Set-Content $summary -Encoding utf8
 
@@ -1202,7 +1308,10 @@ jobs:
             Write-Host "Installed scorer pipe E2E        = $pipeResult"
             Write-Host "Scorer --parallel 1              = PASS"
             Write-Host "Scorer loopback-only listener    = PASS"
+            Write-Host "Firewall outbound block rules    = PASS 7/7"
+            Write-Host "Zenz non-loopback TCP connection = NONE"
             Write-Host "W4 native installed MSI gate     = PASS"
+            Write-Host "W5 installed offline gate        = PASS (pre-uninstall)"
           }
           finally {
             if ($directServer -and -not $directServer.HasExited) {
@@ -1254,8 +1363,38 @@ jobs:
                 Write-Host "Install directory was not resolved; payload cleanup paths cannot be checked."
               }
 
+              Write-Host ""
+              Write-Host "===== POST-UNINSTALL FIREWALL CLEANUP ====="
+              $remainingFirewallRules = @()
+              foreach ($spec in $expectedFirewallRules) {
+                $remaining = @(Get-NetFirewallRule -DisplayName $spec.Name -ErrorAction SilentlyContinue)
+                if ($remaining.Count -ne 0) {
+                  $remainingFirewallRules += $spec.Name
+                }
+              }
+
+              if ($remainingFirewallRules.Count -ne 0) {
+                $remainingFirewallRules |
+                  Set-Content (Join-Path $evidence "firewall-rules-remaining.txt") `
+                    -Encoding utf8
+                Write-Error (
+                  "Mozc firewall rules remain after uninstall: " +
+                  ($remainingFirewallRules -join ", ")
+                )
+              }
+
+              Write-Host "Firewall rules remaining after uninstall = $($remainingFirewallRules.Count)"
+              if (Test-Path $summary) {
+                Add-Content $summary `
+                  "firewall_rules_removed=$($remainingFirewallRules.Count -eq 0)" `
+                  -Encoding utf8
+              }
+
               if ($uninstallResult -ne "PASS") {
                 Write-Error "ARM64 MSI uninstall failed: $uninstallResult"
+              }
+              if ($remainingFirewallRules.Count -eq 0) {
+                Write-Host "W5 firewall uninstall cleanup = PASS"
               }
             }
           }
