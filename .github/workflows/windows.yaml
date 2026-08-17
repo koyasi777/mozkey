@@ -1731,6 +1731,46 @@ jobs:
         run: |
           bazelisk test ... -c dbg --build_tests_only
 
+  test_arm64:
+    needs: prepare_daily_dictionary
+    # https://github.com/actions/runner-images/blob/main/images/windows/Windows11-Arm64-Readme.md
+    runs-on: windows-11-arm
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: download daily dictionary
+        uses: actions/download-artifact@v6
+        with:
+          name: daily-dictionary
+          path: .
+
+      - name: Try to restore update_deps cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install Dependencies
+        shell: cmd
+        working-directory: .\src
+        # This command uses src/third_party_cache as the download cache.
+        run: |
+          python build_tools/update_deps.py
+
+      - name: runtests
+        shell: cmd
+        working-directory: .\src
+        env:
+          ANDROID_NDK_HOME: ""
+        run: |
+          bazelisk test ... -c dbg --build_tests_only
+
   # actions/cache works without this job, but having this would increase the likelihood of cache hit
   # in other jobs. Another approach would be to use "needs:".
   # https://docs.github.com/en/actions/using-jobs/using-jobs-in-a-workflow
