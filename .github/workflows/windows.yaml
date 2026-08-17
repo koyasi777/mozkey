@@ -305,11 +305,11 @@ jobs:
         run: |
           python build_tools/update_deps.py
 
-      - name: Build Qt (arm64)
+      - name: Build Qt
         shell: cmd
         working-directory: .\src
         run: |
-          python build_tools/build_qt.py --release --confirm_license --target_arch=arm64
+          python build_tools/build_qt.py --release --confirm_license
 
       # This is needed only for GitHub Actions where free disk space is quite limited.
       - name: Delete Qt src to save disk space
@@ -379,7 +379,7 @@ jobs:
         env:
           ANDROID_NDK_HOME: ""
         run: |
-          bazelisk build package --config release_build --platforms=//:windows-arm64
+          bazelisk build package --config release_build
 
       - name: upload Mozc64_arm64.msi
         uses: actions/upload-artifact@v6
