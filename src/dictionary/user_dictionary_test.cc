@@ -30,6 +30,7 @@
 #include "dictionary/user_dictionary.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -991,6 +992,37 @@ TEST_F(UserDictionaryTest, TestPopulateTokenFromUserPosToken) {
   dic->PopulateTokenFromUserPosToken(user_token, UserDictionary::PREFIX,
                                      &token);
   EXPECT_EQ(token.cost, expected_cost);
+}
+
+TEST_F(UserDictionaryTest, TestPopulateTokenFromUserPosTokenWithEntryPenalty) {
+  std::unique_ptr<UserDictionary> dic(CreateDictionaryWithMockPos());
+  user_dictionary::UserDictionaryStorage storage;
+  user_dictionary::UserDictionary* user_dic = storage.add_dictionaries();
+  for (int i = 0; i < 10; ++i) {
+    user_dictionary::UserDictionary::Entry* entry = user_dic->add_entries();
+    entry->set_key(absl::StrCat("key", i));
+    entry->set_value(absl::StrCat("value", i));
+    entry->set_pos(user_dictionary::UserDictionary::NOUN);
+  }
+  dic->Load(storage);
+
+  UserPos::Token user_token{.key = "key0", .value = "value0", .id = 10};
+  user_token.set_pos_type(user_dictionary::UserDictionary::NOUN);
+
+  Token token;
+  dic->PopulateTokenFromUserPosToken(user_token, UserDictionary::PREFIX,
+                                     &token);
+  const int base_cost = UserPos::GetCostFromPosType(user_token.pos_type());
+  const int expected_penalty =
+      static_cast<int>(500.0 * std::log(11.0));  // N = 10
+  EXPECT_EQ(token.cost, base_cost + expected_penalty);
+
+  // POS type with cost 0 in user_pos.def (e.g. WA_GROUP1_VERB) uses default
+  // cost (5000) without penalty.
+  user_token.set_pos_type(user_dictionary::UserDictionary::WA_GROUP1_VERB);
+  dic->PopulateTokenFromUserPosToken(user_token, UserDictionary::PREFIX,
+                                     &token);
+  EXPECT_EQ(token.cost, 5000);
 }
 
 TEST_F(UserDictionaryTest, AsyncImportTest) {

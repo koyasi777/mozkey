@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -153,6 +154,7 @@ class UserDictionary::TokensIndex {
 
   bool empty() const { return user_pos_tokens_.empty(); }
   size_t size() const { return user_pos_tokens_.size(); }
+  int cost_penalty() const { return cost_penalty_; }
 
   std::vector<UserPos::Token>::const_iterator begin() const {
     return user_pos_tokens_.begin();
@@ -218,6 +220,30 @@ class UserDictionary::TokensIndex {
     std::sort(user_pos_tokens_.begin(), user_pos_tokens_.end(),
               OrderByKeyThenById());
 
+    // Adds cost penalty based on dictionary entry count N: 500 * log(N + 1).
+    //
+    // Background:
+    // User dictionary entries default to static minimum costs defined in
+    // user_pos.def. When users carelessly or unconsciously import large
+    // 3rd-party dictionaries, low-quality entries over-trigger and overpower
+    // standard system candidates.
+    //
+    // Theoretical Justification:
+    // Assuming a uniform prior probability P = 1/N across N entries, the
+    // self-information penalty in Mozc cost scaling (approx. 500 * (-ln P)) is
+    // 500 * ln(N + 1). Using N + 1 generalizes to 0 penalty when N = 0.
+    //
+    // Cost penalty examples per N:
+    // - N = 0: +0
+    // - N = 1: +346
+    // - N = 10: +1,198
+    // - N = 100: +2,307
+    // - N = 1,000: +3,454
+    // - N = 10,000: +4,605
+    // - N = 100,000: +5,756
+    cost_penalty_ = static_cast<int>(
+        500.0 * std::log(user_pos_tokens_.size() + 1));
+
     MOZC_VLOG(1) << user_pos_tokens_.size() << " user dic entries loaded";
   }
 
@@ -233,6 +259,7 @@ class UserDictionary::TokensIndex {
   const UserPos& user_pos_;
   SuppressionDictionary suppression_dictionary_;
   std::vector<UserPos::Token> user_pos_tokens_;
+  int cost_penalty_ = 0;
 };
 
 class UserDictionary::UserDictionaryReloader {
@@ -561,7 +588,8 @@ void UserDictionary::PopulateTokenFromUserPosToken(
   if (user_pos_token.has_attribute(UserPos::Token::NON_JA_LOCALE)) {
     token->cost = 10000;
   } else {
-    token->cost = UserPos::GetCostFromPosType(user_pos_token.pos_type());
+    token->cost = UserPos::GetCostFromPosType(user_pos_token.pos_type(),
+                                              GetTokens()->cost_penalty());
     DCHECK_GT(token->cost, 0);
   }
 
