@@ -499,6 +499,33 @@ jobs:
         run: |
           bazelisk build package --config release_build --platforms=//:windows-arm64
 
+      - name: Verify x64-host current ARM64 parity MSI before baseline checkout
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $head = (git rev-parse HEAD).Trim()
+          if ($head -ne "${{ github.sha }}") {
+            throw "Cross-parity warm-up source mismatch: $head"
+          }
+
+          $msi = ".\src\bazel-bin\win32\installer\Mozc64.msi"
+          if (-not (Test-Path $msi -PathType Leaf)) {
+            throw "Current-source x64-host ARM64 warm-up MSI was not produced."
+          }
+
+          Write-Host "Cross-parity source SHA = $head"
+          Write-Host "Cross-parity MSI SHA256 = $((Get-FileHash $msi -Algorithm SHA256).Hash)"
+
+      - name: upload x64-host current ARM64 parity MSI
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_x64_cross_parity.msi
+          path: src/bazel-bin/win32/installer/Mozc64.msi
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Build W2-predecessor ARM64 lifecycle baseline
         shell: pwsh
         run: |
@@ -558,6 +585,50 @@ jobs:
           name: Mozc64_arm64_pre_native_lifecycle_baseline.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
           if-no-files-found: error
+
+  test_arm64_cross_native_parity:
+    name: ARM64 cross/native package parity audit
+    needs:
+      - build_arm64
+      - build_arm64_lifecycle_baseline
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout parity audit script
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Download native ARM64 MSI
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64.msi
+          path: ${{ runner.temp }}\mozkey-native-arm64-parity
+
+      - name: Download x64-host cross-built ARM64 MSI
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64_x64_cross_parity.msi
+          path: ${{ runner.temp }}\mozkey-cross-arm64-parity
+
+      - name: Compare native and x64-host cross ARM64 package contracts
+        shell: pwsh
+        run: |
+          & ".\.github\scripts\windows_arm64_cross_native_parity_audit.ps1" `
+            -NativeArtifactDir "${{ runner.temp }}\mozkey-native-arm64-parity" `
+            -CrossArtifactDir "${{ runner.temp }}\mozkey-cross-arm64-parity" `
+            -EvidenceDir "${{ runner.temp }}\mozkey-arm64-cross-native-parity-evidence"
+
+      - name: Upload cross/native parity evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_cross_native_parity_audit
+          path: ${{ runner.temp }}\mozkey-arm64-cross-native-parity-evidence
+          if-no-files-found: warn
+          retention-days: 7
 
   test_arm64_installer_lifecycle:
     name: Native ARM64 installer lifecycle audit
