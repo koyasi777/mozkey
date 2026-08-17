@@ -66,7 +66,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
 
       - name: Install Dependencies
         shell: cmd
@@ -181,7 +181,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
 
       - name: Install Dependencies
         shell: cmd
@@ -275,8 +275,8 @@ jobs:
 
   build_arm64:
     needs: prepare_daily_dictionary
-    # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
-    runs-on: windows-2025
+    # https://github.com/actions/runner-images/blob/main/images/windows/Windows11-Arm64-Readme.md
+    runs-on: windows-11-arm
     timeout-minutes: 120
 
     steps:
@@ -296,7 +296,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
 
       - name: Install Dependencies
         shell: cmd
@@ -414,7 +414,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
 
       - name: Install Dependencies
         shell: cmd
@@ -1643,7 +1643,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
 
       - name: Install Dependencies
         shell: cmd
@@ -1679,7 +1679,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
 
       - name: Install Dependencies
         shell: cmd
