@@ -387,6 +387,118 @@ jobs:
           name: Mozc64_arm64.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
           if-no-files-found: warn
+
+  build_arm64_lifecycle_baseline:
+    needs: prepare_daily_dictionary
+    # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
+    runs-on: windows-2025
+    timeout-minutes: 120
+
+    # Preserve the pre-split W2 baseline semantics: prepare the environment
+    # from the current source, run the current ARM64 build once to warm the
+    # same Bazel workspace/output-base, then checkout the immutable baseline.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: download daily dictionary
+        uses: actions/download-artifact@v6
+        with:
+          name: daily-dictionary
+          path: .
+
+      - name: Try to restore update_deps cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: update_deps-${{ runner.os }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install Dependencies
+        shell: cmd
+        working-directory: .\src
+        # This command uses src/third_party_cache as the download cache.
+        run: |
+          python build_tools/update_deps.py
+
+      - name: Build Qt (arm64)
+        shell: cmd
+        working-directory: .\src
+        run: |
+          python build_tools/build_qt.py --release --confirm_license --target_arch=arm64
+
+      # This is needed only for GitHub Actions where free disk space is quite limited.
+      - name: Delete Qt src to save disk space
+        shell: cmd
+        working-directory: .\src
+        run: |
+          rmdir third_party\qt_src /s /q
+
+      - name: Prepare CRT redist directory expected by WiX
+        shell: pwsh
+        run: |
+          $expectedDir = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Redist\MSVC\14.50.35710\x64\Microsoft.VC145.CRT"
+
+          $requiredDlls = @(
+            "msvcp140.dll",
+            "msvcp140_1.dll",
+            "msvcp140_2.dll",
+            "vcruntime140.dll",
+            "vcruntime140_1.dll"
+          )
+
+          $searchRoots = @(
+            "C:\Program Files\Microsoft Visual Studio\2022",
+            "C:\Program Files\Microsoft Visual Studio\17",
+            "C:\Program Files\Microsoft Visual Studio\18",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022",
+            "C:\Program Files (x86)\Microsoft Visual Studio\17",
+            "C:\Program Files (x86)\Microsoft Visual Studio\18"
+          ) | Where-Object { Test-Path $_ }
+
+          Write-Host "Expected CRT redist dir:"
+          Write-Host $expectedDir
+
+          Write-Host "Search roots:"
+          $searchRoots | ForEach-Object { Write-Host $_ }
+
+          New-Item -ItemType Directory -Force $expectedDir | Out-Null
+
+          foreach ($dll in $requiredDlls) {
+            $source = Get-ChildItem -Path $searchRoots -Recurse -Filter $dll -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match "\\x64\\Microsoft\.VC[0-9]+\.CRT\\" } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+
+            if (-not $source) {
+              Write-Host "Available CRT directories:"
+              Get-ChildItem -Path $searchRoots -Recurse -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match "\\x64\\Microsoft\.VC[0-9]+\.CRT$" } |
+                Select-Object FullName
+
+              throw "Required CRT DLL was not found: $dll"
+            }
+
+            $destination = Join-Path $expectedDir $dll
+            Copy-Item $source.FullName $destination -Force
+            Write-Host "Copied $dll"
+            Write-Host "  from: $($source.FullName)"
+            Write-Host "  to:   $destination"
+          }
+
+          Write-Host "Prepared CRT redist directory:"
+          Get-ChildItem $expectedDir | Select-Object FullName
+
+      - name: build artifacts
+        shell: cmd
+        working-directory: .\src
+        env:
+          ANDROID_NDK_HOME: ""
+        run: |
+          bazelisk build package --config release_build --platforms=//:windows-arm64
+
       - name: Build W2-predecessor ARM64 lifecycle baseline
         shell: pwsh
         run: |
@@ -447,10 +559,11 @@ jobs:
           path: src/bazel-bin/win32/installer/Mozc64.msi
           if-no-files-found: error
 
-
   test_arm64_installer_lifecycle:
     name: Native ARM64 installer lifecycle audit
-    needs: build_arm64
+    needs:
+      - build_arm64
+      - build_arm64_lifecycle_baseline
     runs-on: windows-11-arm
     timeout-minutes: 30
 
