@@ -205,6 +205,7 @@ mozc_cc_library(
         ":win32_font_util",
         "//base:coordinates",
         "//base/win32:wide_char",
+        "//bazel/win32:gdi32",
         "//bazel/win32:d2d1",
         "//bazel/win32:dwrite",
         "//protocol:renderer_cc_proto",
@@ -212,6 +213,17 @@ mozc_cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/types:span",
         "@com_microsoft_wil//:wil",
+    ],
+)
+
+mozc_cc_test(
+    name = "text_renderer_test",
+    srcs = ["text_renderer_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":text_renderer",
+        "//testing:gunit_main",
     ],
 )
 

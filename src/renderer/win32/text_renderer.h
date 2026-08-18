@@ -98,9 +98,19 @@ class TextRenderer {
   virtual Size MeasureStringMultiLine(FONT_TYPE font_type,
                                       std::wstring_view str,
                                       int width) const = 0;
+
+  // Returns whether this renderer can shape and draw native vertical text.
+  virtual bool SupportsVerticalText(FONT_TYPE font_type) const = 0;
+
+  // Retrieves the physical bounding box of a single vertical text column.
+  virtual Size MeasureStringVertical(FONT_TYPE font_type,
+                                     std::wstring_view str) const = 0;
   // Renders the given |text|.
   virtual void RenderText(HDC dc, std::wstring_view text, const Rect& rect,
                           FONT_TYPE font_type) const = 0;
+  virtual void RenderTextVertical(HDC dc, std::wstring_view text,
+                                  const Rect& rect,
+                                  FONT_TYPE font_type) const = 0;
   virtual void RenderTextList(HDC dc,
                               absl::Span<const TextRenderingInfo> display_list,
                               FONT_TYPE font_type) const = 0;
