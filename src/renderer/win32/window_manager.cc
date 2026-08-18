@@ -61,33 +61,44 @@ RECT ToWinRect(const Rect& rect) {
   return RECT{rect.Left(), rect.Top(), rect.Right(), rect.Bottom()};
 }
 
-enum class VerticalRelationToPreedit {
-  kAbove,
-  kBelow,
+enum class SideRelationToPreedit {
+  kBefore,
+  kAfter,
   kOverlapping,
 };
 
-VerticalRelationToPreedit GetVerticalRelationToPreedit(
-    const RECT& rect, const Rect& preedit_rect) {
+SideRelationToPreedit GetSideRelationToPreedit(
+    const RECT& rect, const Rect& preedit_rect, bool vertical_writing) {
+  if (vertical_writing) {
+    if (rect.right <= preedit_rect.Left()) {
+      return SideRelationToPreedit::kBefore;
+    }
+    if (rect.left >= preedit_rect.Right()) {
+      return SideRelationToPreedit::kAfter;
+    }
+    return SideRelationToPreedit::kOverlapping;
+  }
+
   if (rect.bottom <= preedit_rect.Top()) {
-    return VerticalRelationToPreedit::kAbove;
+    return SideRelationToPreedit::kBefore;
   }
   if (rect.top >= preedit_rect.Bottom()) {
-    return VerticalRelationToPreedit::kBelow;
+    return SideRelationToPreedit::kAfter;
   }
-  return VerticalRelationToPreedit::kOverlapping;
+  return SideRelationToPreedit::kOverlapping;
 }
 
 bool IsOppositeSideOfPreedit(const RECT& lhs, const RECT& rhs,
-                             const Rect& preedit_rect) {
-  const VerticalRelationToPreedit lhs_relation =
-      GetVerticalRelationToPreedit(lhs, preedit_rect);
-  const VerticalRelationToPreedit rhs_relation =
-      GetVerticalRelationToPreedit(rhs, preedit_rect);
-  return (lhs_relation == VerticalRelationToPreedit::kAbove &&
-          rhs_relation == VerticalRelationToPreedit::kBelow) ||
-         (lhs_relation == VerticalRelationToPreedit::kBelow &&
-          rhs_relation == VerticalRelationToPreedit::kAbove);
+                             const Rect& preedit_rect,
+                             bool vertical_writing) {
+  const SideRelationToPreedit lhs_relation =
+      GetSideRelationToPreedit(lhs, preedit_rect, vertical_writing);
+  const SideRelationToPreedit rhs_relation =
+      GetSideRelationToPreedit(rhs, preedit_rect, vertical_writing);
+  return (lhs_relation == SideRelationToPreedit::kBefore &&
+          rhs_relation == SideRelationToPreedit::kAfter) ||
+         (lhs_relation == SideRelationToPreedit::kAfter &&
+          rhs_relation == SideRelationToPreedit::kBefore);
 }
 
 bool HasRenderableCandidateMainText(
@@ -436,7 +447,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
         IsOppositeSideOfPreedit(
             last_live_conversion_passive_suggestion_rect_,
             next_live_conversion_passive_suggestion_rect,
-            preedit_rect_for_transition)) {
+            preedit_rect_for_transition, vertical)) {
       main_window_->HideWithEffects();
     }
     ruby_window_->OnUpdate(command, *layout_manager_,

@@ -59,6 +59,22 @@ TEST(TextRendererTest, VerticalMeasurementHandlesPunctuationLatinAndDigits) {
   EXPECT_GT(size.height, size.width);
 }
 
+TEST(TextRendererTest, VerticalRubyMeasurementProducesSingleColumn) {
+  std::unique_ptr<TextRenderer> renderer = TextRenderer::Create(kTestDpi);
+  ASSERT_NE(renderer, nullptr);
+
+  if (!renderer->SupportsVerticalText(TextRenderer::FONTSET_RUBY)) {
+    GTEST_SKIP() << "DirectWrite vertical ruby text is unavailable.";
+  }
+
+  const Size size = renderer->MeasureStringVertical(
+      TextRenderer::FONTSET_RUBY, L"\u3042\u3044\u3059\u308b");
+
+  EXPECT_GT(size.width, 0);
+  EXPECT_GT(size.height, 0);
+  EXPECT_GT(size.height, size.width);
+}
+
 TEST(TextRendererTest, VerticalWrappedMeasurementFlowsIntoLeftColumns) {
   std::unique_ptr<TextRenderer> renderer = TextRenderer::Create(kTestDpi);
   ASSERT_NE(renderer, nullptr);

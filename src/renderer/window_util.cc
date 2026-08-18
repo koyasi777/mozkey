@@ -285,6 +285,59 @@ bool WindowUtil::GetRubyWindowRect(
   return false;
 }
 
+bool WindowUtil::GetRubyWindowRectForVerticalWriting(
+    const Point& composition_right_top, int composition_width,
+    const Size& window_size, int text_top_offset, int gap,
+    const Rect& working_area, const Rect* avoid_rect, Rect* window_rect) {
+  if (window_rect == nullptr || composition_width <= 0 ||
+      window_size.width <= 0 || window_size.height <= 0 ||
+      working_area.Width() <= 0 || working_area.Height() <= 0 ||
+      window_size.width > working_area.Width() ||
+      window_size.height > working_area.Height()) {
+    return false;
+  }
+
+  const int normalized_gap = std::max(0, gap);
+  const int normalized_text_top_offset = std::max(0, text_top_offset);
+  const int max_top = working_area.Bottom() - window_size.height;
+  const int aligned_top =
+      composition_right_top.y - normalized_text_top_offset;
+  const int top =
+      std::clamp(aligned_top, working_area.Top(), max_top);
+
+  const auto intersects = [](const Rect& lhs, const Rect& rhs) {
+    return lhs.Left() < rhs.Right() && rhs.Left() < lhs.Right() &&
+           lhs.Top() < rhs.Bottom() && rhs.Top() < lhs.Bottom();
+  };
+
+  const auto is_usable = [&](const Rect& rect) {
+    if (rect.Left() < working_area.Left() ||
+        rect.Right() > working_area.Right() ||
+        rect.Top() < working_area.Top() ||
+        rect.Bottom() > working_area.Bottom()) {
+      return false;
+    }
+    return avoid_rect == nullptr || !intersects(rect, *avoid_rect);
+  };
+
+  const Rect right_rect(composition_right_top.x + normalized_gap, top,
+                        window_size.width, window_size.height);
+  if (is_usable(right_rect)) {
+    *window_rect = right_rect;
+    return true;
+  }
+
+  const Rect left_rect(composition_right_top.x - composition_width -
+                           normalized_gap - window_size.width,
+                       top, window_size.width, window_size.height);
+  if (is_usable(left_rect)) {
+    *window_rect = left_rect;
+    return true;
+  }
+
+  return false;
+}
+
 Rect WindowUtil::GetWindowRectForInfolistWindow(const Size& window_size,
                                                 const Rect& candidate_rect,
                                                 const Rect& working_area) {

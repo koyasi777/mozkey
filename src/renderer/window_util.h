@@ -94,6 +94,18 @@ class WindowUtil {
                                 const Rect* avoid_rect,
                                 Rect* window_rect);
 
+  // Returns a vertical-writing ruby rectangle. |composition_right_top| is the
+  // right-top anchor of the active composition column and |composition_width|
+  // is that column's physical width. |text_top_offset| is the vertical inset
+  // from the ruby window edge to its first text glyph. Japanese vertical ruby
+  // is placed on the right side first and on the left side as a fallback. The
+  // first ruby glyph stays aligned with the active text unless the monitor work
+  // area requires a vertical clamp.
+  static bool GetRubyWindowRectForVerticalWriting(
+      const Point& composition_right_top, int composition_width,
+      const Size& window_size, int text_top_offset, int gap,
+      const Rect& working_area, const Rect* avoid_rect, Rect* window_rect);
+
   // Returns the appropriate infolist window position in the screen
   // coordinate.  |window_size| is the size of the infolist window.
   // |candidate_rect| is the rect of the candidate window.

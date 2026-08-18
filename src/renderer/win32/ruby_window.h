@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include <atlbase.h>
@@ -11,6 +12,7 @@
 #include <atlwin.h>
 
 #include "protocol/renderer_command.pb.h"
+#include "renderer/win32/text_renderer.h"
 #include "renderer/win32/win32_renderer_util.h"
 
 namespace mozc {
@@ -61,7 +63,7 @@ class RubyWindow
   void ResetFont();
   void UpdateDpi(uint32_t dpi);
   void UpdateFont();
-  SIZE MeasureText() const;
+  SIZE MeasureText(bool vertical_writing) const;
   bool BuildReadingText(const commands::RendererCommand& command,
                         std::string* reading) const;
   struct TargetIdentity {
@@ -84,17 +86,20 @@ class RubyWindow
                                      bool from_preedit_rectangle,
                                      bool target_changed) const;
   bool GetBasePosition(const commands::RendererCommand& command,
-                       const LayoutManager& layout_manager, POINT* point,
-                       int* line_height,
+                       const LayoutManager& layout_manager,
+                       bool vertical_writing, POINT* point, int* line_height,
                        bool* from_preedit_rectangle) const;
 
   HFONT font_ = nullptr;
   std::wstring font_face_name_;
   int font_height_ = 0;
   int font_weight_ = 0;
+  uint32_t ruby_text_color_ = 0xffffffff;
   uint32_t dpi_ = USER_DEFAULT_SCREEN_DPI;
+  std::unique_ptr<TextRenderer> text_renderer_;
 
   std::wstring text_;
+  bool vertical_writing_ = false;
   SIZE window_size_ = {};
   RendererShadowWindow shadow_window_;
 

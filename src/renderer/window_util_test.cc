@@ -372,5 +372,74 @@ TEST_F(WindowUtilTest, RubyWindowReturnsFalseWhenBothSidesAreBlocked) {
       preedit_rect, ruby_size, 4, working_area, &avoid_rect, &result));
 }
 
+TEST_F(WindowUtilTest, VerticalRubyPrefersRightOfComposition) {
+  const Point composition_right_top(120, 200);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_right_top, 20, ruby_size, 8, 4, working_area, nullptr,
+      &result));
+
+  EXPECT_EQ(result.Left(), 124);
+  EXPECT_EQ(result.Top(), 192);
+}
+
+TEST_F(WindowUtilTest, VerticalRubyFallsBackLeftAtRightEdge) {
+  const Point composition_right_top(980, 200);
+  const Size ruby_size(50, 100);
+  const Rect working_area(0, 0, 1000, 800);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_right_top, 20, ruby_size, 8, 4, working_area, nullptr,
+      &result));
+
+  EXPECT_EQ(result.Left(), 906);
+  EXPECT_EQ(result.Right(), 956);
+}
+
+TEST_F(WindowUtilTest, VerticalRubyAvoidsSuggestionOnPreferredRight) {
+  const Point composition_right_top(120, 200);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+  const Rect avoid_rect(120, 180, 100, 180);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_right_top, 20, ruby_size, 8, 4, working_area, &avoid_rect,
+      &result));
+
+  EXPECT_EQ(result.Right(), 96);
+  EXPECT_EQ(result.Left(), 66);
+}
+
+TEST_F(WindowUtilTest, VerticalRubyReturnsFalseWhenBothSidesAreBlocked) {
+  const Point composition_right_top(120, 200);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+  const Rect avoid_rect(50, 180, 220, 180);
+
+  Rect result;
+  EXPECT_FALSE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_right_top, 20, ruby_size, 8, 4, working_area, &avoid_rect,
+      &result));
+}
+
+TEST_F(WindowUtilTest, VerticalRubyClampsTopInsideWorkingArea) {
+  const Point composition_right_top(120, 760);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_right_top, 20, ruby_size, 8, 4, working_area, nullptr,
+      &result));
+
+  EXPECT_EQ(result.Top(), 700);
+  EXPECT_EQ(result.Bottom(), 800);
+}
+
 }  // namespace renderer
 }  // namespace mozc
