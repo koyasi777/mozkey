@@ -371,9 +371,15 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   main_window_->UpdateDpi(target_dpi);
   infolist_window_->UpdateDpi(target_dpi);
 
+  const bool vertical = (LayoutManager::GetWritingDirection(app_info) ==
+                         LayoutManager::VERTICAL_WRITING);
+
   if (candidate_changed &&
       (candidate_window.display_type() == commands::MAIN)) {
-    main_window_->UpdateLayout(candidate_window);
+    main_window_->UpdateLayout(
+        candidate_window,
+        vertical ? CandidateWindow::LayoutMode::kVertical
+                 : CandidateWindow::LayoutMode::kHorizontal);
   }
   const Size main_window_size = main_window_->GetLayoutSize();
 
@@ -400,8 +406,6 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     const CRect rect(candidate_layout.exclude_region());
     const Rect preedit_rect(rect.left, rect.top, rect.Width(), rect.Height());
     preedit_rect_for_transition = preedit_rect;
-    const bool vertical = (LayoutManager::GetWritingDirection(app_info) ==
-                           LayoutManager::VERTICAL_WRITING);
     // Sometimes |target_point| is set to the top-left of the exclusion area
     // but WindowUtil does not support this case yet.
     // As a workaround, use |preedit_rect.Bottom()| for y-coordinate of the

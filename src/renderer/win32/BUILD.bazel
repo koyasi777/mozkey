@@ -133,6 +133,7 @@ mozc_cc_library(
     deps = [
         ":resource_h",
         ":text_renderer",
+        ":vertical_candidate_layout",
         ":win32_dpi_util",
         ":win32_renderer_util",
         "//base:const",
