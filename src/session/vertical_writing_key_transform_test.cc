@@ -101,14 +101,86 @@ TEST(VerticalWritingKeyTransformTest, PredictionLeftAndRightMoveCandidates) {
   EXPECT_EQ(right.special_key(), commands::KeyEvent::UP);
 }
 
-TEST(VerticalWritingKeyTransformTest, ModifiedArrowIsNeverReinterpreted) {
+TEST(VerticalWritingKeyTransformTest,
+     VerticalConversionShiftUpAndDownResizeSegment) {
+  for (const config::Config::SessionKeymap profile :
+       {config::Config::MSIME, config::Config::KOTOERI}) {
+    SCOPED_TRACE(static_cast<int>(profile));
+    keymap::KeyMapManager keymap = MakeKeyMap(profile);
+
+    commands::KeyEvent shrink = ParseKey("Shift Up");
+    EXPECT_TRUE(TransformVerticalWritingCandidateArrowKey(
+        true, VerticalWritingKeyState::kConversion, keymap, &shrink));
+    EXPECT_EQ(shrink.special_key(), commands::KeyEvent::LEFT);
+    keymap::ConversionState::Commands shrink_command =
+        keymap::ConversionState::NONE;
+    ASSERT_TRUE(keymap.GetCommandConversion(shrink, &shrink_command));
+    EXPECT_EQ(shrink_command, keymap::ConversionState::SEGMENT_WIDTH_SHRINK);
+
+    commands::KeyEvent expand = ParseKey("Shift Down");
+    EXPECT_TRUE(TransformVerticalWritingCandidateArrowKey(
+        true, VerticalWritingKeyState::kConversion, keymap, &expand));
+    EXPECT_EQ(expand.special_key(), commands::KeyEvent::RIGHT);
+    keymap::ConversionState::Commands expand_command =
+        keymap::ConversionState::NONE;
+    ASSERT_TRUE(keymap.GetCommandConversion(expand, &expand_command));
+    EXPECT_EQ(expand_command, keymap::ConversionState::SEGMENT_WIDTH_EXPAND);
+  }
+}
+
+TEST(VerticalWritingKeyTransformTest,
+     ExistingShiftLeftAndRightRemainCompatibilityBindings) {
   keymap::KeyMapManager keymap = MakeKeyMap(config::Config::MSIME);
-  commands::KeyEvent key = ParseKey("Shift Left");
+
+  commands::KeyEvent shrink = ParseKey("Shift Left");
+  EXPECT_FALSE(TransformVerticalWritingCandidateArrowKey(
+      true, VerticalWritingKeyState::kConversion, keymap, &shrink));
+  EXPECT_EQ(shrink.special_key(), commands::KeyEvent::LEFT);
+
+  commands::KeyEvent expand = ParseKey("Shift Right");
+  EXPECT_FALSE(TransformVerticalWritingCandidateArrowKey(
+      true, VerticalWritingKeyState::kConversion, keymap, &expand));
+  EXPECT_EQ(expand.special_key(), commands::KeyEvent::RIGHT);
+}
+
+TEST(VerticalWritingKeyTransformTest,
+     HorizontalShiftUpAndDownKeepPageNavigation) {
+  keymap::KeyMapManager keymap = MakeKeyMap(config::Config::MSIME);
+
+  commands::KeyEvent up = ParseKey("Shift Up");
+  EXPECT_FALSE(TransformVerticalWritingCandidateArrowKey(
+      false, VerticalWritingKeyState::kConversion, keymap, &up));
+  EXPECT_EQ(up.special_key(), commands::KeyEvent::UP);
+
+  commands::KeyEvent down = ParseKey("Shift Down");
+  EXPECT_FALSE(TransformVerticalWritingCandidateArrowKey(
+      false, VerticalWritingKeyState::kConversion, keymap, &down));
+  EXPECT_EQ(down.special_key(), commands::KeyEvent::DOWN);
+}
+
+TEST(VerticalWritingKeyTransformTest,
+     PredictionShiftUpAndDownRemainUnchanged) {
+  keymap::KeyMapManager keymap = MakeKeyMap(config::Config::MSIME);
+
+  commands::KeyEvent up = ParseKey("Shift Up");
+  EXPECT_FALSE(TransformVerticalWritingCandidateArrowKey(
+      true, VerticalWritingKeyState::kPrediction, keymap, &up));
+  EXPECT_EQ(up.special_key(), commands::KeyEvent::UP);
+
+  commands::KeyEvent down = ParseKey("Shift Down");
+  EXPECT_FALSE(TransformVerticalWritingCandidateArrowKey(
+      true, VerticalWritingKeyState::kPrediction, keymap, &down));
+  EXPECT_EQ(down.special_key(), commands::KeyEvent::DOWN);
+}
+
+TEST(VerticalWritingKeyTransformTest,
+     CtrlShiftArrowIsNotReinterpreted) {
+  keymap::KeyMapManager keymap = MakeKeyMap(config::Config::MSIME);
+  commands::KeyEvent key = ParseKey("Ctrl Shift Up");
 
   EXPECT_FALSE(TransformVerticalWritingCandidateArrowKey(
       true, VerticalWritingKeyState::kConversion, keymap, &key));
-  EXPECT_EQ(key.special_key(), commands::KeyEvent::LEFT);
-  EXPECT_GT(key.modifier_keys_size(), 0);
+  EXPECT_EQ(key.special_key(), commands::KeyEvent::UP);
 }
 
 TEST(VerticalWritingKeyTransformTest, OrdinaryCompositionIsOutOfScope) {
@@ -127,7 +199,8 @@ TEST(VerticalWritingKeyTransformTest, AtokArrowContractIsPreserved) {
        {VerticalWritingKeyState::kSuggestion,
         VerticalWritingKeyState::kConversion,
         VerticalWritingKeyState::kPrediction}) {
-    for (const char* physical : {"Left", "Right", "Up", "Down"}) {
+    for (const char* physical :
+         {"Left", "Right", "Up", "Down", "Shift Up", "Shift Down"}) {
       SCOPED_TRACE(static_cast<int>(state));
       SCOPED_TRACE(physical);
       commands::KeyEvent key = ParseKey(physical);

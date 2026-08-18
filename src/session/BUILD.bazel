@@ -865,6 +865,7 @@ mozc_cc_library(
     hdrs = ["vertical_writing_key_transform.h"],
     deps = [
         ":keymap",
+        "//composer:key_event_util",
         "//protocol:commands_cc_proto",
     ],
 )

@@ -3,6 +3,9 @@
 
 #include "session/vertical_writing_key_transform.h"
 
+#include <cstdint>
+
+#include "composer/key_event_util.h"
 #include "protocol/commands.pb.h"
 #include "session/keymap.h"
 
@@ -21,8 +24,19 @@ commands::KeyEvent MakeLookupKey(SpecialKey special_key) {
 bool IsPlainSpecialKey(const commands::KeyEvent& key,
                        SpecialKey special_key) {
   return key.has_special_key() && key.special_key() == special_key &&
-         key.modifier_keys_size() == 0 && !key.has_key_code() &&
+         KeyEventUtil::GetModifiers(key) == 0 && !key.has_key_code() &&
          !key.has_key_string();
+}
+
+bool IsShiftOnlySpecialKey(const commands::KeyEvent& key,
+                           SpecialKey special_key) {
+  constexpr uint32_t kShiftMask =
+      commands::KeyEvent::SHIFT | commands::KeyEvent::LEFT_SHIFT |
+      commands::KeyEvent::RIGHT_SHIFT;
+  const uint32_t modifiers = KeyEventUtil::GetModifiers(key);
+  return key.has_special_key() && key.special_key() == special_key &&
+         (modifiers & kShiftMask) != 0 && (modifiers & ~kShiftMask) == 0 &&
+         !key.has_key_code() && !key.has_key_string();
 }
 
 bool GetConversionCommand(const keymap::KeyMapManager& keymap,
@@ -47,6 +61,22 @@ bool HasConventionalVerticalCandidateContract(
          left == keymap::ConversionState::SEGMENT_FOCUS_LEFT &&
          GetConversionCommand(keymap, commands::KeyEvent::RIGHT, &right) &&
          right == keymap::ConversionState::SEGMENT_FOCUS_RIGHT;
+}
+
+bool HasVerticalSegmentWidthContract(
+    const keymap::KeyMapManager& keymap,
+    const commands::KeyEvent& shifted_arrow) {
+  commands::KeyEvent shrink_key = shifted_arrow;
+  shrink_key.set_special_key(commands::KeyEvent::LEFT);
+  commands::KeyEvent expand_key = shifted_arrow;
+  expand_key.set_special_key(commands::KeyEvent::RIGHT);
+
+  keymap::ConversionState::Commands shrink = keymap::ConversionState::NONE;
+  keymap::ConversionState::Commands expand = keymap::ConversionState::NONE;
+  return keymap.GetCommandConversion(shrink_key, &shrink) &&
+         shrink == keymap::ConversionState::SEGMENT_WIDTH_SHRINK &&
+         keymap.GetCommandConversion(expand_key, &expand) &&
+         expand == keymap::ConversionState::SEGMENT_WIDTH_EXPAND;
 }
 
 bool CurrentStateAcceptsLogicalKey(VerticalWritingKeyState state,
@@ -84,8 +114,33 @@ bool CurrentStateAcceptsLogicalKey(VerticalWritingKeyState state,
 bool TransformVerticalWritingCandidateArrowKey(
     bool vertical_writing, VerticalWritingKeyState state,
     const keymap::KeyMapManager& keymap, commands::KeyEvent* key) {
-  if (!vertical_writing || key == nullptr ||
-      !HasConventionalVerticalCandidateContract(keymap)) {
+  if (!vertical_writing || key == nullptr) {
+    return false;
+  }
+
+  // In Japanese vertical writing, text inside a segment advances top-to-bottom.
+  // Reuse the user's existing horizontal segment-width commands rather than
+  // introducing new commands or rewriting the keymap:
+  //
+  //   physical Shift+Up   -> logical Shift+Left  -> SegmentWidthShrink
+  //   physical Shift+Down -> logical Shift+Right -> SegmentWidthExpand
+  //
+  // Keep Shift+Left/Right themselves unchanged as compatibility bindings.
+  // The pair is enabled only when the active keymap actually maps the logical
+  // Shift+Left/Right pair to shrink/expand. This automatically excludes ATOK's
+  // different arrow contract and respects compatible custom keymaps.
+  if (state == VerticalWritingKeyState::kConversion &&
+      (IsShiftOnlySpecialKey(*key, commands::KeyEvent::UP) ||
+       IsShiftOnlySpecialKey(*key, commands::KeyEvent::DOWN)) &&
+      HasVerticalSegmentWidthContract(keymap, *key)) {
+    key->set_special_key(
+        key->special_key() == commands::KeyEvent::UP
+            ? commands::KeyEvent::LEFT
+            : commands::KeyEvent::RIGHT);
+    return true;
+  }
+
+  if (!HasConventionalVerticalCandidateContract(keymap)) {
     return false;
   }
 

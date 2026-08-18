@@ -19,16 +19,20 @@ enum class VerticalWritingKeyState {
   kPrediction,
 };
 
-// Transforms an unmodified physical arrow key to the logical key whose existing
-// keymap command matches Japanese vertical-writing geometry.
+// Transforms candidate-navigation arrows, and vertical-writing segment-width
+// Shift+Up/Down, to logical keys whose existing keymap commands match Japanese
+// vertical-writing geometry.
 //
-// The transform is deliberately keymap-aware. It is enabled only for keymaps
-// whose ordinary Conversion arrows have the MS-IME/Kotoeri semantic contract:
+// The transform is deliberately keymap-aware. Candidate navigation is enabled
+// only for keymaps whose ordinary Conversion arrows have the MS-IME/Kotoeri
+// semantic contract:
 //   Down  = PredictAndConvert
 //   Up    = ConvertPrev
 //   Left  = SegmentFocusLeft
 //   Right = SegmentFocusRight
 //
+// Segment-width Shift+Up/Down is independently enabled only when the active
+// keymap maps Shift+Left/Right to SegmentWidthShrink/SegmentWidthExpand.
 // Consequently ATOK-style bindings are preserved. Returns true only when the
 // key itself was changed.
 bool TransformVerticalWritingCandidateArrowKey(
