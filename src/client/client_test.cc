@@ -289,6 +289,7 @@ TEST_F(ClientTest, SendKeyWithContext) {
   context.set_preceding_text(kPrecedingText);
   context.set_following_text(kFollowingText);
   context.set_suppress_suggestion(kSuppressSuggestion);
+  context.set_vertical_writing(true);
 
   commands::Output mock_output;
   mock_output.set_id(mock_id);
@@ -306,6 +307,7 @@ TEST_F(ClientTest, SendKeyWithContext) {
   EXPECT_EQ(input.context().preceding_text(), kPrecedingText);
   EXPECT_EQ(input.context().following_text(), kFollowingText);
   EXPECT_EQ(input.context().suppress_suggestion(), kSuppressSuggestion);
+  EXPECT_TRUE(input.context().vertical_writing());
 }
 
 TEST_F(ClientTest, TestSendKey) {
@@ -342,6 +344,7 @@ TEST_F(ClientTest, TestSendKeyWithContext) {
   context.set_preceding_text(kPrecedingText);
   context.set_following_text(kFollowingText);
   context.set_suppress_suggestion(kSuppressSuggestion);
+  context.set_vertical_writing(true);
 
   commands::Output mock_output;
   mock_output.Clear();
@@ -360,6 +363,7 @@ TEST_F(ClientTest, TestSendKeyWithContext) {
   EXPECT_EQ(input.context().preceding_text(), kPrecedingText);
   EXPECT_EQ(input.context().following_text(), kFollowingText);
   EXPECT_EQ(input.context().suppress_suggestion(), kSuppressSuggestion);
+  EXPECT_TRUE(input.context().vertical_writing());
 }
 
 TEST_F(ClientTest, SendCommand) {
@@ -394,6 +398,7 @@ TEST_F(ClientTest, SendCommandWithContext) {
   context.set_preceding_text(kPrecedingText);
   context.set_following_text(kFollowingText);
   context.set_suppress_suggestion(kSuppressSuggestion);
+  context.set_vertical_writing(true);
 
   commands::Output mock_output;
   mock_output.Clear();
@@ -411,6 +416,7 @@ TEST_F(ClientTest, SendCommandWithContext) {
   EXPECT_EQ(input.context().preceding_text(), kPrecedingText);
   EXPECT_EQ(input.context().following_text(), kFollowingText);
   EXPECT_EQ(input.context().suppress_suggestion(), kSuppressSuggestion);
+  EXPECT_TRUE(input.context().vertical_writing());
 }
 
 TEST_F(ClientTest, IsDirectModeCommandPresetTest) {

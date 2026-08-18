@@ -173,6 +173,7 @@ mozc_cc_library(
         ":ime_context",
         ":key_event_transformer",
         ":keymap",
+        ":vertical_writing_key_transform",
         ":zenz_adoption_policy",
         ":zenz_client_context",
         ":zenz_context_assembler",
@@ -859,6 +860,16 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "vertical_writing_key_transform",
+    srcs = ["vertical_writing_key_transform.cc"],
+    hdrs = ["vertical_writing_key_transform.h"],
+    deps = [
+        ":keymap",
+        "//protocol:commands_cc_proto",
+    ],
+)
+
+mozc_cc_library(
     name = "key_event_transformer",
     srcs = ["key_event_transformer.cc"],
     hdrs = ["key_event_transformer.h"],
@@ -915,6 +926,20 @@ mozc_cc_test(
         "//testing:mozctest",
         "//testing:test_peer",
         "@com_google_absl//absl/container:flat_hash_set",
+    ],
+)
+
+mozc_cc_test(
+    name = "vertical_writing_key_transform_test",
+    size = "small",
+    srcs = ["vertical_writing_key_transform_test.cc"],
+    deps = [
+        ":keymap",
+        ":vertical_writing_key_transform",
+        "//composer:key_parser",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//testing:gunit_main",
     ],
 )
 
