@@ -495,9 +495,18 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
       infolist_window_->UpdateLayout(candidate_window);
     }
 
-    // Align infolist window
-    const Rect infolist_rect = WindowUtil::GetWindowRectForInfolistWindow(
-        infolist_window_->GetLayoutSize(), main_window_rect, working_area);
+    // Horizontal writing keeps the legacy right/left placement contract.
+    // Vertical writing treats the active preedit as an obstacle: the candidate
+    // window is normally on its left, so the infolist should continue outward
+    // instead of opening back across the composition.
+    const Size infolist_size = infolist_window_->GetLayoutSize();
+    const Rect infolist_rect =
+        vertical && !preedit_rect_for_transition.IsRectEmpty()
+            ? WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+                  infolist_size, main_window_rect,
+                  preedit_rect_for_transition, working_area)
+            : WindowUtil::GetWindowRectForInfolistWindow(
+                  infolist_size, main_window_rect, working_area);
     // InfolistWindow is permanently layered. Its cached PBGRA surface is
     // presented explicitly by UpdateEffectWindows(), so moving/resizing must
     // not trigger the legacy WM_PAINT path.

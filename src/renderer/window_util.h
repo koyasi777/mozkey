@@ -103,6 +103,15 @@ class WindowUtil {
   static Rect GetWindowRectForInfolistWindow(const Size& window_size,
                                              const Rect& candidate_rect,
                                              const Rect& working_area);
+
+  // Returns an infolist rectangle that avoids both |candidate_rect| and
+  // |avoid_rect| whenever the working area allows it.  The side opposite
+  // |avoid_rect| is preferred, so a vertical candidate window placed left of
+  // the preedit also puts its infolist farther left.  The other horizontal
+  // side and then above/below are used as fallbacks.
+  static Rect GetWindowRectForInfolistWindowAvoidingRect(
+      const Size& window_size, const Rect& candidate_rect,
+      const Rect& avoid_rect, const Rect& working_area);
 };
 }  // namespace renderer
 }  // namespace mozc

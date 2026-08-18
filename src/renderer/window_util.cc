@@ -308,5 +308,80 @@ Rect WindowUtil::GetWindowRectForInfolistWindow(const Size& window_size,
   }
   return Rect(infolist_pos, window_size);
 }
+
+Rect WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+    const Size& window_size, const Rect& candidate_rect,
+    const Rect& avoid_rect, const Rect& working_area) {
+  const int group_left = std::min(candidate_rect.Left(), avoid_rect.Left());
+  const int group_right = std::max(candidate_rect.Right(), avoid_rect.Right());
+  const int group_top = std::min(candidate_rect.Top(), avoid_rect.Top());
+  const int group_bottom =
+      std::max(candidate_rect.Bottom(), avoid_rect.Bottom());
+
+  const int candidate_center =
+      candidate_rect.Left() + candidate_rect.Width() / 2;
+  const int avoid_center = avoid_rect.Left() + avoid_rect.Width() / 2;
+  const bool prefer_left = avoid_center >= candidate_center;
+
+  // Without a reliable working area we cannot evaluate fallbacks.  Still keep
+  // the infolist on the outside of the candidate/preedit pair.
+  if (working_area.Height() == 0 || working_area.Width() == 0) {
+    const int x =
+        prefer_left ? group_left - window_size.width : group_right;
+    return Rect(x, candidate_rect.Top(), window_size.width, window_size.height);
+  }
+
+  const int max_top =
+      std::max(working_area.Top(), working_area.Bottom() - window_size.height);
+  const int side_top =
+      std::clamp(candidate_rect.Top(), working_area.Top(), max_top);
+
+  const Rect left_rect(group_left - window_size.width, side_top,
+                       window_size.width, window_size.height);
+  const Rect right_rect(group_right, side_top, window_size.width,
+                        window_size.height);
+
+  const auto fits = [&](const Rect& rect) {
+    return working_area.Left() <= rect.Left() &&
+           rect.Right() <= working_area.Right() &&
+           working_area.Top() <= rect.Top() &&
+           rect.Bottom() <= working_area.Bottom();
+  };
+
+  const Rect& preferred_side = prefer_left ? left_rect : right_rect;
+  const Rect& other_side = prefer_left ? right_rect : left_rect;
+  if (fits(preferred_side)) {
+    return preferred_side;
+  }
+  if (fits(other_side)) {
+    return other_side;
+  }
+
+  // If neither horizontal side is available, try above and below the combined
+  // candidate/preedit obstacle. This prevents a large usage window from
+  // covering the active vertical composition just because horizontal space is
+  // tight.
+  const int max_left =
+      std::max(working_area.Left(), working_area.Right() - window_size.width);
+  const int vertical_left =
+      std::clamp(candidate_rect.Left(), working_area.Left(), max_left);
+
+  const Rect above_rect(vertical_left, group_top - window_size.height,
+                        window_size.width, window_size.height);
+  if (fits(above_rect)) {
+    return above_rect;
+  }
+
+  const Rect below_rect(vertical_left, group_bottom, window_size.width,
+                        window_size.height);
+  if (fits(below_rect)) {
+    return below_rect;
+  }
+
+  // Degenerate case: there is not enough room around the obstacle. Preserve
+  // the legacy working-area behavior rather than returning an off-screen rect.
+  return GetWindowRectForInfolistWindow(window_size, candidate_rect,
+                                        working_area);
+}
 }  // namespace renderer
 }  // namespace mozc

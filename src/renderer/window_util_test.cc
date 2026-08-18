@@ -254,6 +254,48 @@ TEST_F(WindowUtilTest, InfolistWindow) {
   VerifyInfolistWindow(10, 20, 20, 85, 11, 12, 31, 80, "On the bottom edge");
 }
 
+TEST_F(WindowUtilTest, VerticalInfolistPrefersOutsideOfPreedit) {
+  const Size infolist_size(30, 20);
+  const Rect candidate_rect(60, 20, 20, 40);
+  const Rect preedit_rect(80, 20, 10, 40);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+      infolist_size, candidate_rect, preedit_rect, working_area);
+
+  EXPECT_EQ(result.Left(), 30);
+  EXPECT_EQ(result.Top(), 20);
+  EXPECT_EQ(result.Right(), candidate_rect.Left());
+}
+
+TEST_F(WindowUtilTest, VerticalInfolistFallsBackBeyondPreedit) {
+  const Size infolist_size(30, 20);
+  const Rect candidate_rect(5, 20, 20, 40);
+  const Rect preedit_rect(25, 20, 10, 40);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+      infolist_size, candidate_rect, preedit_rect, working_area);
+
+  EXPECT_EQ(result.Left(), 35);
+  EXPECT_EQ(result.Top(), 20);
+  EXPECT_EQ(result.Left(), preedit_rect.Right());
+}
+
+TEST_F(WindowUtilTest, VerticalInfolistUsesVerticalFallbackWhenSidesAreTight) {
+  const Size infolist_size(60, 20);
+  const Rect candidate_rect(50, 40, 40, 20);
+  const Rect preedit_rect(90, 40, 60, 20);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+      infolist_size, candidate_rect, preedit_rect, working_area);
+
+  EXPECT_EQ(result.Left(), 50);
+  EXPECT_EQ(result.Top(), 20);
+  EXPECT_EQ(result.Bottom(), candidate_rect.Top());
+}
+
 TEST_F(WindowUtilTest, MonitorErrors) {
   // Error! monitor doesn't have width nor height.
   Rect working_area(0, 0, 0, 0);
