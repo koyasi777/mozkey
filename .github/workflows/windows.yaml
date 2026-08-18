@@ -2052,6 +2052,465 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  probe_arm64_real_ime_desktop_capability:
+    name: TEMP WoA real-IME desktop capability probe
+    needs: build_arm64
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Try to restore update_deps cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install Dependencies
+        shell: cmd
+        working-directory: .\src
+        run: |
+          python build_tools/update_deps.py
+
+      - name: Build native ARM64 profile-activation probe
+        shell: cmd
+        working-directory: .\src
+        env:
+          ANDROID_NDK_HOME: ""
+        run: |
+          bazelisk build --config release_build //win32/base:real_ime_desktop_probe_arm64
+
+      - name: Resolve and stage native probe helper
+        shell: pwsh
+        working-directory: .\src
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $executionRootOutput = @(
+            & bazelisk info --config release_build execution_root
+          )
+          if ($LASTEXITCODE -ne 0) {
+            throw "bazelisk info execution_root failed with exit code $LASTEXITCODE"
+          }
+
+          $executionRoots = @(
+            $executionRootOutput |
+              ForEach-Object { ([string]$_).Trim() } |
+              Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_) -and
+                (Test-Path $_ -PathType Container)
+              }
+          )
+          if ($executionRoots.Count -ne 1) {
+            throw "Expected exactly one existing Bazel execution_root."
+          }
+          $executionRoot = [string]$executionRoots[0]
+
+          $outputs = @(
+            & bazelisk cquery --config release_build --output=files `
+              //win32/base:real_ime_desktop_probe_arm64 |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+          )
+          if ($LASTEXITCODE -ne 0) {
+            throw "bazelisk cquery failed."
+          }
+
+          $matches = @(
+            $outputs |
+              Where-Object {
+                [System.IO.Path]::GetFileName($_) -ieq `
+                  "real_ime_desktop_probe_arm64.exe"
+              }
+          )
+          if ($matches.Count -ne 1) {
+            throw "Expected exactly one ARM64 desktop probe output."
+          }
+
+          $source = Join-Path $executionRoot $matches[0]
+          if (-not (Test-Path $source -PathType Leaf)) {
+            throw "Resolved probe output does not exist: $source"
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP "mozkey-real-ime-desktop-probe"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item $source (Join-Path $stage "real_ime_desktop_probe_arm64.exe") -Force
+
+      - name: Download exact ARM64 MSI
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64.msi
+          path: ${{ runner.temp }}\mozkey-real-ime-probe-msi
+
+      - name: Install exact ARM64 MSI
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $evidence = Join-Path $env:RUNNER_TEMP "mozkey-real-ime-desktop-evidence"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+
+          $msis = @(
+            Get-ChildItem (Join-Path $env:RUNNER_TEMP "mozkey-real-ime-probe-msi") `
+              -Recurse -File -Filter *.msi
+          )
+          if ($msis.Count -ne 1) {
+            throw "Expected exactly one ARM64 MSI; found $($msis.Count)"
+          }
+
+          $msi = $msis[0].FullName
+          $log = Join-Path $evidence "install.log"
+          $result = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            "/i", "`"$msi`"", "/qn", "/norestart", "/l*v", "`"$log`""
+          )
+          if ($result.ExitCode -notin @(0, 3010)) {
+            throw "MSI install failed: $($result.ExitCode)"
+          }
+
+          "msi=$msi" | Set-Content (Join-Path $evidence "msi.txt") -Encoding utf8
+          "sha256=$((Get-FileHash $msi -Algorithm SHA256).Hash)" |
+            Add-Content (Join-Path $evidence "msi.txt") -Encoding utf8
+
+      - name: Probe session, input desktop, GUI host, foreground, and profile activation
+        id: capability_probe
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $evidence = Join-Path $env:RUNNER_TEMP "mozkey-real-ime-desktop-evidence"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+
+          public static class MozkeyDesktopProbeNative {
+            [DllImport("kernel32.dll")]
+            public static extern uint GetCurrentThreadId();
+
+            [DllImport("user32.dll", SetLastError = true)]
+            public static extern IntPtr OpenInputDesktop(
+              uint flags, bool inherit, uint desiredAccess);
+
+            [DllImport("user32.dll", SetLastError = true)]
+            public static extern bool CloseDesktop(IntPtr desktop);
+
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetThreadDesktop(uint threadId);
+
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetProcessWindowStation();
+
+            [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            public static extern bool GetUserObjectInformation(
+              IntPtr handle, int index, StringBuilder buffer,
+              uint length, out uint needed);
+
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetForegroundWindow();
+
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetShellWindow();
+
+            [DllImport("user32.dll", SetLastError = true)]
+            public static extern bool SetForegroundWindow(IntPtr window);
+
+            [DllImport("user32.dll")]
+            public static extern uint GetWindowThreadProcessId(
+              IntPtr window, out uint processId);
+          }
+          '@
+
+          function Get-UserObjectName {
+            param([Parameter(Mandatory = $true)][IntPtr]$Handle)
+            $buffer = New-Object System.Text.StringBuilder 512
+            [uint32]$needed = 0
+            $ok = [MozkeyDesktopProbeNative]::GetUserObjectInformation(
+              $Handle, 2, $buffer, [uint32]($buffer.Capacity * 2), [ref]$needed
+            )
+            if (-not $ok) {
+              return "<unavailable:$([Runtime.InteropServices.Marshal]::GetLastWin32Error())>"
+            }
+            return $buffer.ToString()
+          }
+
+          function Get-WindowProcessId {
+            param([IntPtr]$Window)
+            if ($Window -eq [IntPtr]::Zero) {
+              return 0
+            }
+            [uint32]$windowProcessId = 0
+            [void][MozkeyDesktopProbeNative]::GetWindowThreadProcessId(
+              $Window, [ref]$windowProcessId
+            )
+            return [int]$windowProcessId
+          }
+
+          $rows = [ordered]@{}
+          $rows["runner_arch"] = $env:PROCESSOR_ARCHITECTURE
+          $rows["whoami"] = (& whoami).Trim()
+          $rows["session_name_env"] = [string]$env:SESSIONNAME
+          $rows["process_session_id"] = [Diagnostics.Process]::GetCurrentProcess().SessionId
+
+          $windowStation = [MozkeyDesktopProbeNative]::GetProcessWindowStation()
+          $rows["window_station"] = Get-UserObjectName $windowStation
+
+          $threadDesktop = [MozkeyDesktopProbeNative]::GetThreadDesktop(
+            [MozkeyDesktopProbeNative]::GetCurrentThreadId()
+          )
+          $rows["thread_desktop"] = Get-UserObjectName $threadDesktop
+
+          $inputDesktop = [MozkeyDesktopProbeNative]::OpenInputDesktop(
+            0, $false, 0x0001
+          )
+          if ($inputDesktop -eq [IntPtr]::Zero) {
+            $rows["input_desktop_open"] = "false"
+            $rows["input_desktop_name"] = ""
+            $rows["input_desktop_error"] = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+          } else {
+            try {
+              $rows["input_desktop_open"] = "true"
+              $rows["input_desktop_name"] = Get-UserObjectName $inputDesktop
+              $rows["input_desktop_error"] = "0"
+            } finally {
+              [void][MozkeyDesktopProbeNative]::CloseDesktop($inputDesktop)
+            }
+          }
+
+          foreach ($name in @(
+            "explorer", "dwm", "ctfmon", "ShellExperienceHost",
+            "StartMenuExperienceHost"
+          )) {
+            $items = @(Get-Process -Name $name -ErrorAction SilentlyContinue)
+            $rows["process_${name}_count"] = $items.Count
+            $rows["process_${name}_sessions"] = (
+              $items | ForEach-Object { $_.SessionId } | Sort-Object -Unique
+            ) -join ","
+          }
+
+          $foregroundBefore = [MozkeyDesktopProbeNative]::GetForegroundWindow()
+          $rows["foreground_before_hwnd"] = "0x{0:X}" -f $foregroundBefore.ToInt64()
+          $rows["foreground_before_pid"] = Get-WindowProcessId $foregroundBefore
+
+          $shellWindow = [MozkeyDesktopProbeNative]::GetShellWindow()
+          $rows["shell_hwnd"] = "0x{0:X}" -f $shellWindow.ToInt64()
+          $rows["shell_pid"] = Get-WindowProcessId $shellWindow
+
+          $notepad = $null
+          try {
+            $notepadCommand = Get-Command notepad.exe -ErrorAction SilentlyContinue
+            $rows["notepad_present"] = [string]($null -ne $notepadCommand)
+
+            if ($null -ne $notepadCommand) {
+              $notepad = Start-Process notepad.exe -PassThru
+              $deadline = [DateTime]::UtcNow.AddSeconds(12)
+              [IntPtr]$window = [IntPtr]::Zero
+
+              while ([DateTime]::UtcNow -lt $deadline) {
+                Start-Sleep -Milliseconds 250
+                $notepad.Refresh()
+                if ($notepad.HasExited) {
+                  break
+                }
+                if ($notepad.MainWindowHandle -ne 0) {
+                  $window = [IntPtr]$notepad.MainWindowHandle
+                  break
+                }
+              }
+
+              $rows["notepad_exited_early"] = [string]$notepad.HasExited
+              $rows["notepad_session_id"] = if ($notepad.HasExited) {
+                ""
+              } else {
+                [string]$notepad.SessionId
+              }
+              $rows["notepad_hwnd"] = "0x{0:X}" -f $window.ToInt64()
+              $rows["notepad_window_present"] = [string]($window -ne [IntPtr]::Zero)
+
+              if ($window -ne [IntPtr]::Zero) {
+                $setForeground = [MozkeyDesktopProbeNative]::SetForegroundWindow($window)
+                Start-Sleep -Milliseconds 500
+                $foregroundAfter = [MozkeyDesktopProbeNative]::GetForegroundWindow()
+                $foregroundAfterPid = Get-WindowProcessId $foregroundAfter
+
+                $rows["set_foreground_return"] = [string]$setForeground
+                $rows["foreground_after_hwnd"] = "0x{0:X}" -f $foregroundAfter.ToInt64()
+                $rows["foreground_after_pid"] = $foregroundAfterPid
+                $rows["notepad_foreground"] = [string](
+                  (-not $notepad.HasExited) -and
+                  ($foregroundAfterPid -eq $notepad.Id)
+                )
+              } else {
+                $rows["set_foreground_return"] = "false"
+                $rows["foreground_after_hwnd"] = ""
+                $rows["foreground_after_pid"] = "0"
+                $rows["notepad_foreground"] = "false"
+              }
+            } else {
+              $rows["notepad_window_present"] = "false"
+              $rows["notepad_foreground"] = "false"
+            }
+
+            $helper = Join-Path $env:RUNNER_TEMP `
+              "mozkey-real-ime-desktop-probe\real_ime_desktop_probe_arm64.exe"
+            if (-not (Test-Path $helper -PathType Leaf)) {
+              throw "Profile-activation helper is missing."
+            }
+
+            $profileLog = Join-Path $evidence "profile-activation.log"
+            & $helper *> $profileLog
+            $profileExit = $LASTEXITCODE
+            Get-Content $profileLog | ForEach-Object { Write-Host $_ }
+
+            $rows["profile_activation_exit"] = $profileExit
+            $rows["profile_activation_pass"] = [string]($profileExit -eq 0)
+
+            $interactiveDesktop = (
+              $rows["input_desktop_open"] -eq "true" -and
+              -not [string]::IsNullOrWhiteSpace([string]$rows["input_desktop_name"])
+            )
+            $guiWindow = $rows["notepad_window_present"] -eq "True"
+            $foreground = $rows["notepad_foreground"] -eq "True"
+            $profile = $profileExit -eq 0
+
+            $available = (
+              $interactiveDesktop -and $guiWindow -and $foreground -and $profile
+            )
+
+            $rows["interactive_desktop_signal"] = [string]$interactiveDesktop
+            $rows["gui_window_signal"] = [string]$guiWindow
+            $rows["foreground_signal"] = [string]$foreground
+            $rows["profile_signal"] = [string]$profile
+            $rows["DESKTOP_CAPABILITY_PROBE"] = if ($available) {
+              "AVAILABLE"
+            } else {
+              "UNAVAILABLE"
+            }
+          } finally {
+            if ($null -ne $notepad -and -not $notepad.HasExited) {
+              Stop-Process -Id $notepad.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          $rows.GetEnumerator() | ForEach-Object {
+            "$($_.Key)=$($_.Value)"
+          } | Tee-Object -FilePath (Join-Path $evidence "summary.txt")
+
+          $rows.GetEnumerator() |
+            ForEach-Object {
+              [pscustomobject]@{ Key = $_.Key; Value = [string]$_.Value }
+            } |
+            Export-Csv (Join-Path $evidence "capability.csv") `
+              -NoTypeInformation -Encoding utf8
+
+          Write-Host "This is a diagnostic probe; capability UNAVAILABLE is not a job failure."
+          "result=$($rows["DESKTOP_CAPABILITY_PROBE"])" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          ("interactive_desktop={0}" -f $rows["interactive_desktop_signal"]) |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          ("gui_window={0}" -f $rows["gui_window_signal"]) |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          ("foreground={0}" -f $rows["foreground_signal"]) |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          ("profile_activation={0}" -f $rows["profile_signal"]) |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: CAPABILITY RESULT - AVAILABLE
+        if: steps.capability_probe.outputs.result == 'AVAILABLE'
+        shell: pwsh
+        run: |
+          Write-Host "DESKTOP_CAPABILITY_PROBE=AVAILABLE"
+
+      - name: CAPABILITY RESULT - UNAVAILABLE
+        if: steps.capability_probe.outputs.result == 'UNAVAILABLE'
+        shell: pwsh
+        run: |
+          Write-Host "DESKTOP_CAPABILITY_PROBE=UNAVAILABLE"
+
+      - name: SIGNAL interactive_desktop - TRUE
+        if: steps.capability_probe.outputs.interactive_desktop == 'True'
+        shell: pwsh
+        run: Write-Host "interactive_desktop_signal=True"
+
+      - name: SIGNAL interactive_desktop - FALSE
+        if: steps.capability_probe.outputs.interactive_desktop == 'False'
+        shell: pwsh
+        run: Write-Host "interactive_desktop_signal=False"
+
+      - name: SIGNAL gui_window - TRUE
+        if: steps.capability_probe.outputs.gui_window == 'True'
+        shell: pwsh
+        run: Write-Host "gui_window_signal=True"
+
+      - name: SIGNAL gui_window - FALSE
+        if: steps.capability_probe.outputs.gui_window == 'False'
+        shell: pwsh
+        run: Write-Host "gui_window_signal=False"
+
+      - name: SIGNAL foreground - TRUE
+        if: steps.capability_probe.outputs.foreground == 'True'
+        shell: pwsh
+        run: Write-Host "foreground_signal=True"
+
+      - name: SIGNAL foreground - FALSE
+        if: steps.capability_probe.outputs.foreground == 'False'
+        shell: pwsh
+        run: Write-Host "foreground_signal=False"
+
+      - name: SIGNAL profile_activation - TRUE
+        if: steps.capability_probe.outputs.profile_activation == 'True'
+        shell: pwsh
+        run: Write-Host "profile_signal=True"
+
+      - name: SIGNAL profile_activation - FALSE
+        if: steps.capability_probe.outputs.profile_activation == 'False'
+        shell: pwsh
+        run: Write-Host "profile_signal=False"
+
+      - name: Uninstall exact ARM64 MSI
+        if: always()
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Continue"
+
+          $evidence = Join-Path $env:RUNNER_TEMP "mozkey-real-ime-desktop-evidence"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+
+          $msis = @(
+            Get-ChildItem (Join-Path $env:RUNNER_TEMP "mozkey-real-ime-probe-msi") `
+              -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue
+          )
+          if ($msis.Count -eq 1) {
+            $log = Join-Path $evidence "uninstall.log"
+            $result = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+              "/x", "`"$($msis[0].FullName)`"", "/qn", "/norestart",
+              "/l*v", "`"$log`""
+            )
+            Write-Host "uninstall exit = $($result.ExitCode)"
+            if ($result.ExitCode -notin @(0, 1605, 3010)) {
+              exit 1
+            }
+          } else {
+            Write-Host "Cleanup MSI count = $($msis.Count)"
+          }
+
+      - name: Upload WoA desktop-capability evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_real_ime_desktop_capability_probe
+          path: ${{ runner.temp }}\mozkey-real-ime-desktop-evidence
+          if-no-files-found: warn
+          retention-days: 7
+
   test:
     needs: prepare_daily_dictionary
     # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md

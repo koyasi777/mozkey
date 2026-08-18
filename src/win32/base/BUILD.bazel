@@ -35,6 +35,7 @@ load(
     "mozc_cc_library",
     "mozc_cc_test",
     "mozc_cc_win32_library",
+    "mozc_win32_cc_prod_binary",
 )
 load(
     "//bazel/win32:build_defs.bzl",
@@ -151,6 +152,20 @@ mozc_cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log:check",
     ],
+)
+
+mozc_win32_cc_prod_binary(
+    name = "real_ime_desktop_probe_arm64",
+    srcs = ["real_ime_desktop_probe.cc"],
+    executable_name_map = {
+        "Mozc": "real_ime_desktop_probe_arm64.exe",
+        "GoogleJapaneseInput": "real_ime_desktop_probe_arm64.exe",
+    },
+    platform = "//:windows-arm64",
+    static_crt = True,
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [":imm_util"],
 )
 
 mozc_cc_library(
