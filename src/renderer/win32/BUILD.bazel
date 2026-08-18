@@ -115,6 +115,16 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "vertical_candidate_layout",
+    srcs = ["vertical_candidate_layout.cc"],
+    hdrs = ["vertical_candidate_layout.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//base:coordinates",
+    ],
+)
+mozc_cc_library(
     name = "candidate_window",
     srcs = ["candidate_window.cc"],
     hdrs = ["candidate_window.h"],
@@ -338,6 +348,17 @@ mozc_cc_library(
     ],
 )
 
+mozc_cc_test(
+    name = "vertical_candidate_layout_test",
+    srcs = ["vertical_candidate_layout_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":vertical_candidate_layout",
+        "//base:coordinates",
+        "//testing:gunit_main",
+    ],
+)
 mozc_cc_test(
     name = "win32_renderer_util_test",
     srcs = ["win32_renderer_util_test.cc"],
