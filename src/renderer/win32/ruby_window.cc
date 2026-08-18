@@ -242,6 +242,9 @@ void RubyWindow::HideWindowOnly() {
 void RubyWindow::ClearPlacementTracking() {
   has_last_target_identity_ = false;
   has_last_valid_geometry_ = false;
+  has_vertical_composition_span_ = false;
+  vertical_composition_left_ = 0;
+  vertical_composition_right_ = 0;
   transient_geometry_reject_count_ = 0;
   last_target_identity_ = TargetIdentity();
   last_valid_window_rect_ = {};
@@ -638,6 +641,9 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     last_target_identity_ = current_target_identity;
     has_last_target_identity_ = true;
     has_last_valid_geometry_ = false;
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
     transient_geometry_reject_count_ = 0;
     HideWindowOnly();
   } else if (has_current_target_identity) {
@@ -646,7 +652,16 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   } else {
     has_last_target_identity_ = false;
     has_last_valid_geometry_ = false;
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
     transient_geometry_reject_count_ = 0;
+  }
+
+  if (!vertical_writing) {
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
   }
 
   POINT base_point = {};
@@ -696,10 +711,34 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   RECT preferred_window_rect = {};
   RECT window_rect = {};
 
+  bool has_next_vertical_composition_span = false;
+  int next_vertical_composition_left = 0;
+  int next_vertical_composition_right = 0;
+
   if (vertical_writing) {
-    // composition_target is the right-top corner of the active vertical column
-    // and line_height is its physical width. Put the reading on the conventional
-    // Japanese ruby side (right) first, with left as the fallback.
+    // Word can collapse the active TSF target to a caret-like rectangle when a
+    // live composition wraps into a new vertical column. The full composition
+    // GetTextExt is identical to that active target, so renderer-side accepted
+    // geometry is the reliable source of the occupied horizontal extent.
+    //
+    // Japanese vertical text creates subsequent columns toward the left.
+    // Preserve the outermost accepted edges for the lifetime of this live
+    // composition. Compute the next span locally and commit it only after the
+    // new ruby frame survives transient-geometry checks and is presented.
+    const int current_column_left = base_point.x - line_height;
+    const int current_column_right = base_point.x;
+    if (has_vertical_composition_span_) {
+      next_vertical_composition_left =
+          std::min(vertical_composition_left_, current_column_left);
+      next_vertical_composition_right =
+          std::max(vertical_composition_right_, current_column_right);
+    } else {
+      next_vertical_composition_left = current_column_left;
+      next_vertical_composition_right = current_column_right;
+    }
+    has_next_vertical_composition_span =
+        next_vertical_composition_right > next_vertical_composition_left;
+
     const Rect work_rect(work_area.left, work_area.top,
                          work_area.right - work_area.left,
                          work_area.bottom - work_area.top);
@@ -710,9 +749,22 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
                     avoid_rect->bottom - avoid_rect->top);
     }
 
+    if (!has_next_vertical_composition_span) {
+      restore_previous_content();
+      if (KeepCurrentPlacement()) {
+        return;
+      }
+      has_last_valid_geometry_ = false;
+      HideWindowOnly();
+      return;
+    }
+
+    const Rect composition_span(
+        next_vertical_composition_left, base_point.y,
+        next_vertical_composition_right - next_vertical_composition_left, 1);
     const int text_top_offset =
         GetRubyContentPaddingY(theme, dpi_, /*vertical_writing=*/true);
-    const Rect preferred_rect(base_point.x + gap,
+    const Rect preferred_rect(composition_span.Right() + gap,
                               base_point.y - text_top_offset,
                               window_size_.cx, window_size_.cy);
     preferred_window_rect =
@@ -721,9 +773,9 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
 
     Rect placed_rect;
     if (!WindowUtil::GetRubyWindowRectForVerticalWriting(
-            Point(base_point.x, base_point.y), line_height,
-            Size(window_size_.cx, window_size_.cy), text_top_offset, gap,
-            work_rect, avoid.has_value() ? &*avoid : nullptr, &placed_rect)) {
+            composition_span, Size(window_size_.cx, window_size_.cy),
+            text_top_offset, gap, work_rect,
+            avoid.has_value() ? &*avoid : nullptr, &placed_rect)) {
       restore_previous_content();
       const bool looks_like_transient_geometry =
           ShouldRejectTransientGeometry(
@@ -741,8 +793,7 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     top = placed_rect.Top();
     window_rect =
         RECT{placed_rect.Left(), placed_rect.Top(),
-             placed_rect.Right(), placed_rect.Bottom()};
-  } else {
+             placed_rect.Right(), placed_rect.Bottom()};  } else {
     // Keep the left edge stable while the reading text grows. Centering a ruby
     // chip that is wider than the preedit makes the window expand both left and
     // right on every keystroke, which is visually noisy in live conversion.
@@ -814,6 +865,16 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     restore_previous_content();
     HideWindowOnly();
     return;
+  }
+
+  if (vertical_writing && has_next_vertical_composition_span) {
+    has_vertical_composition_span_ = true;
+    vertical_composition_left_ = next_vertical_composition_left;
+    vertical_composition_right_ = next_vertical_composition_right;
+  } else {
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
   }
 
   ShowWindow(SW_SHOWNOACTIVATE);

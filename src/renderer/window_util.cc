@@ -286,10 +286,10 @@ bool WindowUtil::GetRubyWindowRect(
 }
 
 bool WindowUtil::GetRubyWindowRectForVerticalWriting(
-    const Point& composition_right_top, int composition_width,
-    const Size& window_size, int text_top_offset, int gap,
-    const Rect& working_area, const Rect* avoid_rect, Rect* window_rect) {
-  if (window_rect == nullptr || composition_width <= 0 ||
+    const Rect& composition_span, const Size& window_size,
+    int text_top_offset, int gap, const Rect& working_area,
+    const Rect* avoid_rect, Rect* window_rect) {
+  if (window_rect == nullptr || composition_span.Width() <= 0 ||
       window_size.width <= 0 || window_size.height <= 0 ||
       working_area.Width() <= 0 || working_area.Height() <= 0 ||
       window_size.width > working_area.Width() ||
@@ -301,7 +301,7 @@ bool WindowUtil::GetRubyWindowRectForVerticalWriting(
   const int normalized_text_top_offset = std::max(0, text_top_offset);
   const int max_top = working_area.Bottom() - window_size.height;
   const int aligned_top =
-      composition_right_top.y - normalized_text_top_offset;
+      composition_span.Top() - normalized_text_top_offset;
   const int top =
       std::clamp(aligned_top, working_area.Top(), max_top);
 
@@ -320,15 +320,15 @@ bool WindowUtil::GetRubyWindowRectForVerticalWriting(
     return avoid_rect == nullptr || !intersects(rect, *avoid_rect);
   };
 
-  const Rect right_rect(composition_right_top.x + normalized_gap, top,
+  const Rect right_rect(composition_span.Right() + normalized_gap, top,
                         window_size.width, window_size.height);
   if (is_usable(right_rect)) {
     *window_rect = right_rect;
     return true;
   }
 
-  const Rect left_rect(composition_right_top.x - composition_width -
-                           normalized_gap - window_size.width,
+  const Rect left_rect(composition_span.Left() - normalized_gap -
+                           window_size.width,
                        top, window_size.width, window_size.height);
   if (is_usable(left_rect)) {
     *window_rect = left_rect;
@@ -337,7 +337,6 @@ bool WindowUtil::GetRubyWindowRectForVerticalWriting(
 
   return false;
 }
-
 Rect WindowUtil::GetWindowRectForInfolistWindow(const Size& window_size,
                                                 const Rect& candidate_rect,
                                                 const Rect& working_area) {

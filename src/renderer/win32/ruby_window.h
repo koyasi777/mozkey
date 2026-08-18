@@ -100,6 +100,13 @@ class RubyWindow
 
   std::wstring text_;
   bool vertical_writing_ = false;
+  // Physical horizontal extent of composition columns that have been accepted
+  // and rendered during the current vertical live-conversion composition.
+  // Japanese vertical text advances into new columns toward the left, so ruby
+  // stays outside [left, right] instead of following only the active column.
+  bool has_vertical_composition_span_ = false;
+  int vertical_composition_left_ = 0;
+  int vertical_composition_right_ = 0;
   SIZE window_size_ = {};
   RendererShadowWindow shadow_window_;
 
