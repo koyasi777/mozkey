@@ -130,6 +130,29 @@ TEST(VerticalCandidateLayoutTest, EmptyOptionalSectionsDoNotCreateGaps) {
   ExpectRect(layout.GetValueRect(0), 3, 4, 16, 40);
 }
 
+TEST(VerticalCandidateLayoutTest,
+     CrossAxisEdgePaddingAddsMarginsWithoutWideningCandidateColumn) {
+  VerticalCandidateLayout layout;
+  VerticalCandidateLayout::Parameters parameters;
+  parameters.window_border = 1;
+  parameters.column_padding = 2;
+  parameters.vertical_padding = 3;
+  parameters.cross_axis_edge_padding = 5;
+
+  std::vector<VerticalCandidateLayout::CandidateMetrics> metrics = {
+      Metrics(Size(), Size(10, 30), Size()),
+  };
+
+  layout.Initialize(metrics, parameters);
+
+  // Candidate column width remains 10 + 2 * 2 = 14.  Only the physical
+  // left/right edges gain 5 px each.
+  EXPECT_EQ(layout.GetTotalSize().width, 26);
+  EXPECT_EQ(layout.GetTotalSize().height, 38);
+  ExpectRect(layout.GetCandidateRect(0), 6, 1, 14, 36);
+  ExpectRect(layout.GetValueRect(0), 8, 4, 10, 30);
+}
+
 TEST(VerticalCandidateLayoutTest, EmptyCandidateListKeepsFooterGeometryValid) {
   VerticalCandidateLayout layout;
   VerticalCandidateLayout::Parameters parameters;

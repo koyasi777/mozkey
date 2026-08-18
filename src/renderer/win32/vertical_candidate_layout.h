@@ -33,6 +33,11 @@ class VerticalCandidateLayout {
     int vertical_padding = 0;
     int section_gap = 0;
     Size footer_size;
+
+    // Extra blank space at the physical left/right edges of a vertical popup.
+    // This is intentionally independent from column_padding so callers can
+    // add outer breathing room without widening every candidate column.
+    int cross_axis_edge_padding = 0;
   };
 
   VerticalCandidateLayout() = default;

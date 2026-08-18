@@ -44,6 +44,8 @@ void VerticalCandidateLayout::Initialize(
   parameters.vertical_padding = NonNegative(parameters.vertical_padding);
   parameters.section_gap = NonNegative(parameters.section_gap);
   parameters.footer_size = NonNegativeSize(parameters.footer_size);
+  parameters.cross_axis_edge_padding =
+      NonNegative(parameters.cross_axis_edge_padding);
 
   std::vector<CandidateMetrics> metrics;
   metrics.reserve(input_candidates.size());
@@ -89,14 +91,20 @@ void VerticalCandidateLayout::Initialize(
     }
   }
 
-  const int inner_width = std::max(body_width, parameters.footer_size.width);
+  const int body_edge_padding =
+      has_candidates ? parameters.cross_axis_edge_padding : 0;
+  const int body_width_with_edges =
+      body_width + body_edge_padding * 2;
+  const int inner_width =
+      std::max(body_width_with_edges, parameters.footer_size.width);
   total_size_ =
       Size(parameters.window_border * 2 + inner_width,
            parameters.window_border * 2 + body_height +
                parameters.footer_size.height);
 
   const int body_top = parameters.window_border;
-  int column_right = total_size_.width - parameters.window_border;
+  int column_right =
+      total_size_.width - parameters.window_border - body_edge_padding;
 
   int shortcut_top = body_top + parameters.vertical_padding;
   int value_top = shortcut_top + shortcut_zone_height;

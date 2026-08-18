@@ -536,12 +536,36 @@ bool CandidateWindow::TryUpdateVerticalLayout() {
              ? layout_style.row_rect_padding()
              : kRowRectPadding);
 
+  // Keep ordinary conversion/prediction geometry exactly as before.  The
+  // passive SUGGESTION popup is visually denser because it normally contains
+  // only vertical candidate strings, so give only that popup additional outer
+  // breathing room.  Do not use column_padding for the left/right edges:
+  // widening every candidate column would change the already-approved
+  // conversion candidate spacing.
+  int vertical_padding = padding;
+  int cross_axis_edge_padding = 0;
+  if (candidate_window_->category() == commands::SUGGESTION) {
+    const Size candidate_em = text_renderer_->MeasureStringVertical(
+        TextRenderer::FONTSET_CANDIDATE, L"日");
+    const int em_cross = std::max(1, candidate_em.width);
+    const int em_inline = std::max(1, candidate_em.height);
+
+    // About 0.25em at the physical left/right edges and about 0.33em at
+    // the top/bottom.  Measurements come from the active candidate font, so
+    // the result follows font size and DPI.
+    cross_axis_edge_padding =
+        std::max(1, (em_cross + 3) / 4);
+    vertical_padding =
+        std::max(padding, std::max(1, (em_inline + 2) / 3));
+  }
+
   VerticalCandidateLayout::Parameters parameters;
   parameters.window_border = kWindowBorder;
   parameters.column_padding = padding;
-  parameters.vertical_padding = padding;
+  parameters.vertical_padding = vertical_padding;
   parameters.section_gap = padding;
   parameters.footer_size = MeasureVerticalFooterSize();
+  parameters.cross_axis_edge_padding = cross_axis_edge_padding;
 
   vertical_layout_->Initialize(metrics, parameters);
   layout_mode_ = LayoutMode::kVertical;
