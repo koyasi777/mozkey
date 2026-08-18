@@ -1691,6 +1691,367 @@ jobs:
           name: Mozc64_arm64_native_installed_msi_audit
           path: ${{ runner.temp }}\mozkey-w4-arm64-msi-evidence
           if-no-files-found: warn
+  test_arm64_tip_client_architecture:
+    name: ARM64 TIP client-architecture smoke
+    needs: build_arm64
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Try to restore update_deps cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install Dependencies
+        shell: cmd
+        working-directory: .\src
+        run: |
+          python build_tools/update_deps.py
+
+      - name: Build native ARM64 and x64 TIP client smoke helpers
+        shell: cmd
+        working-directory: .\src
+        env:
+          ANDROID_NDK_HOME: ""
+        run: |
+          bazelisk build --config release_build //win32/tip:tip_client_smoke_arm64 //win32/tip:tip_client_smoke_x64
+
+      - name: Resolve, stage, and verify helper PE architectures
+        shell: pwsh
+        working-directory: .\src
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          function Get-PEMachine {
+            param([Parameter(Mandatory = $true)][string]$Path)
+
+            $stream = [System.IO.File]::Open(
+              $Path,
+              [System.IO.FileMode]::Open,
+              [System.IO.FileAccess]::Read,
+              [System.IO.FileShare]::Read
+            )
+            try {
+              $reader = New-Object System.IO.BinaryReader($stream)
+              if ($reader.ReadUInt16() -ne 0x5A4D) {
+                throw "Not an MZ executable: $Path"
+              }
+              $stream.Position = 0x3C
+              $peOffset = $reader.ReadUInt32()
+              $stream.Position = $peOffset
+              if ($reader.ReadUInt32() -ne 0x00004550) {
+                throw "Missing PE signature: $Path"
+              }
+              $machine = $reader.ReadUInt16()
+            } finally {
+              $stream.Dispose()
+            }
+
+            switch ($machine) {
+              0xAA64 { return "ARM64" }
+              0x8664 { return "x64" }
+              0x014C { return "x86" }
+              default { return ("0x{0:X4}" -f $machine) }
+            }
+          }
+
+          function Resolve-BazelOutput {
+            param(
+              [Parameter(Mandatory = $true)][string]$Target,
+              [Parameter(Mandatory = $true)][string]$ExpectedFileName,
+              [Parameter(Mandatory = $true)][string]$ExecutionRoot
+            )
+
+            $outputs = @(
+              & bazelisk cquery --config release_build --output=files $Target |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            )
+            if ($LASTEXITCODE -ne 0) {
+              throw "bazelisk cquery failed for $Target with exit code $LASTEXITCODE"
+            }
+
+            Write-Host "cquery outputs for ${Target}:"
+            $outputs | ForEach-Object { Write-Host "  $_" }
+
+            $matching = @(
+              $outputs |
+                Where-Object {
+                  [System.IO.Path]::GetFileName($_) -ieq $ExpectedFileName
+                }
+            )
+            if ($matching.Count -ne 1) {
+              throw (
+                "Expected exactly one $ExpectedFileName output for $Target; " +
+                "found $($matching.Count)"
+              )
+            }
+
+            $resolved = Join-Path $ExecutionRoot $matching[0]
+            if (-not (Test-Path $resolved -PathType Leaf)) {
+              throw "Resolved Bazel output does not exist: $resolved"
+            }
+
+            return (Resolve-Path $resolved).Path
+          }
+
+          if ($env:PROCESSOR_ARCHITECTURE -ne "ARM64") {
+            throw "This job is not running on native Windows ARM64."
+          }
+
+          $executionRootOutput = @(
+            & bazelisk info --config release_build execution_root
+          )
+          if ($LASTEXITCODE -ne 0) {
+            throw "bazelisk info execution_root failed with exit code $LASTEXITCODE"
+          }
+
+          Write-Host "bazelisk info execution_root raw output:"
+          $executionRootOutput | ForEach-Object { Write-Host "  $_" }
+
+          $executionRootCandidates = @(
+            $executionRootOutput |
+              ForEach-Object { ([string]$_).Trim() } |
+              Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_) -and
+                (Test-Path $_ -PathType Container)
+              }
+          )
+
+          if ($executionRootCandidates.Count -ne 1) {
+            throw (
+              "Expected exactly one existing execution_root directory; " +
+              "found $($executionRootCandidates.Count)"
+            )
+          }
+
+          $executionRoot = [string]$executionRootCandidates[0]
+          Write-Host "Bazel execution_root = $executionRoot"
+
+          $armSource = Resolve-BazelOutput `
+            -Target "//win32/tip:tip_client_smoke_arm64" `
+            -ExpectedFileName "tip_client_smoke_arm64.exe" `
+            -ExecutionRoot $executionRoot
+
+          $x64Source = Resolve-BazelOutput `
+            -Target "//win32/tip:tip_client_smoke_x64" `
+            -ExpectedFileName "tip_client_smoke_x64.exe" `
+            -ExecutionRoot $executionRoot
+
+          $stage = Join-Path $env:RUNNER_TEMP "mozkey-tip-client-smoke"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          $armHelper = Join-Path $stage "tip_client_smoke_arm64.exe"
+          $x64Helper = Join-Path $stage "tip_client_smoke_x64.exe"
+
+          Copy-Item $armSource $armHelper -Force
+          Copy-Item $x64Source $x64Helper -Force
+
+          $armMachine = Get-PEMachine $armHelper
+          $x64Machine = Get-PEMachine $x64Helper
+
+          Write-Host "ARM64 source  = $armSource"
+          Write-Host "ARM64 staged  = $armHelper"
+          Write-Host "ARM64 machine = $armMachine"
+          Write-Host "x64 source    = $x64Source"
+          Write-Host "x64 staged    = $x64Helper"
+          Write-Host "x64 machine   = $x64Machine"
+
+          if ($armMachine -ne "ARM64") {
+            throw "Native helper is not ARM64."
+          }
+          if ($x64Machine -ne "x64") {
+            throw "Cross-built helper is not x64."
+          }
+
+      - name: Download exact ARM64 MSI from this workflow run
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64.msi
+          path: ${{ runner.temp }}\mozkey-tip-smoke-msi
+
+      - name: Install MSI and audit TIP client architecture routing
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+
+          $evidence = Join-Path $env:RUNNER_TEMP "mozkey-tip-client-architecture-evidence"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+
+          $msiCandidates = @(
+            Get-ChildItem (Join-Path $env:RUNNER_TEMP "mozkey-tip-smoke-msi") `
+              -Recurse -File -Filter *.msi
+          )
+          if ($msiCandidates.Count -ne 1) {
+            throw "Expected exactly one ARM64 MSI artifact; found $($msiCandidates.Count)"
+          }
+          $msi = $msiCandidates[0].FullName
+
+          if ($env:PROCESSOR_ARCHITECTURE -ne "ARM64") {
+            throw "This job is not running on native Windows ARM64."
+          }
+
+          $installLog = Join-Path $evidence "install.log"
+          $install = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            "/i",
+            "`"$msi`"",
+            "/qn",
+            "/norestart",
+            "/l*v",
+            "`"$installLog`""
+          )
+          Write-Host "msiexec install exit = $($install.ExitCode)"
+          if ($install.ExitCode -notin @(0, 3010)) {
+            throw "ARM64 MSI install failed: $($install.ExitCode)"
+          }
+
+          $clsid = "{10A67BC8-22FA-4A59-90DC-2546652C56BF}"
+          $subkey = "CLSID\$clsid\InProcServer32"
+
+          function Get-ComRegistration {
+            param(
+              [Parameter(Mandatory = $true)]
+              [Microsoft.Win32.RegistryView]$View
+            )
+
+            $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+              [Microsoft.Win32.RegistryHive]::ClassesRoot,
+              $View
+            )
+            try {
+              $key = $base.OpenSubKey($subkey, $false)
+              if ($null -eq $key) {
+                throw "COM registration not found in registry view $View`: $subkey"
+              }
+              try {
+                return [pscustomobject]@{
+                  View = [string]$View
+                  Server = [string]$key.GetValue("")
+                  ThreadingModel = [string]$key.GetValue("ThreadingModel")
+                }
+              } finally {
+                $key.Dispose()
+              }
+            } finally {
+              $base.Dispose()
+            }
+          }
+
+          $reg64 = Get-ComRegistration `
+            -View ([Microsoft.Win32.RegistryView]::Registry64)
+          $reg32 = Get-ComRegistration `
+            -View ([Microsoft.Win32.RegistryView]::Registry32)
+
+          @($reg64, $reg32) |
+            Export-Csv (Join-Path $evidence "com-registration.csv") `
+              -NoTypeInformation -Encoding utf8
+
+          Write-Host "64-bit COM server = $($reg64.Server)"
+          Write-Host "32-bit COM server = $($reg32.Server)"
+
+          if ([System.IO.Path]::GetFileName($reg64.Server) -ine "mozc_tip64x.dll") {
+            throw "64-bit ARM64 COM registration does not point to mozc_tip64x.dll."
+          }
+          if ([System.IO.Path]::GetFileName($reg32.Server) -ine "mozc_tip32.dll") {
+            throw "32-bit COM registration does not point to mozc_tip32.dll."
+          }
+          if ($reg64.ThreadingModel -ine "Apartment") {
+            throw "64-bit TIP ThreadingModel is not Apartment."
+          }
+          if ($reg32.ThreadingModel -ine "Apartment") {
+            throw "32-bit TIP ThreadingModel is not Apartment."
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP "mozkey-tip-client-smoke"
+          $armHelper = Join-Path $stage "tip_client_smoke_arm64.exe"
+          $x64Helper = Join-Path $stage "tip_client_smoke_x64.exe"
+
+          $armLog = Join-Path $evidence "arm64-helper.log"
+          & $armHelper *> $armLog
+          $armExit = $LASTEXITCODE
+          Get-Content $armLog | ForEach-Object { Write-Host $_ }
+          if ($armExit -ne 0) {
+            throw "Native ARM64 TIP client smoke failed: $armExit"
+          }
+
+          $x64Log = Join-Path $evidence "x64-helper.log"
+          & $x64Helper *> $x64Log
+          $x64Exit = $LASTEXITCODE
+          Get-Content $x64Log | ForEach-Object { Write-Host $_ }
+          if ($x64Exit -ne 0) {
+            throw "x64-emulated TIP client smoke failed: $x64Exit"
+          }
+
+          @(
+            "runner_arch=$env:PROCESSOR_ARCHITECTURE"
+            "msi=$msi"
+            "msi_sha256=$((Get-FileHash $msi -Algorithm SHA256).Hash)"
+            "registry64_server=$($reg64.Server)"
+            "registry32_server=$($reg32.Server)"
+            "arm64_helper_exit=$armExit"
+            "x64_helper_exit=$x64Exit"
+            "TIP_CLIENT_ARCHITECTURE_SMOKE=PASS"
+          ) | Set-Content (Join-Path $evidence "summary.txt") -Encoding utf8
+
+      - name: Uninstall exact ARM64 MSI
+        if: always()
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Continue"
+
+          $evidence = Join-Path $env:RUNNER_TEMP "mozkey-tip-client-architecture-evidence"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $uninstallLog = Join-Path $evidence "uninstall.log"
+
+          $msiCandidates = @(
+            Get-ChildItem (Join-Path $env:RUNNER_TEMP "mozkey-tip-smoke-msi") `
+              -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue
+          )
+
+          if ($msiCandidates.Count -eq 0) {
+            Write-Host "No MSI available for cleanup."
+            exit 0
+          }
+          if ($msiCandidates.Count -ne 1) {
+            Write-Error "Cleanup expected one MSI; found $($msiCandidates.Count)"
+            exit 1
+          }
+
+          $msi = $msiCandidates[0].FullName
+          $uninstall = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            "/x",
+            "`"$msi`"",
+            "/qn",
+            "/norestart",
+            "/l*v",
+            "`"$uninstallLog`""
+          )
+          Write-Host "msiexec uninstall exit = $($uninstall.ExitCode)"
+
+          if ($uninstall.ExitCode -notin @(0, 1605, 3010)) {
+            Write-Error "ARM64 MSI cleanup failed: $($uninstall.ExitCode)"
+            exit 1
+          }
+
+      - name: Upload TIP client-architecture smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_tip_client_architecture_smoke
+          path: ${{ runner.temp }}\mozkey-tip-client-architecture-evidence
+          if-no-files-found: warn
+          retention-days: 7
+
   test:
     needs: prepare_daily_dictionary
     # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
