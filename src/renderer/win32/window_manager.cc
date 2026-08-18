@@ -492,7 +492,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
 
   if (infolist_visible && !cascading_visible) {
     if (candidate_changed) {
-      infolist_window_->UpdateLayout(candidate_window);
+      infolist_window_->UpdateLayout(
+          candidate_window,
+          vertical ? InfolistWindow::LayoutMode::kVertical
+                   : InfolistWindow::LayoutMode::kHorizontal);
     }
 
     // Horizontal writing keeps the legacy right/left placement contract.

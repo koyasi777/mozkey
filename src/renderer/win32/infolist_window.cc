@@ -39,6 +39,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "base/coordinates.h"
 #include "base/vlog.h"
@@ -50,6 +51,7 @@
 #include "protocol/renderer_style.pb.h"
 #include "renderer/win32/text_renderer.h"
 #include "renderer/renderer_style_handler.h"
+#include "renderer/win32/vertical_infolist_layout.h"
 #include "renderer/win32/win32_dpi_util.h"
 #include "renderer/win32/win32_renderer_util.h"
 
@@ -87,6 +89,7 @@ InfolistWindow::InfolistWindow()
       dpi_(::GetDpiForSystem()),
       text_renderer_(TextRenderer::Create(dpi_)),
       style_(new RendererStyle),
+      layout_mode_(LayoutMode::kHorizontal),
       metrics_changed_(false),
       visible_(false) {
   GetScaledRendererStyleForWindowType(
@@ -150,7 +153,16 @@ void InfolistWindow::OnPrintClient(HDC dc, UINT /*uFlags*/) {
   }
 }
 
+bool InfolistWindow::IsVerticalLayout() const {
+  return layout_mode_ == LayoutMode::kVertical;
+}
+
 Size InfolistWindow::DoPaint(HDC dc, bool draw_frame) {
+  return IsVerticalLayout() ? DoPaintVertical(dc, draw_frame)
+                            : DoPaintHorizontal(dc, draw_frame);
+}
+
+Size InfolistWindow::DoPaintHorizontal(HDC dc, bool draw_frame) {
   if (dc != nullptr) {
     ::SetBkMode(dc, TRANSPARENT);
   }
@@ -190,7 +202,7 @@ Size InfolistWindow::DoPaint(HDC dc, bool draw_frame) {
   ypos += infostyle.caption_height();
 
   for (int i = 0; i < usages.information_size(); ++i) {
-    Size size = DoPaintRow(dc, i, ypos);
+    Size size = DoPaintHorizontalRow(dc, i, ypos);
     ypos += size.height;
   }
   ypos += infostyle.window_border();
@@ -220,7 +232,7 @@ Size InfolistWindow::DoPaint(HDC dc, bool draw_frame) {
   return Size(style_->infolist_style().window_width(), ypos);
 }
 
-Size InfolistWindow::DoPaintRow(HDC dc, int row, int ypos) {
+Size InfolistWindow::DoPaintHorizontalRow(HDC dc, int row, int ypos) {
   const RendererStyle::InfolistStyle& infostyle = style_->infolist_style();
   const InformationList& usages = candidate_window_->usages();
   const RendererStyle::TextStyle& title_style = infostyle.title_style();
@@ -312,6 +324,171 @@ Size InfolistWindow::DoPaintRow(HDC dc, int row, int ypos) {
   return Size(0, row_height);
 }
 
+Size InfolistWindow::DoPaintVertical(HDC dc, bool draw_frame) {
+  if (dc != nullptr) {
+    ::SetBkMode(dc, TRANSPARENT);
+  }
+
+  const RendererStyle::InfolistStyle& infostyle = style_->infolist_style();
+  const InformationList& usages = candidate_window_->usages();
+  const int border = std::max(0, infostyle.window_border());
+  const int row_padding = std::max(0, infostyle.row_rect_padding());
+  const int window_height = std::max(1, infostyle.window_width());
+  const int content_height = std::max(1, window_height - border * 2);
+  const int text_height = std::max(1, content_height - row_padding * 2);
+
+  const RendererStyle::TextStyle& caption_style = infostyle.caption_style();
+  const RendererStyle::TextStyle& title_style = infostyle.title_style();
+  const RendererStyle::TextStyle& desc_style = infostyle.description_style();
+
+  int caption_width = std::max(0, infostyle.caption_height());
+  if (infostyle.has_caption_string()) {
+    const std::wstring caption =
+        mozc::win32::Utf8ToWide(infostyle.caption_string());
+    const Size caption_size = text_renderer_->MeasureStringVertical(
+        TextRenderer::FONTSET_INFOLIST_CAPTION, caption);
+    caption_width = std::max(
+        caption_width,
+        caption_size.width + infostyle.caption_padding() * 2 +
+            caption_style.left_padding() + caption_style.right_padding());
+  }
+
+  std::vector<VerticalInfolistLayout::ItemMetrics> metrics;
+  metrics.reserve(usages.information_size());
+  for (int i = 0; i < usages.information_size(); ++i) {
+    const Information& info = usages.information(i);
+    VerticalInfolistLayout::ItemMetrics item;
+
+    const std::wstring title = mozc::win32::Utf8ToWide(info.title());
+    item.title_size = text_renderer_->MeasureStringVerticalWrapped(
+        TextRenderer::FONTSET_INFOLIST_TITLE, title, text_height);
+    item.title_left_padding = title_style.left_padding();
+    item.title_right_padding = title_style.right_padding();
+
+    const std::wstring description =
+        mozc::win32::Utf8ToWide(info.description());
+    item.description_size = text_renderer_->MeasureStringVerticalWrapped(
+        TextRenderer::FONTSET_INFOLIST_DESCRIPTION, description, text_height);
+    item.description_left_padding = desc_style.left_padding();
+    item.description_right_padding = desc_style.right_padding();
+
+    metrics.push_back(item);
+  }
+
+  VerticalInfolistLayout::Parameters parameters;
+  parameters.window_border = border;
+  parameters.row_padding = row_padding;
+  parameters.caption_width = caption_width;
+  parameters.window_height = window_height;
+
+  VerticalInfolistLayout layout;
+  layout.Layout(metrics, parameters);
+  const Size layout_size = layout.window_size();
+
+  if (dc == nullptr) {
+    return layout_size;
+  }
+
+  COLORREF default_background = kDefaultBackgroundColor;
+  if (title_style.has_background_color()) {
+    default_background =
+        RGB(title_style.background_color().r(),
+            title_style.background_color().g(),
+            title_style.background_color().b());
+  }
+  const RECT full_rect = {0, 0, layout_size.width, layout_size.height};
+  FillSolidRect(dc, &full_rect, default_background);
+
+  const Rect caption_rect = layout.caption_rect();
+  if (!caption_rect.IsRectEmpty()) {
+    const CRect caption_background(
+        caption_rect.Left(), caption_rect.Top(),
+        caption_rect.Right(), caption_rect.Bottom());
+    FillSolidRect(dc, &caption_background,
+                  RGB(infostyle.caption_background_color().r(),
+                      infostyle.caption_background_color().g(),
+                      infostyle.caption_background_color().b()));
+
+    if (infostyle.has_caption_string()) {
+      const int caption_padding = std::max(0, infostyle.caption_padding());
+      const int caption_left =
+          caption_rect.Left() + caption_padding +
+          std::max(0, caption_style.left_padding());
+      const int caption_width_for_text = std::max(
+          1, caption_rect.Right() - caption_padding -
+                 std::max(0, caption_style.right_padding()) - caption_left);
+      const int caption_top = caption_rect.Top() + caption_padding;
+      const int caption_height_for_text =
+          std::max(1, caption_rect.Bottom() - caption_padding - caption_top);
+      const Rect caption_text_rect(
+          caption_left, caption_top, caption_width_for_text,
+          caption_height_for_text);
+      text_renderer_->RenderTextVertical(
+          dc, mozc::win32::Utf8ToWide(infostyle.caption_string()),
+          caption_text_rect, TextRenderer::FONTSET_INFOLIST_CAPTION);
+    }
+  }
+
+  for (int i = 0; i < usages.information_size(); ++i) {
+    const Information& info = usages.information(i);
+    const Rect item_rect = layout.GetItemRect(i);
+    const Rect title_rect = layout.GetTitleRect(i);
+    const Rect description_rect = layout.GetDescriptionRect(i);
+
+    if (usages.has_focused_index() && i == usages.focused_index()) {
+      const CRect selected_rect(
+          item_rect.Left(), item_rect.Top(), item_rect.Right(),
+          item_rect.Bottom());
+      FillSolidRect(dc, &selected_rect,
+                    RGB(infostyle.focused_background_color().r(),
+                        infostyle.focused_background_color().g(),
+                        infostyle.focused_background_color().b()));
+      ::SetDCBrushColor(dc, RGB(infostyle.focused_border_color().r(),
+                                infostyle.focused_border_color().g(),
+                                infostyle.focused_border_color().b()));
+      ::FrameRect(dc, &selected_rect,
+                  static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
+    }
+
+    const std::wstring title = mozc::win32::Utf8ToWide(info.title());
+    if (!title.empty() && !title_rect.IsRectEmpty()) {
+      text_renderer_->RenderTextVerticalWrapped(
+          dc, title, title_rect, TextRenderer::FONTSET_INFOLIST_TITLE);
+    }
+
+    const std::wstring description =
+        mozc::win32::Utf8ToWide(info.description());
+    if (!description.empty() && !description_rect.IsRectEmpty()) {
+      text_renderer_->RenderTextVerticalWrapped(
+          dc, description, description_rect,
+          TextRenderer::FONTSET_INFOLIST_DESCRIPTION);
+    }
+  }
+
+  if (draw_frame) {
+    const CRect rect(0, 0, layout_size.width, layout_size.height);
+    const COLORREF border_color =
+        RGB(infostyle.border_color().r(), infostyle.border_color().g(),
+            infostyle.border_color().b());
+    const int corner_radius = GetRendererWindowCornerRadiusInPixels(
+        RendererStyleHandler::GetCandidateWindowCornerRadius(
+            RendererStyleHandler::RendererStyleType::kCandidate),
+        dpi_, rect.Width(), rect.Height());
+    wil::unique_select_object old_brush = wil::SelectObject(
+        dc, static_cast<HBRUSH>(::GetStockObject(HOLLOW_BRUSH)));
+    wil::unique_select_object old_pen =
+        wil::SelectObject(dc, static_cast<HPEN>(::GetStockObject(DC_PEN)));
+    ::SetDCPenColor(dc, border_color);
+    if (corner_radius <= 0) {
+      ::Rectangle(dc, rect.left, rect.top, rect.right, rect.bottom);
+    } else {
+      ::RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom,
+                  corner_radius * 2, corner_radius * 2);
+    }
+  }
+
+  return layout_size;
+}
 void InfolistWindow::OnShowWindow(BOOL shown, UINT /*status*/) {
   if (!shown) {
     shadow_window_.Hide();
@@ -377,6 +554,12 @@ void InfolistWindow::DelayHide(UINT mseconds) {
 
 void InfolistWindow::UpdateLayout(
     const commands::CandidateWindow& candidate_window) {
+  UpdateLayout(candidate_window, LayoutMode::kHorizontal);
+}
+
+void InfolistWindow::UpdateLayout(
+    const commands::CandidateWindow& candidate_window,
+    LayoutMode layout_mode) {
   ClearBitmapCache();
   *candidate_window_ = candidate_window;
 
@@ -386,6 +569,18 @@ void InfolistWindow::UpdateLayout(
   GetScaledRendererStyleForWindowType(
       RendererStyleHandler::RendererStyleType::kCandidate, style_.get(), dpi_);
   text_renderer_->OnThemeChanged();
+
+  layout_mode_ = layout_mode;
+  if (layout_mode_ == LayoutMode::kVertical &&
+      (!text_renderer_->SupportsVerticalText(
+           TextRenderer::FONTSET_INFOLIST_CAPTION) ||
+       !text_renderer_->SupportsVerticalWrappedText(
+           TextRenderer::FONTSET_INFOLIST_TITLE) ||
+       !text_renderer_->SupportsVerticalWrappedText(
+           TextRenderer::FONTSET_INFOLIST_DESCRIPTION))) {
+    layout_mode_ = LayoutMode::kHorizontal;
+  }
+
   metrics_changed_ = false;
   RenderToBitmapCache();
 }

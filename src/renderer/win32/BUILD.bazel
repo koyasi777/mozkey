@@ -124,6 +124,18 @@ mozc_cc_library(
         "//base:coordinates",
     ],
 )
+
+mozc_cc_library(
+    name = "vertical_infolist_layout",
+    srcs = ["vertical_infolist_layout.cc"],
+    hdrs = ["vertical_infolist_layout.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//base:coordinates",
+    ],
+)
+
 mozc_cc_library(
     name = "candidate_window",
     srcs = ["candidate_window.cc"],
@@ -277,6 +289,7 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":text_renderer",
+        ":vertical_infolist_layout",
         ":win32_dpi_util",
         ":win32_renderer_util",
         "//base:const",
@@ -372,6 +385,19 @@ mozc_cc_test(
         "//testing:gunit_main",
     ],
 )
+
+mozc_cc_test(
+    name = "vertical_infolist_layout_test",
+    srcs = ["vertical_infolist_layout_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":vertical_infolist_layout",
+        "//base:coordinates",
+        "//testing:gunit_main",
+    ],
+)
+
 mozc_cc_test(
     name = "win32_renderer_util_test",
     srcs = ["win32_renderer_util_test.cc"],
