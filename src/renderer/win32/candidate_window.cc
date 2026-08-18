@@ -550,11 +550,11 @@ bool CandidateWindow::TryUpdateVerticalLayout() {
     const int em_cross = std::max(1, candidate_em.width);
     const int em_inline = std::max(1, candidate_em.height);
 
-    // About 0.2em at the physical left/right edges and about 0.33em at
+    // About 0.15em at the physical left/right edges and about 0.33em at
     // the top/bottom.  Measurements come from the active candidate font, so
     // the result follows font size and DPI.
     cross_axis_edge_padding =
-        std::max(1, (em_cross + 4) / 5);
+        std::max(1, (3 * em_cross + 19) / 20);
     vertical_padding =
         std::max(padding, std::max(1, (em_inline + 2) / 3));
   }
