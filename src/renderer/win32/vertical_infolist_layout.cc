@@ -33,12 +33,14 @@ void VerticalInfolistLayout::Layout(
 
   const int border = std::max(0, parameters.window_border);
   const int row_padding = std::max(0, parameters.row_padding);
+  const int vertical_padding = std::max(0, parameters.vertical_padding);
+  const int section_gap = std::max(0, parameters.section_gap);
   const int caption_width = std::max(0, parameters.caption_width);
-  const int window_height =
-      std::max(parameters.window_height, border * 2 + row_padding * 2 + 1);
+  const int window_height = std::max(
+      parameters.window_height, border * 2 + vertical_padding * 2 + 1);
   const int content_height = std::max(1, window_height - border * 2);
   const int text_height =
-      std::max(1, content_height - row_padding * 2);
+      std::max(1, content_height - vertical_padding * 2);
 
   std::vector<int> item_widths;
   item_widths.reserve(items.size());
@@ -51,8 +53,13 @@ void VerticalInfolistLayout::Layout(
     const int description_width =
         SectionWidth(item.description_size, item.description_left_padding,
                      item.description_right_padding);
-    const int item_width =
-        std::max(1, row_padding * 2 + title_width + description_width);
+    const bool has_title = title_width > 0;
+    const bool has_description = description_width > 0;
+    const int title_description_gap =
+        has_title && has_description ? section_gap : 0;
+    const int item_width = std::max(
+        1, row_padding * 2 + title_width + title_description_gap +
+               description_width);
     item_widths.push_back(item_width);
     body_width += item_width;
   }
@@ -79,7 +86,7 @@ void VerticalInfolistLayout::Layout(
     item_rects_.push_back(item_rect);
 
     int section_right = item_rect.Right() - row_padding;
-    const int text_top = item_rect.Top() + row_padding;
+    const int text_top = item_rect.Top() + vertical_padding;
 
     const int title_left_padding = std::max(0, item.title_left_padding);
     const int title_right_padding = std::max(0, item.title_right_padding);
@@ -102,10 +109,18 @@ void VerticalInfolistLayout::Layout(
         SectionWidth(item.description_size, description_left_padding,
                      item.description_right_padding);
     if (description_section_width > 0) {
+      if (title_section_width > 0) {
+        section_right -= section_gap;
+      }
+      const int description_indent = std::clamp(
+          item.description_top_indent, 0, std::max(0, text_height - 1));
+      const int description_height =
+          std::max(1, text_height - description_indent);
       const int section_left = section_right - description_section_width;
       description_rects_.emplace_back(
-          section_left + description_left_padding, text_top,
-          item.description_size.width, text_height);
+          section_left + description_left_padding,
+          text_top + description_indent, item.description_size.width,
+          description_height);
     } else {
       description_rects_.emplace_back();
     }

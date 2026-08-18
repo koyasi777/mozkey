@@ -30,11 +30,26 @@ class VerticalInfolistLayout {
     Size description_size;
     int description_left_padding = 0;
     int description_right_padding = 0;
+
+    // Inline-axis indent for the description. In vertical writing this moves
+    // the description downward, expressing the title -> body hierarchy
+    // without inserting artificial spaces into the Japanese text itself.
+    int description_top_indent = 0;
   };
 
   struct Parameters {
     int window_border = 0;
+
+    // Cross-axis padding inside each usage block.
     int row_padding = 0;
+
+    // Inline-axis top/bottom padding. Kept separate from row_padding because
+    // the two axes have different typographic roles in vertical writing.
+    int vertical_padding = 0;
+
+    // Cross-axis gap between the title column and description columns.
+    int section_gap = 0;
+
     int caption_width = 0;
     int window_height = 0;
   };

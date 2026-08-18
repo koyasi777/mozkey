@@ -59,6 +59,53 @@ TEST(VerticalInfolistLayoutTest, TitleIsRightOfDescription) {
   EXPECT_EQ(title.Height(), description.Height());
 }
 
+TEST(VerticalInfolistLayoutTest, DescriptionIsIndentedAndSeparatedFromTitle) {
+  VerticalInfolistLayout layout;
+  VerticalInfolistLayout::Parameters parameters;
+  parameters.window_border = 1;
+  parameters.row_padding = 3;
+  parameters.vertical_padding = 8;
+  parameters.section_gap = 5;
+  parameters.caption_width = 10;
+  parameters.window_height = 120;
+
+  VerticalInfolistLayout::ItemMetrics item;
+  item.title_size = Size(14, 80);
+  item.description_size = Size(28, 80);
+  item.description_top_indent = 16;
+
+  layout.Layout({item}, parameters);
+
+  const Rect title = layout.GetTitleRect(0);
+  const Rect description = layout.GetDescriptionRect(0);
+
+  EXPECT_EQ(title.Top(), 9);
+  EXPECT_EQ(description.Top(), title.Top() + 16);
+  EXPECT_EQ(title.Left() - description.Right(), 5);
+  EXPECT_EQ(description.Height(), title.Height() - 16);
+}
+
+TEST(VerticalInfolistLayoutTest, EmptyTitleDoesNotCreateSectionGap) {
+  VerticalInfolistLayout layout;
+  VerticalInfolistLayout::Parameters parameters;
+  parameters.window_border = 1;
+  parameters.row_padding = 3;
+  parameters.vertical_padding = 8;
+  parameters.section_gap = 7;
+  parameters.window_height = 120;
+
+  VerticalInfolistLayout::ItemMetrics item;
+  item.description_size = Size(28, 80);
+  item.description_top_indent = 0;
+
+  layout.Layout({item}, parameters);
+
+  EXPECT_TRUE(layout.GetTitleRect(0).IsRectEmpty());
+  EXPECT_EQ(layout.GetDescriptionRect(0).Top(), 9);
+  EXPECT_EQ(layout.GetDescriptionRect(0).Right(),
+            layout.GetItemRect(0).Right() - 3);
+}
+
 TEST(VerticalInfolistLayoutTest, EmptyIndexIsSafe) {
   VerticalInfolistLayout layout;
   layout.Layout({}, VerticalInfolistLayout::Parameters());

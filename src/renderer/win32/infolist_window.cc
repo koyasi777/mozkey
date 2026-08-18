@@ -332,10 +332,31 @@ Size InfolistWindow::DoPaintVertical(HDC dc, bool draw_frame) {
   const RendererStyle::InfolistStyle& infostyle = style_->infolist_style();
   const InformationList& usages = candidate_window_->usages();
   const int border = std::max(0, infostyle.window_border());
-  const int row_padding = std::max(0, infostyle.row_rect_padding());
+  const int style_row_padding = std::max(0, infostyle.row_rect_padding());
   const int window_height = std::max(1, infostyle.window_width());
+
+  // Derive vertical-writing whitespace from the actual configured font at the
+  // current DPI instead of hard-coding pixels. "日" is used only as an em-like
+  // CJK advance probe; no content-dependent layout decision is made.
+  const Size description_em = text_renderer_->MeasureStringVertical(
+      TextRenderer::FONTSET_INFOLIST_DESCRIPTION, L"\u65E5");
+  const int em_inline = std::max(1, description_em.height);
+  const int em_cross = std::max(1, description_em.width);
+
+  // About 0.2em cross-axis padding, 0.4em inline-axis padding, 0.25em between
+  // title/body columns, and 0.8em body indent. These ratios preserve the
+  // hierarchy visible in the horizontal Infolist without making the already
+  // wide vertical usage window excessively wider.
+  const int row_padding =
+      std::max(style_row_padding, std::max(1, (em_cross + 4) / 5));
+  const int vertical_padding =
+      std::max(style_row_padding, std::max(1, (em_inline * 2 + 4) / 5));
+  const int section_gap = std::max(1, (em_cross + 3) / 4);
+  const int description_indent = std::max(1, (em_inline * 4 + 4) / 5);
+
   const int content_height = std::max(1, window_height - border * 2);
-  const int text_height = std::max(1, content_height - row_padding * 2);
+  const int text_height =
+      std::max(1, content_height - vertical_padding * 2);
 
   const RendererStyle::TextStyle& caption_style = infostyle.caption_style();
   const RendererStyle::TextStyle& title_style = infostyle.title_style();
@@ -365,10 +386,18 @@ Size InfolistWindow::DoPaintVertical(HDC dc, bool draw_frame) {
     item.title_left_padding = title_style.left_padding();
     item.title_right_padding = title_style.right_padding();
 
+    item.description_top_indent =
+        title.empty()
+            ? 0
+            : std::clamp(description_indent, 0, std::max(0, text_height - 1));
+    const int description_height =
+        std::max(1, text_height - item.description_top_indent);
+
     const std::wstring description =
         mozc::win32::Utf8ToWide(info.description());
     item.description_size = text_renderer_->MeasureStringVerticalWrapped(
-        TextRenderer::FONTSET_INFOLIST_DESCRIPTION, description, text_height);
+        TextRenderer::FONTSET_INFOLIST_DESCRIPTION, description,
+        description_height);
     item.description_left_padding = desc_style.left_padding();
     item.description_right_padding = desc_style.right_padding();
 
@@ -378,6 +407,8 @@ Size InfolistWindow::DoPaintVertical(HDC dc, bool draw_frame) {
   VerticalInfolistLayout::Parameters parameters;
   parameters.window_border = border;
   parameters.row_padding = row_padding;
+  parameters.vertical_padding = vertical_padding;
+  parameters.section_gap = section_gap;
   parameters.caption_width = caption_width;
   parameters.window_height = window_height;
 
@@ -411,15 +442,17 @@ Size InfolistWindow::DoPaintVertical(HDC dc, bool draw_frame) {
 
     if (infostyle.has_caption_string()) {
       const int caption_padding = std::max(0, infostyle.caption_padding());
+      const int caption_inline_padding =
+          std::max(caption_padding, vertical_padding);
       const int caption_left =
           caption_rect.Left() + caption_padding +
           std::max(0, caption_style.left_padding());
       const int caption_width_for_text = std::max(
           1, caption_rect.Right() - caption_padding -
                  std::max(0, caption_style.right_padding()) - caption_left);
-      const int caption_top = caption_rect.Top() + caption_padding;
-      const int caption_height_for_text =
-          std::max(1, caption_rect.Bottom() - caption_padding - caption_top);
+      const int caption_top = caption_rect.Top() + caption_inline_padding;
+      const int caption_height_for_text = std::max(
+          1, caption_rect.Bottom() - caption_inline_padding - caption_top);
       const Rect caption_text_rect(
           caption_left, caption_top, caption_width_for_text,
           caption_height_for_text);
