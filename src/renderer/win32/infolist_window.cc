@@ -344,15 +344,16 @@ Size InfolistWindow::DoPaintVertical(HDC dc, bool draw_frame) {
   const int em_cross = std::max(1, description_em.width);
 
   // About 0.2em cross-axis padding, 0.4em inline-axis padding, 0.25em between
-  // title/body columns, and 0.8em body indent. These ratios preserve the
-  // hierarchy visible in the horizontal Infolist without making the already
-  // wide vertical usage window excessively wider.
+  // title/body columns, and a full 1.0em body indent. The full CJK-em indent
+  // gives the description a clear one-character visual step below its title,
+  // matching conventional Japanese paragraph hierarchy without inserting
+  // artificial spaces into the text.
   const int row_padding =
       std::max(style_row_padding, std::max(1, (em_cross + 4) / 5));
   const int vertical_padding =
       std::max(style_row_padding, std::max(1, (em_inline * 2 + 4) / 5));
   const int section_gap = std::max(1, (em_cross + 3) / 4);
-  const int description_indent = std::max(1, (em_inline * 4 + 4) / 5);
+  const int description_indent = em_inline;
 
   const int content_height = std::max(1, window_height - border * 2);
   const int text_height =
