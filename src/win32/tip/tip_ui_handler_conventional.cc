@@ -54,6 +54,7 @@
 #include "win32/tip/tip_text_service.h"
 #include "win32/tip/tip_thread_context.h"
 #include "win32/tip/tip_ui_element_manager.h"
+#include "win32/tip/tip_writing_direction.h"
 
 namespace mozc {
 namespace win32 {
@@ -300,6 +301,66 @@ wil::com_ptr_nothrow<ITfRange> GetSelectionRange(ITfContext* context,
   return selection_range;
 }
 
+WritingDirection ProbeExpandedRangeDirection(
+    ITfContextView* context_view, TfEditCookie read_cookie,
+    ITfRange* composition_range, ITfRange* target_range,
+    const RECT& target_rect, bool forward) {
+  if (context_view == nullptr || composition_range == nullptr ||
+      target_range == nullptr) {
+    return WritingDirection::kUnknown;
+  }
+
+  wil::com_ptr_nothrow<ITfRange> probe_range;
+  if (FAILED(target_range->Clone(&probe_range)) || !probe_range) {
+    return WritingDirection::kUnknown;
+  }
+
+  LONG shifted = 0;
+  const HRESULT shift_result =
+      forward ? probe_range->ShiftEnd(read_cookie, 1, &shifted, nullptr)
+              : probe_range->ShiftStart(read_cookie, -1, &shifted, nullptr);
+  const LONG expected_shift = forward ? 1 : -1;
+  if (FAILED(shift_result) || shifted != expected_shift) {
+    return WritingDirection::kUnknown;
+  }
+
+  // Never cross the Mozc composition boundary merely to infer geometry.
+  if (!TipRangeUtil::IsRangeCovered(read_cookie, probe_range.get(),
+                                    composition_range)) {
+    return WritingDirection::kUnknown;
+  }
+
+  RECT expanded_rect = {};
+  bool expanded_clipped = false;
+  if (FAILED(TipRangeUtil::GetTextExt(context_view, read_cookie,
+                                      probe_range.get(), &expanded_rect,
+                                      &expanded_clipped)) ||
+      expanded_clipped) {
+    return WritingDirection::kUnknown;
+  }
+
+  return InferWritingDirectionFromExtentGrowth(
+      target_rect.right - target_rect.left,
+      target_rect.bottom - target_rect.top,
+      expanded_rect.right - expanded_rect.left,
+      expanded_rect.bottom - expanded_rect.top);
+}
+
+WritingDirection InferCompositionWritingDirectionFromGeometry(
+    ITfContextView* context_view, TfEditCookie read_cookie,
+    ITfRange* composition_range, ITfRange* target_range,
+    const RECT& target_rect) {
+  WritingDirection direction = ProbeExpandedRangeDirection(
+      context_view, read_cookie, composition_range, target_range, target_rect,
+      /*forward=*/true);
+  if (direction != WritingDirection::kUnknown) {
+    return direction;
+  }
+  return ProbeExpandedRangeDirection(
+      context_view, read_cookie, composition_range, target_range, target_rect,
+      /*forward=*/false);
+}
+
 // This function updates RendererCommand::CharacterPosition to emulate
 // IMM32-based client. Ideally we'd better to define new field for TSF Mozc
 // into which the result of ITfContextView::GetTextExt is stored.
@@ -382,9 +443,46 @@ bool FillCharPosition(TipPrivateContext* private_context, ITfContext* context,
       app_info->mutable_composition_target();
   composition_target->set_position(0);
 
-  bool vertical_writing = false;
-  if (SUCCEEDED(TipRangeUtil::IsVerticalWriting(target_range.get(), read_cookie,
-                                                &vertical_writing))) {
+  const WritingDirection snapshot_direction =
+      has_composition ? private_context->composition_writing_direction()
+                      : WritingDirection::kUnknown;
+
+  WritingDirection attribute_direction = WritingDirection::kUnknown;
+  TipRangeUtil::GetWritingDirection(target_range.get(), read_cookie,
+                                    &attribute_direction);
+
+  WritingDirection writing_direction = WritingDirection::kUnknown;
+  if (snapshot_direction == WritingDirection::kVertical) {
+    // Preserve a positive pre-composition vertical signal. Some TSF hosts
+    // replace both VerticalWriting and Orientation with horizontal values on
+    // the range created by StartComposition.
+    writing_direction = WritingDirection::kVertical;
+  } else if (attribute_direction == WritingDirection::kVertical) {
+    // Never let a horizontal pre-composition snapshot suppress a current,
+    // explicit vertical signal.
+    writing_direction = WritingDirection::kVertical;
+  } else if (snapshot_direction == WritingDirection::kHorizontal) {
+    writing_direction = WritingDirection::kHorizontal;
+  } else if (has_composition && !clipped) {
+    // No reliable pre-composition snapshot exists. Strong adjacent-range
+    // growth may then override a composition-local horizontal default. This
+    // deliberately compares growth direction rather than a glyph's aspect
+    // ratio.
+    const WritingDirection geometry_direction =
+        InferCompositionWritingDirectionFromGeometry(
+            context_view.get(), read_cookie, range.get(), target_range.get(),
+            text_rect);
+    writing_direction =
+        geometry_direction != WritingDirection::kUnknown
+            ? geometry_direction
+            : attribute_direction;
+  } else {
+    writing_direction = attribute_direction;
+  }
+
+  const bool vertical_writing =
+      writing_direction == WritingDirection::kVertical;
+  if (writing_direction != WritingDirection::kUnknown) {
     composition_target->set_vertical_writing(vertical_writing);
   }
 

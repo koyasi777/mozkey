@@ -60,6 +60,8 @@ class TipPrivateContext::InternalState {
   SurrogatePairObserver surrogate_pair_observer_;
   commands::Output last_output_;
   TipZenzContextRequestState zenz_context_request_state_;
+  WritingDirection composition_writing_direction_ =
+      WritingDirection::kUnknown;
   VirtualKey last_down_key_;
   bool has_pending_mode_indicator_key_ = false;
   KeyInformation pending_mode_indicator_key_ = 0;
@@ -171,6 +173,19 @@ const InputBehavior& TipPrivateContext::input_behavior() const {
 
 InputBehavior* TipPrivateContext::mutable_input_behavior() {
   return &state_->input_behavior_;
+}
+
+WritingDirection TipPrivateContext::composition_writing_direction() const {
+  return state_->composition_writing_direction_;
+}
+
+void TipPrivateContext::SetCompositionWritingDirection(
+    WritingDirection direction) {
+  state_->composition_writing_direction_ = direction;
+}
+
+void TipPrivateContext::ClearCompositionWritingDirection() {
+  state_->composition_writing_direction_ = WritingDirection::kUnknown;
 }
 
 }  // namespace tsf
