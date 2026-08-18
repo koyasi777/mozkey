@@ -393,10 +393,14 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     }
   }
 
-  // We prefer the left position of candidate strings is aligned to
-  // that of preedit.
-  const Point main_window_zero_point(
-      main_window_->GetCandidateColumnInClientCord().Left(), 0);
+  // Horizontal writing aligns the left edge of candidate text with the
+  // preedit.  Vertical writing places the window beside the preedit and aligns
+  // the top of the first candidate text with the vertical target position.
+  const Rect main_candidate_text_rect =
+      main_window_->GetCandidateColumnInClientCord();
+  const Point main_window_zero_point =
+      vertical ? Point(0, main_candidate_text_rect.Top())
+               : Point(main_candidate_text_rect.Left(), 0);
 
   Rect main_window_rect;
   Rect preedit_rect_for_transition;
@@ -406,12 +410,9 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     const CRect rect(candidate_layout.exclude_region());
     const Rect preedit_rect(rect.left, rect.top, rect.Width(), rect.Height());
     preedit_rect_for_transition = preedit_rect;
-    // Sometimes |target_point| is set to the top-left of the exclusion area
-    // but WindowUtil does not support this case yet.
-    // As a workaround, use |preedit_rect.Bottom()| for y-coordinate of the
-    // |target_point|.
-    // TODO(yukawa): Fix WindowUtil to support this case.
-    // TODO(yukawa): Add more unit tests.
+    // Horizontal candidate placement uses the bottom of the exclusion area.
+    // Vertical placement intentionally keeps LayoutManager's top-left target
+    // so the first vertical candidate text can align with the segment top.
     Point new_target_point = target_point;
     if (!vertical) {
       new_target_point.y = preedit_rect.Bottom();

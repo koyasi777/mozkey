@@ -165,22 +165,74 @@ TEST_F(WindowUtilTest, MainWindow) {
                                                       49, 0, "On the top edge");
 
   VerifyMainWindowWithTargetPointAndPreeditVertical(
-      50, 55, 50, 50, 20, 5, 70, 55, "Preedit is in the middle of the window");
-  VerifyMainWindowWithTargetPointAndPreeditVertical(50, 198, 50, 198, 5, 20, 55,
-                                                    80, "On the bottom edge");
-  VerifyMainWindowWithTargetPointAndPreeditVertical(-50, 50, -50, 50, 5, 20, 0,
-                                                    50, "On the left edge");
+      50, 55, 50, 50, 20, 5, 40, 57,
+      "Prefer the left side in the middle of the window");
   VerifyMainWindowWithTargetPointAndPreeditVertical(
-      50, 55, 50, 0, 20, 100, 70, 55,
+      50, 198, 50, 198, 5, 20, 40, 80, "Clamp on the bottom edge");
+  VerifyMainWindowWithTargetPointAndPreeditVertical(
+      -50, 50, -50, 50, 5, 20, 0, 52, "Clamp beyond the left edge");
+  VerifyMainWindowWithTargetPointAndPreeditVertical(
+      50, 55, 50, 0, 20, 100, 40, 57,
       "Preedit height is the same to client area");
-  // If the candidate window across the right edge, it appears in the left of
-  // the preedit.
   VerifyMainWindowWithTargetPointAndPreeditVertical(
-      192, 50, 192, 50, 5, 20, 182, 50, "On the right edge");
+      192, 50, 192, 50, 5, 20, 182, 52,
+      "Keep the preferred left side near the right edge");
   VerifyMainWindowWithTargetPointAndPreeditVertical(
-      215, 50, 210, 50, 5, 20, 190, 50, "Under the right edge");
-  VerifyMainWindowWithTargetPointAndPreeditVertical(-5, 50, -10, 50, 5, 20, 0,
-                                                    50, "On the left edge");
+      215, 50, 210, 50, 5, 20, 190, 52,
+      "Clamp when both sides are beyond the right edge");
+  VerifyMainWindowWithTargetPointAndPreeditVertical(
+      -5, 50, -10, 50, 5, 20, 0, 52,
+      "Clamp when both sides are beyond the left edge");
+}
+
+TEST_F(WindowUtilTest, VerticalMainWindowFallsBackToRight) {
+  const Point target_point(5, 50);
+  const Rect preedit_rect(5, 50, 5, 20);
+  const Size window_size(10, 20);
+  const Point zero_point_offset(1, -2);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result =
+      WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
+          target_point, preedit_rect, window_size, zero_point_offset,
+          working_area, true);
+
+  EXPECT_EQ(result.Left(), 10);
+  EXPECT_EQ(result.Top(), 52);
+}
+
+TEST_F(WindowUtilTest, VerticalMainWindowAlignsCandidateTextTop) {
+  const Point target_point(50, 60);
+  const Rect preedit_rect(50, 60, 5, 20);
+  const Size window_size(10, 20);
+  const Point zero_point_offset(123, 7);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result =
+      WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
+          target_point, preedit_rect, window_size, zero_point_offset,
+          working_area, true);
+
+  // The x-component does not affect side placement.  The y-component marks
+  // the first candidate text position inside the candidate window.
+  EXPECT_EQ(result.Left(), 40);
+  EXPECT_EQ(result.Top(), 53);
+}
+
+TEST_F(WindowUtilTest, VerticalMainWindowWithoutWorkingAreaKeepsLeftPreference) {
+  const Point target_point(50, 50);
+  const Rect preedit_rect(50, 50, 5, 20);
+  const Size window_size(10, 20);
+  const Point zero_point_offset(1, -2);
+  const Rect unknown_working_area(0, 0, 0, 0);
+
+  const Rect result =
+      WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
+          target_point, preedit_rect, window_size, zero_point_offset,
+          unknown_working_area, true);
+
+  EXPECT_EQ(result.Left(), 40);
+  EXPECT_EQ(result.Top(), 52);
 }
 
 TEST_F(WindowUtilTest, CascadingWindow) {

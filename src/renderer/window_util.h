@@ -60,8 +60,11 @@ class WindowUtil {
       const Point& zero_point_offset, const Rect& working_area);
 
   // Returns the appropriate candidate window position in the screen
-  // coordinate.  |zero_point_offset| is the point in the candidate
-  // window which should be aligned to the preedit.
+  // coordinate.  For horizontal writing, |zero_point_offset| is aligned to
+  // |target_point| as before.  For vertical writing, its y-coordinate aligns
+  // the first candidate text with |target_point.y| while horizontal placement
+  // is adjacent to |preedit_rect|: the left side is preferred and the right
+  // side is the fallback.
   // |working_area| is the available area in the current monitor.  If
   // caller fails to obtain |working_area|, set its width or height as
   // 0.  Then it doesn't care the monitor.

@@ -82,39 +82,48 @@ Rect GetWindowRectForMainWindowFromPreeditRectVertical(
     const Point& target_point, const Rect& preedit_rect,
     const Size& window_size, const Point& zero_point_offset,
     const Rect& working_area) {
-  Rect window_rect(target_point, window_size);
+  // Japanese vertical writing proceeds in columns from right to left.  Keep the
+  // first candidate column next to the composition by preferring the left side
+  // of the preedit.  The vertical zero point is the start of the first
+  // candidate text and is aligned to the target segment's top.
+  const int aligned_top = target_point.y - zero_point_offset.y;
+  Rect preferred_left(preedit_rect.Left() - window_size.width, aligned_top,
+                      window_size.width, window_size.height);
 
-  // Currently |zero_point_offset| is ignored because the candidate renderer
-  // has not supported vertical writing.
-
-  // Since |target_point| is pointing the upper-left of the preedit, move the
-  // candidate window to the right side of the preedit.
-  window_rect.origin.x += preedit_rect.Width();
-
-  // If monitor_rect has erroneous value, it returns window_rect.
+  // If the working area is unavailable, preserve the preferred side and the
+  // text anchor.  There is no reliable basis for choosing a fallback side.
   if (working_area.Height() == 0 || working_area.Width() == 0) {
-    return window_rect;
+    return preferred_left;
   }
 
-  if (working_area.Right() < window_rect.Right()) {
-    window_rect.origin.x -= (window_rect.Width() + preedit_rect.Width());
+  const auto fits_horizontally = [&](const Rect& rect) {
+    return working_area.Left() <= rect.Left() &&
+           rect.Right() <= working_area.Right();
+  };
+
+  Rect window_rect = preferred_left;
+
+  // If the preferred left side does not fit, try the right side of the
+  // preedit.  Keep the same vertical text anchor on both sides.
+  if (!fits_horizontally(window_rect)) {
+    const Rect fallback_right(preedit_rect.Right(), aligned_top,
+                              window_size.width, window_size.height);
+    if (fits_horizontally(fallback_right)) {
+      window_rect = fallback_right;
+    }
   }
 
-  if (working_area.Right() < window_rect.Right()) {
-    window_rect.origin.x -= (window_rect.Right() - working_area.Right());
-  }
+  // If neither side fits completely, keep the preferred/fallback result but
+  // clamp it into the working area as far as the window size allows.
+  const int max_left =
+      std::max(working_area.Left(), working_area.Right() - window_size.width);
+  window_rect.origin.x =
+      std::clamp(window_rect.Left(), working_area.Left(), max_left);
 
-  if (window_rect.Left() < working_area.Left()) {
-    window_rect.origin.x += (working_area.Left() - window_rect.Left());
-  }
-
-  if (working_area.Bottom() < window_rect.Bottom()) {
-    window_rect.origin.y -= (window_rect.Bottom() - working_area.Bottom());
-  }
-
-  if (window_rect.Top() < working_area.Top()) {
-    window_rect.origin.y += (working_area.Top() - window_rect.Top());
-  }
+  const int max_top =
+      std::max(working_area.Top(), working_area.Bottom() - window_size.height);
+  window_rect.origin.y =
+      std::clamp(window_rect.Top(), working_area.Top(), max_top);
 
   return window_rect;
 }
