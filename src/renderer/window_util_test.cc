@@ -235,6 +235,73 @@ TEST_F(WindowUtilTest, VerticalMainWindowWithoutWorkingAreaKeepsLeftPreference) 
   EXPECT_EQ(result.Top(), 52);
 }
 
+TEST_F(WindowUtilTest, VerticalCandidatePlacementKeepsWideHostLine) {
+  const Rect preedit_rect(100, 200, 72, 1);
+
+  const Rect result =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(preedit_rect, 36);
+
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 200);
+  EXPECT_EQ(result.Width(), 72);
+  EXPECT_EQ(result.Height(), 1);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementExpandsNarrowEvenHostLine) {
+  const Rect preedit_rect(100, 200, 50, 1);
+
+  const Rect result =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(preedit_rect, 36);
+
+  EXPECT_EQ(result.Left(), 89);
+  EXPECT_EQ(result.Top(), 200);
+  EXPECT_EQ(result.Width(), 72);
+  EXPECT_EQ(result.Height(), 1);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementExpandsNarrowOddHostLine) {
+  const Rect preedit_rect(100, 200, 51, 1);
+
+  const Rect result =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(preedit_rect, 36);
+
+  EXPECT_EQ(result.Left(), 89);
+  EXPECT_EQ(result.Top(), 200);
+  EXPECT_EQ(result.Width(), 73);
+  EXPECT_EQ(result.Height(), 1);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementKeepsNonPositiveMinimum) {
+  const Rect preedit_rect(100, 200, 50, 1);
+
+  const Rect result =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(preedit_rect, 0);
+
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 200);
+  EXPECT_EQ(result.Width(), 50);
+  EXPECT_EQ(result.Height(), 1);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementClearanceSurvivesRightFallback) {
+  const Point target_point(5, 50);
+  const Rect host_preedit_rect(5, 50, 50, 1);
+  const Rect placement_preedit_rect =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(host_preedit_rect,
+                                                           36);
+  const Size window_size(10, 20);
+  const Point zero_point_offset(0, 0);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result =
+      WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
+          target_point, placement_preedit_rect, window_size, zero_point_offset,
+          working_area, true);
+
+  EXPECT_EQ(result.Left(), 66);
+  EXPECT_EQ(result.Top(), 50);
+}
+
 TEST_F(WindowUtilTest, CascadingWindow) {
   VerifyCascadingWindow(50, 50, 20, 5, 69, 52,
                         "Selected row is in the middle of the window");

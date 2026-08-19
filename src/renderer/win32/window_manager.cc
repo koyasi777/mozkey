@@ -55,6 +55,8 @@ namespace win32 {
 namespace {
 
 constexpr uint32_t kHideWindowDelay = 500;  // msec
+constexpr int kDefaultDpi = 96;
+constexpr int kVerticalCandidateMinimumHalfClearanceDip = 24;
 const POINT kInvalidMousePosition = {-65535, -65535};
 
 RECT ToWinRect(const Rect& rect) {
@@ -420,7 +422,25 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     // makes most of users happy.
     const CRect rect(candidate_layout.exclude_region());
     const Rect preedit_rect(rect.left, rect.top, rect.Width(), rect.Height());
+
+    // Keep the host-provided geometry for transition and collision semantics.
+    // Candidate-only visual clearance must not enlarge the composition itself.
     preedit_rect_for_transition = preedit_rect;
+
+    Rect placement_preedit_rect = preedit_rect;
+    if (vertical) {
+      // Some TSF hosts report a narrow vertical line box. Because the vertical
+      // candidate is otherwise placed flush against that box, enforce a
+      // DPI-scaled minimum half-line clearance around its center while leaving
+      // already-wide host geometry unchanged.
+      const int minimum_half_clearance =
+          ::MulDiv(kVerticalCandidateMinimumHalfClearanceDip,
+                   static_cast<int>(target_dpi), kDefaultDpi);
+      placement_preedit_rect =
+          WindowUtil::GetVerticalCandidatePlacementPreeditRect(
+              preedit_rect, minimum_half_clearance);
+    }
+
     // Horizontal candidate placement uses the bottom of the exclusion area.
     // Vertical placement intentionally keeps LayoutManager's top-left target
     // so the first vertical candidate text can align with the segment top.
@@ -430,7 +450,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     }
     main_window_rect =
         WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
-            new_target_point, preedit_rect, main_window_size,
+            new_target_point, placement_preedit_rect, main_window_size,
             main_window_zero_point, working_area, vertical);
   }
 

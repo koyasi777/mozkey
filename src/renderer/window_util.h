@@ -73,6 +73,14 @@ class WindowUtil {
       const Size& window_size, const Point& zero_point_offset,
       const Rect& working_area, bool vertical);
 
+  // Returns the preedit rectangle to use only for vertical candidate
+  // placement. Hosts may report a vertical line box narrower than the visual
+  // clearance needed around the line center. Preserve wider host geometry,
+  // but symmetrically expand narrow rectangles to at least
+  // |minimum_half_width| on each side of that center.
+  static Rect GetVerticalCandidatePlacementPreeditRect(
+      const Rect& preedit_rect, int minimum_half_width);
+
   // Returns the appropriate cascading window position in the screen
   // coordinate.  |zero_point_offset| is the point in the cascading
   // window which should be aligned to the selected row in the

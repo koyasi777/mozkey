@@ -184,6 +184,22 @@ Rect WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
       target_point, preedit_rect, window_size, zero_point_offset, working_area);
 }
 
+Rect WindowUtil::GetVerticalCandidatePlacementPreeditRect(
+    const Rect& preedit_rect, int minimum_half_width) {
+  if (minimum_half_width <= 0 || preedit_rect.Width() <= 0) {
+    return preedit_rect;
+  }
+
+  const int current_half_width = preedit_rect.Width() / 2;
+  const int extra = std::max(0, minimum_half_width - current_half_width);
+  if (extra == 0) {
+    return preedit_rect;
+  }
+
+  return Rect(preedit_rect.Left() - extra, preedit_rect.Top(),
+              preedit_rect.Width() + extra * 2, preedit_rect.Height());
+}
+
 Rect WindowUtil::GetWindowRectForCascadingWindow(const Rect& selected_row,
                                                  const Size& window_size,
                                                  const Point& zero_point_offset,
