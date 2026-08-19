@@ -91,6 +91,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - サジェストウィンドウとルビ表示は、候補ウィンドウの配色に追従するか、個別のテーマ・カスタム配色を使うかを選択可能
 - Windows 版の候補ウィンドウ・用例ウィンドウ・ライブ変換中のルビ表示に使うフォントを設定画面から変更可能
 - Windows 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、主要テキストの太さを 100～900 の範囲で個別に設定可能
+- Windows 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、縦書き時の候補・文節移動も視覚方向に合わせて操作可能
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能
 - Windows 版の IME 切り替えインジケータが、Windows のライト / ダークテーマに合わせて表示されるように改善
@@ -465,6 +466,23 @@ Windows 版では、設定画面から候補ウィンドウ、サジェストウ
 
 IME 切り替えインジケータは Windows のライト / ダークテーマに追従し、現在の入力モードを確認しやすいように配色を切り替えます。
 
+### Windows 縦書き対応
+
+Windows 版では、縦書きの入力位置を検出し、候補ウィンドウ、予測・サジェスト、用例表示、ライブ変換中のルビを縦組みに合わせて表示します。候補や用例の主要テキストには DirectWrite の縦書き描画を使用します。
+
+候補ウィンドウは縦書きの入力位置に対して左側への配置を優先し、アプリケーションから渡される入力行の幅が狭い場合でも、入力文字と候補表示が近づきすぎないように配置を補正します。アプリケーション名ごとの個別分岐ではなく、入力位置の geometry に基づいて調整します。
+
+ライブ変換中のルビも縦書き composition に追従します。Word などで未確定文字列が複数の縦列へ折り返す場合は、すでに表示されている composition 列と重ならない位置へルビを配置します。
+
+縦書きの候補操作では、現在のキー設定が対応する既存コマンド割り当てに一致する場合に、視覚方向に合わせて矢印キーを解釈します。
+
+- Suggestion では Left で候補へ移動
+- Conversion / Prediction では Left / Right で候補の前後へ移動し、Up / Down で前後の文節へ移動
+- Conversion では `Shift+Up` で文節幅を縮小、`Shift+Down` で文節幅を拡大
+- 既存の `Shift+Left` / `Shift+Right` による文節幅変更も互換操作として維持
+
+通常の横書き動作、通常 Composition 中のカーソル操作、`Ctrl+Shift` 系の操作、および対応するコマンド割り当てを持たないキー設定は従来動作を維持します。
+
 ### Windows 未確定文字の表示色
 
 Windows 版では、設定画面から未確定文字の表示色をカスタマイズできます。
@@ -701,6 +719,7 @@ Main features added in this fork
 - Allows the suggestion window and ruby display to either follow the candidate window color theme or use their own theme/custom colors
 - Allows changing the font used for the Windows candidate window, infolist window, and live-conversion ruby display from the config dialog
 - Allows configuring the primary text weight independently from 100 to 900 for the Windows candidate window, suggestion window, and live-conversion ruby display
+- Adds Windows vertical-writing support for candidate, suggestion, infolist, and live-conversion ruby displays, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog
 - Makes the Windows IME mode indicator follow the Windows light/dark theme
@@ -1165,6 +1184,23 @@ the config dialog.
 
 The IME mode indicator follows the Windows light/dark theme and changes its
 colors to keep the current input mode easy to recognize.
+
+### Windows vertical writing support
+
+On Windows, Mozkey detects vertical composition geometry and lays out the candidate window, prediction/suggestion display, infolist, and live-conversion ruby for vertical writing. Primary candidate and infolist text uses DirectWrite vertical text rendering.
+
+The candidate window prefers placement on the left side of a vertical composition. When an application reports a narrow input-line geometry, Mozkey adds placement clearance so that the candidate display does not sit too close to the input text. This adjustment is based on the reported composition geometry rather than application-specific name checks.
+
+The live-conversion ruby display also follows vertical composition geometry. When an uncommitted composition wraps across multiple vertical columns, such as in Word, the renderer keeps the ruby outside the already occupied composition span instead of placing it over an earlier column.
+
+For candidate navigation in vertical writing, Mozkey reinterprets arrow keys only when the active keymap uses the supported existing command bindings.
+
+- In Suggestion state, Left enters the candidate list.
+- In Conversion / Prediction state, Left / Right move through candidates while Up / Down move between segments.
+- In Conversion state, `Shift+Up` shrinks the segment width and `Shift+Down` expands it.
+- Existing `Shift+Left` / `Shift+Right` segment-width operations remain available for compatibility.
+
+Horizontal writing, ordinary cursor movement during Composition, `Ctrl+Shift` combinations, and keymaps that do not use the supported command bindings retain their existing behavior.
 
 ### Windows preedit display colors
 
