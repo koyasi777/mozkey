@@ -529,6 +529,13 @@ message Context {
   optional string zenz_preceding_text = 1001;
   optional string zenz_following_text = 1002;
 
+  // Fork-specific writing direction supplied by clients that can determine it.
+  // Currently the Windows TSF client sets this only when an active composition
+  // is positively identified as vertical. Absent/false means that vertical
+  // navigation must not be applied; it intentionally covers both horizontal and
+  // unknown writing direction.
+  optional bool vertical_writing = 1003 [default = false];
+
   // If this is true, suggestion feature is disabled regardless the
   // configuration.  If this is false, suggestion feature is followed
   // by the user's configuration.  If you want to omit interim

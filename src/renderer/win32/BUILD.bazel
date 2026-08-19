@@ -115,6 +115,28 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "vertical_candidate_layout",
+    srcs = ["vertical_candidate_layout.cc"],
+    hdrs = ["vertical_candidate_layout.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//base:coordinates",
+    ],
+)
+
+mozc_cc_library(
+    name = "vertical_infolist_layout",
+    srcs = ["vertical_infolist_layout.cc"],
+    hdrs = ["vertical_infolist_layout.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//base:coordinates",
+    ],
+)
+
+mozc_cc_library(
     name = "candidate_window",
     srcs = ["candidate_window.cc"],
     hdrs = ["candidate_window.h"],
@@ -123,6 +145,7 @@ mozc_cc_library(
     deps = [
         ":resource_h",
         ":text_renderer",
+        ":vertical_candidate_layout",
         ":win32_dpi_util",
         ":win32_renderer_util",
         "//base:const",
@@ -197,11 +220,23 @@ mozc_cc_library(
         "//base/win32:wide_char",
         "//bazel/win32:d2d1",
         "//bazel/win32:dwrite",
+        "//bazel/win32:gdi32",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_style_handler",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/types:span",
         "@com_microsoft_wil//:wil",
+    ],
+)
+
+mozc_cc_test(
+    name = "text_renderer_test",
+    srcs = ["text_renderer_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":text_renderer",
+        "//testing:gunit_main",
     ],
 )
 
@@ -231,9 +266,11 @@ mozc_cc_library(
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        ":text_renderer",
         ":win32_dpi_util",
         ":win32_font_util",
         ":win32_renderer_util",
+        "//base:coordinates",
         "//base/win32:wide_char",
         "//bazel/win32:gdi32",
         "//bazel/win32:user32",
@@ -242,6 +279,7 @@ mozc_cc_library(
         "//protocol:config_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_style_handler",
+        "//renderer:window_util",
         "@com_microsoft_wil//:wil",
     ],
 )
@@ -254,6 +292,7 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":text_renderer",
+        ":vertical_infolist_layout",
         ":win32_dpi_util",
         ":win32_renderer_util",
         "//base:const",
@@ -335,6 +374,30 @@ mozc_cc_library(
         "//renderer:window_effect_util",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+    ],
+)
+
+mozc_cc_test(
+    name = "vertical_candidate_layout_test",
+    srcs = ["vertical_candidate_layout_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":vertical_candidate_layout",
+        "//base:coordinates",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "vertical_infolist_layout_test",
+    srcs = ["vertical_infolist_layout_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":vertical_infolist_layout",
+        "//base:coordinates",
+        "//testing:gunit_main",
     ],
 )
 

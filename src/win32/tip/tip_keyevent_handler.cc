@@ -194,6 +194,18 @@ void FillMozcContextCommon(TipTextService* text_service, ITfContext* context,
   }
   mozc_context->set_revision(
       text_service->GetThreadContext()->GetFocusRevision());
+
+  // Commit 12 keeps a positive vertical-writing snapshot in TipPrivateContext
+  // across TSF hosts that temporarily lose their direction attributes during
+  // composition. Propagate only that positive state. Horizontal and unknown
+  // intentionally remain false so no key behavior changes without evidence.
+  TipPrivateContext* private_context = text_service->GetPrivateContext(context);
+  if (private_context != nullptr &&
+      private_context->composition_writing_direction() ==
+          WritingDirection::kVertical) {
+    mozc_context->set_vertical_writing(true);
+  }
+
   wil::com_ptr_nothrow<ITfContextView> context_view;
   if (FAILED(context->GetActiveView(&context_view))) {
     return;

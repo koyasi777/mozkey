@@ -82,39 +82,48 @@ Rect GetWindowRectForMainWindowFromPreeditRectVertical(
     const Point& target_point, const Rect& preedit_rect,
     const Size& window_size, const Point& zero_point_offset,
     const Rect& working_area) {
-  Rect window_rect(target_point, window_size);
+  // Japanese vertical writing proceeds in columns from right to left.  Keep the
+  // first candidate column next to the composition by preferring the left side
+  // of the preedit.  The vertical zero point is the start of the first
+  // candidate text and is aligned to the target segment's top.
+  const int aligned_top = target_point.y - zero_point_offset.y;
+  Rect preferred_left(preedit_rect.Left() - window_size.width, aligned_top,
+                      window_size.width, window_size.height);
 
-  // Currently |zero_point_offset| is ignored because the candidate renderer
-  // has not supported vertical writing.
-
-  // Since |target_point| is pointing the upper-left of the preedit, move the
-  // candidate window to the right side of the preedit.
-  window_rect.origin.x += preedit_rect.Width();
-
-  // If monitor_rect has erroneous value, it returns window_rect.
+  // If the working area is unavailable, preserve the preferred side and the
+  // text anchor.  There is no reliable basis for choosing a fallback side.
   if (working_area.Height() == 0 || working_area.Width() == 0) {
-    return window_rect;
+    return preferred_left;
   }
 
-  if (working_area.Right() < window_rect.Right()) {
-    window_rect.origin.x -= (window_rect.Width() + preedit_rect.Width());
+  const auto fits_horizontally = [&](const Rect& rect) {
+    return working_area.Left() <= rect.Left() &&
+           rect.Right() <= working_area.Right();
+  };
+
+  Rect window_rect = preferred_left;
+
+  // If the preferred left side does not fit, try the right side of the
+  // preedit.  Keep the same vertical text anchor on both sides.
+  if (!fits_horizontally(window_rect)) {
+    const Rect fallback_right(preedit_rect.Right(), aligned_top,
+                              window_size.width, window_size.height);
+    if (fits_horizontally(fallback_right)) {
+      window_rect = fallback_right;
+    }
   }
 
-  if (working_area.Right() < window_rect.Right()) {
-    window_rect.origin.x -= (window_rect.Right() - working_area.Right());
-  }
+  // If neither side fits completely, keep the preferred/fallback result but
+  // clamp it into the working area as far as the window size allows.
+  const int max_left =
+      std::max(working_area.Left(), working_area.Right() - window_size.width);
+  window_rect.origin.x =
+      std::clamp(window_rect.Left(), working_area.Left(), max_left);
 
-  if (window_rect.Left() < working_area.Left()) {
-    window_rect.origin.x += (working_area.Left() - window_rect.Left());
-  }
-
-  if (working_area.Bottom() < window_rect.Bottom()) {
-    window_rect.origin.y -= (window_rect.Bottom() - working_area.Bottom());
-  }
-
-  if (window_rect.Top() < working_area.Top()) {
-    window_rect.origin.y += (working_area.Top() - window_rect.Top());
-  }
+  const int max_top =
+      std::max(working_area.Top(), working_area.Bottom() - window_size.height);
+  window_rect.origin.y =
+      std::clamp(window_rect.Top(), working_area.Top(), max_top);
 
   return window_rect;
 }
@@ -173,6 +182,22 @@ Rect WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
 
   return GetWindowRectForMainWindowFromPreeditRectHorizontal(
       target_point, preedit_rect, window_size, zero_point_offset, working_area);
+}
+
+Rect WindowUtil::GetVerticalCandidatePlacementPreeditRect(
+    const Rect& preedit_rect, int minimum_half_width) {
+  if (minimum_half_width <= 0 || preedit_rect.Width() <= 0) {
+    return preedit_rect;
+  }
+
+  const int current_half_width = preedit_rect.Width() / 2;
+  const int extra = std::max(0, minimum_half_width - current_half_width);
+  if (extra == 0) {
+    return preedit_rect;
+  }
+
+  return Rect(preedit_rect.Left() - extra, preedit_rect.Top(),
+              preedit_rect.Width() + extra * 2, preedit_rect.Height());
 }
 
 Rect WindowUtil::GetWindowRectForCascadingWindow(const Rect& selected_row,
@@ -276,6 +301,58 @@ bool WindowUtil::GetRubyWindowRect(
   return false;
 }
 
+bool WindowUtil::GetRubyWindowRectForVerticalWriting(
+    const Rect& composition_span, const Size& window_size,
+    int text_top_offset, int gap, const Rect& working_area,
+    const Rect* avoid_rect, Rect* window_rect) {
+  if (window_rect == nullptr || composition_span.Width() <= 0 ||
+      window_size.width <= 0 || window_size.height <= 0 ||
+      working_area.Width() <= 0 || working_area.Height() <= 0 ||
+      window_size.width > working_area.Width() ||
+      window_size.height > working_area.Height()) {
+    return false;
+  }
+
+  const int normalized_gap = std::max(0, gap);
+  const int normalized_text_top_offset = std::max(0, text_top_offset);
+  const int max_top = working_area.Bottom() - window_size.height;
+  const int aligned_top =
+      composition_span.Top() - normalized_text_top_offset;
+  const int top =
+      std::clamp(aligned_top, working_area.Top(), max_top);
+
+  const auto intersects = [](const Rect& lhs, const Rect& rhs) {
+    return lhs.Left() < rhs.Right() && rhs.Left() < lhs.Right() &&
+           lhs.Top() < rhs.Bottom() && rhs.Top() < lhs.Bottom();
+  };
+
+  const auto is_usable = [&](const Rect& rect) {
+    if (rect.Left() < working_area.Left() ||
+        rect.Right() > working_area.Right() ||
+        rect.Top() < working_area.Top() ||
+        rect.Bottom() > working_area.Bottom()) {
+      return false;
+    }
+    return avoid_rect == nullptr || !intersects(rect, *avoid_rect);
+  };
+
+  const Rect right_rect(composition_span.Right() + normalized_gap, top,
+                        window_size.width, window_size.height);
+  if (is_usable(right_rect)) {
+    *window_rect = right_rect;
+    return true;
+  }
+
+  const Rect left_rect(composition_span.Left() - normalized_gap -
+                           window_size.width,
+                       top, window_size.width, window_size.height);
+  if (is_usable(left_rect)) {
+    *window_rect = left_rect;
+    return true;
+  }
+
+  return false;
+}
 Rect WindowUtil::GetWindowRectForInfolistWindow(const Size& window_size,
                                                 const Rect& candidate_rect,
                                                 const Rect& working_area) {
@@ -298,6 +375,81 @@ Rect WindowUtil::GetWindowRectForInfolistWindow(const Size& window_size,
     infolist_pos.y = candidate_rect.Top();
   }
   return Rect(infolist_pos, window_size);
+}
+
+Rect WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+    const Size& window_size, const Rect& candidate_rect,
+    const Rect& avoid_rect, const Rect& working_area) {
+  const int group_left = std::min(candidate_rect.Left(), avoid_rect.Left());
+  const int group_right = std::max(candidate_rect.Right(), avoid_rect.Right());
+  const int group_top = std::min(candidate_rect.Top(), avoid_rect.Top());
+  const int group_bottom =
+      std::max(candidate_rect.Bottom(), avoid_rect.Bottom());
+
+  const int candidate_center =
+      candidate_rect.Left() + candidate_rect.Width() / 2;
+  const int avoid_center = avoid_rect.Left() + avoid_rect.Width() / 2;
+  const bool prefer_left = avoid_center >= candidate_center;
+
+  // Without a reliable working area we cannot evaluate fallbacks.  Still keep
+  // the infolist on the outside of the candidate/preedit pair.
+  if (working_area.Height() == 0 || working_area.Width() == 0) {
+    const int x =
+        prefer_left ? group_left - window_size.width : group_right;
+    return Rect(x, candidate_rect.Top(), window_size.width, window_size.height);
+  }
+
+  const int max_top =
+      std::max(working_area.Top(), working_area.Bottom() - window_size.height);
+  const int side_top =
+      std::clamp(candidate_rect.Top(), working_area.Top(), max_top);
+
+  const Rect left_rect(group_left - window_size.width, side_top,
+                       window_size.width, window_size.height);
+  const Rect right_rect(group_right, side_top, window_size.width,
+                        window_size.height);
+
+  const auto fits = [&](const Rect& rect) {
+    return working_area.Left() <= rect.Left() &&
+           rect.Right() <= working_area.Right() &&
+           working_area.Top() <= rect.Top() &&
+           rect.Bottom() <= working_area.Bottom();
+  };
+
+  const Rect& preferred_side = prefer_left ? left_rect : right_rect;
+  const Rect& other_side = prefer_left ? right_rect : left_rect;
+  if (fits(preferred_side)) {
+    return preferred_side;
+  }
+  if (fits(other_side)) {
+    return other_side;
+  }
+
+  // If neither horizontal side is available, try above and below the combined
+  // candidate/preedit obstacle. This prevents a large usage window from
+  // covering the active vertical composition just because horizontal space is
+  // tight.
+  const int max_left =
+      std::max(working_area.Left(), working_area.Right() - window_size.width);
+  const int vertical_left =
+      std::clamp(candidate_rect.Left(), working_area.Left(), max_left);
+
+  const Rect above_rect(vertical_left, group_top - window_size.height,
+                        window_size.width, window_size.height);
+  if (fits(above_rect)) {
+    return above_rect;
+  }
+
+  const Rect below_rect(vertical_left, group_bottom, window_size.width,
+                        window_size.height);
+  if (fits(below_rect)) {
+    return below_rect;
+  }
+
+  // Degenerate case: there is not enough room around the obstacle. Preserve
+  // the legacy working-area behavior rather than returning an off-screen rect.
+  return GetWindowRectForInfolistWindow(window_size, candidate_rect,
+                                        working_area);
 }
 }  // namespace renderer
 }  // namespace mozc

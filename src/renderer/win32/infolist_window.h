@@ -96,7 +96,14 @@ class InfolistWindow : public ATL::CWindowImpl<InfolistWindow, ATL::CWindow,
   // UpdateLayout.
   void UpdateDpi(uint32_t dpi);
 
+  enum class LayoutMode {
+    kHorizontal,
+    kVertical,
+  };
+
   void UpdateLayout(const commands::CandidateWindow& candidates);
+  void UpdateLayout(const commands::CandidateWindow& candidates,
+                    LayoutMode layout_mode);
   void PresentCachedBitmapImmediately();
   void UpdateEffectWindows();
   void SetShadowZOrderAnchor(HWND hwnd) { shadow_z_order_anchor_ = hwnd; }
@@ -110,8 +117,11 @@ class InfolistWindow : public ATL::CWindowImpl<InfolistWindow, ATL::CWindow,
   void DelayHide(UINT mseconds);
 
  private:
+  bool IsVerticalLayout() const;
   Size DoPaint(HDC dc, bool draw_frame);
-  Size DoPaintRow(HDC dc, int row, int ypos);
+  Size DoPaintHorizontal(HDC dc, bool draw_frame);
+  Size DoPaintHorizontalRow(HDC dc, int row, int ypos);
+  Size DoPaintVertical(HDC dc, bool draw_frame);
   bool RenderToBitmapCache();
   void ClearBitmapCache();
 
@@ -161,6 +171,7 @@ class InfolistWindow : public ATL::CWindowImpl<InfolistWindow, ATL::CWindow,
   uint32_t dpi_;
   std::unique_ptr<TextRenderer> text_renderer_;
   std::unique_ptr<renderer::RendererStyle> style_;
+  LayoutMode layout_mode_;
   bool metrics_changed_;
   bool visible_;
   wil::unique_hbitmap cached_bitmap_;

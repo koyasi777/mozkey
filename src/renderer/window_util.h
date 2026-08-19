@@ -60,8 +60,11 @@ class WindowUtil {
       const Point& zero_point_offset, const Rect& working_area);
 
   // Returns the appropriate candidate window position in the screen
-  // coordinate.  |zero_point_offset| is the point in the candidate
-  // window which should be aligned to the preedit.
+  // coordinate.  For horizontal writing, |zero_point_offset| is aligned to
+  // |target_point| as before.  For vertical writing, its y-coordinate aligns
+  // the first candidate text with |target_point.y| while horizontal placement
+  // is adjacent to |preedit_rect|: the left side is preferred and the right
+  // side is the fallback.
   // |working_area| is the available area in the current monitor.  If
   // caller fails to obtain |working_area|, set its width or height as
   // 0.  Then it doesn't care the monitor.
@@ -69,6 +72,14 @@ class WindowUtil {
       const Point& target_point, const Rect& preedit_rect,
       const Size& window_size, const Point& zero_point_offset,
       const Rect& working_area, bool vertical);
+
+  // Returns the preedit rectangle to use only for vertical candidate
+  // placement. Hosts may report a vertical line box narrower than the visual
+  // clearance needed around the line center. Preserve wider host geometry,
+  // but symmetrically expand narrow rectangles to at least
+  // |minimum_half_width| on each side of that center.
+  static Rect GetVerticalCandidatePlacementPreeditRect(
+      const Rect& preedit_rect, int minimum_half_width);
 
   // Returns the appropriate cascading window position in the screen
   // coordinate.  |zero_point_offset| is the point in the cascading
@@ -91,6 +102,18 @@ class WindowUtil {
                                 const Rect* avoid_rect,
                                 Rect* window_rect);
 
+  // Returns a vertical-writing ruby rectangle around the horizontally occupied
+  // span of the active composition. |composition_span.Left()/Right()| are the
+  // outermost observed composition-column edges and |composition_span.Top()|
+  // is the current text anchor. |text_top_offset| is the vertical inset from
+  // the ruby window edge to its first text glyph. Japanese vertical ruby is
+  // placed outside the right edge first and outside the left edge as fallback.
+  // This keeps ruby outside a composition that wraps into columns to the left.
+  static bool GetRubyWindowRectForVerticalWriting(
+      const Rect& composition_span, const Size& window_size,
+      int text_top_offset, int gap, const Rect& working_area,
+      const Rect* avoid_rect, Rect* window_rect);
+
   // Returns the appropriate infolist window position in the screen
   // coordinate.  |window_size| is the size of the infolist window.
   // |candidate_rect| is the rect of the candidate window.
@@ -100,6 +123,15 @@ class WindowUtil {
   static Rect GetWindowRectForInfolistWindow(const Size& window_size,
                                              const Rect& candidate_rect,
                                              const Rect& working_area);
+
+  // Returns an infolist rectangle that avoids both |candidate_rect| and
+  // |avoid_rect| whenever the working area allows it.  The side opposite
+  // |avoid_rect| is preferred, so a vertical candidate window placed left of
+  // the preedit also puts its infolist farther left.  The other horizontal
+  // side and then above/below are used as fallbacks.
+  static Rect GetWindowRectForInfolistWindowAvoidingRect(
+      const Size& window_size, const Rect& candidate_rect,
+      const Rect& avoid_rect, const Rect& working_area);
 };
 }  // namespace renderer
 }  // namespace mozc

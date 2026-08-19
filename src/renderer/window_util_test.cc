@@ -165,22 +165,141 @@ TEST_F(WindowUtilTest, MainWindow) {
                                                       49, 0, "On the top edge");
 
   VerifyMainWindowWithTargetPointAndPreeditVertical(
-      50, 55, 50, 50, 20, 5, 70, 55, "Preedit is in the middle of the window");
-  VerifyMainWindowWithTargetPointAndPreeditVertical(50, 198, 50, 198, 5, 20, 55,
-                                                    80, "On the bottom edge");
-  VerifyMainWindowWithTargetPointAndPreeditVertical(-50, 50, -50, 50, 5, 20, 0,
-                                                    50, "On the left edge");
+      50, 55, 50, 50, 20, 5, 40, 57,
+      "Prefer the left side in the middle of the window");
   VerifyMainWindowWithTargetPointAndPreeditVertical(
-      50, 55, 50, 0, 20, 100, 70, 55,
+      50, 198, 50, 198, 5, 20, 40, 80, "Clamp on the bottom edge");
+  VerifyMainWindowWithTargetPointAndPreeditVertical(
+      -50, 50, -50, 50, 5, 20, 0, 52, "Clamp beyond the left edge");
+  VerifyMainWindowWithTargetPointAndPreeditVertical(
+      50, 55, 50, 0, 20, 100, 40, 57,
       "Preedit height is the same to client area");
-  // If the candidate window across the right edge, it appears in the left of
-  // the preedit.
   VerifyMainWindowWithTargetPointAndPreeditVertical(
-      192, 50, 192, 50, 5, 20, 182, 50, "On the right edge");
+      192, 50, 192, 50, 5, 20, 182, 52,
+      "Keep the preferred left side near the right edge");
   VerifyMainWindowWithTargetPointAndPreeditVertical(
-      215, 50, 210, 50, 5, 20, 190, 50, "Under the right edge");
-  VerifyMainWindowWithTargetPointAndPreeditVertical(-5, 50, -10, 50, 5, 20, 0,
-                                                    50, "On the left edge");
+      215, 50, 210, 50, 5, 20, 190, 52,
+      "Clamp when both sides are beyond the right edge");
+  VerifyMainWindowWithTargetPointAndPreeditVertical(
+      -5, 50, -10, 50, 5, 20, 0, 52,
+      "Clamp when both sides are beyond the left edge");
+}
+
+TEST_F(WindowUtilTest, VerticalMainWindowFallsBackToRight) {
+  const Point target_point(5, 50);
+  const Rect preedit_rect(5, 50, 5, 20);
+  const Size window_size(10, 20);
+  const Point zero_point_offset(1, -2);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result =
+      WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
+          target_point, preedit_rect, window_size, zero_point_offset,
+          working_area, true);
+
+  EXPECT_EQ(result.Left(), 10);
+  EXPECT_EQ(result.Top(), 52);
+}
+
+TEST_F(WindowUtilTest, VerticalMainWindowAlignsCandidateTextTop) {
+  const Point target_point(50, 60);
+  const Rect preedit_rect(50, 60, 5, 20);
+  const Size window_size(10, 20);
+  const Point zero_point_offset(123, 7);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result =
+      WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
+          target_point, preedit_rect, window_size, zero_point_offset,
+          working_area, true);
+
+  // The x-component does not affect side placement.  The y-component marks
+  // the first candidate text position inside the candidate window.
+  EXPECT_EQ(result.Left(), 40);
+  EXPECT_EQ(result.Top(), 53);
+}
+
+TEST_F(WindowUtilTest, VerticalMainWindowWithoutWorkingAreaKeepsLeftPreference) {
+  const Point target_point(50, 50);
+  const Rect preedit_rect(50, 50, 5, 20);
+  const Size window_size(10, 20);
+  const Point zero_point_offset(1, -2);
+  const Rect unknown_working_area(0, 0, 0, 0);
+
+  const Rect result =
+      WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
+          target_point, preedit_rect, window_size, zero_point_offset,
+          unknown_working_area, true);
+
+  EXPECT_EQ(result.Left(), 40);
+  EXPECT_EQ(result.Top(), 52);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementKeepsWideHostLine) {
+  const Rect preedit_rect(100, 200, 72, 1);
+
+  const Rect result =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(preedit_rect, 36);
+
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 200);
+  EXPECT_EQ(result.Width(), 72);
+  EXPECT_EQ(result.Height(), 1);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementExpandsNarrowEvenHostLine) {
+  const Rect preedit_rect(100, 200, 50, 1);
+
+  const Rect result =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(preedit_rect, 36);
+
+  EXPECT_EQ(result.Left(), 89);
+  EXPECT_EQ(result.Top(), 200);
+  EXPECT_EQ(result.Width(), 72);
+  EXPECT_EQ(result.Height(), 1);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementExpandsNarrowOddHostLine) {
+  const Rect preedit_rect(100, 200, 51, 1);
+
+  const Rect result =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(preedit_rect, 36);
+
+  EXPECT_EQ(result.Left(), 89);
+  EXPECT_EQ(result.Top(), 200);
+  EXPECT_EQ(result.Width(), 73);
+  EXPECT_EQ(result.Height(), 1);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementKeepsNonPositiveMinimum) {
+  const Rect preedit_rect(100, 200, 50, 1);
+
+  const Rect result =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(preedit_rect, 0);
+
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 200);
+  EXPECT_EQ(result.Width(), 50);
+  EXPECT_EQ(result.Height(), 1);
+}
+
+TEST_F(WindowUtilTest, VerticalCandidatePlacementClearanceSurvivesRightFallback) {
+  const Point target_point(5, 50);
+  const Rect host_preedit_rect(5, 50, 50, 1);
+  const Rect placement_preedit_rect =
+      WindowUtil::GetVerticalCandidatePlacementPreeditRect(host_preedit_rect,
+                                                           36);
+  const Size window_size(10, 20);
+  const Point zero_point_offset(0, 0);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result =
+      WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
+          target_point, placement_preedit_rect, window_size, zero_point_offset,
+          working_area, true);
+
+  EXPECT_EQ(result.Left(), 66);
+  EXPECT_EQ(result.Top(), 50);
 }
 
 TEST_F(WindowUtilTest, CascadingWindow) {
@@ -200,6 +319,48 @@ TEST_F(WindowUtilTest, InfolistWindow) {
   VerifyInfolistWindow(10, 10, 160, 30, 40, 12, 150, 30,
                        "Left of the candidate window");
   VerifyInfolistWindow(10, 20, 20, 85, 11, 12, 31, 80, "On the bottom edge");
+}
+
+TEST_F(WindowUtilTest, VerticalInfolistPrefersOutsideOfPreedit) {
+  const Size infolist_size(30, 20);
+  const Rect candidate_rect(60, 20, 20, 40);
+  const Rect preedit_rect(80, 20, 10, 40);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+      infolist_size, candidate_rect, preedit_rect, working_area);
+
+  EXPECT_EQ(result.Left(), 30);
+  EXPECT_EQ(result.Top(), 20);
+  EXPECT_EQ(result.Right(), candidate_rect.Left());
+}
+
+TEST_F(WindowUtilTest, VerticalInfolistFallsBackBeyondPreedit) {
+  const Size infolist_size(30, 20);
+  const Rect candidate_rect(5, 20, 20, 40);
+  const Rect preedit_rect(25, 20, 10, 40);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+      infolist_size, candidate_rect, preedit_rect, working_area);
+
+  EXPECT_EQ(result.Left(), 35);
+  EXPECT_EQ(result.Top(), 20);
+  EXPECT_EQ(result.Left(), preedit_rect.Right());
+}
+
+TEST_F(WindowUtilTest, VerticalInfolistUsesVerticalFallbackWhenSidesAreTight) {
+  const Size infolist_size(60, 20);
+  const Rect candidate_rect(50, 40, 40, 20);
+  const Rect preedit_rect(90, 40, 60, 20);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+      infolist_size, candidate_rect, preedit_rect, working_area);
+
+  EXPECT_EQ(result.Left(), 50);
+  EXPECT_EQ(result.Top(), 20);
+  EXPECT_EQ(result.Bottom(), candidate_rect.Top());
 }
 
 TEST_F(WindowUtilTest, MonitorErrors) {
@@ -278,5 +439,85 @@ TEST_F(WindowUtilTest, RubyWindowReturnsFalseWhenBothSidesAreBlocked) {
       preedit_rect, ruby_size, 4, working_area, &avoid_rect, &result));
 }
 
+TEST_F(WindowUtilTest, VerticalRubyPrefersRightOfComposition) {
+  const Rect composition_span(100, 200, 20, 1);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_span, ruby_size, 8, 4, working_area, nullptr, &result));
+
+  EXPECT_EQ(result.Left(), 124);
+  EXPECT_EQ(result.Top(), 192);
+}
+
+TEST_F(WindowUtilTest, VerticalRubyUsesOuterRightAcrossWrappedColumns) {
+  // The active wrapped column could currently end at x=70, while an earlier
+  // column in the same vertical composition reached x=120. The ruby must stay
+  // outside the outermost observed right edge, not move over the earlier text.
+  const Rect composition_span(60, 200, 60, 1);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_span, ruby_size, 8, 4, working_area, nullptr, &result));
+
+  EXPECT_EQ(composition_span.Right(), 120);
+  EXPECT_EQ(result.Left(), 124);
+}
+
+TEST_F(WindowUtilTest, VerticalRubyFallsBackOutsideLeftSpanAtRightEdge) {
+  const Rect composition_span(960, 200, 20, 1);
+  const Size ruby_size(50, 100);
+  const Rect working_area(0, 0, 1000, 800);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_span, ruby_size, 8, 4, working_area, nullptr, &result));
+
+  EXPECT_EQ(result.Left(), 906);
+  EXPECT_EQ(result.Right(), 956);
+  EXPECT_LT(result.Right(), composition_span.Left());
+}
+
+TEST_F(WindowUtilTest, VerticalRubyAvoidsSuggestionOnPreferredRight) {
+  const Rect composition_span(100, 200, 20, 1);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+  const Rect avoid_rect(120, 180, 100, 180);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_span, ruby_size, 8, 4, working_area, &avoid_rect, &result));
+
+  EXPECT_EQ(result.Right(), 96);
+  EXPECT_EQ(result.Left(), 66);
+}
+
+TEST_F(WindowUtilTest, VerticalRubyReturnsFalseWhenBothSidesAreBlocked) {
+  const Rect composition_span(100, 200, 20, 1);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+  const Rect avoid_rect(50, 180, 220, 180);
+
+  Rect result;
+  EXPECT_FALSE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_span, ruby_size, 8, 4, working_area, &avoid_rect, &result));
+}
+
+TEST_F(WindowUtilTest, VerticalRubyClampsTopInsideWorkingArea) {
+  const Rect composition_span(100, 760, 20, 1);
+  const Size ruby_size(30, 100);
+  const Rect working_area(0, 0, 1000, 800);
+
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRectForVerticalWriting(
+      composition_span, ruby_size, 8, 4, working_area, nullptr, &result));
+
+  EXPECT_EQ(result.Top(), 700);
+  EXPECT_EQ(result.Bottom(), 800);
+}
 }  // namespace renderer
 }  // namespace mozc

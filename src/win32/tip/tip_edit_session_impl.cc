@@ -58,6 +58,7 @@
 #include "win32/tip/tip_text_service.h"
 #include "win32/tip/tip_thread_context.h"
 #include "win32/tip/tip_ui_handler.h"
+#include "win32/tip/tip_writing_direction.h"
 
 namespace mozc {
 namespace win32 {
@@ -125,10 +126,26 @@ wil::com_ptr_nothrow<ITfComposition> CreateComposition(
           write_cookie, TF_IAS_QUERYONLY, nullptr, 0, &insertion_pos))) {
     return nullptr;
   }
+
+  // Some TSF hosts expose correct writing-direction properties at the
+  // insertion point but replace them with horizontal values on the composition
+  // range after StartComposition. Snapshot the pre-composition direction in
+  // the private context before giving the host a chance to rewrite attributes.
+  TipPrivateContext* private_context = text_service->GetPrivateContext(context);
+  if (private_context != nullptr) {
+    WritingDirection direction = WritingDirection::kUnknown;
+    TipRangeUtil::GetWritingDirection(insertion_pos.get(), write_cookie,
+                                      &direction);
+    private_context->SetCompositionWritingDirection(direction);
+  }
+
   wil::com_ptr_nothrow<ITfComposition> composition;
   if (FAILED(composition_context->StartComposition(
           write_cookie, insertion_pos.get(),
           text_service->CreateCompositionSink(context).get(), &composition))) {
+    if (private_context != nullptr) {
+      private_context->ClearCompositionWritingDirection();
+    }
     return nullptr;
   }
   return composition;
@@ -252,8 +269,14 @@ HRESULT UpdateComposition(TipTextService* text_service, ITfContext* context,
       }
       result = composition->EndComposition(write_cookie);
       if (FAILED(result)) {
+        // Keep the snapshot while the TSF composition may still be active.
         return result;
       }
+    }
+    if (TipPrivateContext* private_context =
+            text_service->GetPrivateContext(context);
+        private_context != nullptr) {
+      private_context->ClearCompositionWritingDirection();
     }
     return S_OK;
   }
@@ -610,6 +633,13 @@ HRESULT TipEditSessionImpl::OnCompositionTerminated(
     return E_FAIL;
   }
 
+  // This callback is also the authoritative cleanup path when an application
+  // terminates the composition externally.
+  TipPrivateContext* private_context = text_service->GetPrivateContext(context);
+  if (private_context != nullptr) {
+    private_context->ClearCompositionWritingDirection();
+  }
+
   // Clear the display attributes first.
   // TODO(https://github.com/google/mozc/discussions/1388): Revisit here.
   if (composition) {
@@ -623,7 +653,6 @@ HRESULT TipEditSessionImpl::OnCompositionTerminated(
   SessionCommand command;
   command.set_type(SessionCommand::SUBMIT);
   Output output;
-  TipPrivateContext* private_context = text_service->GetPrivateContext(context);
   if (private_context == nullptr) {
     return E_FAIL;
   }

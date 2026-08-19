@@ -39,6 +39,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,13 @@ constexpr GUID kGuidAttrIdTextVerticalWriting = {
     0x046f,
     0x4ea9,
     {0xb3, 0x11, 0x97, 0xfd, 0x66, 0xc4, 0x27, 0x4b}};
+
+// TSATTRID_Text_Orientation
+constexpr GUID kGuidAttrIdTextOrientation = {
+    0x6bab707f,
+    0x8785,
+    0x4c39,
+    {0x8b, 0x52, 0x96, 0xf8, 0x78, 0x30, 0x3f, 0xfb}};
 
 HRESULT GetReadOnlyAppProperty(ITfRange* range, TfEditCookie read_cookie,
                                const GUID& guid, VARIANT* variant_addr) {
@@ -237,6 +245,36 @@ HRESULT TipRangeUtil::IsVerticalWriting(ITfRange* range,
   }
   *vertical_writing = (variant.vt == VT_BOOL && variant.boolVal != 0);
   return S_OK;
+}
+
+HRESULT TipRangeUtil::GetWritingDirection(
+    ITfRange* range, TfEditCookie read_cookie, WritingDirection* direction) {
+  if (range == nullptr || direction == nullptr) {
+    return E_INVALIDARG;
+  }
+  *direction = WritingDirection::kUnknown;
+
+  wil::unique_variant vertical_variant;
+  const HRESULT vertical_result = GetReadOnlyAppProperty(
+      range, read_cookie, kGuidAttrIdTextVerticalWriting,
+      vertical_variant.reset_and_addressof());
+  if (SUCCEEDED(vertical_result) && vertical_variant.vt == VT_BOOL) {
+    *direction = ResolveWritingDirection(
+        vertical_variant.boolVal != VARIANT_FALSE, std::nullopt);
+    return S_OK;
+  }
+
+  wil::unique_variant orientation_variant;
+  const HRESULT orientation_result = GetReadOnlyAppProperty(
+      range, read_cookie, kGuidAttrIdTextOrientation,
+      orientation_variant.reset_and_addressof());
+  if (SUCCEEDED(orientation_result) && orientation_variant.vt == VT_I4) {
+    *direction = ResolveWritingDirection(
+        std::nullopt, static_cast<int32_t>(orientation_variant.lVal));
+    return *direction == WritingDirection::kUnknown ? S_FALSE : S_OK;
+  }
+
+  return S_FALSE;
 }
 
 bool TipRangeUtil::IsRangeCovered(TfEditCookie edit_cookie,

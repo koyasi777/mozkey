@@ -55,6 +55,7 @@
 #include "renderer/table_layout.h"
 #include "renderer/win32/resource.h"
 #include "renderer/win32/text_renderer.h"
+#include "renderer/win32/vertical_candidate_layout.h"
 #include "renderer/win32/win32_dpi_util.h"
 #include "renderer/win32/win32_renderer_util.h"
 
@@ -310,6 +311,8 @@ CandidateWindow::CandidateWindow()
       footer_logo_display_size_(0, 0),
       send_command_interface_(nullptr),
       table_layout_(std::make_unique<TableLayout>()),
+      vertical_layout_(std::make_unique<VerticalCandidateLayout>()),
+      layout_mode_(LayoutMode::kHorizontal),
       cached_bitmap_size_(0, 0),
       cached_bitmap_valid_(false),
       dpi_(::GetDpiForSystem()),
@@ -406,6 +409,169 @@ void CandidateWindow::OnGetMinMaxInfo(MINMAXINFO* min_max_info) {
   SetMsgHandled(TRUE);
 }
 
+bool CandidateWindow::IsVerticalLayout() const {
+  return layout_mode_ == LayoutMode::kVertical;
+}
+
+bool CandidateWindow::IsLayoutReady() const {
+  if (IsVerticalLayout()) {
+    return vertical_layout_->candidate_count() ==
+           static_cast<size_t>(candidate_window_->candidate_size());
+  }
+  return table_layout_->IsLayoutFrozen();
+}
+
+Rect CandidateWindow::GetCandidateRect(size_t index) const {
+  if (IsVerticalLayout()) {
+    return vertical_layout_->GetCandidateRect(index);
+  }
+  return table_layout_->GetRowRect(index);
+}
+
+Rect CandidateWindow::GetFooterRect() const {
+  if (IsVerticalLayout()) {
+    return vertical_layout_->GetFooterRect();
+  }
+  return table_layout_->GetFooterRect();
+}
+
+Size CandidateWindow::MeasureVerticalFooterSize() const {
+  Size footer_size(0, 0);
+  if (!candidate_window_->has_footer()) {
+    return footer_size;
+  }
+
+  if (candidate_window_->footer().has_label() &&
+      ShouldRenderFooterText(candidate_window_->footer().label())) {
+    const std::wstring footer_label =
+        mozc::win32::Utf8ToWide(candidate_window_->footer().label());
+    const Size label_size = text_renderer_->MeasureString(
+        TextRenderer::FONTSET_FOOTER_LABEL, L" " + footer_label + L" ");
+    footer_size.width += label_size.width;
+    footer_size.height = std::max(footer_size.height, label_size.height);
+  } else if (candidate_window_->footer().has_sub_label() &&
+             ShouldRenderFooterText(candidate_window_->footer().sub_label())) {
+    const std::wstring footer_sub_label =
+        mozc::win32::Utf8ToWide(candidate_window_->footer().sub_label());
+    const Size label_size = text_renderer_->MeasureString(
+        TextRenderer::FONTSET_FOOTER_SUBLABEL,
+        L" " + footer_sub_label + L" ");
+    footer_size.width += label_size.width;
+    footer_size.height = std::max(footer_size.height, label_size.height);
+  }
+
+  if (candidate_window_->footer().index_visible()) {
+    const std::wstring index_guide_string =
+        mozc::win32::Utf8ToWide(GetIndexGuideString(*candidate_window_));
+    const Size index_size = text_renderer_->MeasureString(
+        TextRenderer::FONTSET_FOOTER_INDEX, index_guide_string);
+    footer_size.width += index_size.width;
+    footer_size.height = std::max(footer_size.height, index_size.height);
+  }
+
+  if (footer_logo_.is_valid()) {
+    if (candidate_window_->footer().logo_visible()) {
+      footer_size.width += footer_logo_display_size_.width;
+      footer_size.height =
+          std::max(footer_size.height, footer_logo_display_size_.height);
+    } else if (footer_size.height > 0) {
+      footer_size.height =
+          std::max(footer_size.height, footer_logo_display_size_.height);
+    }
+  }
+
+  if (footer_size.height > 0) {
+    footer_size.height += kFooterSeparatorHeight;
+  }
+  return footer_size;
+}
+
+bool CandidateWindow::TryUpdateVerticalLayout() {
+  if (!text_renderer_->SupportsVerticalText(TextRenderer::FONTSET_CANDIDATE)) {
+    return false;
+  }
+
+  std::vector<VerticalCandidateLayout::CandidateMetrics> metrics;
+  metrics.reserve(candidate_window_->candidate_size());
+
+  for (size_t i = 0; i < candidate_window_->candidate_size(); ++i) {
+    const commands::CandidateWindow::Candidate& candidate =
+        candidate_window_->candidate(i);
+    const std::wstring shortcut =
+        GetDisplayStringByColumn(candidate, COLUMN_SHORTCUT);
+    const std::wstring value =
+        GetDisplayStringByColumn(candidate, COLUMN_CANDIDATE);
+    const std::wstring description =
+        GetDisplayStringByColumn(candidate, COLUMN_DESCRIPTION);
+
+    if (!description.empty() &&
+        !text_renderer_->SupportsVerticalText(
+            TextRenderer::FONTSET_DESCRIPTION)) {
+      return false;
+    }
+
+    VerticalCandidateLayout::CandidateMetrics item;
+    if (!shortcut.empty()) {
+      item.shortcut_size =
+          text_renderer_->MeasureString(TextRenderer::FONTSET_SHORTCUT,
+                                        shortcut);
+    }
+    if (!value.empty()) {
+      item.value_size = text_renderer_->MeasureStringVertical(
+          TextRenderer::FONTSET_CANDIDATE, value);
+    }
+    if (!description.empty()) {
+      item.description_size = text_renderer_->MeasureStringVertical(
+          TextRenderer::FONTSET_DESCRIPTION, description);
+    }
+    metrics.push_back(item);
+  }
+
+  const RendererStyleHandler::RendererStyleType style_type =
+      GetRendererStyleType(*candidate_window_);
+  const RendererStyle layout_style =
+      GetCurrentScaledRendererStyle(style_type, dpi_);
+  const int padding = std::max(
+      0, layout_style.has_row_rect_padding()
+             ? layout_style.row_rect_padding()
+             : kRowRectPadding);
+
+  // Keep ordinary conversion/prediction geometry exactly as before.  The
+  // passive SUGGESTION popup is visually denser because it normally contains
+  // only vertical candidate strings, so give only that popup additional outer
+  // breathing room.  Do not use column_padding for the left/right edges:
+  // widening every candidate column would change the already-approved
+  // conversion candidate spacing.
+  int vertical_padding = padding;
+  int cross_axis_edge_padding = 0;
+  if (candidate_window_->category() == commands::SUGGESTION) {
+    const Size candidate_em = text_renderer_->MeasureStringVertical(
+        TextRenderer::FONTSET_CANDIDATE, L"日");
+    const int em_cross = std::max(1, candidate_em.width);
+    const int em_inline = std::max(1, candidate_em.height);
+
+    // About 0.15em at the physical left/right edges and about 0.33em at
+    // the top/bottom.  Measurements come from the active candidate font, so
+    // the result follows font size and DPI.
+    cross_axis_edge_padding =
+        std::max(1, (3 * em_cross + 19) / 20);
+    vertical_padding =
+        std::max(padding, std::max(1, (em_inline + 2) / 3));
+  }
+
+  VerticalCandidateLayout::Parameters parameters;
+  parameters.window_border = kWindowBorder;
+  parameters.column_padding = padding;
+  parameters.vertical_padding = vertical_padding;
+  parameters.section_gap = padding;
+  parameters.footer_size = MeasureVerticalFooterSize();
+  parameters.cross_axis_edge_padding = cross_axis_edge_padding;
+
+  vertical_layout_->Initialize(metrics, parameters);
+  layout_mode_ = LayoutMode::kVertical;
+  return true;
+}
+
 void CandidateWindow::HandleMouseEvent(UINT nFlags, const CPoint& point,
                                        bool close_candidatewindow) {
   if (send_command_interface_ == nullptr) {
@@ -419,7 +585,7 @@ void CandidateWindow::HandleMouseEvent(UINT nFlags, const CPoint& point,
     const commands::CandidateWindow::Candidate& candidate =
         candidate_window_->candidate(i);
 
-    const CRect rect = ToCRect(table_layout_->GetRowRect(i));
+    const CRect rect = ToCRect(GetCandidateRect(i));
     if (rect.PtInRect(point)) {
       commands::SessionCommand command;
       if (close_candidatewindow) {
@@ -485,11 +651,11 @@ void CandidateWindow::OnPrintClient(HDC dc, UINT /*uFlags*/) {
 bool CandidateWindow::RenderToBitmapCache() {
   ClearBitmapCache();
 
-  if (!table_layout_->IsLayoutFrozen()) {
+  if (!IsLayoutReady()) {
     return false;
   }
 
-  const Size layout_size = table_layout_->GetTotalSize();
+  const Size layout_size = GetLayoutSize();
   if (layout_size.width <= 0 || layout_size.height <= 0) {
     return false;
   }
@@ -575,8 +741,8 @@ void CandidateWindow::DoPaint(HDC dc, bool draw_frame) {
       return;
   }
 
-  if (!table_layout_->IsLayoutFrozen()) {
-    LOG(WARNING) << "Table layout is not frozen.";
+  if (!IsLayoutReady()) {
+    LOG(WARNING) << "Candidate layout is not ready.";
     return;
   }
 
@@ -631,8 +797,15 @@ void CandidateWindow::OnSettingChange(UINT uFlags, LPCTSTR /*lpszSection*/) {
 
 void CandidateWindow::UpdateLayout(
     const commands::CandidateWindow& candidates) {
+  UpdateLayout(candidates, LayoutMode::kHorizontal);
+}
+
+void CandidateWindow::UpdateLayout(
+    const commands::CandidateWindow& candidates,
+    LayoutMode requested_layout_mode) {
   ClearBitmapCache();
   *candidate_window_ = candidates;
+  layout_mode_ = LayoutMode::kHorizontal;
 
   const RendererStyleHandler::RendererStyleType style_type =
       GetRendererStyleType(*candidate_window_);
@@ -658,6 +831,12 @@ void CandidateWindow::UpdateLayout(
       LOG(INFO) << "Unknown candidates category: "
                 << candidate_window_->category();
       return;
+  }
+
+  if (requested_layout_mode == LayoutMode::kVertical &&
+      TryUpdateVerticalLayout()) {
+    RenderToBitmapCache();
+    return;
   }
 
   table_layout_->Initialize(candidate_window_->candidate_size(),
@@ -841,8 +1020,10 @@ void CandidateWindow::SetSendCommandInterface(
 }
 
 Size CandidateWindow::GetLayoutSize() const {
-  DCHECK(table_layout_->IsLayoutFrozen()) << "Table layout is not frozen.";
-
+  DCHECK(IsLayoutReady()) << "Candidate layout is not ready.";
+  if (IsVerticalLayout()) {
+    return vertical_layout_->GetTotalSize();
+  }
   return table_layout_->GetTotalSize();
 }
 
@@ -853,7 +1034,7 @@ Rect CandidateWindow::GetSelectionRectInScreenCord() const {
       focused_array_index < candidate_window_->candidate_size()) {
     (void)candidate_window_->candidate(focused_array_index);
 
-    CRect rect = ToCRect(table_layout_->GetRowRect(focused_array_index));
+    CRect rect = ToCRect(GetCandidateRect(focused_array_index));
     ClientToScreen(&rect);
     return Rect(rect.left, rect.top, rect.Width(), rect.Height());
   }
@@ -862,19 +1043,61 @@ Rect CandidateWindow::GetSelectionRectInScreenCord() const {
 }
 
 Rect CandidateWindow::GetCandidateColumnInClientCord() const {
-  DCHECK(table_layout_->IsLayoutFrozen()) << "Table layout is not frozen.";
-
+  DCHECK(IsLayoutReady()) << "Candidate layout is not ready.";
+  if (IsVerticalLayout()) {
+    const Rect value_rect = vertical_layout_->GetValueRect(0);
+    if (!value_rect.IsRectEmpty()) {
+      return value_rect;
+    }
+    return vertical_layout_->GetCandidateRect(0);
+  }
   return table_layout_->GetCellRect(0, COLUMN_CANDIDATE);
 }
 
 Rect CandidateWindow::GetFirstRowInClientCord() const {
-  DCHECK(table_layout_->IsLayoutFrozen()) << "Table layout is not frozen.";
+  DCHECK(IsLayoutReady()) << "Candidate layout is not ready.";
+  if (IsVerticalLayout()) {
+    DCHECK_GT(vertical_layout_->candidate_count(), 0);
+    return vertical_layout_->GetCandidateRect(0);
+  }
   DCHECK_GT(table_layout_->number_of_rows(), 0)
       << "number of rows should be positive";
   return table_layout_->GetRowRect(0);
 }
 
 void CandidateWindow::DrawCells(HDC dc) {
+  if (IsVerticalLayout()) {
+    for (size_t i = 0; i < candidate_window_->candidate_size(); ++i) {
+      const commands::CandidateWindow::Candidate& candidate =
+          candidate_window_->candidate(i);
+
+      const std::wstring shortcut =
+          GetDisplayStringByColumn(candidate, COLUMN_SHORTCUT);
+      if (!shortcut.empty()) {
+        text_renderer_->RenderText(
+            dc, shortcut, vertical_layout_->GetShortcutRect(i),
+            TextRenderer::FONTSET_SHORTCUT);
+      }
+
+      const std::wstring value =
+          GetDisplayStringByColumn(candidate, COLUMN_CANDIDATE);
+      if (!value.empty()) {
+        text_renderer_->RenderTextVertical(
+            dc, value, vertical_layout_->GetValueRect(i),
+            TextRenderer::FONTSET_CANDIDATE);
+      }
+
+      const std::wstring description =
+          GetDisplayStringByColumn(candidate, COLUMN_DESCRIPTION);
+      if (!description.empty()) {
+        text_renderer_->RenderTextVertical(
+            dc, description, vertical_layout_->GetDescriptionRect(i),
+            TextRenderer::FONTSET_DESCRIPTION);
+      }
+    }
+    return;
+  }
+
   COLUMN_TYPE kColumnTypes[] = {COLUMN_SHORTCUT, COLUMN_CANDIDATE,
                                 COLUMN_DESCRIPTION};
   TextRenderer::FONT_TYPE kFontTypes[] = {TextRenderer::FONTSET_SHORTCUT,
@@ -901,6 +1124,10 @@ void CandidateWindow::DrawCells(HDC dc) {
 }
 
 void CandidateWindow::DrawVScrollBar(HDC dc) {
+  if (IsVerticalLayout()) {
+    return;
+  }
+
   const Rect& vscroll_rect = table_layout_->GetVScrollBarRect();
 
   if (!vscroll_rect.IsRectEmpty() && candidate_window_->candidate_size() > 0) {
@@ -924,6 +1151,10 @@ void CandidateWindow::DrawVScrollBar(HDC dc) {
 }
 
 void CandidateWindow::DrawShortcutBackground(HDC dc) {
+  if (IsVerticalLayout()) {
+    return;
+  }
+
   if (table_layout_->number_of_columns() > 0) {
     Rect shortcut_colmun_rect = table_layout_->GetColumnRect(0);
     if (!shortcut_colmun_rect.IsRectEmpty()) {
@@ -946,7 +1177,7 @@ void CandidateWindow::DrawShortcutBackground(HDC dc) {
 }
 
 void CandidateWindow::DrawFooter(HDC dc) {
-  const Rect& footer_rect = table_layout_->GetFooterRect();
+  const Rect footer_rect = GetFooterRect();
   if (!candidate_window_->has_footer() || footer_rect.IsRectEmpty()) {
     return;
   }
@@ -1041,7 +1272,7 @@ void CandidateWindow::DrawFooter(HDC dc) {
 }
 
 void CandidateWindow::DrawSelectedRect(HDC dc) {
-  DCHECK(table_layout_->IsLayoutFrozen()) << "Table layout is not frozen.";
+  DCHECK(IsLayoutReady()) << "Candidate layout is not ready.";
 
   const int focused_array_index = GetFocusedArrayIndex(*candidate_window_);
 
@@ -1052,8 +1283,7 @@ void CandidateWindow::DrawSelectedRect(HDC dc) {
     const auto style = GetCurrentRendererStyle(
         GetRendererStyleType(*candidate_window_));
 
-    CRect selected_rect =
-        ToCRect(table_layout_->GetRowRect(focused_array_index));
+    CRect selected_rect = ToCRect(GetCandidateRect(focused_array_index));
 
     selected_rect.DeflateRect(4, 1);
 
@@ -1080,17 +1310,24 @@ void CandidateWindow::DrawSelectedRect(HDC dc) {
 }
 
 void CandidateWindow::DrawInformationIcon(HDC dc) {
-  DCHECK(table_layout_->IsLayoutFrozen()) << "Table layout is not frozen.";
+  DCHECK(IsLayoutReady()) << "Candidate layout is not ready.";
   const double scale_factor = GetDPIScalingFactor(dpi_);
   for (size_t i = 0; i < candidate_window_->candidate_size(); ++i) {
     if (candidate_window_->candidate(i).has_information_id()) {
-      CRect rect = ToCRect(table_layout_->GetRowRect(i));
-      rect.left = rect.right - (6.0 * scale_factor);
-      rect.right = rect.right - (2.0 * scale_factor);
-      rect.top += (2.0 * scale_factor);
-      rect.bottom -= (2.0 * scale_factor);
+      CRect rect = ToCRect(GetCandidateRect(i));
+      if (IsVerticalLayout()) {
+        rect.left += (2.0 * scale_factor);
+        rect.right -= (2.0 * scale_factor);
+        rect.top = rect.bottom - (6.0 * scale_factor);
+        rect.bottom -= (2.0 * scale_factor);
+      } else {
+        rect.left = rect.right - (6.0 * scale_factor);
+        rect.right -= (2.0 * scale_factor);
+        rect.top += (2.0 * scale_factor);
+        rect.bottom -= (2.0 * scale_factor);
+      }
       const auto style = GetCurrentRendererStyle(
-        GetRendererStyleType(*candidate_window_));
+          GetRendererStyleType(*candidate_window_));
 
       FillSolidRect(dc, &rect, GetIndicatorColor(style));
       ::SetDCBrushColor(dc, GetIndicatorColor(style));
@@ -1102,7 +1339,7 @@ void CandidateWindow::DrawInformationIcon(HDC dc) {
 void CandidateWindow::DrawBackground(HDC dc) {
   const auto style = GetCurrentRendererStyle(
         GetRendererStyleType(*candidate_window_));
-  const Rect client_rect(Point(0, 0), table_layout_->GetTotalSize());
+  const Rect client_rect(Point(0, 0), GetLayoutSize());
   const CRect client_crect = ToCRect(client_rect);
   FillSolidRect(dc, &client_crect, GetDefaultBackgroundColor(style));
 }
@@ -1110,7 +1347,7 @@ void CandidateWindow::DrawBackground(HDC dc) {
 void CandidateWindow::DrawFrame(HDC dc) {
   const auto style = GetCurrentRendererStyle(
         GetRendererStyleType(*candidate_window_));
-  const Rect client_rect(Point(0, 0), table_layout_->GetTotalSize());
+  const Rect client_rect(Point(0, 0), GetLayoutSize());
   const CRect client_crect = ToCRect(client_rect);
 
   const int radius = GetRendererWindowCornerRadiusInPixels(

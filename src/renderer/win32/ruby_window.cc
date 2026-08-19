@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include <wil/resource.h>
@@ -15,6 +16,8 @@
 #include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_style_handler.h"
+#include "renderer/window_util.h"
+#include "renderer/win32/text_renderer.h"
 #include "renderer/win32/win32_dpi_util.h"
 #include "renderer/win32/win32_font_util.h"
 #include "renderer/win32/win32_renderer_util.h"
@@ -79,6 +82,20 @@ int GetRubyPaddingY(const RendererStyleHandler::RubyWindowStyle& theme,
                     uint32_t dpi) {
   return ScaleRubySpacing(
       static_cast<int>(theme.vertical_padding), theme.size_percent, dpi);
+}
+
+int GetRubyContentPaddingX(
+    const RendererStyleHandler::RubyWindowStyle& theme, uint32_t dpi,
+    bool vertical_writing) {
+  return vertical_writing ? GetRubyPaddingY(theme, dpi)
+                          : GetRubyPaddingX(theme, dpi);
+}
+
+int GetRubyContentPaddingY(
+    const RendererStyleHandler::RubyWindowStyle& theme, uint32_t dpi,
+    bool vertical_writing) {
+  return vertical_writing ? GetRubyPaddingX(theme, dpi)
+                          : GetRubyPaddingY(theme, dpi);
 }
 
 int GetRubyFontPointSize() {
@@ -201,6 +218,9 @@ void RubyWindow::Initialize() {
   if (!IsWindow()) {
     Create(nullptr);
   }
+  if (text_renderer_ == nullptr) {
+    text_renderer_ = TextRenderer::Create(dpi_);
+  }
 
   ShowWindow(SW_HIDE);
 }
@@ -222,6 +242,9 @@ void RubyWindow::HideWindowOnly() {
 void RubyWindow::ClearPlacementTracking() {
   has_last_target_identity_ = false;
   has_last_valid_geometry_ = false;
+  has_vertical_composition_span_ = false;
+  vertical_composition_left_ = 0;
+  vertical_composition_right_ = 0;
   transient_geometry_reject_count_ = 0;
   last_target_identity_ = TargetIdentity();
   last_valid_window_rect_ = {};
@@ -285,10 +308,59 @@ bool RubyWindow::BuildReadingText(
 
 bool RubyWindow::GetBasePosition(const commands::RendererCommand& command,
                                  const LayoutManager& layout_manager,
-                                 POINT* point, int* line_height,
+                                 bool vertical_writing, POINT* point,
+                                 int* line_height,
                                  bool* from_preedit_rectangle) const {
-  // Prefer the preedit rectangle. This is usually closer to the actual
-  // composition text than composition_target, which tends to follow the caret.
+  const auto fill_from_composition_target = [&]() {
+    if (!command.has_application_info()) {
+      return false;
+    }
+
+    const commands::RendererCommand::ApplicationInfo& app_info =
+        command.application_info();
+    if (!app_info.has_composition_target() ||
+        !app_info.composition_target().has_top_left()) {
+      return false;
+    }
+
+    const commands::RendererCommand::CharacterPosition& target =
+        app_info.composition_target();
+    const int target_line_height =
+        target.has_line_height() ? static_cast<int>(target.line_height())
+                                 : kFallbackLineHeight;
+    if (target_line_height <= 0) {
+      return false;
+    }
+
+    POINT physical_top_left = {};
+    int physical_line_height = 0;
+    if (layout_manager.GetCompositionTargetInPhysicalCoords(
+            app_info, kFallbackLineHeight, &physical_top_left,
+            &physical_line_height)) {
+      *point = physical_top_left;
+      *line_height = physical_line_height;
+    } else {
+      // Preserve the historical fallback for malformed or legacy commands
+      // whose target window cannot be used for DPI virtualization.
+      point->x = target.top_left().x();
+      point->y = target.top_left().y();
+      *line_height = target_line_height;
+    }
+    if (from_preedit_rectangle != nullptr) {
+      *from_preedit_rectangle = false;
+    }
+    return true;
+  };
+
+  // Windows' preedit_rectangle is a horizontal-writing caret correction.
+  // For vertical writing, composition_target carries the right-top anchor and
+  // physical column width established by the TSF writing-direction path.
+  if (vertical_writing && fill_from_composition_target()) {
+    return true;
+  }
+
+  // Horizontal writing preserves the existing preedit-rectangle-first
+  // placement contract.
   if (command.has_preedit_rectangle()) {
     const commands::RendererCommand::Rectangle& rect =
         command.preedit_rectangle();
@@ -321,47 +393,8 @@ bool RubyWindow::GetBasePosition(const commands::RendererCommand& command,
     }
   }
 
-  // Fallback for clients that do not provide a usable preedit rectangle.
-  if (command.has_application_info()) {
-    const commands::RendererCommand::ApplicationInfo& app_info =
-        command.application_info();
-
-    if (app_info.has_composition_target() &&
-        app_info.composition_target().has_top_left()) {
-      const commands::RendererCommand::CharacterPosition& target =
-          app_info.composition_target();
-
-      const int target_line_height =
-          target.has_line_height() ? static_cast<int>(target.line_height())
-                                   : kFallbackLineHeight;
-      if (target_line_height <= 0) {
-        return false;
-      }
-
-      POINT physical_top_left = {};
-      int physical_line_height = 0;
-      if (layout_manager.GetCompositionTargetInPhysicalCoords(
-              app_info, kFallbackLineHeight, &physical_top_left,
-              &physical_line_height)) {
-        *point = physical_top_left;
-        *line_height = physical_line_height;
-      } else {
-        // Preserve the historical fallback for malformed or legacy commands
-        // whose target window cannot be used for DPI virtualization.
-        point->x = target.top_left().x();
-        point->y = target.top_left().y();
-        *line_height = target_line_height;
-      }
-      if (from_preedit_rectangle != nullptr) {
-        *from_preedit_rectangle = false;
-      }
-      return true;
-    }
-  }
-
-  return false;
+  return fill_from_composition_target();
 }
-
 bool RubyWindow::GetTargetIdentity(const commands::RendererCommand& command,
                                    TargetIdentity* identity) {
   if (identity == nullptr || !command.has_application_info()) {
@@ -450,6 +483,7 @@ void RubyWindow::ResetFont() {
   font_face_name_.clear();
   font_height_ = 0;
   font_weight_ = 0;
+  ruby_text_color_ = 0xffffffff;
 }
 
 void RubyWindow::UpdateDpi(uint32_t dpi) {
@@ -457,6 +491,9 @@ void RubyWindow::UpdateDpi(uint32_t dpi) {
     return;
   }
   dpi_ = dpi;
+  if (text_renderer_ != nullptr) {
+    text_renderer_->OnDpiChanged(dpi_);
+  }
   ResetFont();
 }
 
@@ -473,6 +510,7 @@ void RubyWindow::UpdateFont() {
   if (font_ != nullptr &&
       font_height_ == font_height &&
       font_weight_ == font_weight &&
+      ruby_text_color_ == theme.text_color &&
       font_face_name_ == font_name) {
     return;
   }
@@ -496,6 +534,10 @@ void RubyWindow::UpdateFont() {
     actual_font_name = default_font_name;
   }
 
+  if (text_renderer_ != nullptr) {
+    text_renderer_->OnThemeChanged();
+  }
+
   if (font_ == nullptr) {
     return;
   }
@@ -503,11 +545,32 @@ void RubyWindow::UpdateFont() {
   font_face_name_ = actual_font_name;
   font_height_ = font_height;
   font_weight_ = font_weight;
+  ruby_text_color_ = theme.text_color;
 }
 
-SIZE RubyWindow::MeasureText() const {
+SIZE RubyWindow::MeasureText(bool vertical_writing) const {
   SIZE size = {};
   if (text_.empty()) {
+    return size;
+  }
+
+  const RendererStyleHandler::RubyWindowStyle theme = GetRubyWindowTheme();
+  if (vertical_writing) {
+    if (text_renderer_ == nullptr ||
+        !text_renderer_->SupportsVerticalText(TextRenderer::FONTSET_RUBY)) {
+      return size;
+    }
+    const Size text_size = text_renderer_->MeasureStringVertical(
+        TextRenderer::FONTSET_RUBY, text_);
+    if (text_size.width <= 0 || text_size.height <= 0) {
+      return size;
+    }
+    size.cx = text_size.width +
+              GetRubyContentPaddingX(theme, dpi_, /*vertical_writing=*/true) *
+                  2;
+    size.cy = text_size.height +
+              GetRubyContentPaddingY(theme, dpi_, /*vertical_writing=*/true) *
+                  2;
     return size;
   }
 
@@ -532,9 +595,12 @@ SIZE RubyWindow::MeasureText() const {
 
   ::ReleaseDC(nullptr, dc);
 
-  const RendererStyleHandler::RubyWindowStyle theme = GetRubyWindowTheme();
-  size.cx += GetRubyPaddingX(theme, dpi_) * 2;
-  size.cy += GetRubyPaddingY(theme, dpi_) * 2;
+  size.cx += GetRubyContentPaddingX(
+                 theme, dpi_, /*vertical_writing=*/false) *
+             2;
+  size.cy += GetRubyContentPaddingY(
+                 theme, dpi_, /*vertical_writing=*/false) *
+             2;
   return size;
 }
 
@@ -557,6 +623,13 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     return;
   }
 
+  bool vertical_writing = false;
+  if (command.has_application_info()) {
+    vertical_writing =
+        LayoutManager::GetWritingDirection(command.application_info()) ==
+        LayoutManager::VERTICAL_WRITING;
+  }
+
   TargetIdentity current_target_identity;
   const bool has_current_target_identity =
       GetTargetIdentity(command, &current_target_identity);
@@ -568,6 +641,9 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     last_target_identity_ = current_target_identity;
     has_last_target_identity_ = true;
     has_last_valid_geometry_ = false;
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
     transient_geometry_reject_count_ = 0;
     HideWindowOnly();
   } else if (has_current_target_identity) {
@@ -576,14 +652,23 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   } else {
     has_last_target_identity_ = false;
     has_last_valid_geometry_ = false;
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
     transient_geometry_reject_count_ = 0;
+  }
+
+  if (!vertical_writing) {
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
   }
 
   POINT base_point = {};
   int line_height = kFallbackLineHeight;
   bool from_preedit_rectangle = false;
-  if (!GetBasePosition(command, layout_manager, &base_point, &line_height,
-                       &from_preedit_rectangle)) {
+  if (!GetBasePosition(command, layout_manager, vertical_writing, &base_point,
+                       &line_height, &from_preedit_rectangle)) {
     if (KeepCurrentPlacement()) {
       return;
     }
@@ -600,13 +685,15 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
 
   const std::wstring previous_text = text_;
   const SIZE previous_window_size = window_size_;
+  const bool previous_vertical_writing = vertical_writing_;
   const auto restore_previous_content = [&]() {
     text_ = previous_text;
     window_size_ = previous_window_size;
+    vertical_writing_ = previous_vertical_writing;
   };
 
   text_ = ToWide(reading);
-  window_size_ = MeasureText();
+  window_size_ = MeasureText(vertical_writing);
   if (window_size_.cx <= 0 || window_size_.cy <= 0) {
     restore_previous_content();
     Hide();
@@ -619,54 +706,140 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
 
   const RECT work_area = GetWorkAreaForPoint(base_point);
 
-  // Keep the left edge stable while the reading text grows. Centering a ruby
-  // chip that is wider than the preedit makes the window expand both left and
-  // right on every keystroke, which is visually noisy in live conversion.
-  const int preedit_width = GetPreeditWidth(command);
-
-  int left = base_point.x;
-  if (preedit_width > window_size_.cx) {
-    left = base_point.x + (preedit_width - window_size_.cx) / 2;
-  }
-  left = ClampInt(left, work_area.left, work_area.right - window_size_.cx);
-
-  const int above_top = base_point.y - window_size_.cy - gap;
-  const int below_top = base_point.y + line_height + gap;
-
-  const auto ruby_rect_at = [&](int top) {
-    return RECT{left, top, left + window_size_.cx, top + window_size_.cy};
-  };
-
-  const auto try_place = [&](int top, int* chosen_top) {
-    const RECT rect = ruby_rect_at(top);
-    if (!IsUsableRubyRect(rect, work_area, avoid_rect)) {
-      return false;
-    }
-    *chosen_top = top;
-    return true;
-  };
-
+  int left = 0;
   int top = 0;
-  // Prefer the conventional ruby-like placement above the preedit.  Use below
-  // only when the above side is unavailable or occupied by candidate/suggestion
-  // UI.  If neither side is usable, keep the last stable placement when this
-  // looks like a transient geometry frame.
-  const RECT preferred_window_rect = ruby_rect_at(above_top);
-  const bool looks_like_transient_geometry = ShouldRejectTransientGeometry(
-      base_point, line_height, preferred_window_rect, work_area,
-      from_preedit_rectangle, target_changed);
-  if (!try_place(above_top, &top) && !try_place(below_top, &top)) {
-    restore_previous_content();
-    if (looks_like_transient_geometry && KeepCurrentPlacement()) {
+  RECT preferred_window_rect = {};
+  RECT window_rect = {};
+
+  bool has_next_vertical_composition_span = false;
+  int next_vertical_composition_left = 0;
+  int next_vertical_composition_right = 0;
+
+  if (vertical_writing) {
+    // Word can collapse the active TSF target to a caret-like rectangle when a
+    // live composition wraps into a new vertical column. The full composition
+    // GetTextExt is identical to that active target, so renderer-side accepted
+    // geometry is the reliable source of the occupied horizontal extent.
+    //
+    // Japanese vertical text creates subsequent columns toward the left.
+    // Preserve the outermost accepted edges for the lifetime of this live
+    // composition. Compute the next span locally and commit it only after the
+    // new ruby frame survives transient-geometry checks and is presented.
+    const int current_column_left = base_point.x - line_height;
+    const int current_column_right = base_point.x;
+    if (has_vertical_composition_span_) {
+      next_vertical_composition_left =
+          std::min(vertical_composition_left_, current_column_left);
+      next_vertical_composition_right =
+          std::max(vertical_composition_right_, current_column_right);
+    } else {
+      next_vertical_composition_left = current_column_left;
+      next_vertical_composition_right = current_column_right;
+    }
+    has_next_vertical_composition_span =
+        next_vertical_composition_right > next_vertical_composition_left;
+
+    const Rect work_rect(work_area.left, work_area.top,
+                         work_area.right - work_area.left,
+                         work_area.bottom - work_area.top);
+    std::optional<Rect> avoid;
+    if (avoid_rect != nullptr) {
+      avoid.emplace(avoid_rect->left, avoid_rect->top,
+                    avoid_rect->right - avoid_rect->left,
+                    avoid_rect->bottom - avoid_rect->top);
+    }
+
+    if (!has_next_vertical_composition_span) {
+      restore_previous_content();
+      if (KeepCurrentPlacement()) {
+        return;
+      }
+      has_last_valid_geometry_ = false;
+      HideWindowOnly();
       return;
     }
-    has_last_valid_geometry_ = false;
-    HideWindowOnly();
-    return;
-  }
 
-  RECT window_rect = {left, top, left + window_size_.cx,
-                      top + window_size_.cy};
+    const Rect composition_span(
+        next_vertical_composition_left, base_point.y,
+        next_vertical_composition_right - next_vertical_composition_left, 1);
+    const int text_top_offset =
+        GetRubyContentPaddingY(theme, dpi_, /*vertical_writing=*/true);
+    const Rect preferred_rect(composition_span.Right() + gap,
+                              base_point.y - text_top_offset,
+                              window_size_.cx, window_size_.cy);
+    preferred_window_rect =
+        RECT{preferred_rect.Left(), preferred_rect.Top(),
+             preferred_rect.Right(), preferred_rect.Bottom()};
+
+    Rect placed_rect;
+    if (!WindowUtil::GetRubyWindowRectForVerticalWriting(
+            composition_span, Size(window_size_.cx, window_size_.cy),
+            text_top_offset, gap, work_rect,
+            avoid.has_value() ? &*avoid : nullptr, &placed_rect)) {
+      restore_previous_content();
+      const bool looks_like_transient_geometry =
+          ShouldRejectTransientGeometry(
+              base_point, line_height, preferred_window_rect, work_area,
+              from_preedit_rectangle, target_changed);
+      if (looks_like_transient_geometry && KeepCurrentPlacement()) {
+        return;
+      }
+      has_last_valid_geometry_ = false;
+      HideWindowOnly();
+      return;
+    }
+
+    left = placed_rect.Left();
+    top = placed_rect.Top();
+    window_rect =
+        RECT{placed_rect.Left(), placed_rect.Top(),
+             placed_rect.Right(), placed_rect.Bottom()};  } else {
+    // Keep the left edge stable while the reading text grows. Centering a ruby
+    // chip that is wider than the preedit makes the window expand both left and
+    // right on every keystroke, which is visually noisy in live conversion.
+    const int preedit_width = GetPreeditWidth(command);
+
+    left = base_point.x;
+    if (preedit_width > window_size_.cx) {
+      left = base_point.x + (preedit_width - window_size_.cx) / 2;
+    }
+    left = ClampInt(left, work_area.left, work_area.right - window_size_.cx);
+
+    const int above_top = base_point.y - window_size_.cy - gap;
+    const int below_top = base_point.y + line_height + gap;
+
+    const auto ruby_rect_at = [&](int candidate_top) {
+      return RECT{left, candidate_top, left + window_size_.cx,
+                  candidate_top + window_size_.cy};
+    };
+
+    const auto try_place = [&](int candidate_top, int* chosen_top) {
+      const RECT rect = ruby_rect_at(candidate_top);
+      if (!IsUsableRubyRect(rect, work_area, avoid_rect)) {
+        return false;
+      }
+      *chosen_top = candidate_top;
+      return true;
+    };
+
+    // Preserve the existing horizontal contract: above first, below fallback.
+    preferred_window_rect = ruby_rect_at(above_top);
+    const bool looks_like_transient_geometry = ShouldRejectTransientGeometry(
+        base_point, line_height, preferred_window_rect, work_area,
+        from_preedit_rectangle, target_changed);
+    if (!try_place(above_top, &top) && !try_place(below_top, &top)) {
+      restore_previous_content();
+      if (looks_like_transient_geometry && KeepCurrentPlacement()) {
+        return;
+      }
+      has_last_valid_geometry_ = false;
+      HideWindowOnly();
+      return;
+    }
+
+    window_rect =
+        RECT{left, top, left + window_size_.cx, top + window_size_.cy};
+  }
   if (ShouldRejectTransientGeometry(base_point, line_height, window_rect,
                                     work_area, from_preedit_rectangle,
                                     target_changed)) {
@@ -685,12 +858,23 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   // Resize and position while still hidden. The layered surface is fully
   // prepared before ShowWindow so the first visible ruby frame is already
   // antialiased and complete.
+  vertical_writing_ = vertical_writing;
   SetWindowPos(HWND_TOPMOST, left, top, window_size_.cx, window_size_.cy,
                SWP_NOACTIVATE);
   if (!RenderAndPresent()) {
     restore_previous_content();
     HideWindowOnly();
     return;
+  }
+
+  if (vertical_writing && has_next_vertical_composition_span) {
+    has_vertical_composition_span_ = true;
+    vertical_composition_left_ = next_vertical_composition_left;
+    vertical_composition_right_ = next_vertical_composition_right;
+  } else {
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
   }
 
   ShowWindow(SW_SHOWNOACTIVATE);
@@ -799,18 +983,35 @@ void RubyWindow::DoPaint(HDC dc) {
   ::FillRect(dc, &rect, bg_brush);
   ::DeleteObject(bg_brush);
 
+  RECT text_rect = rect;
+  text_rect.left +=
+      GetRubyContentPaddingX(theme, dpi_, vertical_writing_);
+  text_rect.top +=
+      GetRubyContentPaddingY(theme, dpi_, vertical_writing_);
+  text_rect.right -=
+      GetRubyContentPaddingX(theme, dpi_, vertical_writing_);
+  text_rect.bottom -=
+      GetRubyContentPaddingY(theme, dpi_, vertical_writing_);
+
+  if (vertical_writing_) {
+    if (text_renderer_ != nullptr &&
+        text_renderer_->SupportsVerticalText(TextRenderer::FONTSET_RUBY)) {
+      text_renderer_->RenderTextVertical(
+          dc, text_,
+          Rect(text_rect.left, text_rect.top,
+               text_rect.right - text_rect.left,
+               text_rect.bottom - text_rect.top),
+          TextRenderer::FONTSET_RUBY);
+    }
+    return;
+  }
+
   HFONT old_font = nullptr;
   if (font_ != nullptr) {
     old_font = static_cast<HFONT>(::SelectObject(dc, font_));
   }
 
   ::SetTextColor(dc, ToColorRef(theme.text_color));
-
-  RECT text_rect = rect;
-  text_rect.left += GetRubyPaddingX(theme, dpi_);
-  text_rect.top += GetRubyPaddingY(theme, dpi_);
-  text_rect.right -= GetRubyPaddingX(theme, dpi_);
-  text_rect.bottom -= GetRubyPaddingY(theme, dpi_);
 
   ::DrawTextW(dc, text_.c_str(), static_cast<int>(text_.size()), &text_rect,
               DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);

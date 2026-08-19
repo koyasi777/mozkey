@@ -67,6 +67,7 @@ namespace {
   constexpr size_t kShortcutTextStyleIndex = 0;
   constexpr size_t kCandidateTextStyleIndex = 2;
   constexpr size_t kDescriptionTextStyleIndex = 3;
+  constexpr int kRubyFontPointSize = 13;
 
   CRect ToCRect(const Rect& rect) {
     return CRect(rect.Left(), rect.Top(), rect.Right(), rect.Bottom());
@@ -75,6 +76,12 @@ namespace {
   COLORREF ToColorRef(const RendererStyle::RGBAColor& color) {
     return RGB(static_cast<int>(color.r()), static_cast<int>(color.g()),
               static_cast<int>(color.b()));
+  }
+
+  COLORREF ToColorRef(uint32_t rgb) {
+    return RGB(static_cast<int>((rgb >> 16) & 0xff),
+               static_cast<int>((rgb >> 8) & 0xff),
+               static_cast<int>(rgb & 0xff));
   }
 
   COLORREF GetTextColor(
@@ -122,6 +129,10 @@ namespace {
       case TextRenderer::FONTSET_INFOLIST_DESCRIPTION:
         return ToColorRef(
             style.infolist_style().description_style().foreground_color());
+
+      case TextRenderer::FONTSET_RUBY:
+        return ToColorRef(
+            RendererStyleHandler::GetRubyWindowStyle().text_color);
 
       default:
         LOG(DFATAL) << "Unknown type: " << type;
@@ -304,6 +315,22 @@ namespace {
         font.lfWeight = FW_NORMAL;
         return font;
 
+      case TextRenderer::FONTSET_RUBY: {
+        const RendererStyleHandler::RubyWindowStyle ruby_style =
+            RendererStyleHandler::GetRubyWindowStyle();
+        const int point_size = std::max(
+            1, static_cast<int>(std::lround(
+                   static_cast<double>(kRubyFontPointSize) *
+                   static_cast<double>(ruby_style.size_percent) / 100.0)));
+        font.lfHeight = -MulDiv(point_size, dpi, 72);
+        ApplyFontNameFromTextStyle(
+            GetTextStyleOrNull(style, kCandidateTextStyleIndex), &font);
+        font.lfWeight = std::clamp(
+            static_cast<int>(ruby_style.font_weight),
+            static_cast<int>(FW_THIN), static_cast<int>(FW_HEAVY));
+        return font;
+      }
+
       default:
         LOG(DFATAL) << "Unknown type: " << type;
         return font;
@@ -331,6 +358,8 @@ DWORD GetGdiDrawTextStyle(TextRenderer::FONT_TYPE type) {
              DT_NOPREFIX;
     case TextRenderer::FONTSET_INFOLIST_DESCRIPTION:
       return DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX;
+    case TextRenderer::FONTSET_RUBY:
+      return DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
     default:
       LOG(DFATAL) << "Unknown type: " << type;
       return 0;
@@ -425,6 +454,16 @@ class GdiTextRenderer : public TextRenderer {
     return Size(rect.Width(), rect.Height());
   }
 
+  bool SupportsVerticalText(FONT_TYPE) const override { return false; }
+  bool SupportsVerticalWrappedText(FONT_TYPE) const override { return false; }
+  Size MeasureStringVertical(FONT_TYPE,
+                             std::wstring_view) const override {
+    return Size();
+  }
+  Size MeasureStringVerticalWrapped(FONT_TYPE, std::wstring_view,
+                                    int) const override {
+    return Size();
+  }
   void RenderText(HDC dc, const std::wstring_view text, const Rect& rect,
                   FONT_TYPE font_type) const override {
     std::vector<TextRenderingInfo> infolist;
@@ -432,6 +471,13 @@ class GdiTextRenderer : public TextRenderer {
     RenderTextList(dc, infolist, font_type);
   }
 
+  void RenderTextVertical(HDC, std::wstring_view, const Rect&,
+                          FONT_TYPE) const override {
+    // GDI is the compatibility fallback. CandidateWindow keeps using the
+    // existing horizontal layout when native vertical text is unavailable.
+  }
+  void RenderTextVerticalWrapped(HDC, std::wstring_view, const Rect&,
+                                 FONT_TYPE) const override {}
   void RenderTextList(HDC dc,
                       const absl::Span<const TextRenderingInfo> display_list,
                       FONT_TYPE font_type) const override {
@@ -502,6 +548,8 @@ class DirectWriteTextRenderer : public TextRenderer {
     COLORREF color;
     wil::com_ptr_nothrow<IDWriteTextFormat> format;
     wil::com_ptr_nothrow<IDWriteTextFormat> format_to_render;
+    wil::com_ptr_nothrow<IDWriteTextFormat> vertical_format;
+    wil::com_ptr_nothrow<IDWriteTextFormat> vertical_wrapped_format;
   };
 
   // TextRenderer overrides:
@@ -522,6 +570,15 @@ class DirectWriteTextRenderer : public TextRenderer {
       render_info_[i].color = GetTextColor(font_type, style_type_);
       render_info_[i].format = CreateFormatWithFallback(log_font);
       render_info_[i].format_to_render = CreateFormatWithFallback(log_font);
+      render_info_[i].vertical_format = CreateVerticalFormatWithFallback(
+          log_font, DWRITE_WORD_WRAPPING_NO_WRAP);
+      render_info_[i].vertical_wrapped_format =
+          CreateVerticalFormatWithFallback(log_font, DWRITE_WORD_WRAPPING_WRAP);
+      if (render_info_[i].vertical_format == nullptr ||
+          render_info_[i].vertical_wrapped_format == nullptr) {
+        LOG(WARNING) << "Native vertical text is unavailable for font type: "
+                     << static_cast<int>(font_type);
+      }
 
       if (render_info_[i].format == nullptr ||
           render_info_[i].format_to_render == nullptr) {
@@ -567,11 +624,54 @@ class DirectWriteTextRenderer : public TextRenderer {
     return MeasureStringImpl(font_type, str, width, true);
   }
 
+  bool SupportsVerticalText(FONT_TYPE font_type) const override {
+    return render_info_[font_type].vertical_format != nullptr;
+  }
+  bool SupportsVerticalWrappedText(FONT_TYPE font_type) const override {
+    return render_info_[font_type].vertical_wrapped_format != nullptr;
+  }
+  Size MeasureStringVertical(FONT_TYPE font_type,
+                             const std::wstring_view str) const override {
+    if (!SupportsVerticalText(font_type)) {
+      return Size();
+    }
+    constexpr FLOAT kLayoutLimit = 100000.0f;
+    return MeasureStringWithFormat(render_info_[font_type].vertical_format.get(),
+                                   str, kLayoutLimit, kLayoutLimit);
+  }
+
+  Size MeasureStringVerticalWrapped(FONT_TYPE font_type,
+                                    const std::wstring_view str,
+                                    int height) const override {
+    if (!SupportsVerticalWrappedText(font_type) || height <= 0) {
+      return Size();
+    }
+    constexpr FLOAT kLayoutLimit = 100000.0f;
+    return MeasureStringWithFormat(
+        render_info_[font_type].vertical_wrapped_format.get(), str,
+        kLayoutLimit, static_cast<FLOAT>(height));
+  }
+
   void RenderText(HDC dc, const std::wstring_view text, const Rect& rect,
                   FONT_TYPE font_type) const override {
     std::vector<TextRenderingInfo> infolist;
     infolist.emplace_back(std::wstring(text), rect);
     RenderTextList(dc, infolist, font_type);
+  }
+
+  void RenderTextVertical(HDC dc, const std::wstring_view text,
+                          const Rect& rect,
+                          FONT_TYPE font_type) const override {
+    RenderTextVerticalWithFormat(
+        dc, text, rect, font_type, render_info_[font_type].vertical_format.get());
+  }
+
+  void RenderTextVerticalWrapped(HDC dc, const std::wstring_view text,
+                                 const Rect& rect,
+                                 FONT_TYPE font_type) const override {
+    RenderTextVerticalWithFormat(
+        dc, text, rect, font_type,
+        render_info_[font_type].vertical_wrapped_format.get());
   }
 
   void RenderTextList(HDC dc,
@@ -596,6 +696,71 @@ class DirectWriteTextRenderer : public TextRenderer {
       // maximum number of trials, we simply accept the result here.
       return;
     }
+  }
+
+  void RenderTextVerticalWithFormat(HDC dc, const std::wstring_view text,
+                                    const Rect& rect, FONT_TYPE font_type,
+                                    IDWriteTextFormat* format) const {
+    if (text.empty() || rect.IsRectEmpty() || format == nullptr) {
+      return;
+    }
+    constexpr size_t kMaxTrial = 3;
+    size_t trial = 0;
+    while (true) {
+      CreateRenderTargetIfNecessary();
+      if (dc_render_target_ == nullptr) {
+        return;
+      }
+      const HRESULT hr =
+          RenderTextVerticalImpl(dc, text, rect, font_type, format);
+      if (hr == D2DERR_RECREATE_TARGET && trial < kMaxTrial) {
+        dc_render_target_.reset();
+        ++trial;
+        continue;
+      }
+      return;
+    }
+  }
+
+  HRESULT RenderTextVerticalImpl(HDC dc, const std::wstring_view text,
+                                 const Rect& rect, FONT_TYPE font_type,
+                                 IDWriteTextFormat* format) const {
+    if (format == nullptr) {
+      return E_FAIL;
+    }
+
+    CRect total_rect(0, 0, std::max(1, rect.Right()),
+                     std::max(1, rect.Bottom()));
+    HRESULT hr = dc_render_target_->BindDC(dc, &total_rect);
+    if (FAILED(hr)) {
+      return hr;
+    }
+
+    wil::com_ptr_nothrow<ID2D1SolidColorBrush> brush;
+    hr = dc_render_target_->CreateSolidColorBrush(
+        ToD2DColor(render_info_[font_type].color), brush.put());
+    if (FAILED(hr)) {
+      return hr;
+    }
+
+    wil::com_ptr_nothrow<IDWriteTextLayout> layout;
+    hr = dwrite_factory_->CreateTextLayout(
+        text.data(), text.size(), format,
+        static_cast<FLOAT>(std::max(1, rect.Width())),
+        static_cast<FLOAT>(std::max(1, rect.Height())), layout.put());
+    if (FAILED(hr) || layout == nullptr) {
+      return FAILED(hr) ? hr : E_FAIL;
+    }
+
+    constexpr D2D1_DRAW_TEXT_OPTIONS option =
+        D2D1_DRAW_TEXT_OPTIONS_NONE | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
+    dc_render_target_->BeginDraw();
+    dc_render_target_->SetTransform(D2D1::Matrix3x2F::Identity());
+    dc_render_target_->DrawTextLayout(
+        D2D1::Point2F(static_cast<FLOAT>(rect.Left()),
+                      static_cast<FLOAT>(rect.Top())),
+        layout.get(), brush.get(), option);
+    return dc_render_target_->EndDraw();
   }
 
   HRESULT RenderTextListImpl(
@@ -641,6 +806,27 @@ class DirectWriteTextRenderer : public TextRenderer {
           brush.get(), option);
     }
     return dc_render_target_->EndDraw();
+  }
+
+  Size MeasureStringWithFormat(IDWriteTextFormat* format,
+                               const std::wstring_view str,
+                               FLOAT max_width, FLOAT max_height) const {
+    if (format == nullptr) {
+      return Size();
+    }
+    wil::com_ptr_nothrow<IDWriteTextLayout> layout;
+    const HRESULT layout_hr = dwrite_factory_->CreateTextLayout(
+        str.data(), str.size(), format, max_width, max_height, layout.put());
+    if (FAILED(layout_hr) || layout == nullptr) {
+      return Size();
+    }
+    DWRITE_TEXT_METRICS metrics = {};
+    const HRESULT metrics_hr = layout->GetMetrics(&metrics);
+    if (FAILED(metrics_hr)) {
+      return Size();
+    }
+    return Size(ceilf(metrics.widthIncludingTrailingWhitespace),
+                ceilf(metrics.height));
   }
 
   Size MeasureStringImpl(FONT_TYPE font_type, const std::wstring_view str,
@@ -706,6 +892,53 @@ class DirectWriteTextRenderer : public TextRenderer {
 
     return metrics.widthIncludingTrailingWhitespace > 0.0f &&
           metrics.height > 0.0f;
+  }
+
+  bool ConfigureVerticalFormat(IDWriteTextFormat* format,
+                               DWRITE_WORD_WRAPPING wrapping) const {
+    if (format == nullptr) {
+      return false;
+    }
+    if (FAILED(format->SetReadingDirection(
+            DWRITE_READING_DIRECTION_TOP_TO_BOTTOM))) {
+      return false;
+    }
+    if (FAILED(
+            format->SetFlowDirection(DWRITE_FLOW_DIRECTION_RIGHT_TO_LEFT))) {
+      return false;
+    }
+    if (FAILED(format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING))) {
+      return false;
+    }
+    if (FAILED(
+            format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR))) {
+      return false;
+    }
+    if (FAILED(format->SetWordWrapping(wrapping))) {
+      return false;
+    }
+    return true;
+  }
+
+  wil::com_ptr_nothrow<IDWriteTextFormat> CreateVerticalFormatWithFallback(
+      const LOGFONTW& logfont, DWRITE_WORD_WRAPPING wrapping) {
+    wil::com_ptr_nothrow<IDWriteTextFormat> format = CreateFormat(logfont);
+    if (ConfigureVerticalFormat(format.get(), wrapping) &&
+        IsUsableTextFormat(format.get())) {
+      return format;
+    }
+
+    const LOGFONTW fallback_logfont =
+        GetLogFontWithDefaultFaceName(logfont, dpi_);
+    wil::com_ptr_nothrow<IDWriteTextFormat> fallback_format =
+        CreateFormat(fallback_logfont);
+    if (ConfigureVerticalFormat(fallback_format.get(), wrapping) &&
+        IsUsableTextFormat(fallback_format.get())) {
+      LOG(WARNING) << "Falling back to default vertical renderer font.";
+      return fallback_format;
+    }
+
+    return nullptr;
   }
 
   wil::com_ptr_nothrow<IDWriteTextFormat> CreateFormatWithFallback(

@@ -36,6 +36,7 @@
 #include <wil/resource.h>
 #include <windows.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -46,6 +47,7 @@
 #include "protocol/commands.pb.h"
 #include "renderer/table_layout.h"
 #include "renderer/win32/text_renderer.h"
+#include "renderer/win32/vertical_candidate_layout.h"
 #include "renderer/win32/win32_renderer_util.h"
 
 namespace mozc {
@@ -110,7 +112,14 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   // UpdateLayout.
   void UpdateDpi(uint32_t dpi);
 
+  enum class LayoutMode {
+    kHorizontal,
+    kVertical,
+  };
+
   void UpdateLayout(const commands::CandidateWindow& candidate_window);
+  void UpdateLayout(const commands::CandidateWindow& candidate_window,
+                    LayoutMode layout_mode);
   void UpdateEffectWindows();
   void SetShadowZOrderAnchor(HWND hwnd) { shadow_z_order_anchor_ = hwnd; }
   HWND GetWindowHandle() const { return m_hWnd; }
@@ -137,6 +146,13 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
 
   bool RenderToBitmapCache();
   void ClearBitmapCache();
+
+  bool IsVerticalLayout() const;
+  bool IsLayoutReady() const;
+  Rect GetCandidateRect(size_t index) const;
+  Rect GetFooterRect() const;
+  Size MeasureVerticalFooterSize() const;
+  bool TryUpdateVerticalLayout();
 
   void DrawCells(HDC dc);
   void DrawVScrollBar(HDC dc);
@@ -224,6 +240,8 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   Size footer_logo_display_size_;
   client::SendCommandInterface* send_command_interface_;
   std::unique_ptr<TableLayout> table_layout_;
+  std::unique_ptr<VerticalCandidateLayout> vertical_layout_;
+  LayoutMode layout_mode_;
   wil::unique_hbitmap cached_bitmap_;
   Size cached_bitmap_size_;
   bool cached_bitmap_valid_;

@@ -37,6 +37,8 @@
 #include <string>
 #include <vector>
 
+#include "win32/tip/tip_writing_direction.h"
+
 namespace mozc {
 namespace win32 {
 namespace tsf {
@@ -73,6 +75,13 @@ class TipRangeUtil {
   // Returns the general result code.
   static HRESULT IsVerticalWriting(ITfRange* range, TfEditCookie read_cookie,
                                    bool* vertical_writing);
+
+  // Resolves writing direction from TSF application properties. The direct
+  // VerticalWriting attribute takes precedence and Orientation is used only
+  // when VerticalWriting is unavailable.
+  static HRESULT GetWritingDirection(ITfRange* range,
+                                     TfEditCookie read_cookie,
+                                     WritingDirection* direction);
 
   // Checks whether or not |range_test| becomes a subset of |range_cover|.
   static bool IsRangeCovered(TfEditCookie edit_cookie, ITfRange* range_test,

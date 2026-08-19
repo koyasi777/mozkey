@@ -60,6 +60,7 @@
 #include "session/ime_context.h"
 #include "session/key_event_transformer.h"
 #include "session/keymap.h"
+#include "session/vertical_writing_key_transform.h"
 #include "session/zenz_client_context.h"
 #include "session/zenz_client_factory.h"
 #include "session/zenz_context_assembler.h"
@@ -8915,9 +8916,30 @@ void Session::UpdateTime() {
 }
 
 void Session::TransformInput(commands::Input* input) {
-  if (input->has_key()) {
-    context_->key_event_transformer().TransformKeyEvent(input->mutable_key());
+  if (!input->has_key()) {
+    return;
   }
+
+  context_->key_event_transformer().TransformKeyEvent(input->mutable_key());
+
+  if (!input->has_context() || !input->context().vertical_writing()) {
+    return;
+  }
+
+  VerticalWritingKeyState vertical_key_state = VerticalWritingKeyState::kOther;
+  if (context_->state() == ImeContext::COMPOSITION &&
+      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)) {
+    vertical_key_state = VerticalWritingKeyState::kSuggestion;
+  } else if (context_->state() == ImeContext::CONVERSION) {
+    vertical_key_state =
+        context_->converter().CheckState(EngineConverterInterface::PREDICTION)
+            ? VerticalWritingKeyState::kPrediction
+            : VerticalWritingKeyState::kConversion;
+  }
+
+  TransformVerticalWritingCandidateArrowKey(
+      /*vertical_writing=*/true, vertical_key_state,
+      context_->GetKeyMapManager(), input->mutable_key());
 }
 
 bool Session::SwitchInputFieldType(commands::Command* command) {

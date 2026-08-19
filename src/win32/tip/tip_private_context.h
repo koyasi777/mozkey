@@ -42,6 +42,7 @@
 #include "win32/base/input_state.h"
 #include "win32/base/keyboard.h"
 #include "win32/base/surrogate_pair_observer.h"
+#include "win32/tip/tip_writing_direction.h"
 #include "win32/tip/tip_zenz_context_request.h"
 
 namespace mozc {
@@ -78,6 +79,10 @@ class TipPrivateContext {
 
   const InputBehavior& input_behavior() const;
   InputBehavior* mutable_input_behavior();
+
+  WritingDirection composition_writing_direction() const;
+  void SetCompositionWritingDirection(WritingDirection direction);
+  void ClearCompositionWritingDirection();
 
  private:
   class InternalState;

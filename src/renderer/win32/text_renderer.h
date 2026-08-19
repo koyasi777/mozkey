@@ -70,6 +70,7 @@ class TextRenderer {
     FONTSET_INFOLIST_CAPTION,
     FONTSET_INFOLIST_TITLE,
     FONTSET_INFOLIST_DESCRIPTION,
+    FONTSET_RUBY,
     SIZE_OF_FONT_TYPE,  // DO NOT DELETE THIS
   };
 
@@ -98,9 +99,35 @@ class TextRenderer {
   virtual Size MeasureStringMultiLine(FONT_TYPE font_type,
                                       std::wstring_view str,
                                       int width) const = 0;
+
+  // Returns whether this renderer can shape and draw native vertical text.
+  virtual bool SupportsVerticalText(FONT_TYPE font_type) const = 0;
+
+  // Returns whether this renderer can flow vertical text into multiple
+  // right-to-left columns. Kept separate so candidate single-column support
+  // never depends on Infolist wrapping support.
+  virtual bool SupportsVerticalWrappedText(FONT_TYPE font_type) const = 0;
+
+  // Retrieves the physical bounding box of a single vertical text column.
+  virtual Size MeasureStringVertical(FONT_TYPE font_type,
+                                     std::wstring_view str) const = 0;
+
+  // Measures native vertical text constrained by |height|. Text that does not
+  // fit the first top-to-bottom column flows into additional columns to the
+  // left according to Japanese vertical-writing order.
+  virtual Size MeasureStringVerticalWrapped(FONT_TYPE font_type,
+                                            std::wstring_view str,
+                                            int height) const = 0;
+
   // Renders the given |text|.
   virtual void RenderText(HDC dc, std::wstring_view text, const Rect& rect,
                           FONT_TYPE font_type) const = 0;
+  virtual void RenderTextVertical(HDC dc, std::wstring_view text,
+                                  const Rect& rect,
+                                  FONT_TYPE font_type) const = 0;
+  virtual void RenderTextVerticalWrapped(HDC dc, std::wstring_view text,
+                                         const Rect& rect,
+                                         FONT_TYPE font_type) const = 0;
   virtual void RenderTextList(HDC dc,
                               absl::Span<const TextRenderingInfo> display_list,
                               FONT_TYPE font_type) const = 0;
