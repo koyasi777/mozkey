@@ -2135,6 +2135,243 @@ jobs:
   # actions/cache works without this job, but having this would increase the likelihood of cache hit
   # in other jobs. Another approach would be to use "needs:".
   # https://docs.github.com/en/actions/using-jobs/using-jobs-in-a-workflow
+  test_arm64_tsf_application_host_foundation:
+    name: ARM64 installed-IME TSF application-host foundation
+    needs: build_arm64
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Try to restore update_deps cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install Dependencies
+        shell: cmd
+        working-directory: .\src
+        # This command uses src/third_party_cache as the download cache.
+        run: |
+          python build_tools/update_deps.py
+
+      - name: Build native ARM64 TSF application-host helper
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          Set-Location src
+          & bazelisk build --config release_build //win32/tip:tsf_application_host_smoke_arm64
+          if ($LASTEXITCODE -ne 0) {
+            throw "ARM64 TSF application-host helper build failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Resolve native ARM64 helper
+        id: resolve_helper
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          Set-Location src
+
+          $executionRootOutput = @(
+            & bazelisk info --config release_build execution_root
+          )
+          if ($LASTEXITCODE -ne 0) {
+            throw "bazelisk info execution_root failed with exit code $LASTEXITCODE"
+          }
+
+          Write-Host "bazelisk info execution_root raw output:"
+          $executionRootOutput | ForEach-Object { Write-Host "  $_" }
+
+          $executionRootCandidates = @(
+            $executionRootOutput |
+              ForEach-Object { ([string]$_).Trim() } |
+              Where-Object {
+                $_ -and
+                (Test-Path -LiteralPath $_ -PathType Container)
+              } |
+              Select-Object -Unique
+          )
+
+          if ($executionRootCandidates.Count -ne 1) {
+            throw (
+              "Expected exactly one existing execution_root directory; " +
+              "found $($executionRootCandidates.Count): " +
+              ($executionRootCandidates -join ", ")
+            )
+          }
+
+          [string]$executionRoot = $executionRootCandidates[0]
+          Write-Host "Bazel execution_root = $executionRoot"
+
+          $outputs = @(
+            & bazelisk cquery --config release_build --output=files `
+              //win32/tip:tsf_application_host_smoke_arm64 |
+              ForEach-Object { ([string]$_).Trim() } |
+              Where-Object { $_ }
+          )
+          if ($LASTEXITCODE -ne 0) {
+            throw "bazelisk cquery failed with exit code $LASTEXITCODE"
+          }
+
+          Write-Host "cquery outputs:"
+          $outputs | ForEach-Object { Write-Host "  $_" }
+
+          $matches = @()
+          foreach ($output in $outputs) {
+            $candidate = if ([System.IO.Path]::IsPathRooted($output)) {
+              $output
+            } else {
+              Join-Path $executionRoot $output
+            }
+
+            if (
+              [System.IO.Path]::GetFileName($candidate) -eq
+                "tsf_application_host_smoke_arm64.exe" -and
+              (Test-Path -LiteralPath $candidate -PathType Leaf)
+            ) {
+              $matches += [System.IO.Path]::GetFullPath($candidate)
+            }
+          }
+
+          $matches = @($matches | Select-Object -Unique)
+          if ($matches.Count -ne 1) {
+            throw (
+              "Expected exactly one tsf_application_host_smoke_arm64.exe; " +
+              "found $($matches.Count): " +
+              ($matches -join ", ")
+            )
+          }
+
+          $helper = $matches[0]
+          Write-Host "Resolved helper = $helper"
+          "helper=$helper" >> $env:GITHUB_OUTPUT
+
+      - name: Download exact ARM64 MSI
+        uses: actions/download-artifact@v6
+        with:
+          name: Mozc64_arm64.msi
+          path: arm64-msi
+
+      - name: Install exact ARM64 MSI
+        id: install
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $msis = @(
+            Get-ChildItem -LiteralPath arm64-msi -Recurse -File -Filter *.msi
+          )
+          if ($msis.Count -ne 1) {
+            throw "Expected exactly one ARM64 MSI; found $($msis.Count)"
+          }
+
+          $msi = $msis[0].FullName
+          Write-Host "MSI = $msi"
+          Get-FileHash -LiteralPath $msi -Algorithm SHA256
+
+          $installLog = Join-Path $env:RUNNER_TEMP "tsf-host-install.log"
+          $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            "/i",
+            "`"$msi`"",
+            "/qn",
+            "/norestart",
+            "/l*v",
+            "`"$installLog`""
+          )
+
+          Write-Host "msiexec install exit = $($process.ExitCode)"
+          if ($process.ExitCode -notin @(0, 3010)) {
+            throw "ARM64 MSI install failed with exit code $($process.ExitCode)"
+          }
+
+          "msi=$msi" >> $env:GITHUB_OUTPUT
+          "install_log=$installLog" >> $env:GITHUB_OUTPUT
+
+      - name: Run installed-IME TSF application-host foundation
+        id: smoke
+        shell: pwsh
+        env:
+          HELPER: ${{ steps.resolve_helper.outputs.helper }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          if (-not (Test-Path -LiteralPath $env:HELPER -PathType Leaf)) {
+            throw "Resolved helper does not exist: $env:HELPER"
+          }
+
+          $log = Join-Path $env:RUNNER_TEMP "tsf-application-host-foundation.log"
+
+          & $env:HELPER 2>&1 | Tee-Object -FilePath $log
+          $exitCode = $LASTEXITCODE
+
+          Write-Host "helper exit = $exitCode"
+          if ($exitCode -ne 0) {
+            throw "TSF application-host foundation failed with exit code $exitCode"
+          }
+
+          $content = Get-Content -LiteralPath $log -Raw
+          foreach ($required in @(
+            "process_architecture=ARM64",
+            "gate_active_profile=PASS",
+            "gate_document_focus=PASS",
+            "gate_top_context=PASS",
+            "gate_ime_open=PASS",
+            "gate_hiragana_mode=PASS",
+            "gate_text_store_sink=PASS",
+            "gate_foreground_service=PASS",
+            "gate_arm64_tip=PASS",
+            "TSF_APPLICATION_HOST_FOUNDATION=PASS"
+          )) {
+            if ($content -notmatch [regex]::Escape($required)) {
+              throw "Required helper evidence missing: $required"
+            }
+          }
+
+          "log=$log" >> $env:GITHUB_OUTPUT
+
+      - name: Uninstall exact ARM64 MSI
+        if: always() && steps.install.outcome == 'success'
+        shell: pwsh
+        env:
+          MSI: ${{ steps.install.outputs.msi }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $uninstallLog = Join-Path $env:RUNNER_TEMP "tsf-host-uninstall.log"
+          $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            "/x",
+            "`"$env:MSI`"",
+            "/qn",
+            "/norestart",
+            "/l*v",
+            "`"$uninstallLog`""
+          )
+
+          Write-Host "msiexec uninstall exit = $($process.ExitCode)"
+          if ($process.ExitCode -notin @(0, 1605, 3010)) {
+            throw "ARM64 MSI uninstall failed with exit code $($process.ExitCode)"
+          }
+
+      - name: Upload TSF application-host evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mozc64_arm64_tsf_application_host_foundation
+          path: |
+            ${{ runner.temp }}/tsf-application-host-foundation.log
+            ${{ runner.temp }}/tsf-host-install.log
+            ${{ runner.temp }}/tsf-host-uninstall.log
+          if-no-files-found: warn
+          retention-days: 7
+
   cache_deps:
     # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
     runs-on: windows-2025

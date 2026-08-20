@@ -151,6 +151,25 @@ mozc_win32_cc_prod_binary(
 )
 
 mozc_win32_cc_prod_binary(
+    name = "tsf_application_host_smoke_arm64",
+    srcs = ["tsf_application_host_smoke.cc"],
+    executable_name_map = {
+        "Mozc": "tsf_application_host_smoke_arm64.exe",
+        "GoogleJapaneseInput": "tsf_application_host_smoke_arm64.exe",
+    },
+    platform = "//:windows-arm64",
+    static_crt = True,
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":tip_status",
+        "//base/win32:scoped_com",
+        "//win32/base:msctf_dll",
+        "//win32/base:tsf_profile",
+    ],
+)
+
+mozc_win32_cc_prod_binary(
     name = "tip_client_smoke_arm64",
     srcs = ["tip_client_smoke.cc"],
     executable_name_map = {
