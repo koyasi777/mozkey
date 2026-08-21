@@ -184,6 +184,43 @@ INSTANTIATE_TEST_SUITE_P(InvalidSequences, NumberDecoderTest,
                                            TestParam("くせん", {}),
                                            TestParam("しがいせん", {})));
 
+TEST_F(NumberDecoderTest, CompoundNumberReadings) {
+  const NumberDecoder decoder(pos_matcher());
+
+  struct TestCase {
+    absl::string_view reading;
+    absl::string_view expected;
+  };
+
+  constexpr TestCase kCases[] = {
+      {"じゅういち", "11"},
+      {"じゅうに", "12"},
+      {"じゅうご", "15"},
+      {"じゅうきゅう", "19"},
+      {"じゅうなな", "17"},
+      {"じゅうはち", "18"},
+      {"にじゅう", "20"},
+      {"なな", "7"},
+  };
+
+  for (const TestCase& test_case : kCases) {
+    SCOPED_TRACE(test_case.reading);
+
+    const std::vector<NumberDecoderResult> results =
+        decoder.Decode(test_case.reading);
+
+    bool found = false;
+    for (const NumberDecoderResult& result : results) {
+      if (result.consumed_key_byte_len == test_case.reading.size() &&
+          result.candidate == test_case.expected) {
+        found = true;
+        break;
+      }
+    }
+
+    EXPECT_TRUE(found);
+  }
+}
 TEST_F(NumberDecoderTest, Random) {
   constexpr absl::string_view kKeys[] = {
       "ぜろ",     "いち",      "いっ",   "に",     "さん",     "し",

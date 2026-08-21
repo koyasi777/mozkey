@@ -335,6 +335,7 @@ mozc_cc_library(
         "//converter:attribute",
         "//converter:segments",
         "//dictionary:pos_matcher",
+        "//prediction:number_decoder",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
         "//request:conversion_request",

@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
@@ -54,6 +55,7 @@
 #include "converter/candidate.h"
 #include "converter/segments.h"
 #include "dictionary/pos_matcher.h"
+#include "prediction/number_decoder.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
@@ -441,6 +443,182 @@ std::vector<NumberUtil::NumberString> GetNumbersInDefaultOrder(
   return output;
 }
 
+bool HasNumberCandidate(const SerializedStringArray& suffix_array,
+                        const PosMatcher& pos_matcher,
+                        const Segment& segment) {
+  for (size_t i = 0; i < segment.candidates_size(); ++i) {
+    if (number_compound_util::IsNumber(suffix_array, pos_matcher,
+                                       segment.candidate(i))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsAsciiAlphabet(absl::string_view value) {
+  if (value.empty()) {
+    return false;
+  }
+
+  for (const unsigned char c : value) {
+    if (!(('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z'))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool HasAsciiCounterSuffixCandidate(const PosMatcher& pos_matcher,
+                                    const Segment& segment) {
+  for (size_t i = 0; i < segment.candidates_size(); ++i) {
+    const converter::Candidate& candidate = segment.candidate(i);
+    if (pos_matcher.IsCounterSuffixWord(candidate.lid) &&
+        IsAsciiAlphabet(candidate.value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<std::string> DecodeFullArabicNumber(
+    const PosMatcher& pos_matcher, absl::string_view key) {
+  const prediction::NumberDecoder decoder(pos_matcher);
+
+  for (const prediction::NumberDecoderResult& result : decoder.Decode(key)) {
+    if (result.consumed_key_byte_len == key.size() &&
+        Util::GetScriptType(result.candidate) == Util::NUMBER) {
+      return result.candidate;
+    }
+  }
+
+  return std::nullopt;
+}
+
+std::optional<int> FindDecodedNumberSemanticBaseCandidate(
+    const Segment& segment, absl::string_view decoded_number,
+    const PosMatcher& pos_matcher) {
+  std::optional<int> fallback;
+
+  for (size_t i = 0; i < segment.candidates_size(); ++i) {
+    const converter::Candidate& candidate = segment.candidate(i);
+
+    std::string kanji_number;
+    std::string arabic_number;
+    std::string number_suffix;
+
+    if (!NumberUtil::NormalizeNumbersWithSuffix(
+            candidate.content_value,
+            false,  // trim_reading_zeros
+            &kanji_number, &arabic_number, &number_suffix) ||
+        !number_suffix.empty() || arabic_number != decoded_number) {
+      continue;
+    }
+
+    // Prefer a candidate that is already recognized as numeric.  A
+    // surface-normalizable candidate is kept only as a fallback because the
+    // converter can classify a valid number surface under a lexical POS.
+    if (IsNumberCandidate(candidate, pos_matcher)) {
+      return static_cast<int>(i);
+    }
+
+    if (!fallback.has_value()) {
+      fallback = static_cast<int>(i);
+    }
+  }
+
+  return fallback;
+}
+
+bool PromoteDecodedArabicNumber(const PosMatcher& pos_matcher,
+                                Segment* segment) {
+  if (segment == nullptr || segment->candidates_size() == 0) {
+    return false;
+  }
+
+  const std::optional<std::string> decoded =
+      DecodeFullArabicNumber(pos_matcher, segment->key());
+
+  if (!decoded.has_value()) {
+    return false;
+  }
+
+  // Prefer an exact half-width Arabic candidate that already exists.
+  // NumberRewriter normally generates such candidates for simple numeric
+  // segments, so moving the existing candidate avoids creating duplicates.
+  int exact_pos = -1;
+  for (size_t i = 0; i < segment->candidates_size(); ++i) {
+    const converter::Candidate& candidate = segment->candidate(i);
+    if (candidate.value == *decoded &&
+        candidate.content_value == *decoded &&
+        IsNumberCandidate(candidate, pos_matcher)) {
+      exact_pos = static_cast<int>(i);
+      break;
+    }
+  }
+
+  if (exact_pos >= 0) {
+    if (exact_pos != 0) {
+      segment->move_candidate(exact_pos, 0);
+    }
+
+    converter::Candidate* promoted = segment->mutable_candidate(0);
+    promoted->lid = pos_matcher.GetNumberId();
+    promoted->rid = pos_matcher.GetNumberId();
+
+    promoted->attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
+    return true;
+  }
+
+  const std::optional<int> semantic_base_pos =
+      FindDecodedNumberSemanticBaseCandidate(*segment, *decoded, pos_matcher);
+
+  converter::Candidate decoded_candidate;
+  decoded_candidate.value = *decoded;
+  decoded_candidate.content_value = *decoded;
+  decoded_candidate.style = NumberUtil::NumberString::DEFAULT_STYLE;
+  decoded_candidate.attributes |=
+      converter::Attribute::NO_VARIANTS_EXPANSION;
+
+  if (semantic_base_pos.has_value()) {
+    // Preserve the normal NumberRewriter insertion path when the converter
+    // already has a semantically matching numeric surface.
+    const converter::Candidate semantic_base =
+        segment->candidate(*semantic_base_pos);
+
+    InsertCandidate(segment, 0, semantic_base, decoded_candidate);
+
+    converter::Candidate* inserted = segment->mutable_candidate(0);
+    inserted->lid = pos_matcher.GetNumberId();
+    inserted->rid = pos_matcher.GetNumberId();
+    inserted->attributes |=
+        converter::Attribute::NO_VARIANTS_EXPANSION;
+    return true;
+  }
+
+  // A fully decodable compound reading can lack a numeric surface after
+  // boundary resize.  For example, "じゅうきゅう" can have "中９" but no
+  // "十九" or "19".  NumberDecoder is the semantic authority here.
+  //
+  // Candidate 0 contributes only its contextual cost.  Do not inherit its
+  // lexical POS, consumed-key state, learning attributes, or surface.
+  const int cost_donor_cost = segment->candidate(0).cost;
+
+  converter::Candidate* inserted = segment->insert_candidate(0);
+  inserted->key = std::string(segment->key());
+  inserted->content_key = std::string(segment->key());
+  inserted->value = *decoded;
+  inserted->content_value = *decoded;
+  inserted->consumed_key_size = 0;
+  inserted->cost = cost_donor_cost;
+  inserted->lid = pos_matcher.GetNumberId();
+  inserted->rid = pos_matcher.GetNumberId();
+  inserted->style = NumberUtil::NumberString::DEFAULT_STYLE;
+  inserted->attributes = 0;
+  inserted->attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
+
+  return true;
+}
+
 }  // namespace
 
 NumberRewriter::NumberRewriter(absl::string_view counter_suffix_data,
@@ -460,6 +638,82 @@ int NumberRewriter::capability(const ConversionRequest& request) const {
   return RewriterInterface::CONVERSION;
 }
 
+std::optional<RewriterInterface::ResizeSegmentsRequest>
+NumberRewriter::CheckResizeSegmentsRequest(
+    const ConversionRequest& request, const Segments& segments) const {
+  if (!request.config().use_number_conversion() ||
+      request.request_type() != ConversionRequest::CONVERSION ||
+      segments.resized() || segments.conversion_segments_size() <= 2) {
+    return std::nullopt;
+  }
+
+  const size_t segment_count = segments.conversion_segments_size();
+
+  // Search from right to left.  A numeric reading itself can also have a
+  // CounterSuffixWord candidate (e.g. "ご" -> "語"), so choosing the first
+  // suffix from the left can split the numeric prefix at a wrong position.
+  for (size_t suffix_index = segment_count; suffix_index-- > 1;) {
+    const Segment& suffix_segment =
+        segments.conversion_segment(suffix_index);
+
+    if (!HasAsciiCounterSuffixCandidate(pos_matcher_, suffix_segment)) {
+      continue;
+    }
+
+    size_t number_begin = suffix_index;
+    while (number_begin > 0 &&
+           HasNumberCandidate(
+               suffix_array_, pos_matcher_,
+               segments.conversion_segment(number_begin - 1))) {
+      --number_begin;
+    }
+
+    const size_t number_segment_count = suffix_index - number_begin;
+
+    // Nothing to repair when the numeric prefix is already one segment.
+    // We only repair an actually split numeric prefix:
+    //
+    //   じゅう | ご | あんぺあ
+    //      -> じゅうご | あんぺあ
+    //
+    // Do not merge the counter suffix itself into the numeric segment.
+    if (number_segment_count < 2) {
+      continue;
+    }
+
+    std::string number_key;
+    for (size_t i = number_begin; i < suffix_index; ++i) {
+      number_key += segments.conversion_segment(i).key();
+    }
+
+    if (!DecodeFullArabicNumber(pos_matcher_, number_key).has_value()) {
+      continue;
+    }
+
+    const absl::string_view suffix_key = suffix_segment.key();
+
+    const size_t number_size = Util::CharsLen(number_key);
+    const size_t suffix_size = Util::CharsLen(suffix_key);
+
+    if (number_size == 0 || suffix_size == 0 ||
+        number_size > std::numeric_limits<uint8_t>::max() ||
+        suffix_size > std::numeric_limits<uint8_t>::max()) {
+      continue;
+    }
+
+    ResizeSegmentsRequest resize_request = {
+        .segment_index = number_begin,
+        .segment_sizes = {
+            static_cast<uint8_t>(number_size),
+            static_cast<uint8_t>(suffix_size),
+            0, 0, 0, 0, 0, 0},
+    };
+    return resize_request;
+  }
+
+  return std::nullopt;
+}
+
 bool NumberRewriter::Rewrite(const ConversionRequest& request,
                              Segments* segments) const {
   DCHECK(segments);
@@ -470,8 +724,25 @@ bool NumberRewriter::Rewrite(const ConversionRequest& request,
 
   bool modified = false;
 
-  for (Segment& segment : segments->conversion_segments()) {
-    modified |= RewriteOneSegment(request, &segment, segments);
+  Segments::range conversion_segments = segments->conversion_segments();
+
+  for (auto it = conversion_segments.begin();
+       it != conversion_segments.end(); ++it) {
+    Segment* segment = &*it;
+
+    auto next = it;
+    ++next;
+
+    const bool should_promote_decoded_number =
+        request.request_type() == ConversionRequest::CONVERSION &&
+        next != conversion_segments.end() &&
+        HasAsciiCounterSuffixCandidate(pos_matcher_, *next);
+
+    modified |= RewriteOneSegment(request, segment, segments);
+
+    if (should_promote_decoded_number) {
+      modified |= PromoteDecodedArabicNumber(pos_matcher_, segment);
+    }
   }
 
   return modified;

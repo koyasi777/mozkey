@@ -156,6 +156,441 @@ struct ExpectResult {
 };
 }  // namespace
 
+TEST_F(NumberRewriterTest, CheckResizeSegmentsRequestForNumberCounter) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  // A non-number segment before the target range.  The resize request must
+  // start after this segment.
+  Segment* prefix = segments.push_back_segment();
+  prefix->set_key("おんど");
+  converter::Candidate* prefix_candidate = prefix->add_candidate();
+  prefix_candidate->value = "温度";
+  prefix_candidate->content_value = "温度";
+
+  // candidate(0) is intentionally non-numeric.  The implementation needs to
+  // find the lower-ranked numeric candidate.
+  Segment* ten = segments.push_back_segment();
+  ten->set_key("じゅう");
+  converter::Candidate* ten_top = ten->add_candidate();
+  ten_top->value = "中";
+  ten_top->content_value = "中";
+  converter::Candidate* ten_number = ten->add_candidate();
+  ten_number->lid = pos_matcher_.GetNumberId();
+  ten_number->rid = pos_matcher_.GetNumberId();
+  ten_number->value = "十";
+  ten_number->content_value = "十";
+
+  Segment* five = segments.push_back_segment();
+  five->set_key("ご");
+  converter::Candidate* five_number = five->add_candidate();
+  five_number->lid = pos_matcher_.GetNumberId();
+  five_number->rid = pos_matcher_.GetNumberId();
+  five_number->value = "五";
+  five_number->content_value = "五";
+
+  // "ご" itself can also be interpreted as a counter suffix (e.g. 語).
+  // The actual rightmost counter "あんぺあ" must win.
+  converter::Candidate* five_counter = five->add_candidate();
+  five_counter->lid = pos_matcher_.GetCounterSuffixWordId();
+  five_counter->rid = pos_matcher_.GetCounterSuffixWordId();
+  five_counter->value = "語";
+  five_counter->content_value = "語";
+
+  // The counter candidate is also intentionally not top-1.
+  Segment* ampere = segments.push_back_segment();
+  ampere->set_key("あんぺあ");
+  converter::Candidate* ampere_top = ampere->add_candidate();
+  ampere_top->value = "アンペア";
+  ampere_top->content_value = "アンペア";
+  converter::Candidate* ampere_counter = ampere->add_candidate();
+  ampere_counter->lid = pos_matcher_.GetCounterSuffixWordId();
+  ampere_counter->rid = pos_matcher_.GetCounterSuffixWordId();
+  ampere_counter->value = "A";
+  ampere_counter->content_value = "A";
+
+  const std::optional<RewriterInterface::ResizeSegmentsRequest> request =
+      number_rewriter->CheckResizeSegmentsRequest(default_request_, segments);
+
+  ASSERT_TRUE(request.has_value());
+  EXPECT_EQ(request->segment_index, 1);
+  EXPECT_EQ(request->segment_sizes[0], 4);  // じゅう + ご
+  EXPECT_EQ(request->segment_sizes[1], 4);  // あんぺあ
+  for (size_t i = 2; i < request->segment_sizes.size(); ++i) {
+    EXPECT_EQ(request->segment_sizes[i], 0);
+  }
+}
+
+TEST_F(NumberRewriterTest, CheckResizeSegmentsRequestRequiresCounterSuffix) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* ten = segments.push_back_segment();
+  ten->set_key("じゅう");
+  converter::Candidate* ten_number = ten->add_candidate();
+  ten_number->lid = pos_matcher_.GetNumberId();
+  ten_number->rid = pos_matcher_.GetNumberId();
+  ten_number->value = "十";
+  ten_number->content_value = "十";
+
+  Segment* five = segments.push_back_segment();
+  five->set_key("ご");
+  converter::Candidate* five_number = five->add_candidate();
+  five_number->lid = pos_matcher_.GetNumberId();
+  five_number->rid = pos_matcher_.GetNumberId();
+  five_number->value = "五";
+  five_number->content_value = "五";
+
+  // The third segment has an ASCII value but is not CounterSuffixWord.
+  // This ensures that the test exercises the suffix condition rather than
+  // returning early merely because there are only two segments.
+  Segment* suffix = segments.push_back_segment();
+  suffix->set_key("あんぺあ");
+  converter::Candidate* suffix_candidate = suffix->add_candidate();
+  suffix_candidate->value = "A";
+  suffix_candidate->content_value = "A";
+
+  EXPECT_FALSE(
+      number_rewriter
+          ->CheckResizeSegmentsRequest(default_request_, segments)
+          .has_value());
+}
+
+TEST_F(NumberRewriterTest,
+       CheckResizeSegmentsRequestDoesNotResizeBeforeJapaneseCounter) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* ten = segments.push_back_segment();
+  ten->set_key("じゅう");
+  converter::Candidate* ten_number = ten->add_candidate();
+  ten_number->lid = pos_matcher_.GetNumberId();
+  ten_number->rid = pos_matcher_.GetNumberId();
+  ten_number->value = "十";
+  ten_number->content_value = "十";
+
+  Segment* five = segments.push_back_segment();
+  five->set_key("ご");
+  converter::Candidate* five_number = five->add_candidate();
+  five_number->lid = pos_matcher_.GetNumberId();
+  five_number->rid = pos_matcher_.GetNumberId();
+  five_number->value = "五";
+  five_number->content_value = "五";
+
+  Segment* counter = segments.push_back_segment();
+  counter->set_key("こ");
+  converter::Candidate* counter_candidate = counter->add_candidate();
+  counter_candidate->lid = pos_matcher_.GetCounterSuffixWordId();
+  counter_candidate->rid = pos_matcher_.GetCounterSuffixWordId();
+  counter_candidate->value = "個";
+  counter_candidate->content_value = "個";
+
+  EXPECT_FALSE(
+      number_rewriter
+          ->CheckResizeSegmentsRequest(default_request_, segments)
+          .has_value());
+}
+
+TEST_F(NumberRewriterTest, CheckResizeSegmentsRequestRequiresFullNumberDecode) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* first = segments.push_back_segment();
+  first->set_key("ご");
+  converter::Candidate* first_number = first->add_candidate();
+  first_number->lid = pos_matcher_.GetNumberId();
+  first_number->rid = pos_matcher_.GetNumberId();
+  first_number->value = "五";
+  first_number->content_value = "五";
+
+  Segment* second = segments.push_back_segment();
+  second->set_key("ご");
+  converter::Candidate* second_number = second->add_candidate();
+  second_number->lid = pos_matcher_.GetNumberId();
+  second_number->rid = pos_matcher_.GetNumberId();
+  second_number->value = "五";
+  second_number->content_value = "五";
+
+  Segment* unit = segments.push_back_segment();
+  unit->set_key("あんぺあ");
+  converter::Candidate* unit_candidate = unit->add_candidate();
+  unit_candidate->lid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->rid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->value = "A";
+  unit_candidate->content_value = "A";
+
+  EXPECT_FALSE(
+      number_rewriter
+          ->CheckResizeSegmentsRequest(default_request_, segments)
+          .has_value());
+}
+
+TEST_F(NumberRewriterTest, CheckResizeSegmentsRequestRequiresContiguousNumber) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* ten = segments.push_back_segment();
+  ten->set_key("じゅう");
+  converter::Candidate* ten_number = ten->add_candidate();
+  ten_number->lid = pos_matcher_.GetNumberId();
+  ten_number->rid = pos_matcher_.GetNumberId();
+  ten_number->value = "十";
+  ten_number->content_value = "十";
+
+  Segment* word = segments.push_back_segment();
+  word->set_key("もの");
+  converter::Candidate* word_candidate = word->add_candidate();
+  word_candidate->value = "物";
+  word_candidate->content_value = "物";
+
+  Segment* unit = segments.push_back_segment();
+  unit->set_key("あんぺあ");
+  converter::Candidate* unit_candidate = unit->add_candidate();
+  unit_candidate->lid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->rid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->value = "A";
+  unit_candidate->content_value = "A";
+
+  EXPECT_FALSE(
+      number_rewriter
+          ->CheckResizeSegmentsRequest(default_request_, segments)
+          .has_value());
+}
+
+TEST_F(NumberRewriterTest, PromoteDecodedNumberBeforeAsciiCounterSuffix) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* number = segments.push_back_segment();
+  number->set_key("じゅうご");
+
+  converter::Candidate* wrong = number->add_candidate();
+  wrong->key = "じゅうご";
+  wrong->content_key = "じゅうご";
+  wrong->value = "中５";
+  wrong->content_value = "中５";
+
+  converter::Candidate* kanji = number->add_candidate();
+  kanji->key = "じゅうご";
+  kanji->content_key = "じゅうご";
+  kanji->value = "十五";
+  kanji->content_value = "十五";
+
+  Segment* unit = segments.push_back_segment();
+  unit->set_key("あんぺあ");
+
+  converter::Candidate* unit_candidate = unit->add_candidate();
+  unit_candidate->lid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->rid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->value = "A";
+  unit_candidate->content_value = "A";
+
+  EXPECT_TRUE(number_rewriter->Rewrite(default_request_, &segments));
+
+  ASSERT_GT(number->candidates_size(), 0);
+  EXPECT_EQ(number->candidate(0).value, "15");
+  EXPECT_EQ(number->candidate(0).content_value, "15");
+  EXPECT_EQ(number->candidate(0).lid, pos_matcher_.GetNumberId());
+  EXPECT_EQ(number->candidate(0).rid, pos_matcher_.GetNumberId());
+  EXPECT_FALSE(number->candidate(0).attributes &
+               converter::Attribute::NO_MODIFICATION);
+  EXPECT_TRUE(number->candidate(0).attributes &
+              converter::Attribute::NO_VARIANTS_EXPANSION);
+
+  EXPECT_EQ(unit->candidate(0).value, "A");
+}
+
+TEST_F(NumberRewriterTest, PromoteExistingArabicNumberBeforeAsciiCounterSuffix) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* number = segments.push_back_segment();
+  number->set_key("きゅう");
+
+  converter::Candidate* kanji = number->add_candidate();
+  kanji->key = "きゅう";
+  kanji->content_key = "きゅう";
+  kanji->value = "九";
+  kanji->content_value = "九";
+  kanji->lid = pos_matcher_.GetNumberId();
+  kanji->rid = pos_matcher_.GetNumberId();
+
+  converter::Candidate* arabic = number->add_candidate();
+  arabic->key = "きゅう";
+  arabic->content_key = "きゅう";
+  arabic->value = "9";
+  arabic->content_value = "9";
+  arabic->lid = pos_matcher_.GetNumberId();
+  arabic->rid = pos_matcher_.GetNumberId();
+
+  Segment* unit = segments.push_back_segment();
+  unit->set_key("てらばいと");
+
+  converter::Candidate* unit_candidate = unit->add_candidate();
+  unit_candidate->lid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->rid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->value = "TB";
+  unit_candidate->content_value = "TB";
+
+  EXPECT_TRUE(number_rewriter->Rewrite(default_request_, &segments));
+
+  ASSERT_GT(number->candidates_size(), 0);
+  EXPECT_EQ(number->candidate(0).value, "9");
+  EXPECT_EQ(number->candidate(0).content_value, "9");
+  EXPECT_EQ(number->candidate(0).lid, pos_matcher_.GetNumberId());
+  EXPECT_EQ(number->candidate(0).rid, pos_matcher_.GetNumberId());
+  EXPECT_FALSE(number->candidate(0).attributes &
+               converter::Attribute::NO_MODIFICATION);
+  EXPECT_TRUE(number->candidate(0).attributes &
+              converter::Attribute::NO_VARIANTS_EXPANSION);
+
+  EXPECT_EQ(unit->candidate(0).value, "TB");
+}
+
+TEST_F(NumberRewriterTest, PromoteDecodedNumberUsingOnlyContextualCostDonor) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* number = segments.push_back_segment();
+  number->set_key("じゅうきゅう");
+
+  constexpr int kDonorCost = 10299;
+  constexpr int kDonorStructureCost = 4321;
+  converter::Candidate* donor = number->add_candidate();
+  donor->key = "じゅうきゅう";
+  donor->content_key = "じゅうきゅう";
+  donor->value = "中９";
+  donor->content_value = "中９";
+  donor->cost = kDonorCost;
+  donor->structure_cost = kDonorStructureCost;
+  donor->description = "donor metadata";
+  donor->consumed_key_size = 3;
+  donor->attributes |= converter::Attribute::NO_LEARNING;
+  donor->attributes |= converter::Attribute::PARTIALLY_KEY_CONSUMED;
+
+  Segment* unit = segments.push_back_segment();
+  unit->set_key("あんぺあ");
+
+  converter::Candidate* unit_candidate = unit->add_candidate();
+  unit_candidate->lid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->rid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->value = "A";
+  unit_candidate->content_value = "A";
+
+  EXPECT_TRUE(number_rewriter->Rewrite(default_request_, &segments));
+
+  ASSERT_GT(number->candidates_size(), 0);
+
+  const converter::Candidate& promoted = number->candidate(0);
+  EXPECT_EQ(promoted.key, "じゅうきゅう");
+  EXPECT_EQ(promoted.content_key, "じゅうきゅう");
+  EXPECT_EQ(promoted.value, "19");
+  EXPECT_EQ(promoted.content_value, "19");
+  EXPECT_EQ(promoted.cost, kDonorCost);
+  EXPECT_EQ(promoted.structure_cost, 0);
+  EXPECT_TRUE(promoted.description.empty());
+  EXPECT_EQ(promoted.consumed_key_size, 0);
+  EXPECT_EQ(promoted.lid, pos_matcher_.GetNumberId());
+  EXPECT_EQ(promoted.rid, pos_matcher_.GetNumberId());
+
+  EXPECT_TRUE(promoted.attributes &
+              converter::Attribute::NO_VARIANTS_EXPANSION);
+  EXPECT_FALSE(promoted.attributes &
+               converter::Attribute::NO_MODIFICATION);
+  EXPECT_FALSE(promoted.attributes &
+               converter::Attribute::NO_LEARNING);
+  EXPECT_FALSE(promoted.attributes &
+               converter::Attribute::PARTIALLY_KEY_CONSUMED);
+}
+
+TEST_F(NumberRewriterTest, DoNotPromoteDecodedNumberInPrediction) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* number = segments.push_back_segment();
+  number->set_key("じゅうご");
+
+  converter::Candidate* wrong = number->add_candidate();
+  wrong->key = "じゅうご";
+  wrong->content_key = "じゅうご";
+  wrong->value = "中５";
+  wrong->content_value = "中５";
+
+  // This surface is intentionally available as a valid contextual base.
+  // If promotion accidentally runs in prediction mode, it can synthesize
+  // "15" from this candidate.
+  converter::Candidate* kanji = number->add_candidate();
+  kanji->key = "じゅうご";
+  kanji->content_key = "じゅうご";
+  kanji->value = "十五";
+  kanji->content_value = "十五";
+
+  Segment* unit = segments.push_back_segment();
+  unit->set_key("あんぺあ");
+
+  converter::Candidate* unit_candidate = unit->add_candidate();
+  unit_candidate->lid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->rid = pos_matcher_.GetCounterSuffixWordId();
+  unit_candidate->value = "A";
+  unit_candidate->content_value = "A";
+
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequestType(ConversionRequest::PREDICTION)
+          .Build();
+
+  number_rewriter->Rewrite(request, &segments);
+
+  ASSERT_GT(number->candidates_size(), 0);
+  EXPECT_EQ(number->candidate(0).value, "中５");
+  EXPECT_FALSE(FindValue(*number, "15"));
+}
+
+TEST_F(NumberRewriterTest, DoNotPromoteDecodedNumberBeforeJapaneseCounter) {
+  std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
+
+  Segments segments;
+
+  Segment* number = segments.push_back_segment();
+  number->set_key("じゅうご");
+
+  converter::Candidate* wrong = number->add_candidate();
+  wrong->key = "じゅうご";
+  wrong->content_key = "じゅうご";
+  wrong->value = "中５";
+  wrong->content_value = "中５";
+
+  converter::Candidate* kanji = number->add_candidate();
+  kanji->key = "じゅうご";
+  kanji->content_key = "じゅうご";
+  kanji->value = "十五";
+  kanji->content_value = "十五";
+
+  Segment* counter = segments.push_back_segment();
+  counter->set_key("こ");
+
+  converter::Candidate* counter_candidate = counter->add_candidate();
+  counter_candidate->lid = pos_matcher_.GetCounterSuffixWordId();
+  counter_candidate->rid = pos_matcher_.GetCounterSuffixWordId();
+  counter_candidate->value = "個";
+  counter_candidate->content_value = "個";
+
+  number_rewriter->Rewrite(default_request_, &segments);
+
+  ASSERT_GT(number->candidates_size(), 0);
+  EXPECT_EQ(number->candidate(0).value, "中５");
+  EXPECT_FALSE(FindValue(*number, "15"));
+}
+
 TEST_F(NumberRewriterTest, BasicTest) {
   std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
 
