@@ -146,6 +146,9 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
     return false;
   }
   command_.CopyFrom(command);
+  // Resolve the host writing direction before any candidate window performs
+  // layout. Phase 2B will consume this same snapshot for vertical layout.
+  writing_direction_ = ResolveWritingDirection(command_);
 
   if (!command_.visible()) {
     candidate_window_->Hide();
@@ -261,16 +264,7 @@ void CandidateController::AlignWindows() {
                                       command_.preedit_rectangle().top() - GetBaseScreenHeight()),
                           preedit_size);
 
-  // Prefer the writing direction explicitly reported by InputMethodKit.
-  // Keep the historical rectangle-shape heuristic only as a compatibility
-  // fallback for older clients or applications that do not report orientation.
-  bool is_vertical = (preedit_size.height < preedit_size.width);
-  if (command_.has_application_info() &&
-      command_.application_info().has_composition_target() &&
-      command_.application_info().composition_target().has_vertical_writing()) {
-    is_vertical =
-        command_.application_info().composition_target().vertical_writing();
-  }
+  const bool is_vertical = IsVerticalWriting(writing_direction_);
 
   // Expand the rect size to make a margin to the candidate window.
   if (is_vertical) {

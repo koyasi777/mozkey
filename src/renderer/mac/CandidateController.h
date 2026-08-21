@@ -32,6 +32,7 @@
 
 #include "base/coordinates.h"
 #include "protocol/renderer_command.pb.h"
+#include "renderer/mac/mac_writing_direction.h"
 #include "renderer/renderer_interface.h"
 
 namespace mozc {
@@ -76,6 +77,7 @@ class CandidateController : public RendererInterface {
   RubyWindow *ruby_window_;
   mozc::Rect candidate_rect_;
   bool has_candidate_rect_ = false;
+  WritingDirection writing_direction_ = WritingDirection::kHorizontal;
   mozc::commands::RendererCommand command_;
 };
 
