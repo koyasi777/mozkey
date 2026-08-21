@@ -230,19 +230,41 @@ mins = [
 if "12.0" not in mins:
     raise SystemExit(f"minimum macOS 12.0 not found: {mins}")
 
+titles = [
+    (node.text or "").strip()
+    for node in root.findall("./title")
+]
+
+if titles != ["Mozkey"]:
+    raise SystemExit(f"unexpected installer title: {titles}")
+
 host_architectures = [
     node.attrib["hostArchitectures"]
     for node in root.findall(".//options")
     if "hostArchitectures" in node.attrib
 ]
 
-if host_architectures:
+if len(host_architectures) != 1:
     raise SystemExit(
-        f"unexpected hostArchitectures restriction: {host_architectures}"
+        "expected exactly one hostArchitectures declaration: "
+        f"{host_architectures}"
+    )
+
+architectures = [
+    value.strip()
+    for value in host_architectures[0].split(",")
+    if value.strip()
+]
+
+if len(architectures) != 2 or set(architectures) != {"arm64", "x86_64"}:
+    raise SystemExit(
+        "unexpected hostArchitectures declaration: "
+        f"{host_architectures[0]!r}"
     )
 
 print("Minimum macOS     = 12.0")
-print("hostArchitectures = UNRESTRICTED")
+print("Installer title   = Mozkey")
+print("hostArchitectures = arm64,x86_64")
 PY
 
 echo
