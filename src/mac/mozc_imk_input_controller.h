@@ -97,6 +97,10 @@
   /** |rendererCommand_| stores the command sent to |mozcRenderer_| */
   mozc::commands::RendererCommand rendererCommand_;
 
+  /** Writing-direction snapshot reported by InputMethodKit for the active composition. */
+  bool hasWritingDirection_;
+  bool verticalWriting_;
+
   /** Frozen left edge of the live-conversion ruby anchor while composition stays active. */
   int liveConversionAnchorLeft_;
   bool hasLiveConversionAnchorLeft_;

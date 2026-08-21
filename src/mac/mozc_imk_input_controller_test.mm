@@ -910,6 +910,127 @@ TEST_F(MozcImkInputControllerTest, LiveConversionRecalculatesRendererPosition) {
   EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().right(), 51);
 }
 
+TEST_F(MozcImkInputControllerTest,
+       VerticalWritingDirectionPropagatesToRendererAndKeyContext) {
+  controller_.mode = commands::HIRAGANA;
+
+  commands::Output output;
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_focused_index(0);
+  candidate_window->set_size(1);
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
+  candidate->set_index(0);
+  candidate->set_value("候補");
+
+  mock_client_.expectedCursor = NSMakeRect(50, 50, 10, 1);
+  mock_client_.expectedAttributes = @{
+    @"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(60, 718)],
+    IMKTextOrientationName : @(NO),
+  };
+
+  [controller_ updateCandidates:&output];
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  const commands::RendererCommand &renderer_command =
+      controller_.rendererCommand;
+  ASSERT_TRUE(renderer_command.has_application_info());
+  ASSERT_TRUE(
+      renderer_command.application_info().has_composition_target());
+  ASSERT_TRUE(renderer_command.application_info()
+                  .composition_target()
+                  .has_vertical_writing());
+  EXPECT_TRUE(renderer_command.application_info()
+                  .composition_target()
+                  .vertical_writing());
+
+  commands::Output send_output;
+  send_output.set_consumed(true);
+  commands::Context send_context;
+  EXPECT_CALL(*mock_mozc_client_,
+              SendKeyWithContext(
+                  HasSpecialKey(commands::KeyEvent::LEFT), _, NotNull()))
+      .WillOnce(DoAll(SaveArg<1>(&send_context),
+                      SetArgPointee<2>(send_output), Return(true)));
+
+  EXPECT_TRUE(SendKeyEvent(kVK_LeftArrow, controller_, mock_client_));
+  EXPECT_TRUE(send_context.vertical_writing());
+
+  [controller_ updateComposedString:nullptr];
+  EXPECT_FALSE(renderer_command.application_info()
+                   .composition_target()
+                   .has_vertical_writing());
+}
+
+TEST_F(MozcImkInputControllerTest,
+       HorizontalWritingDirectionOverridesGeometryHeuristic) {
+  commands::Output output;
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_focused_index(0);
+  candidate_window->set_size(1);
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
+  candidate->set_index(0);
+  candidate->set_value("候補");
+
+  // Deliberately use a geometry shape that the historical heuristic would
+  // interpret as vertical.  Explicit IMK orientation must win.
+  mock_client_.expectedCursor = NSMakeRect(50, 50, 10, 1);
+  mock_client_.expectedAttributes = @{
+    @"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(60, 718)],
+    IMKTextOrientationName : @(YES),
+  };
+
+  [controller_ updateCandidates:&output];
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  const commands::RendererCommand &renderer_command =
+      controller_.rendererCommand;
+  ASSERT_TRUE(renderer_command.has_application_info());
+  ASSERT_TRUE(
+      renderer_command.application_info().has_composition_target());
+  ASSERT_TRUE(renderer_command.application_info()
+                  .composition_target()
+                  .has_vertical_writing());
+  EXPECT_FALSE(renderer_command.application_info()
+                   .composition_target()
+                   .vertical_writing());
+}
+
+TEST_F(MozcImkInputControllerTest,
+       MissingWritingDirectionKeepsRendererOrientationUnknown) {
+  commands::Output output;
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_focused_index(0);
+  candidate_window->set_size(1);
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
+  candidate->set_index(0);
+  candidate->set_value("候補");
+
+  mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
+  mock_client_.expectedAttributes =
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+
+  [controller_ updateCandidates:&output];
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  const commands::RendererCommand &renderer_command =
+      controller_.rendererCommand;
+  ASSERT_TRUE(renderer_command.has_application_info());
+  if (renderer_command.application_info().has_composition_target()) {
+    EXPECT_FALSE(renderer_command.application_info()
+                     .composition_target()
+                     .has_vertical_writing());
+  }
+}
+
 TEST_F(MozcImkInputControllerTest, OpenLink) {
   EXPECT_EQ(gOpenURLCount, 0);
   [controller_ openLink:[NSURL URLWithString:@"http://www.example.com/"]];
