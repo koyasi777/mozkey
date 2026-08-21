@@ -261,10 +261,16 @@ void CandidateController::AlignWindows() {
                                       command_.preedit_rectangle().top() - GetBaseScreenHeight()),
                           preedit_size);
 
-  // This is a hacky way to check vertical writing.
-  // TODO(komatsu): We should use the return value of attributesForCharacterIndex
-  // in MozcImkInputController as a proper way.
-  const bool is_vertical = (preedit_size.height < preedit_size.width);
+  // Prefer the writing direction explicitly reported by InputMethodKit.
+  // Keep the historical rectangle-shape heuristic only as a compatibility
+  // fallback for older clients or applications that do not report orientation.
+  bool is_vertical = (preedit_size.height < preedit_size.width);
+  if (command_.has_application_info() &&
+      command_.application_info().has_composition_target() &&
+      command_.application_info().composition_target().has_vertical_writing()) {
+    is_vertical =
+        command_.application_info().composition_target().vertical_writing();
+  }
 
   // Expand the rect size to make a margin to the candidate window.
   if (is_vertical) {
