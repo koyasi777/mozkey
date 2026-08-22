@@ -649,6 +649,7 @@ mozc_cc_library(
     hdrs = [
         "number_decoder.h",
     ],
+    visibility = ["//rewriter:__pkg__"],
     deps = [
         ":result",
         "//base:util",

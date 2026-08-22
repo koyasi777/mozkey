@@ -30,6 +30,7 @@
 #ifndef MOZC_REWRITER_NUMBER_REWRITER_H_
 #define MOZC_REWRITER_NUMBER_REWRITER_H_
 
+#include <optional>
 #include <vector>
 
 #include "absl/types/span.h"
@@ -53,6 +54,10 @@ class NumberRewriter : public RewriterInterface {
   ~NumberRewriter() override;
 
   int capability(const ConversionRequest& request) const override;
+
+  std::optional<ResizeSegmentsRequest> CheckResizeSegmentsRequest(
+      const ConversionRequest& request,
+      const Segments& segments) const override;
 
   bool Rewrite(const ConversionRequest& request,
                Segments* segments) const override;
