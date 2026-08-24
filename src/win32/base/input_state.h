@@ -71,6 +71,15 @@ struct InputBehavior {
   // Used to show the mode indicator when IMEOn is explicitly pressed while
   // IME is already on.
   std::vector<KeyInformation> active_mode_ime_on_keys;
+
+  // Keys bound to IMEOff in active IME modes (Precomposition, Composition,
+  // Conversion, etc.). These keys turn the IME off. Used by the Alt-tap
+  // keyboard hook to turn the IME off on a left Alt tap (see tip_text_service).
+  std::vector<KeyInformation> active_mode_ime_off_keys;
+
+  // Keys bound to IMEOn in Direct/DirectInput mode. These keys turn the IME on.
+  // Used by the Alt-tap keyboard hook to turn the IME on on a right Alt tap.
+  std::vector<KeyInformation> direct_mode_ime_on_keys;
 };
 
 }  // namespace win32

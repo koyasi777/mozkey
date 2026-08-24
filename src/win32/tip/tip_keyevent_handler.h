@@ -57,6 +57,15 @@ class TipKeyeventHandler {
                              WPARAM wparam, LPARAM lparam, BOOL* eaten);
   static HRESULT OnKeyUp(TipTextService* text_service, ITfContext* context,
                          WPARAM wparam, LPARAM lparam, BOOL* eaten);
+
+  // Processes a synthetic lone modifier-key tap (e.g. a left/right Alt tap
+  // detected by the keyboard hook). Sends the corresponding modifier key event
+  // to the server so that the configured command (e.g. "Commit|IMEOff" or
+  // "IMEOn") runs, and applies the resulting output via an async edit session.
+  // |vk| must be a modifier virtual key such as VK_LMENU or VK_RMENU. Unlike
+  // OnKeyUp, this is safe to call outside of a TSF key-event handler.
+  static HRESULT OnModifierTap(TipTextService* text_service,
+                               ITfContext* context, BYTE vk);
 };
 
 }  // namespace tsf

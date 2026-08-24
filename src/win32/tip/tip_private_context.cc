@@ -102,6 +102,8 @@ void TipPrivateContext::EnsureInitialized() {
     behavior->direct_mode_keys = snapshot.direct_mode_keys;
     behavior->direct_mode_ime_off_keys = snapshot.direct_mode_ime_off_keys;
     behavior->active_mode_ime_on_keys = snapshot.active_mode_ime_on_keys;
+    behavior->active_mode_ime_off_keys = snapshot.active_mode_ime_off_keys;
+    behavior->direct_mode_ime_on_keys = snapshot.direct_mode_ime_on_keys;
     behavior->initialized = true;
   }
 }
