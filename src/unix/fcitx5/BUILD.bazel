@@ -1,0 +1,182 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load(
+    "//:build_defs.bzl",
+    "mozc_cc_binary",
+    "mozc_cc_library",
+)
+
+package(default_visibility = ["//:__subpackages__"])
+
+bool_flag(
+    name = "use_server",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "without_server",
+    flag_values = {
+        ":use_server": "False",
+    },
+)
+
+mozc_cc_library(
+    name = "mozc_client_interface",
+    hdrs = [
+        "mozc_client_interface.h",
+    ],
+    deps = [
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+    ],
+)
+
+mozc_cc_library(
+    name = "mozc_client_pool",
+    srcs = [
+        "mozc_client_pool.cc",
+    ],
+    hdrs = [
+        "mozc_client_pool.h",
+    ],
+    deps = [
+        ":mozc_client_interface",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_library(
+    name = "mozc_direct_client",
+    srcs = [
+        "mozc_direct_client.cc",
+    ],
+    hdrs = [
+        "mozc_direct_client.h",
+    ],
+    deps = [
+        ":mozc_client_interface",
+        "//base:singleton",
+        "//base:vlog",
+        "//config:config_handler",
+        "//data_manager/oss:oss_data_manager",
+        "//engine",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//session:key_info_util",
+        "//session:session_handler",
+        "@com_google_absl//absl/log",
+    ],
+)
+
+mozc_cc_library(
+    name = "mozc_ipc_client",
+    srcs = [
+        "mozc_ipc_client.cc",
+    ],
+    hdrs = [
+        "mozc_ipc_client.h",
+    ],
+    deps = [
+        ":mozc_client_interface",
+        "//client",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+    ],
+)
+
+mozc_cc_library(
+    name = "i18nwrapper",
+    hdrs = [
+        "i18nwrapper.h",
+    ],
+    deps = [
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_library(
+    name = "mozc_engine",
+    srcs = [
+        "mozc_engine.cc",
+        "mozc_response_parser.cc",
+        "mozc_state.cc",
+    ],
+    hdrs = [
+        "mozc_engine.h",
+        "mozc_response_parser.h",
+        "mozc_state.h",
+    ],
+    deps = [
+        ":fcitx_key_util",
+        ":i18nwrapper",
+        ":mozc_client_pool",
+        ":surrounding_text_util",
+        "//base:init_mozc",
+        "//base:port",
+        "//base:process",
+        "//base:run_level",
+        "//base:util",
+        "//base:vlog",
+        "//protocol:candidate_window_cc_proto",
+        "//protocol:commands_cc_proto",
+        "@fcitx5",
+    ] + select({
+        ":without_server": [
+            ":mozc_direct_client",
+        ],
+        "//conditions:default": [
+            ":mozc_ipc_client",
+        ],
+    }),
+)
+
+mozc_cc_library(
+    name = "fcitx_key_util",
+    srcs = [
+        "fcitx_key_event_handler.cc",
+        "fcitx_key_translator.cc",
+    ],
+    hdrs = [
+        "fcitx_key_event_handler.h",
+        "fcitx_key_translator.h",
+    ],
+    deps = [
+        "//base:port",
+        "//base:singleton",
+        "//base:vlog",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "@com_google_absl//absl/log:check",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_library(
+    name = "surrounding_text_util",
+    srcs = [
+        "surrounding_text_util.cc",
+    ],
+    hdrs = [
+        "surrounding_text_util.h",
+    ],
+    deps = [
+        "//base:port",
+        "//base:util",
+        "//base:vlog",
+        "@com_google_absl//absl/log:check",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_binary(
+    name = "fcitx5-mozc.so",
+    srcs = [
+        "mozc_engine_factory.cc",
+    ],
+    linkshared = 1,
+    linkstatic = 1,
+    deps = [
+        ":mozc_engine",
+    ],
+)

@@ -408,6 +408,7 @@ mozc_cc_library(
     visibility = [
         "//android/jni:__pkg__",
         "//ios:__pkg__",
+        "//unix/fcitx5:__pkg__",
     ],
     deps = [
         ":keymap",
@@ -604,6 +605,7 @@ mozc_cc_library(
     hdrs = ["key_info_util.h"],
     visibility = [
         "//client:__pkg__",
+        "//unix/fcitx5:__pkg__",
         "//win32/base:__pkg__",
     ],
     deps = [

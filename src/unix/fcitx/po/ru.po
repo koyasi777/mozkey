@@ -1,0 +1,83 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+#
+# Translators:
+# Dmitry <dmitrydmitry761@gmail.com>, 2022,2024
+# TotalCaesar659 <x24cm5b8c54q6szxw@yandex.ru>, 2016
+# TotalCaesar659 <x24cm5b8c54q6szxw@yandex.ru>, 2016
+msgid ""
+msgstr ""
+"Project-Id-Version: fcitx\n"
+"Report-Msgid-Bugs-To: fcitx-dev@googlegroups.com\n"
+"POT-Creation-Date: 2024-04-17 20:27+0000\n"
+"PO-Revision-Date: 2012-03-06 06:51+0000\n"
+"Last-Translator: Dmitry <dmitrydmitry761@gmail.com>, 2022,2024\n"
+"Language-Team: Russian (http://app.transifex.com/fcitx/fcitx/language/ru/)\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=4; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"n%10<=4 && (n%100<12 || n%100>14) ? 1 : n%10==0 || (n%10>=5 && n%10<=9) || "
+"(n%100>=11 && n%100<=14)? 2 : 3);\n"
+
+#: ../eim.cc:191
+msgid "Press Escape to go back"
+msgstr "Нажмите  для перехода назад"
+
+#: ../fcitx_mozc.cc:69
+msgid "Direct"
+msgstr "Прямой"
+
+#: ../fcitx_mozc.cc:74
+msgid "Hiragana"
+msgstr "Хирагана"
+
+#: ../fcitx_mozc.cc:79
+msgid "Full Katakana"
+msgstr "Полная катакана"
+
+#: ../fcitx_mozc.cc:84
+msgid "Half ASCII"
+msgstr "Полуширинная ASCII"
+
+#: ../fcitx_mozc.cc:89
+msgid "Full ASCII"
+msgstr "Полноширинная ASCII"
+
+#: ../fcitx_mozc.cc:94
+msgid "Half Katakana"
+msgstr "Полуширинная Катакана"
+
+#: ../fcitx_mozc.cc:410 ../fcitx_mozc.cc:411 ../fcitx_mozc.cc:473
+msgid "Composition Mode"
+msgstr "Режим композиции"
+
+#: ../fcitx_mozc.cc:421 ../fcitx_mozc.cc:422
+msgid "Tool"
+msgstr "Инструмент"
+
+#: ../fcitx_mozc.cc:486
+msgid "Mozc Tool"
+msgstr "Инструмент Mozc"
+
+#: ../fcitx_mozc.cc:492
+msgid "Configuration Tool"
+msgstr "Инструмент настройки"
+
+#: ../fcitx_mozc.cc:493
+msgid "Dictionary Tool"
+msgstr "Инструмент словаря"
+
+#: ../fcitx_mozc.cc:494
+msgid "Add Word"
+msgstr "Добавить слово"
+
+#: ../fcitx_mozc.cc:495
+msgid "About Mozc"
+msgstr "О Mozc"
+
+#: ../mozc_response_parser.cc:366
+msgid "Press Ctrl+Alt+H to show usages."
+msgstr "Нажмите Ctrl+Alt+H, чтобы показать использование."

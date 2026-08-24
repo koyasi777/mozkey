@@ -1,0 +1,141 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the fcitx5-mozc package.
+#
+# Translators:
+# Temuri Doghonadze <temuri.doghonadze@gmail.com>, 2026
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: fcitx5-mozc\n"
+"Report-Msgid-Bugs-To: fcitx-dev@googlegroups.com\n"
+"POT-Creation-Date: 2026-04-01 20:24+0000\n"
+"PO-Revision-Date: 2017-11-23 05:28+0000\n"
+"Last-Translator: Temuri Doghonadze <temuri.doghonadze@gmail.com>, 2026\n"
+"Language-Team: Georgian (https://app.transifex.com/fcitx/teams/12005/ka/)\n"
+"Language: ka\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n!=1);\n"
+
+#: mozc_engine.h:64
+msgid "Follow Global Configuration"
+msgstr "გლობალური კონფიგურაციის მიყოლა"
+
+#: mozc_engine.h:64
+msgid "All"
+msgstr "ყველა"
+
+#: mozc_engine.h:65
+msgid "Program"
+msgstr "პროგრამა"
+
+#: mozc_engine.h:65
+msgid "No"
+msgstr "არა"
+
+#: mozc_engine.h:67
+msgid "Always"
+msgstr "ყოველთვის"
+
+#: mozc_engine.h:67
+msgid "On Focus"
+msgstr "ფოკუსზე"
+
+#: mozc_engine.h:68
+msgid "Hotkey"
+msgstr "მალსახმობი ღილაკი"
+
+#: mozc_engine.h:70 mozc_engine.cc:65
+msgid "Direct"
+msgstr "პირდაპირი"
+
+#. Hiragana letter A in UTF-8.
+#: mozc_engine.h:70 mozc_engine.cc:72
+msgid "Hiragana"
+msgstr "ჰირაგანა"
+
+#. Katakana letter A.
+#: mozc_engine.h:71 mozc_engine.cc:79
+msgid "Full Katakana"
+msgstr "სრული კატაკანა"
+
+#: mozc_engine.h:71 mozc_engine.cc:87
+msgid "Half ASCII"
+msgstr "ნახევარი ASCII"
+
+#. Full width ASCII letter A.
+#: mozc_engine.h:72 mozc_engine.cc:95
+msgid "Full ASCII"
+msgstr "სრული ASCII"
+
+#. Half width Katakana letter A.
+#: mozc_engine.h:72 mozc_engine.cc:102
+msgid "Half Katakana"
+msgstr "ნახევარი კატაკანა"
+
+#: mozc_engine.h:82
+msgid "Initial Mode"
+msgstr "საწყისი რეჟიმი"
+
+#: mozc_engine.h:85
+msgid "Shared Input State"
+msgstr "გაზიარებული შეყვანის მდგომარეობა"
+
+#: mozc_engine.h:87
+msgid "Vertical candidate list"
+msgstr "ვერტიკალური კანდიდატების სია"
+
+#: mozc_engine.h:91
+msgid "Expand Usage (Requires vertical candidate list)"
+msgstr "გამოყენების გაფართოება (მოითხოვს ვერტიკალური კანდიდატების სიას)"
+
+#: mozc_engine.h:95
+msgid "Fix embedded preedit cursor at the beginning of the preedit"
+msgstr ""
+"ჩაშენებული წინასწარი რედაქტირების კურსორის დამაგრება წინასწარი რედაქტირების "
+"დასაწყისში"
+
+#: mozc_engine.h:97
+msgid "Hotkey to expand usage"
+msgstr "კლავიატურის მალსახმობი გამოყენების გასაფართოებალად"
+
+#: mozc_engine.h:100 mozc_engine.cc:184
+msgid "Configuration Tool"
+msgstr "მორგების პროგრამა"
+
+#: mozc_engine.h:102 mozc_engine.cc:192
+msgid "Dictionary Tool"
+msgstr "ლექსიკონის პროგრამა"
+
+#: mozc_engine.h:104 mozc_engine.cc:200
+msgid "Add Word"
+msgstr "სიტყვის დამატება"
+
+#: mozc_engine.h:106 mozc_engine.cc:207
+msgid "About Mozc"
+msgstr "Mozc-ის შესახებ"
+
+#. We don't have a good library option for this, just do the simple
+#. replace. absl's runtime parsed format string is too copmlex.
+#: mozc_response_parser.cc:189
+#, c-format
+msgid "Press %s to show usages."
+msgstr "გამოყენების საჩვენებლად დააწექით %s."
+
+#: mozc_engine.cc:156 mozc_engine.cc:157
+msgid "Mozc Settings"
+msgstr "Mozc-ის მორგება"
+
+#: mozc_state.cc:460
+msgid "Press Escape to go back"
+msgstr "დასაბრუნებლად დააწექით Escape"
+
+#: org.fcitx.Fcitx5.Addon.Mozc.metainfo.xml.in:7
+msgid "Mozc for Fcitx 5"
+msgstr "Mozc Fcitx 5-ისთვის"
+
+#: org.fcitx.Fcitx5.Addon.Mozc.metainfo.xml.in:8
+msgid "Japanese input method based on Mozc"
+msgstr "Mozc-ზე დაფუძნებული იაპონური ენის შეყვანის მეთოდი"

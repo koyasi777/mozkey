@@ -1,0 +1,74 @@
+name: Fcitx5 CI
+on:
+  push:
+    branches:
+      - fcitx
+  pull_request:
+    branches:
+      - fcitx
+  workflow_dispatch: # can be manually dispatched under GitHub's "Actions" tab
+jobs:
+  clang-format:
+    name: Check clang-format
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm git clang diffutils
+          git config --global --add safe.directory $GITHUB_WORKSPACE
+      - uses: actions/checkout@v4
+      - uses: fcitx/github-actions@clang-format
+  check:
+    name: Build and test
+    needs: clang-format
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        use_server: [true, false]
+        include:
+          - compiler: gcc
+            cxx_compiler: g++
+          - compiler: clang
+            cxx_compiler: clang++
+    env:
+      CC: ${{ matrix.compiler }}
+      CXX: ${{ matrix.cxx_compiler }}
+    steps:
+      - name: Setup User
+        run: |
+          useradd -m builduser
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm base-devel clang cmake ninja extra-cmake-modules fmt libuv boost git qt6-base qt6-wayland libxkbcommon qt6-webengine bazelisk python
+      - uses: actions/checkout@v4
+        with:
+          repository: fcitx/fcitx5
+          path: fcitx5
+      - name: Cache fcitx5 data files
+        uses: actions/cache@v4
+        with:
+          path: 'fcitx5/**/*.tar.*'
+          key: ${{ runner.os }}-${{ hashFiles('fcitx5/src/modules/spell/CMakeLists.txt')}}
+      - name: Build and Install fcitx5
+        uses: fcitx/github-actions@cmake
+        with:
+          path: fcitx5
+          cmake-option: >-
+            -DENABLE_KEYBOARD=Off -DENABLE_X11=Off -DENABLE_WAYLAND=Off -DENABLE_ENCHANT=Off
+            -DENABLE_DBUS=Off -DENABLE_SERVER=Off -DENABLE_EMOJI=Off -DUSE_SYSTEMD=Off
+          install-prefix: /usr
+      - uses: actions/checkout@v4
+        with:
+          path: mozc
+          submodules: true
+      - name: Build fcitx5-mozc
+        shell: bash
+        run: |
+          cd mozc/src/
+          chown -R builduser:builduser .
+          _BUILD_TARGETS=unix/fcitx5:fcitx5-mozc.so sudo -u builduser ../scripts/build_fcitx5_bazel --//unix/fcitx5:use_server=${{ matrix.use_server }} --cxxopt=-Wno-uninitialized --host_cxxopt=-Wno-uninitialized --linkopt=-L/opt/fcitx/lib
+          chown -R root:root .
