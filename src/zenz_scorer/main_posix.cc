@@ -7,7 +7,10 @@
 #include <vector>
 
 #include <limits.h>
+#if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#endif
+#include <unistd.h>
 
 #include "zenz/zenz_unix_socket_path.h"
 #include "zenz_scorer/posix_runtime.h"
@@ -34,6 +37,7 @@ std::string JoinPath(std::string_view directory, std::string_view name) {
 }
 
 std::string GetExecutablePath() {
+#if defined(__APPLE__)
   uint32_t size = PATH_MAX;
   std::vector<char> buffer(size, '\0');
   if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
@@ -42,6 +46,23 @@ std::string GetExecutablePath() {
       return "";
     }
   }
+#elif defined(__linux__)
+  std::vector<char> buffer(PATH_MAX, '\0');
+  while (true) {
+    const ssize_t read_size =
+        ::readlink("/proc/self/exe", buffer.data(), buffer.size());
+    if (read_size <= 0) {
+      return "";
+    }
+    if (static_cast<size_t>(read_size) < buffer.size()) {
+      buffer[static_cast<size_t>(read_size)] = '\0';
+      break;
+    }
+    buffer.resize(buffer.size() * 2);
+  }
+#else
+  return "";
+#endif
 
   char resolved[PATH_MAX] = {};
   if (::realpath(buffer.data(), resolved) != nullptr) {
