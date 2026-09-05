@@ -18,7 +18,6 @@
 #include <vector>
 
 #include <arpa/inet.h>
-#include <crt_externs.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -29,6 +28,19 @@
 #include <unistd.h>
 
 #include "zenz_scorer/llama_http_client.h"
+
+// See base/process.cc for the platform-specific environ handling.
+#ifdef __APPLE__
+#include <crt_externs.h>
+
+// We do not use the global environ variable because it is unavailable
+// in Mac Framework/dynamic libraries. Instead call _NSGetEnviron().
+static char** environ = *_NSGetEnviron();
+#elif !defined(_WIN32)
+// Defined by libc. posix_spawn must inherit the desktop session environment
+// so the Nix runtime can resolve its normal execution environment.
+extern char** environ;
+#endif  // !__APPLE__ && !_WIN32
 
 namespace mozc {
 namespace zenz_scorer {
@@ -467,7 +479,7 @@ bool LlamaServerProcess::Spawn(std::string* error) {
 
   pid_t child_pid = -1;
   result = ::posix_spawn(&child_pid, options_.executable_path.c_str(), &actions,
-                         &attributes, argv.data(), *_NSGetEnviron());
+                         &attributes, argv.data(), environ);
 
   ::posix_spawnattr_destroy(&attributes);
   ::posix_spawn_file_actions_destroy(&actions);
