@@ -7,13 +7,15 @@
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
-#if TARGET_OS_OSX
+#endif  // __APPLE__
+
+#if (defined(__APPLE__) && TARGET_OS_OSX) || \
+    (defined(__linux__) && !defined(__ANDROID__))
 #include "absl/log/log.h"
 #include "base/file_util.h"
 #include "base/process.h"
 #include "base/system_util.h"
-#endif  // TARGET_OS_OSX
-#endif  // __APPLE__
+#endif
 
 #include "session/zenz_live_corrector.h"
 #include "session/zenz_named_pipe_client.h"
@@ -24,13 +26,14 @@ namespace mozc {
 namespace session {
 namespace {
 
-#if defined(__APPLE__) && TARGET_OS_OSX
+#if (defined(__APPLE__) && TARGET_OS_OSX) || \
+    (defined(__linux__) && !defined(__ANDROID__))
 
 constexpr char kZenzRuntimeDirectory[] = "ZenzRuntime";
 constexpr char kZenzScorerExecutable[] = "mozc_zenz_scorer";
 constexpr auto kScorerLaunchThrottle = std::chrono::seconds(2);
 
-bool LaunchMacZenzScorer() {
+bool LaunchUnixZenzScorer() {
   // MozcConverter is normally a singleton, but several Zenz worker requests
   // can observe the same cold start. Serialize the short spawn operation and
   // treat a recent successful launch as one already in progress.
@@ -61,20 +64,18 @@ bool LaunchMacZenzScorer() {
   return true;
 }
 
-#endif  // __APPLE__ && TARGET_OS_OSX
+#endif
 
 }  // namespace
 
 std::unique_ptr<ZenzClient> CreateZenzClient() {
-#if defined(__APPLE__) && TARGET_OS_OSX
+#if (defined(__APPLE__) && TARGET_OS_OSX) || \
+    (defined(__linux__) && !defined(__ANDROID__))
   return std::make_unique<ZenzUnixSocketClient>(
-      ::mozc::zenz::GetZenzUnixSocketPath(), &LaunchMacZenzScorer);
-#elif defined(__linux__)
-  return std::make_unique<ZenzUnixSocketClient>(
-      ::mozc::zenz::GetZenzUnixSocketPath());
+      ::mozc::zenz::GetZenzUnixSocketPath(), &LaunchUnixZenzScorer);
 #else
   return std::make_unique<ZenzNamedPipeClient>();
-#endif  // __APPLE__ && TARGET_OS_OSX
+#endif
 }
 
 }  // namespace session

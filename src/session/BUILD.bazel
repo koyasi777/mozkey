@@ -199,6 +199,11 @@ mozc_cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ] + mozc_select(
+        linux = [
+            "//base:file_util",
+            "//base:process",
+            "//base:system_util",
+        ],
         macos = [
             "//base:file_util",
             "//base:process",
