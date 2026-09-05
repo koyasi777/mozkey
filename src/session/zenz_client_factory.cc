@@ -69,6 +69,9 @@ std::unique_ptr<ZenzClient> CreateZenzClient() {
 #if defined(__APPLE__) && TARGET_OS_OSX
   return std::make_unique<ZenzUnixSocketClient>(
       ::mozc::zenz::GetZenzUnixSocketPath(), &LaunchMacZenzScorer);
+#elif defined(__linux__)
+  return std::make_unique<ZenzUnixSocketClient>(
+      ::mozc::zenz::GetZenzUnixSocketPath());
 #else
   return std::make_unique<ZenzNamedPipeClient>();
 #endif  // __APPLE__ && TARGET_OS_OSX
