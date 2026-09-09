@@ -159,12 +159,13 @@ class DateRewriter : public RewriterInterface {
   // If the rewrite is done, returns `true` and sets the `num_done_out` to the
   // number of segments processed. The `num_done_out` is not modified if the
   // rewrite is not done.
-  static bool RewriteDate(
-      Segment* segment, absl::Span<const std::string> extra_date_formats,
-      absl::Span<const std::string>  extra_datetime_formats,
-      size_t& num_done_out);
+  static bool RewriteDate(Segment* segment,
+                          absl::Span<const std::string> extra_date_formats,
+                          absl::Span<const std::string> extra_datetime_formats,
+                          size_t& num_done_out);
   static bool RewriteEra(Segments::range segments_range, size_t& num_done_out);
-  static bool RewriteAd(Segments::range segments_range, size_t& num_done_out);
+  static bool RewriteAd(const ConversionRequest& request,
+                        Segments::range segments_range, size_t& num_done_out);
 
   // Returns the value if rewrite for AD wants to resize the segments.
   std::optional<ResizeSegmentsRequest> CheckResizeSegmentsForAd(

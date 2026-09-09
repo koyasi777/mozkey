@@ -100,6 +100,15 @@ void InsertCandidate(const absl::string_view key, const absl::string_view value,
   cand->content_value = std::string(value);
 }
 
+bool HasCandidate(const Segment& segment, absl::string_view value) {
+  for (size_t i = 0; i < segment.candidates_size(); ++i) {
+    if (segment.candidate(i).value == value) {
+      return true;
+    }
+  }
+  return false;
+}
+
 Matcher<const converter::Candidate*> ValueIs(absl::string_view value) {
   return Field(&converter::Candidate::value, value);
 }
@@ -1306,11 +1315,28 @@ TEST_F(DateRewriterTest, ExtraFormatSyntaxTest) {
   Clock::SetClockForUnitTest(nullptr);
 }
 
+struct RewriteAdSegment {
+  std::string key;
+  std::string value;
+  std::string content_key;
+  std::string content_value;
+
+  RewriteAdSegment(std::string k, std::string v)
+      : key(std::move(k)),
+        value(std::move(v)),
+        content_key(key),
+        content_value(value) {}
+  RewriteAdSegment(std::string k, std::string v, std::string ck, std::string cv)
+      : key(std::move(k)),
+        value(std::move(v)),
+        content_key(std::move(ck)),
+        content_value(std::move(cv)) {}
+};
+
 struct RewriteAdData {
-  std::vector<std::pair<std::string, std::string>> segments;
+  std::vector<RewriteAdSegment> segments;
   size_t segment_index = 0;
   std::string candidate;
-  std::string resized_key;
 };
 
 class RewriteAdTest : public DateRewriterTest,
@@ -1338,9 +1364,10 @@ INSTANTIATE_TEST_SUITE_P(
             {{"きょうは", "今日は"}, {"2011ねん", "2011年"}, {"です", "です"}},
             1,
             "平成23年"},
-        // The "年" suffix in the following segment. They don't need resizing,
-        // and the result shouldn't contain the "年" suffix.
-        RewriteAdData{{{"へいせい23", "平成23"}, {"ねん", "年"}}, 0, "2011"},
+        // The "年" suffix in the following segment.
+        // In multi-segment mode, era-to-AD merges both segments into "2011年",
+        // while AD-to-era ("2011" + "ねん") produces "平成23".
+        RewriteAdData{{{"へいせい23", "平成23"}, {"ねん", "年"}}, 0, "2011年"},
         RewriteAdData{{{"2011", "2011"}, {"ねん", "年"}}, 0, "平成23"},
         RewriteAdData{{{"2011", "二千十一"}, {"ねん", "年"}}, 0, "平成23"},
         RewriteAdData{{{"きょうは", "今日は"},
@@ -1348,7 +1375,7 @@ INSTANTIATE_TEST_SUITE_P(
                        {"ねん", "年"},
                        {"です", "です"}},
                       1,
-                      "2011"},
+                      "2011年"},
         RewriteAdData{{{"きょうは", "今日は"},
                        {"2011", "2011"},
                        {"ねん", "年"},
@@ -1356,22 +1383,24 @@ INSTANTIATE_TEST_SUITE_P(
                       1,
                       "平成23"},
         // Multiple segments.
-        RewriteAdData{{{"へいせい", "平成"}, {"23ねん", "23年"}},
-                      0,
-                      "",
-                      "へいせい23ねん"},
-        RewriteAdData{{{"へいせい", "平成"}, {"23", "23"}, {"ねん", "年"}},
-                      0,
-                      "",
-                      "へいせい23ねん"},
-        // Reject more than 3 segments.
+        RewriteAdData{{{"へいせい", "平成"}, {"23ねん", "23年"}}, 0, "2011年"},
         RewriteAdData{
-            {{"へい", "平"}, {"せい", "成"}, {"23", "23"}, {"ねん", "年"}}},
+            {{"へいせい", "平成"}, {"23", "23"}, {"ねん", "年"}}, 0, "2011年"},
+        // 4 segments.
+        RewriteAdData{
+            {{"へい", "平"}, {"せい", "成"}, {"23", "23"}, {"ねん", "年"}},
+            0,
+            "2011年"},
+        // Reject more than 6 segments.
+        RewriteAdData{{{"へ", "へ"},
+                       {"い", "い"},
+                       {"せ", "せ"},
+                       {"い", "い"},
+                       {"2", "2"},
+                       {"3", "3"},
+                       {"ねん", "年"}}},
         // The `value` should be ignored when merging too.
-        RewriteAdData{{{"へいせい", "兵勢"}, {"23ねん", "23年"}},
-                      0,
-                      "",
-                      "へいせい23ねん"},
+        RewriteAdData{{{"へいせい", "兵勢"}, {"23ねん", "23年"}}, 0, "2011年"},
         // Multiple segments with preceding and following segments.
         RewriteAdData{{{"きょうは", "今日は"},
                        {"へいせい", "平成"},
@@ -1379,57 +1408,69 @@ INSTANTIATE_TEST_SUITE_P(
                        {"ねん", "年"},
                        {"です", "です"}},
                       1,
-                      "",
-                      "へいせい23ねん"},
+                      "2011年"},
         // Extra characters in the segment of "nen".
-        RewriteAdData{
-            {{"へいせい23ねんです", "平成23年です"}}, 0, "", "へいせい23ねん"},
-        RewriteAdData{
-            {{"きょうは", "今日は"}, {"へいせい23ねんです", "平成23年です"}},
-            1,
-            "",
-            "へいせい23ねん"},
+        RewriteAdData{{{"へいせい23ねんです", "平成23年です", "へいせい23ねん",
+                        "平成23年"}},
+                      0,
+                      "2011年です"},
+        RewriteAdData{{{"きょうは", "今日は"},
+                       {"へいせい23ねんです", "平成23年です", "へいせい23ねん",
+                        "平成23年"}},
+                      1,
+                      "2011年です"},
         RewriteAdData{{{"きょうは", "今日は"},
                        {"へいせい", "平成"},
                        {"23", "23"},
-                       {"ねんです", "年です"}},
+                       {"ねんです", "年です", "ねん", "年"}},
                       1,
-                      "",
-                      "へいせい23ねん"}));
+                      "2011年です"},
+        RewriteAdData{
+            {{"れいわ8ねんの", "令和8年の", "れいわ8ねん", "令和8年"}},
+            0,
+            "2026年の"},
+        RewriteAdData{
+            {{"れいわ3ねんの", "令和3年の", "れいわ3ねん", "令和3年"}},
+            0,
+            "2021年の"},
+        RewriteAdData{{{"れいわ8ねんの", "令和8年の"}}, 0, "2026年の"},
+        RewriteAdData{{{"れいわ8ねんの", "れいわ8ねんの"}}, 0, "2026年の"},
+        RewriteAdData{{{"れいわ", "令和"}, {"8ねん", "8年"}}, 0, "2026年"},
+        RewriteAdData{{{"れいわ", "令和"}, {"3ねん", "3年"}}, 0, "2021年"},
+        RewriteAdData{
+            {{"れいわ8", "令和8"}, {"ねんの", "年の"}}, 0, "2026年の"},
+        RewriteAdData{{{"れいわ", "令和"}, {"8", "8"}, {"ねんの", "年の"}},
+                      0,
+                      "2026年の"}));
 
 TEST_P(RewriteAdTest, MockConverter) {
   const RewriteAdData& data = GetParam();
   MockDictionary dictionary;
   DateRewriter rewriter(dictionary);
   Segments segments;
-  for (const auto& [key, value] : data.segments) {
-    AppendSegment(key, value, &segments);
+  for (const RewriteAdSegment& s : data.segments) {
+    Segment* seg = segments.add_segment();
+    seg->set_key(s.key);
+    converter::Candidate* cand = seg->add_candidate();
+    cand->key = s.key;
+    cand->value = s.value;
+    cand->content_key = s.content_key;
+    cand->content_value = s.content_value;
   }
-  const ConversionRequest request;
+  commands::Request request_proto;
+  request_proto.mutable_decoder_experiment_params()
+      ->set_enable_multi_segment_candidate(true);
+  const ConversionRequest request =
+      ConversionRequestBuilder().SetRequest(request_proto).Build();
 
-  std::optional<RewriterInterface::ResizeSegmentsRequest> resize_request =
-      rewriter.CheckResizeSegmentsRequest(request, segments);
-
-  if (data.resized_key.empty()) {
-    // Resize is not expected.
-    EXPECT_FALSE(resize_request.has_value());
-
-    if (data.candidate.empty()) {
-      // Rewrite is not expected.
-      EXPECT_FALSE(rewriter.Rewrite(request, &segments));
-    } else {
-      // Rewrite is expected.
-      EXPECT_TRUE(rewriter.Rewrite(request, &segments));
-      const Segment& segment = segments.segment(data.segment_index);
-      EXPECT_THAT(segment, ContainsCandidate(ValueIs(data.candidate)));
-    }
-
+  if (data.candidate.empty()) {
+    // Rewrite is not expected.
+    EXPECT_FALSE(rewriter.Rewrite(request, &segments));
   } else {
-    // Resize is expected.
-    EXPECT_TRUE(resize_request.has_value());
-    EXPECT_EQ(resize_request->segment_index, data.segment_index);
-    EXPECT_EQ(resize_request->segment_sizes[0],
-              Util::CharsLen(data.resized_key));
+    // Rewrite is expected.
+    EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+    const Segment& segment = segments.segment(data.segment_index);
+    EXPECT_THAT(segment, ContainsCandidate(ValueIs(data.candidate)));
   }
 }
 
@@ -1451,6 +1492,64 @@ TEST_F(DateRewriterTest, RewriteAdResizedSegments) {
   segments.set_resized(false);
   resize_request = rewriter.CheckResizeSegmentsRequest(request, segments);
   EXPECT_TRUE(resize_request.has_value());
+}
+
+TEST_F(DateRewriterTest, RewriteAdLegacyBranch) {
+  MockDictionary dictionary;
+  DateRewriter rewriter(dictionary);
+  {
+    // When enable_multi_segment_candidate is false (default):
+    // Multi-segment input is resized via CheckResizeSegmentsRequest.
+    Segments segments;
+    InitSegment("へいせい", "平成", &segments);
+    AppendSegment("23", "23", &segments);
+    AppendSegment("ねん", "年", &segments);
+    const ConversionRequest request;
+
+    std::optional<RewriterInterface::ResizeSegmentsRequest> resize_request =
+        rewriter.CheckResizeSegmentsRequest(request, segments);
+    ASSERT_TRUE(resize_request.has_value());
+    EXPECT_EQ(resize_request->segment_index, 0);
+    EXPECT_EQ(resize_request->segment_sizes[0],
+              Util::CharsLen("へいせい23ねん"));
+  }
+
+  {
+    // When enable_multi_segment_candidate is true:
+    // CheckResizeSegmentsRequest returns std::nullopt.
+    Segments segments;
+    InitSegment("へいせい", "平成", &segments);
+    AppendSegment("23", "23", &segments);
+    AppendSegment("ねん", "年", &segments);
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_enable_multi_segment_candidate(true);
+    const ConversionRequest request =
+        ConversionRequestBuilder().SetRequest(request_proto).Build();
+
+    std::optional<RewriterInterface::ResizeSegmentsRequest> resize_request =
+        rewriter.CheckResizeSegmentsRequest(request, segments);
+    EXPECT_FALSE(resize_request.has_value());
+  }
+
+  {
+    // Legacy rewrite on single (or resized) segment:
+    Segments segments;
+    InitSegment("へいせい23ねん", "平成23年", &segments);
+    const ConversionRequest request;
+    EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+    EXPECT_TRUE(HasCandidate(segments.segment(0), "2011年"));
+  }
+
+  {
+    // Legacy rewrite when following segment starts with "ねん":
+    Segments segments;
+    InitSegment("へいせい23", "平成23", &segments);
+    AppendSegment("ねん", "年", &segments);
+    const ConversionRequest request;
+    EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+    EXPECT_TRUE(HasCandidate(segments.segment(0), "2011"));
+  }
 }
 
 }  // namespace mozc

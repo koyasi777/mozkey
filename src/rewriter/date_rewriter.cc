@@ -564,6 +564,7 @@ std::string GetDescription(absl::string_view era, absl::string_view year,
                            : absl::StrCat(era, year);
 }
 
+// Extracts era year information from `key`.
 bool ExtractYearFromKey(const YearData& year_data, const absl::string_view key,
                         int* year, bool* has_suffix_out,
                         std::string* description) {
@@ -1084,47 +1085,6 @@ bool DateRewriter::RewriteEra(Segments::range segments_range,
   return true;
 }
 
-bool DateRewriter::RewriteAd(Segments::range segments_range,
-                             size_t& num_done_out) {
-  // Rewrite:
-  // * If the first segment ends with the `kNenKey`, or
-  // * If the second segment starts with the `kNenKey`.
-  Segment* segment = &segments_range.front();
-  absl::string_view key = segment->key();
-  const bool has_suffix = key.ends_with(kNenKey);
-  if (!has_suffix) {
-    if (segments_range.size() < 2 ||
-        !segments_range[1].key().starts_with(kNenKey)) {
-      return false;
-    }
-  }
-  if (segment->candidates_size() == 0) {
-    LOG(WARNING) << "No candidates are found";
-    return false;
-  }
-
-  // Try to convert era to AD.
-  const std::vector<std::pair<std::string, std::string>>
-      results_anddescriptions = EraToAd(key);
-  if (results_anddescriptions.empty()) {
-    return false;
-  }
-
-  const converter::Candidate& base_cand = segment->candidate(0);
-  std::vector<std::unique_ptr<converter::Candidate>> candidates;
-  candidates.reserve(results_anddescriptions.size());
-  for (auto& [result, description] : results_anddescriptions) {
-    candidates.push_back(
-        CreateCandidate(base_cand, std::move(result), std::move(description)));
-  }
-
-  // Insert position is the last of candidates
-  const int position = static_cast<int>(segment->candidates_size());
-  segment->insert_candidates(position, std::move(candidates));
-  num_done_out = has_suffix ? 1 : 2;
-  return true;
-}
-
 // This function changes the default conversion behavior. For example, when the
 // input is "taishou2nen", it is converted to 3 segments by default without this
 // function, but this function merges them to 1 segment. Users can still resize
@@ -1194,6 +1154,192 @@ DateRewriter::CheckResizeSegmentsForAd(const ConversionRequest& request,
       .segment_sizes = {segment_size, 0, 0, 0, 0, 0, 0, 0},
   };
   return resize_request;
+}
+
+namespace {
+// Rewrite AD for resized / single-segment inputs (legacy behavior).
+bool RewriteAdResized(Segments::range segments_range, size_t& num_done_out) {
+  // Rewrite:
+  // * If the first segment ends with the `kNenKey`, or
+  // * If the second segment starts with the `kNenKey`.
+  Segment& segment = segments_range.front();
+  absl::string_view key = segment.key();
+  const bool has_suffix = key.ends_with(kNenKey);
+  if (!has_suffix) {
+    if (segments_range.size() < 2 ||
+        !segments_range[1].key().starts_with(kNenKey)) {
+      return false;
+    }
+  }
+  if (segment.candidates_size() == 0) {
+    LOG(WARNING) << "No candidates are found";
+    return false;
+  }
+
+  // Try to convert era to AD.
+  const std::vector<std::pair<std::string, std::string>>
+      results_anddescriptions = DateRewriter::EraToAd(key);
+  if (results_anddescriptions.empty()) {
+    return false;
+  }
+
+  const converter::Candidate& base_cand = segment.candidate(0);
+  std::vector<std::unique_ptr<converter::Candidate>> candidates;
+  candidates.reserve(results_anddescriptions.size());
+  for (const auto& [ad_value, description] : results_anddescriptions) {
+    candidates.push_back(CreateCandidate(base_cand, ad_value, description));
+  }
+
+  // Insert position is the last of candidates
+  const int position = static_cast<int>(segment.candidates_size());
+  segment.insert_candidates(position, std::move(candidates));
+  num_done_out = has_suffix ? 1 : 2;
+  return true;
+}
+
+// Converts Japanese era representations to Christian Era (AD) and vice versa
+// (e.g., "へいせい23ねん" -> "2011年", "2011ねん" -> "平成23年").
+// Supports multi-segment candidate generation up to 6 segments.
+struct EraKeyInfo {
+  // Merged key for era conversion up to "ねん" (e.g. "へいせい23ねん").
+  std::string merged_key;
+
+  // Number of segments scanned (e.g. 3 for ["へいせい"] ["23"] ["ねん"]).
+  size_t segment_count = 0;
+
+  // Byte offset of "ねん" in the last segment (e.g. 0 for ["2011"] ["ねん"],
+  // 1 for "8ねんの").
+  size_t nen_pos_in_last_seg = absl::string_view::npos;
+};
+
+std::optional<EraKeyInfo> ExtractEraKey(Segments::range segments_range) {
+  constexpr size_t kMaxSegments = 6;
+  EraKeyInfo info;
+
+  for (const Segment& seg : segments_range) {
+    const absl::string_view key = seg.key();
+    ++info.segment_count;
+    const size_t pos = key.find(kNenKey);
+    if (pos != absl::string_view::npos) {
+      // Extract up to the end of `kNenKey` (e.g. "ねんです" -> "ねん").
+      absl::StrAppend(&info.merged_key, key.substr(0, pos + kNenKey.size()));
+      info.nen_pos_in_last_seg = pos;
+      return info;
+    }
+    absl::StrAppend(&info.merged_key, key);
+    if (info.segment_count >= kMaxSegments) {
+      break;
+    }
+  }
+
+  return std::nullopt;
+}
+
+// Extracts trailing functional key/value
+// e.g. {"の", "の"} from "れいわ8ねんの" from `last_segment` after stripping
+// "ねん" from key and "年" from value.
+std::pair<absl::string_view, absl::string_view> ExtractFunctionalSuffix(
+    const Segment& last_segment, const EraKeyInfo& info) {
+  if (last_segment.candidates_size() == 0) {
+    return {};
+  }
+  const converter::Candidate& last_cand = last_segment.candidate(0);
+
+  if (info.nen_pos_in_last_seg == absl::string_view::npos ||
+      last_segment.key().size() <= info.nen_pos_in_last_seg + kNenKey.size()) {
+    // No trailing suffix after "ねん" (e.g. ["2011"] ["ねん"]).
+    return {};
+  }
+
+  // Suffix exists in the same segment after "ねん"
+  // (e.g. "れいわ8ねんの" -> "の").
+  const absl::string_view suffix_key =
+      last_segment.key().substr(info.nen_pos_in_last_seg + kNenKey.size());
+
+  // Extract the suffix after "年" from the candidate value (e.g. "年の" ->
+  // "の").
+  const size_t pos_val = last_cand.value.find(kNenValue);
+  if (pos_val != absl::string_view::npos &&
+      last_cand.value.size() > pos_val + kNenValue.size()) {
+    const absl::string_view suffix_value =
+        absl::string_view(last_cand.value).substr(pos_val + kNenValue.size());
+    return {suffix_key, suffix_value};
+  }
+
+  // Fallback: use suffix_key as suffix_value if "年" was not found in value
+  // (e.g. in mock candidates or all-hiragana/katakana values).
+  return {suffix_key, suffix_key};
+}
+
+bool RewriteAdMultiSegmentCandidate(Segments::range segments_range,
+                                    size_t& num_done_out) {
+  Segment& segment = segments_range.front();
+  if (segment.candidates_size() == 0) {
+    LOG(WARNING) << "No candidates are found";
+    return false;
+  }
+
+  const std::optional<EraKeyInfo> era_info = ExtractEraKey(segments_range);
+  if (!era_info.has_value()) {
+    return false;
+  }
+
+  // `results` contains pairs of <AD year value, era description>
+  // (e.g. <"2026年", "令和8年">, <"２０２６年", "令和8年">).
+  const std::vector<std::pair<std::string, std::string>> results =
+      DateRewriter::EraToAd(era_info->merged_key);
+  if (results.empty()) {
+    return false;
+  }
+
+  // Extract trailing functional key/value (e.g. {"の", "の"} from ["れいわ"]
+  // ["8ねんの"]) from the last scanned segment containing "ねん".
+  // `functional_key` and `functional_value` are appended to the date candidate
+  // (e.g. key: "れいわ8ねん" + "の", value: "2026年" + "の") to preserve
+  // trailing particles/auxiliary words in the generated multi-segment
+  // candidate.
+  const Segment& last_segment = segments_range[era_info->segment_count - 1];
+  const auto [functional_key, functional_value] =
+      ExtractFunctionalSuffix(last_segment, *era_info);
+
+  const converter::Candidate& base_cand = segment.candidate(0);
+  std::vector<std::unique_ptr<converter::Candidate>> candidates;
+  candidates.reserve(results.size());
+  for (const auto& [ad_value, description] : results) {
+    std::unique_ptr<converter::Candidate> cand = CreateCandidate(
+        base_cand, absl::StrCat(ad_value, functional_value), description);
+    cand->content_value = ad_value;
+    cand->key = absl::StrCat(era_info->merged_key, functional_key);
+    cand->content_key = era_info->merged_key;
+    cand->converted_segment_count = era_info->segment_count;
+    candidates.push_back(std::move(cand));
+  }
+
+  // For multi-segment conversion (count > 1), boost the candidate to the top
+  // (index 2) so that it is easily discoverable. For single-segment conversion,
+  // append to the end of candidates.
+  const int position = era_info->segment_count > 1
+                           ? std::min<int>(2, segment.candidates_size())
+                           : static_cast<int>(segment.candidates_size());
+  segment.insert_candidates(position, std::move(candidates));
+  num_done_out = 1;
+  return true;
+}
+}  // namespace
+
+bool DateRewriter::RewriteAd(const ConversionRequest& request,
+                             Segments::range segments_range,
+                             size_t& num_done_out) {
+  if (segments_range.empty()) {
+    return false;
+  }
+
+  if (request.request()
+          .decoder_experiment_params()
+          .enable_multi_segment_candidate()) {
+    return RewriteAdMultiSegmentCandidate(segments_range, num_done_out);
+  }
+  return RewriteAdResized(segments_range, num_done_out);
 }
 
 namespace {
@@ -1512,6 +1658,12 @@ DateRewriter::CheckResizeSegmentsRequest(const ConversionRequest& request,
     return std::nullopt;
   }
 
+  if (request.request()
+          .decoder_experiment_params()
+          .enable_multi_segment_candidate()) {
+    return std::nullopt;
+  }
+
   if (segments.resized()) {
     // If the given segments are resized by user, don't modify anymore.
     return std::nullopt;
@@ -1555,7 +1707,7 @@ bool DateRewriter::Rewrite(const ConversionRequest& request,
       return false;
     }
 
-    if (RewriteAd(rest_segments, num_done) ||
+    if (RewriteAd(request, rest_segments, num_done) ||
         RewriteDate(seg, extra_date_formats, extra_datetime_formats,
                     num_done) ||
         RewriteEra(rest_segments, num_done)) {

@@ -2329,11 +2329,29 @@ TEST_F(ConverterTest, IntegrationWithDateRewriter) {
       std::make_unique<DateRewriter>(dictionary), STUB_PREDICTOR);
 
   {
+    // Default (enable_multi_segment_candidate = false):
+    // Multi-segment is merged into 1 segment via CheckResizeSegmentsRequest.
     Segments segments;
     const ConversionRequest convreq =
         ConversionRequestBuilder().SetKey("へいせい30ねん").Build();
     ASSERT_TRUE(converter->StartConversion(convreq, &segments));
     EXPECT_EQ(segments.conversion_segments_size(), 1);
+    EXPECT_TRUE(FindCandidateByValue("2018年", segments.conversion_segment(0)));
+  }
+
+  {
+    // enable_multi_segment_candidate = true:
+    // Multi-segment candidates are generated directly across segments.
+    Segments segments;
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_enable_multi_segment_candidate(true);
+    const ConversionRequest convreq = ConversionRequestBuilder()
+                                          .SetRequest(request_proto)
+                                          .SetKey("へいせい30ねん")
+                                          .Build();
+    ASSERT_TRUE(converter->StartConversion(convreq, &segments));
+    EXPECT_GE(segments.conversion_segments_size(), 1);
     EXPECT_TRUE(FindCandidateByValue("2018年", segments.conversion_segment(0)));
   }
 
