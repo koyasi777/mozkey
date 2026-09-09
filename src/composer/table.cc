@@ -482,7 +482,7 @@ bool Table::LoadFromStream(std::istream* is) {
       continue;
     }
 
-    std::vector<std::string> rules =
+    const std::vector<absl::string_view> rules =
         absl::StrSplit(line, '\t', absl::AllowEmpty());
     if (rules.size() == 4) {
       const TableAttributes attributes = ParseAttributes(rules[3]);
