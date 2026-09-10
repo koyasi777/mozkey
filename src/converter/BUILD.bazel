@@ -90,6 +90,7 @@ mozc_cc_library(
         "//base/strings:assign",
         "//prediction:result",
         "//request:conversion_request",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
     ],

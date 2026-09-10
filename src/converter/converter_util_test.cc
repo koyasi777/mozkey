@@ -366,6 +366,403 @@ TEST(ConverterUtilTest, MakeLearningResultsFromSegments) {
   }
 }
 
+TEST(ConverterUtilTest, ApplyResultToSegmentsMultiSegment) {
+  // Conversion segments: "ここで"(9B) | "はきものを"(15B) | "ぬぐ"(6B)
+  Segments segments;
+  Segment* s0 = segments.add_segment();
+  s0->set_key("ここで");
+  Candidate* c0 = s0->add_candidate();
+  c0->key = "ここで";
+  c0->value = "ここで";
+  c0->content_key = "ここで";
+  c0->content_value = "ここで";
+
+  Segment* s1 = segments.add_segment();
+  s1->set_key("はきものを");
+  Candidate* c1 = s1->add_candidate();
+  c1->key = "はきものを";
+  c1->value = "履物を";
+  c1->content_key = "はきもの";
+  c1->content_value = "履物";
+
+  Segment* s2 = segments.add_segment();
+  s2->set_key("ぬぐ");
+  Candidate* c2_other = s2->add_candidate();
+  c2_other->key = "ぬぐ";
+  c2_other->value = "塗ぐ";
+  c2_other->content_key = "ぬぐ";
+  c2_other->content_value = "塗ぐ";
+  Candidate* c2 = s2->add_candidate();
+  c2->key = "ぬぐ";
+  c2->value = "脱ぐ";
+  c2->content_key = "ぬぐ";
+  c2->content_value = "脱ぐ";
+
+  // Result 0: "ここでは"(12B) | "着物を"(9B, key: "きものを" 12B) | "脱ぐ"(6B,
+  // key: "ぬぐ" 6B)
+  prediction::Result pred_result0;
+  pred_result0.key = "ここではきものをぬぐ";
+  pred_result0.value = "ここでは着物を脱ぐ";
+  pred_result0.inner_segment_boundary =
+      BuildInnerSegmentBoundary({{12, 12, 9, 9}, {12, 9, 9, 6}, {6, 6, 6, 6}},
+                                pred_result0.key, pred_result0.value);
+
+  // Result 1: "此処では"(12B) | "着物を"(9B, key: "きものを" 12B) | "脱ぐ"(6B,
+  // key: "ぬぐ" 6B)
+  prediction::Result pred_result1;
+  pred_result1.key = "ここではきものをぬぐ";
+  pred_result1.value = "此処では着物を脱ぐ";
+  pred_result1.inner_segment_boundary =
+      BuildInnerSegmentBoundary({{12, 12, 9, 9}, {12, 9, 9, 6}, {6, 6, 6, 6}},
+                                pred_result1.key, pred_result1.value);
+
+  // Apply result 0 at target_pos = 0.
+  ApplyResultToSegmentsMultiSegment(pred_result0, /*target_pos=*/0, segments);
+
+  // Segments structure is preserved.
+  ASSERT_EQ(segments.conversion_segments_size(), 3);
+  EXPECT_EQ(segments.conversion_segment(0).key(), "ここで");
+  EXPECT_EQ(segments.conversion_segment(1).key(), "はきものを");
+  EXPECT_EQ(segments.conversion_segment(2).key(), "ぬぐ");
+
+  // Segment 0 contains multi-segment candidate "ここでは着物を" with
+  // converted_segment_count = 2 at pos 0.
+  const Segment& seg0 = segments.conversion_segment(0);
+  ASSERT_GT(seg0.candidates_size(), 0);
+  EXPECT_EQ(seg0.candidate(0).value, "ここでは着物を");
+  EXPECT_EQ(seg0.candidate(0).key, "ここではきものを");
+  EXPECT_EQ(seg0.candidate(0).content_value, "ここでは着物");
+  EXPECT_EQ(seg0.candidate(0).content_key, "ここではきもの");
+  EXPECT_EQ(seg0.candidate(0).converted_segment_count, 2);
+  EXPECT_EQ(seg0.candidate(0).inner_segment_boundary.size(), 2);
+
+  // Segment 2 top candidate is moved to "脱ぐ".
+  const Segment& seg2 = segments.conversion_segment(2);
+  ASSERT_GE(seg2.candidates_size(), 2);
+  EXPECT_EQ(seg2.candidate(0).value, "脱ぐ");
+  EXPECT_EQ(seg2.candidate(0).inner_segment_boundary.size(), 1);
+  EXPECT_EQ(seg2.candidate(1).value, "塗ぐ");
+
+  // Apply result 1 at target_pos = 1.
+  ApplyResultToSegmentsMultiSegment(pred_result1, /*target_pos=*/1, segments);
+
+  // Segment 0 now contains "ここでは着物を" at pos 0 and "此処では着物を" at
+  // pos 1.
+  ASSERT_GE(seg0.candidates_size(), 2);
+  EXPECT_EQ(seg0.candidate(0).value, "ここでは着物を");
+  EXPECT_EQ(seg0.candidate(0).converted_segment_count, 2);
+  EXPECT_EQ(seg0.candidate(1).value, "此処では着物を");
+  EXPECT_EQ(seg0.candidate(1).converted_segment_count, 2);
+
+  // Segment 2 top candidate "脱ぐ" was NOT demoted to pos 1.
+  EXPECT_EQ(seg2.candidate(0).value, "脱ぐ");
+  EXPECT_EQ(seg2.candidate(1).value, "塗ぐ");
+}
+
+TEST(ConverterUtilTest,
+     ApplyResultToSegmentsMultiSegmentEmptyInnerSegmentBoundary) {
+  {
+    // Multi-segment fallback when inner_segment_boundary is empty.
+    Segments segments;
+    Segment* s0 = segments.add_segment();
+    s0->set_key("わたしの");
+    Candidate* c0 = s0->add_candidate();
+    c0->key = "わたしの";
+    c0->value = "私の";
+    c0->content_key = "わたしの";
+    c0->content_value = "私の";
+
+    Segment* s1 = segments.add_segment();
+    s1->set_key("なまえ");
+    Candidate* c1 = s1->add_candidate();
+    c1->key = "なまえ";
+    c1->value = "名前";
+    c1->content_key = "なまえ";
+    c1->content_value = "名前";
+
+    prediction::Result pred_result;
+    pred_result.key = "わたしのなまえ";
+    pred_result.value = "僕の名字";
+    pred_result.attributes =
+        Attribute::USER_HISTORY_PREDICTION |
+        Attribute::USER_HISTORY_EMPTY_INNER_SEGMENT_BOUNDARY;
+
+    ApplyResultToSegmentsMultiSegment(pred_result, /*target_pos=*/0, segments);
+
+    ASSERT_EQ(segments.conversion_segments_size(), 2);
+    const Segment& seg0 = segments.conversion_segment(0);
+    ASSERT_GT(seg0.candidates_size(), 0);
+    EXPECT_EQ(seg0.candidate(0).value, "僕の名字");
+    EXPECT_EQ(seg0.candidate(0).key, "わたしのなまえ");
+    EXPECT_EQ(seg0.candidate(0).converted_segment_count, 2);
+    EXPECT_TRUE(seg0.candidate(0).attributes &
+                Attribute::USER_HISTORY_PREDICTION);
+  }
+
+  {
+    // Single-segment fallback when inner_segment_boundary is empty.
+    Segments segments;
+    Segment* s0 = segments.add_segment();
+    s0->set_key("あめ");
+    Candidate* c0 = s0->add_candidate();
+    c0->key = "あめ";
+    c0->value = "飴";
+    c0->content_key = "あめ";
+    c0->content_value = "飴";
+
+    prediction::Result pred_result;
+    pred_result.key = "あめ";
+    pred_result.value = "雨";
+
+    ApplyResultToSegmentsMultiSegment(pred_result, /*target_pos=*/0, segments);
+
+    ASSERT_EQ(segments.conversion_segments_size(), 1);
+    const Segment& seg0 = segments.conversion_segment(0);
+    ASSERT_GT(seg0.candidates_size(), 0);
+    EXPECT_EQ(seg0.candidate(0).value, "雨");
+    EXPECT_EQ(seg0.candidate(0).key, "あめ");
+    EXPECT_EQ(seg0.candidate(0).converted_segment_count, 1);
+    EXPECT_TRUE(seg0.candidate(0).inner_segment_boundary.empty());
+  }
+}
+
+TEST(ConverterUtilTest, ApplyResultToSegmentsMultiSegmentKeyLengthMismatch) {
+  {
+    // Conversion segments key is shorter than prediction result key.
+    Segments segments;
+    Segment* s0 = segments.add_segment();
+    s0->set_key("ここで");
+    Candidate* c0 = s0->add_candidate();
+    c0->key = "ここで";
+    c0->value = "ここで";
+
+    prediction::Result pred_result;
+    pred_result.key = "ここではきものをぬぐ";
+    pred_result.value = "ここでは着物を脱ぐ";
+    pred_result.inner_segment_boundary =
+        BuildInnerSegmentBoundary({{12, 12, 9, 9}, {12, 9, 9, 6}, {6, 6, 6, 6}},
+                                  pred_result.key, pred_result.value);
+
+    ApplyResultToSegmentsMultiSegment(pred_result, /*target_pos=*/0, segments);
+
+    ASSERT_EQ(segments.conversion_segments_size(), 1);
+    const Segment& seg0 = segments.conversion_segment(0);
+    EXPECT_EQ(seg0.candidates_size(), 1);
+    EXPECT_EQ(seg0.candidate(0).value, "ここで");
+  }
+
+  {
+    // Prediction result key is shorter than conversion segments key.
+    Segments segments;
+    Segment* s0 = segments.add_segment();
+    s0->set_key("ここで");
+    Candidate* c0 = s0->add_candidate();
+    c0->key = "ここで";
+    c0->value = "ここで";
+
+    Segment* s1 = segments.add_segment();
+    s1->set_key("はきものを");
+    Candidate* c1 = s1->add_candidate();
+    c1->key = "はきものを";
+    c1->value = "履物を";
+
+    prediction::Result pred_result;
+    pred_result.key = "ここで";
+    pred_result.value = "此処で";
+    pred_result.inner_segment_boundary = BuildInnerSegmentBoundary(
+        {{9, 9, 9, 9}}, pred_result.key, pred_result.value);
+
+    ApplyResultToSegmentsMultiSegment(pred_result, /*target_pos=*/0, segments);
+
+    ASSERT_EQ(segments.conversion_segments_size(), 2);
+    // Segment 0 matches and gets updated/promoted.
+    EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "此処で");
+    // Segment 1 is untouched.
+    EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "履物を");
+  }
+}
+
+TEST(ConverterUtilTest,
+     ApplyResultToSegmentsMultiSegmentSingleVsMultiSegmentCandidateMatching) {
+  Segments segments;
+  Segment* s0 = segments.add_segment();
+  s0->set_key("とう");
+  Candidate* c0_single = s0->add_candidate();
+  c0_single->key = "とう";
+  c0_single->value = "東京";
+  c0_single->converted_segment_count = 1;
+
+  Candidate* c0_other = s0->add_candidate();
+  c0_other->key = "とう";
+  c0_other->value = "党";
+  c0_other->converted_segment_count = 1;
+
+  Segment* s1 = segments.add_segment();
+  s1->set_key("きょう");
+  Candidate* c1 = s1->add_candidate();
+  c1->key = "きょう";
+  c1->value = "京";
+  c1->converted_segment_count = 1;
+
+  prediction::Result pred_result_multi;
+  pred_result_multi.key = "とうきょう";
+  pred_result_multi.value = "東京";
+  pred_result_multi.inner_segment_boundary =
+      BuildInnerSegmentBoundary({{9, 3, 9, 3}, {6, 3, 6, 3}},
+                                pred_result_multi.key, pred_result_multi.value);
+
+  // 1. Apply multi-segment result (num_segs = 2).
+  // Existing single-segment candidate "東京" (converted_segment_count = 1)
+  // must NOT match. A new multi-segment candidate (converted_segment_count = 2)
+  // is inserted at pos 0.
+  ApplyResultToSegmentsMultiSegment(pred_result_multi, /*target_pos=*/0,
+                                    segments);
+
+  Segment* seg0 = segments.mutable_conversion_segment(0);
+  ASSERT_EQ(seg0->candidates_size(), 3);
+  EXPECT_EQ(seg0->candidate(0).value, "東京");
+  EXPECT_EQ(seg0->candidate(0).converted_segment_count, 2);
+  EXPECT_EQ(seg0->candidate(1).value, "東京");
+  EXPECT_EQ(seg0->candidate(1).converted_segment_count, 1);
+  EXPECT_EQ(seg0->candidate(2).value, "党");
+
+  // 2. Apply multi-segment result again at target_pos = 0.
+  // This time it matches existing candidate 0 (converted_segment_count = 2),
+  // updating in place without inserting a new candidate.
+  ApplyResultToSegmentsMultiSegment(pred_result_multi, /*target_pos=*/0,
+                                    segments);
+  ASSERT_EQ(seg0->candidates_size(), 3);
+  EXPECT_EQ(seg0->candidate(0).value, "東京");
+  EXPECT_EQ(seg0->candidate(0).converted_segment_count, 2);
+
+  // 3. Apply single-segment result for "とう" -> "党".
+  // Matches existing single-segment candidate "党" and moves it to pos 0.
+  prediction::Result pred_result_single;
+  pred_result_single.key = "とう";
+  pred_result_single.value = "党";
+  pred_result_single.inner_segment_boundary = BuildInnerSegmentBoundary(
+      {{6, 6, 3, 3}}, pred_result_single.key, pred_result_single.value);
+
+  Segments single_seg_segments;
+  Segment* ss0 = single_seg_segments.add_segment();
+  ss0->set_key("とう");
+  Candidate* sc0 = ss0->add_candidate();
+  sc0->key = "とう";
+  sc0->value = "東京";
+  sc0->converted_segment_count = 2;  // multi-segment candidate
+  Candidate* sc1 = ss0->add_candidate();
+  sc1->key = "とう";
+  sc1->value = "党";
+  sc1->converted_segment_count = 1;
+
+  ApplyResultToSegmentsMultiSegment(pred_result_single, /*target_pos=*/0,
+                                    single_seg_segments);
+
+  const Segment& ss_seg0 = single_seg_segments.conversion_segment(0);
+  ASSERT_EQ(ss_seg0.candidates_size(), 2);
+  EXPECT_EQ(ss_seg0.candidate(0).value, "党");
+  EXPECT_EQ(ss_seg0.candidate(0).converted_segment_count, 1);
+  EXPECT_EQ(ss_seg0.candidate(1).value, "東京");
+  EXPECT_EQ(ss_seg0.candidate(1).converted_segment_count, 2);
+}
+
+TEST(ConverterUtilTest,
+     ApplyResultToSegmentsMultiSegmentBoundaryAndPositionVariations) {
+  {
+    // Single-segment new candidate insertion with non-empty boundary on empty
+    // candidate list (push_front_candidate path).
+    Segments segments;
+    Segment* s0 = segments.add_segment();
+    s0->set_key("あめ");
+
+    prediction::Result pred_result;
+    pred_result.key = "あめ";
+    pred_result.value = "雨";
+    pred_result.inner_segment_boundary = BuildInnerSegmentBoundary(
+        {{6, 3, 6, 3}}, pred_result.key, pred_result.value);
+
+    ApplyResultToSegmentsMultiSegment(pred_result, /*target_pos=*/0, segments);
+
+    const Segment& seg0 = segments.conversion_segment(0);
+    ASSERT_EQ(seg0.candidates_size(), 1);
+    EXPECT_EQ(seg0.candidate(0).value, "雨");
+    EXPECT_EQ(seg0.candidate(0).converted_segment_count, 1);
+    EXPECT_FALSE(seg0.candidate(0).inner_segment_boundary.empty());
+  }
+
+  {
+    // Single-segment existing candidate update with non-empty boundary.
+    Segments segments;
+    Segment* s0 = segments.add_segment();
+    s0->set_key("あめ");
+    Candidate* c0 = s0->add_candidate();
+    c0->key = "あめ";
+    c0->value = "雨";
+    c0->converted_segment_count = 1;
+
+    prediction::Result pred_result;
+    pred_result.key = "あめ";
+    pred_result.value = "雨";
+    pred_result.inner_segment_boundary = BuildInnerSegmentBoundary(
+        {{6, 3, 6, 3}}, pred_result.key, pred_result.value);
+
+    ApplyResultToSegmentsMultiSegment(pred_result, /*target_pos=*/0, segments);
+
+    const Segment& seg0 = segments.conversion_segment(0);
+    ASSERT_EQ(seg0.candidates_size(), 1);
+    EXPECT_FALSE(seg0.candidate(0).inner_segment_boundary.empty());
+  }
+
+  {
+    // Multi-segment existing candidate update sets sliced
+    // inner_segment_boundary.
+    Segments segments;
+    Segment* s0 = segments.add_segment();
+    s0->set_key("とう");
+    Candidate* c0 = s0->add_candidate();
+    c0->key = "とうきょう";
+    c0->value = "東京";
+    c0->converted_segment_count = 2;
+
+    Segment* s1 = segments.add_segment();
+    s1->set_key("きょう");
+
+    prediction::Result pred_result;
+    pred_result.key = "とうきょう";
+    pred_result.value = "東京";
+    pred_result.inner_segment_boundary = BuildInnerSegmentBoundary(
+        {{9, 3, 9, 3}, {6, 3, 6, 3}}, pred_result.key, pred_result.value);
+
+    ApplyResultToSegmentsMultiSegment(pred_result, /*target_pos=*/0, segments);
+
+    const Segment& seg0 = segments.conversion_segment(0);
+    ASSERT_EQ(seg0.candidates_size(), 1);
+    EXPECT_EQ(seg0.candidate(0).inner_segment_boundary.size(), 2);
+  }
+
+  {
+    // Target pos beyond candidate list size inserts at end.
+    Segments segments;
+    Segment* s0 = segments.add_segment();
+    s0->set_key("あめ");
+    Candidate* c0 = s0->add_candidate();
+    c0->key = "あめ";
+    c0->value = "飴";
+    c0->converted_segment_count = 1;
+
+    prediction::Result pred_result;
+    pred_result.key = "あめ";
+    pred_result.value = "雨";
+
+    ApplyResultToSegmentsMultiSegment(pred_result, /*target_pos=*/10, segments);
+
+    const Segment& seg0 = segments.conversion_segment(0);
+    ASSERT_EQ(seg0.candidates_size(), 2);
+    EXPECT_EQ(seg0.candidate(0).value, "飴");
+    EXPECT_EQ(seg0.candidate(1).value, "雨");
+  }
+}
+
 TEST(ConverterUtilTest, MergePredictionResultsNormalHistory) {
   prediction::Result h0, h1, pc0, pc1;
   h0.value = "history0";

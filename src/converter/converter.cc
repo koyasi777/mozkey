@@ -37,7 +37,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -922,19 +921,26 @@ std::vector<prediction::Result> Converter::PredictForConversion(
 
   const bool is_default_multi_segment =
       (segments.conversion_segments_size() > 1);
+  const bool enable_multi_segment = request.request()
+                                        .decoder_experiment_params()
+                                        .enable_multi_segment_candidate();
 
-  // Fail-safe: Older history entries lack inner_segment boundary information,
-  // indicated by Attribute::USER_HISTORY_EMPTY_INNER_SEGMENT_BOUNDARY.
-  // If top_result is a single-segment prediction without boundary info, but
-  // the default Viterbi conversion produced multiple segments, we cannot
-  // safely infer sub-segment boundaries. Skip applying history prediction to
-  // avoid corrupting the multi-segment structure.
+  // Fail-safe for legacy single-segment resizing (!enable_multi_segment):
+  // Older history entries lack inner_segment boundary information, indicated
+  // by Attribute::USER_HISTORY_EMPTY_INNER_SEGMENT_BOUNDARY.
+  // When enable_multi_segment is false and top_result is a single-segment
+  // prediction without boundary info, resizing a multi-segment default Viterbi
+  // would corrupt the structure.
+  // When enable_multi_segment is true, multi-segment alignment handles
+  // single-segment candidates as spanning multi-segment entries without
+  // resizing.
   if (!user_history_results.empty()) {
     const prediction::Result& history_top = user_history_results.front();
     const bool is_history_multi_segment =
         (history_top.inner_segment_boundary.size() > 1);
     const bool missing_boundary_error =
-        !is_history_multi_segment && is_default_multi_segment &&
+        !enable_multi_segment && !is_history_multi_segment &&
+        is_default_multi_segment &&
         (history_top.attributes &
          Attribute::USER_HISTORY_EMPTY_INNER_SEGMENT_BOUNDARY);
     if (missing_boundary_error || history_top.key.empty() ||
@@ -955,6 +961,10 @@ void Converter::PopulatePredictionResultsToSegments(
     return;
   }
 
+  const bool enable_multi_segment = request.request()
+                                        .decoder_experiment_params()
+                                        .enable_multi_segment_candidate();
+
   const prediction::Result& top_result = results.front();
   const bool is_default_multi_segment =
       (segments->conversion_segments_size() > 1);
@@ -963,38 +973,50 @@ void Converter::PopulatePredictionResultsToSegments(
        top_result.inner_segment_boundary ==
            default_result.inner_segment_boundary);
 
-  // If there is no change in the top candidate and the conversion has multiple
-  // segments, do nothing.
-  if (top_is_same_as_default && is_default_multi_segment) {
-    return;
-  }
-
-  // 1. Resize segments if needed to match top_result's inner segment
-  // boundaries.
-  if (!ResizeSegmentsByResult(request, top_result, segments)) {
-    return;
-  }
-
-  // 2. Apply results across conversion segments.
-  // For single-segment conversion, apply up to 5 results.
-  // If the 1st candidate is identical to the default result, apply starting
-  // from candidate position 1.
-  const bool is_single_segment =
-      (!is_default_multi_segment && segments->conversion_segments_size() == 1);
-  const size_t start_idx = top_is_same_as_default ? 1 : 0;
-
-  if (is_single_segment) {
-    const size_t max_results = std::min<size_t>(results.size(), 5);
-    for (size_t i = start_idx; i < max_results; ++i) {
-      const prediction::Result& res = results[i];
-      if (res.key.empty() || res.value.empty()) continue;
-      ApplyResultToSegments(res, /*target_pos=*/i, Attribute::DEFAULT_ATTRIBUTE,
-                            segments);
+  if (!enable_multi_segment) {
+    // If there is no change in the top candidate and the conversion has
+    // multiple segments, do nothing.
+    if (top_is_same_as_default && is_default_multi_segment) {
+      return;
     }
-  } else if (!top_is_same_as_default) {
-    // Multi-segment conversion: only apply top_result when it modifies default.
-    ApplyResultToSegments(top_result, /*target_pos=*/0,
-                          Attribute::DEFAULT_ATTRIBUTE, segments);
+
+    // 1. Resize segments if needed to match top_result's inner segment
+    // boundaries.
+    if (!ResizeSegmentsByResult(request, top_result, segments)) {
+      return;
+    }
+
+    // 2. Apply results across conversion segments.
+    // For single-segment conversion, apply up to 5 results.
+    // If the 1st candidate is identical to the default result, apply starting
+    // from candidate position 1.
+    const bool is_single_segment = (!is_default_multi_segment &&
+                                    segments->conversion_segments_size() == 1);
+    const size_t start_idx = top_is_same_as_default ? 1 : 0;
+
+    if (is_single_segment) {
+      const size_t max_results = std::min<size_t>(results.size(), 5);
+      for (size_t i = start_idx; i < max_results; ++i) {
+        const prediction::Result& res = results[i];
+        if (res.key.empty() || res.value.empty()) continue;
+        ApplyResultToSegments(res, /*target_pos=*/i,
+                              Attribute::DEFAULT_ATTRIBUTE, segments);
+      }
+    } else if (!top_is_same_as_default) {
+      // Multi-segment conversion: only apply top_result when it modifies
+      // default.
+      ApplyResultToSegments(top_result, /*target_pos=*/0,
+                            Attribute::DEFAULT_ATTRIBUTE, segments);
+    }
+    return;
+  }
+
+  // When enable_multi_segment is true:
+  // Do NOT resize segments. Apply up to 5 results with multi-segment alignment.
+  const size_t start_idx = top_is_same_as_default ? 1 : 0;
+  const size_t max_results = std::min<size_t>(results.size(), 5);
+  for (size_t i = start_idx; i < max_results; ++i) {
+    ApplyResultToSegmentsMultiSegment(results[i], /*target_pos=*/i, *segments);
   }
 }
 
