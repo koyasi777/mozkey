@@ -297,6 +297,50 @@ mozc_cc_test(
 
 # macOS
 mozc_cc_library(
+    name = "mac_vertical_candidate_layout",
+    srcs = ["mac/mac_vertical_candidate_layout.cc"],
+    hdrs = ["mac/mac_vertical_candidate_layout.h"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "//base:coordinates",
+    ],
+)
+
+mozc_cc_test(
+    name = "mac_vertical_candidate_layout_test",
+    size = "small",
+    srcs = ["mac/mac_vertical_candidate_layout_test.cc"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":mac_vertical_candidate_layout",
+        "//base:coordinates",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
+    name = "mac_vertical_infolist_layout",
+    srcs = ["mac/mac_vertical_infolist_layout.cc"],
+    hdrs = ["mac/mac_vertical_infolist_layout.h"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "//base:coordinates",
+    ],
+)
+
+mozc_cc_test(
+    name = "mac_vertical_infolist_layout_test",
+    size = "small",
+    srcs = ["mac/mac_vertical_infolist_layout_test.cc"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":mac_vertical_infolist_layout",
+        "//base:coordinates",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "mac_writing_direction",
     srcs = ["mac/mac_writing_direction.cc"],
     hdrs = ["mac/mac_writing_direction.h"],
@@ -376,9 +420,12 @@ mozc_objc_library(
     sdk_frameworks = [
         "Carbon",
         "Cocoa",
+        "CoreText",
         "Foundation",
     ],
     deps = [
+        ":mac_vertical_candidate_layout",
+        ":mac_vertical_infolist_layout",
         ":mac_writing_direction",
         ":renderer_interface",
         ":renderer_server",

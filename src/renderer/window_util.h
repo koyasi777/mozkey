@@ -81,6 +81,12 @@ class WindowUtil {
   static Rect GetVerticalCandidatePlacementPreeditRect(
       const Rect& preedit_rect, int minimum_half_width);
 
+  // Returns the vertical candidate-placement obstacle expanded by |margin| on
+  // both horizontal sides. This gives left-preferred placement and right-side
+  // fallback the same composition clearance.
+  static Rect GetVerticalCandidatePlacementPreeditRectWithMargin(
+      const Rect& preedit_rect, int margin);
+
   // Returns the appropriate cascading window position in the screen
   // coordinate.  |zero_point_offset| is the point in the cascading
   // window which should be aligned to the selected row in the
@@ -92,6 +98,18 @@ class WindowUtil {
                                               const Size& window_size,
                                               const Point& zero_point_offset,
                                               const Rect& working_area);
+
+  // Returns a cascading-window rectangle for vertical writing.  The selected
+  // candidate controls only the vertical anchor.  Horizontally, the cascading
+  // window is kept outside the union of the main candidate window and the
+  // active preedit, so it cannot open over sibling candidate columns or back
+  // across the composition.  The left side is preferred because Japanese
+  // vertical candidate order proceeds right-to-left; the right side is the
+  // fallback.
+  static Rect GetWindowRectForCascadingWindowForVerticalWriting(
+      const Rect& selected_candidate, const Rect& candidate_rect,
+      const Size& window_size, const Point& zero_point_offset,
+      const Rect& avoid_rect, const Rect& working_area);
 
   // Returns a ruby-window rectangle that stays inside |working_area| and
   // does not intersect |avoid_rect|. Placement above the preedit is preferred;

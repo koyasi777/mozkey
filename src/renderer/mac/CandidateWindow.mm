@@ -42,7 +42,9 @@ namespace mozc {
 namespace renderer {
 namespace mac {
 
-CandidateWindow::CandidateWindow() : command_sender_(nullptr) {}
+CandidateWindow::CandidateWindow()
+    : command_sender_(nullptr),
+      writing_direction_(WritingDirection::kHorizontal) {}
 
 CandidateWindow::~CandidateWindow() {}
 
@@ -55,17 +57,33 @@ void CandidateWindow::SetSendCommandInterface(
   [candidate_view setSendCommandInterface:send_command_interface];
 }
 
+void CandidateWindow::SetWritingDirection(
+    WritingDirection writing_direction) {
+  writing_direction_ = writing_direction;
+  if (view_ != nil) {
+    CandidateView* candidate_view = (CandidateView*)view_;
+    [candidate_view setWritingDirection:writing_direction_];
+  }
+}
+
 void CandidateWindow::InitWindow() {
   RendererBaseWindow::InitWindow();
   [window_ setOpaque:NO];
   [window_ setHasShadow:NO];
   [window_ setBackgroundColor:NSColor.clearColor];
-  const CandidateView* candidate_view = (CandidateView*)view_;
+  CandidateView* candidate_view = (CandidateView*)view_;
   [candidate_view setSendCommandInterface:command_sender_];
+  [candidate_view setWritingDirection:writing_direction_];
 }
-const mozc::renderer::TableLayout* CandidateWindow::GetTableLayout() const {
+
+mozc::Point CandidateWindow::GetCandidateAnchorOffset() const {
   const CandidateView* candidate_view = (CandidateView*)view_;
-  return [candidate_view tableLayout];
+  return [candidate_view candidateAnchorOffset];
+}
+
+mozc::Rect CandidateWindow::GetCascadingAnchorRect(size_t row) const {
+  const CandidateView* candidate_view = (CandidateView*)view_;
+  return [candidate_view cascadingAnchorRectForRow:row];
 }
 
 void CandidateWindow::SetCandidateWindow(const commands::CandidateWindow& candidate_window) {

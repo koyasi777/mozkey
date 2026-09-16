@@ -32,6 +32,7 @@
 
 #import <Carbon/Carbon.h>
 #include "renderer/mac/RendererBaseWindow.h"
+#include "renderer/mac/mac_writing_direction.h"
 
 @class InfolistWindowTimerHandler;
 
@@ -51,6 +52,7 @@ class InfolistWindow : public RendererBaseWindow {
   InfolistWindow &operator=(const InfolistWindow &) = delete;
   virtual ~InfolistWindow();
   void SetSendCommandInterface(client::SendCommandInterface *send_command_interface);
+  void SetWritingDirection(WritingDirection writing_direction);
   void SetCandidateWindow(const commands::CandidateWindow &candidate_window);
   void DelayHide(int delay);  // set duration in msecs.
   void DelayShow(int delay);
@@ -63,6 +65,7 @@ class InfolistWindow : public RendererBaseWindow {
   InfolistWindowTimerHandler *timer_handler_;
   NSTimer *lasttimer_;
   bool visible_;
+  WritingDirection writing_direction_ = WritingDirection::kHorizontal;
   void ResetView();
   mozc::client::SendCommandInterface *command_sender_;
 };
