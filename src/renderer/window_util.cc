@@ -200,6 +200,16 @@ Rect WindowUtil::GetVerticalCandidatePlacementPreeditRect(
               preedit_rect.Width() + extra * 2, preedit_rect.Height());
 }
 
+Rect WindowUtil::GetVerticalCandidatePlacementPreeditRectWithMargin(
+    const Rect& preedit_rect, int margin) {
+  if (margin <= 0) {
+    return preedit_rect;
+  }
+
+  return Rect(preedit_rect.Left() - margin, preedit_rect.Top(),
+              preedit_rect.Width() + margin * 2, preedit_rect.Height());
+}
+
 Rect WindowUtil::GetWindowRectForCascadingWindow(const Rect& selected_row,
                                                  const Size& window_size,
                                                  const Point& zero_point_offset,
@@ -235,6 +245,60 @@ Rect WindowUtil::GetWindowRectForCascadingWindow(const Rect& selected_row,
   if (window_rect.Left() < working_area.Left()) {
     window_rect.origin.x += (working_area.Left() - window_rect.Left());
   }
+
+  return window_rect;
+}
+
+Rect WindowUtil::GetWindowRectForCascadingWindowForVerticalWriting(
+    const Rect& selected_candidate, const Rect& candidate_rect,
+    const Size& window_size, const Point& zero_point_offset,
+    const Rect& avoid_rect, const Rect& working_area) {
+  // The selected vertical candidate can be an interior right-to-left column.
+  // Do not place the cascade immediately beside that one column because it
+  // would cover sibling columns.  Treat the complete candidate/preedit pair as
+  // the horizontal obstacle and continue outward to the left.
+  const int group_left =
+      std::min(candidate_rect.Left(), avoid_rect.Left());
+  const int group_right =
+      std::max(candidate_rect.Right(), avoid_rect.Right());
+
+  const int aligned_top =
+      selected_candidate.Top() - zero_point_offset.y;
+  const Rect preferred_left(
+      group_left - window_size.width + zero_point_offset.x,
+      aligned_top, window_size.width, window_size.height);
+
+  if (working_area.Height() == 0 || working_area.Width() == 0) {
+    return preferred_left;
+  }
+
+  const auto fits_horizontally = [&](const Rect& rect) {
+    return working_area.Left() <= rect.Left() &&
+           rect.Right() <= working_area.Right();
+  };
+
+  Rect window_rect = preferred_left;
+  if (!fits_horizontally(window_rect)) {
+    const Rect fallback_right(
+        group_right - zero_point_offset.x, aligned_top,
+        window_size.width, window_size.height);
+    if (fits_horizontally(fallback_right)) {
+      window_rect = fallback_right;
+    }
+  }
+
+  // If neither side completely fits, retain the left-first policy and clamp as
+  // far as the working area allows.  Vertical alignment remains tied to the
+  // selected candidate and is clamped independently.
+  const int max_left =
+      std::max(working_area.Left(), working_area.Right() - window_size.width);
+  window_rect.origin.x =
+      std::clamp(window_rect.Left(), working_area.Left(), max_left);
+
+  const int max_top =
+      std::max(working_area.Top(), working_area.Bottom() - window_size.height);
+  window_rect.origin.y =
+      std::clamp(window_rect.Top(), working_area.Top(), max_top);
 
   return window_rect;
 }

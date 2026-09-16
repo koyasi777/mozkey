@@ -81,6 +81,14 @@ void InfolistWindow::SetSendCommandInterface(client::SendCommandInterface* send_
   command_sender_ = send_command_interface;
 }
 
+void InfolistWindow::SetWritingDirection(
+    WritingDirection writing_direction) {
+  writing_direction_ = writing_direction;
+  if (view_ != nil) {
+    [(InfolistView*)view_ setWritingDirection:writing_direction_];
+  }
+}
+
 void InfolistWindow::SetCandidateWindow(const CandidateWindow& candidate_window) {
   if (candidate_window.candidate_size() == 0) {
     return;
@@ -90,6 +98,7 @@ void InfolistWindow::SetCandidateWindow(const CandidateWindow& candidate_window)
     InitWindow();
   }
   InfolistView* infolist_view = (InfolistView*)view_;
+  [infolist_view setWritingDirection:writing_direction_];
   [infolist_view setCandidateWindow:&candidate_window];
   [infolist_view setNeedsDisplay:YES];
   NSSize size = [infolist_view updateLayout];
@@ -163,6 +172,7 @@ void InfolistWindow::onTimer(NSTimer* timer) {
 void InfolistWindow::ResetView() {
   DLOG(INFO) << "InfolistWindow::ResetView()";
   view_ = [[InfolistView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+  [(InfolistView*)view_ setWritingDirection:writing_direction_];
 }
 
 }  // namespace mac

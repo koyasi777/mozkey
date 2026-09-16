@@ -32,7 +32,11 @@
 
 #import <Carbon/Carbon.h>
 
+#include <cstddef>
+
+#include "base/coordinates.h"
 #include "renderer/mac/RendererBaseWindow.h"
+#include "renderer/mac/mac_writing_direction.h"
 
 namespace mozc {
 namespace client {
@@ -42,8 +46,6 @@ namespace commands {
 class CandidateWindow;
 }  // namespace commands
 namespace renderer {
-class TableLayout;
-
 namespace mac {
 // CandidateWindow holds a carbon window and maintains the connection
 // between a window and a CandidateView.
@@ -55,13 +57,19 @@ class CandidateWindow : public RendererBaseWindow {
   virtual ~CandidateWindow();
   void SetSendCommandInterface(
       client::SendCommandInterface *send_command_interface);
+  void SetWritingDirection(WritingDirection writing_direction);
   void SetCandidateWindow(const commands::CandidateWindow &candidate_window);
-  const renderer::TableLayout *GetTableLayout() const;
+
+  // Layout-independent geometry consumed by CandidateController. CandidateView
+  // decides whether these values come from the horizontal or vertical engine.
+  mozc::Point GetCandidateAnchorOffset() const;
+  mozc::Rect GetCascadingAnchorRect(size_t row) const;
 
  private:
   void InitWindow();
   void ResetView();
   mozc::client::SendCommandInterface *command_sender_;
+  WritingDirection writing_direction_;
 };
 
 }  // namespace mac

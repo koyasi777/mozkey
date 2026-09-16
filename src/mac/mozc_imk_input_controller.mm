@@ -83,6 +83,8 @@ using SetOfString = std::set<std::string, std::less<>>;
 - (void)cancelDelayedSessionCommand;
 - (void)delayedInvokeSessionCommandFromTimer:(NSTimer *)timer;
 - (void)dispatchSessionCommand:(const SessionCommand *)command client:(id)sender;
+- (void)resetWritingDirection;
+- (void)updateWritingDirectionFromAttributes:(NSDictionary *)attributes;
 @end
 
 namespace {
@@ -340,6 +342,8 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   mode_ = mozc::commands::DIRECT;
   suppressSuggestion_ = false;
   yenSignCharacter_ = mozc::config::Config::YEN_SIGN;
+  hasWritingDirection_ = false;
+  verticalWriting_ = false;
   liveConversionAnchorLeft_ = 0;
   hasLiveConversionAnchorLeft_ = false;
   useLiveConversion_ = false;
@@ -840,6 +844,9 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   // we don't update the composition.
   if (([composedString_ length] == 0) &&
       ((preedit == nullptr || preedit->segment_size() == 0))) {
+    // No composition owns the cached writing direction at this point.  Clear
+    // it even though there is no marked-text update to send to the client.
+    [self resetWritingDirection];
     return;
   }
 
@@ -882,6 +889,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   if ([composedString_ length] == 0) {
     [originalString_ setString:@""];
     replacementRange_ = NSMakeRange(NSNotFound, 0);
+    [self resetWritingDirection];
   }
 
   // Update the composed string of the client applications.
@@ -935,6 +943,38 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
              : NSMakeRange(cursorPosition_, 0);
 }
 
+- (void)resetWritingDirection {
+  hasWritingDirection_ = false;
+  verticalWriting_ = false;
+
+  if (rendererCommand_.has_application_info() &&
+      rendererCommand_.application_info().has_composition_target()) {
+    rendererCommand_.mutable_application_info()
+        ->mutable_composition_target()
+        ->clear_vertical_writing();
+  }
+}
+
+- (void)updateWritingDirectionFromAttributes:(NSDictionary *)attributes {
+  // IMKTextOrientationName is returned by
+  // attributesForCharacterIndex:lineHeightRectangle:.  Its NSNumber value is
+  // YES for horizontal layout and NO for vertical layout.
+  if (hasWritingDirection_ || attributes == nil) {
+    return;
+  }
+
+  id orientation = attributes[IMKTextOrientationName];
+  if (![orientation isKindOfClass:[NSNumber class]]) {
+    return;
+  }
+
+  hasWritingDirection_ = true;
+  verticalWriting_ = ![orientation boolValue];
+  rendererCommand_.mutable_application_info()
+      ->mutable_composition_target()
+      ->set_vertical_writing(verticalWriting_);
+}
+
 - (void)delayedUpdateCandidates {
   if (!mozcRenderer_) {
     return;
@@ -979,6 +1019,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
     NSDictionary *clientData =
         [[self client] attributesForCharacterIndex:position
                               lineHeightRectangle:&preeditRect];
+    [self updateWritingDirectionFromAttributes:clientData];
 
     // IMKBaseline is the left-bottom coordinate of the requested character.
     const NSPoint baseline = [clientData[@"IMKBaseline"] pointValue];
@@ -1010,6 +1051,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
         NSDictionary *rubyClientData =
             [[self client] attributesForCharacterIndex:0
                                   lineHeightRectangle:&rubyPreeditRect];
+        [self updateWritingDirectionFromAttributes:rubyClientData];
         const NSPoint rubyBaseline =
             [rubyClientData[@"IMKBaseline"] pointValue];
 
@@ -1286,6 +1328,9 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   if (suppressSuggestion_) {
     // TODO(komatsu, horo): Support Google Omnibox too.
     context.add_experimental_features("google_search_box");
+  }
+  if (hasWritingDirection_ && verticalWriting_) {
+    context.set_vertical_writing(true);
   }
   keyEvent.set_mode(mode_);
 

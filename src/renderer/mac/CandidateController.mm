@@ -39,7 +39,6 @@
 #include "renderer/mac/RubyWindow.h"
 #include "renderer/mac/mac_view_util.h"
 #include "renderer/renderer_style_handler.h"
-#include "renderer/table_layout.h"
 #include "renderer/window_util.h"
 
 namespace mozc {
@@ -50,8 +49,10 @@ namespace renderer {
 namespace mac {
 
 namespace {
-const int kHideWindowDelay = 500;  // msec
-const int kWindowMargin = 10;      // pixel
+const int kHideWindowDelay = 500;       // msec
+const int kWindowMargin = 10;             // pixel; legacy horizontal path
+const int kVerticalWindowMargin = 6;      // pixel
+const int kVerticalRubyGapAdjustment = 2; // pixel
 
 // In Cocoa's coordinate system the origin point is left-bottom and the Y-axis
 // points up. But in Mozc's coordinate system the Y-axis points down. So we use
@@ -146,6 +147,13 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
     return false;
   }
   command_.CopyFrom(command);
+  // Resolve the host writing direction before any candidate window performs
+  // layout, then propagate that exact snapshot to both candidate windows.
+  writing_direction_ = ResolveWritingDirection(command_);
+  candidate_window_->SetWritingDirection(writing_direction_);
+  cascading_window_->SetWritingDirection(writing_direction_);
+  infolist_window_->SetWritingDirection(writing_direction_);
+  ruby_window_->SetWritingDirection(writing_direction_);
 
   if (!command_.visible()) {
     candidate_window_->Hide();
@@ -261,17 +269,16 @@ void CandidateController::AlignWindows() {
                                       command_.preedit_rectangle().top() - GetBaseScreenHeight()),
                           preedit_size);
 
-  // This is a hacky way to check vertical writing.
-  // TODO(komatsu): We should use the return value of attributesForCharacterIndex
-  // in MozcImkInputController as a proper way.
-  const bool is_vertical = (preedit_size.height < preedit_size.width);
+  const bool is_vertical = IsVerticalWriting(writing_direction_);
 
-  // Expand the rect size to make a margin to the candidate window.
+  // Expand the placement obstacle to keep the candidate/suggestion window a
+  // readable distance away from the composition.  Vertical writing can place
+  // the window on either side, so use the same clearance on both sides.
   if (is_vertical) {
-    // Adjust the margin to the candidate window in the right side.
-    preedit_rect.DeflateRect(0, 0, -kWindowMargin, 0);  // (dx, dy, dw, dh)
+    preedit_rect = WindowUtil::GetVerticalCandidatePlacementPreeditRectWithMargin(
+        preedit_rect, kVerticalWindowMargin);
   } else {
-    // Adjust the margin to the candidate window in the upper side.
+    // Preserve the historical horizontal-writing clearance.
     preedit_rect.DeflateRect(0, -kWindowMargin, 0, 0);  // (dx, dy, dw, dh)
   }
 
@@ -282,9 +289,8 @@ void CandidateController::AlignWindows() {
   // Initialize the position.  We use (left, bottom) of preedit as
   // the top-left position of the window because we want to show the
   // window just below of the preedit.
-  const TableLayout *candidate_layout = candidate_window_->GetTableLayout();
-  const mozc::Point candidate_zero_point(
-      candidate_layout->GetColumnRect(kColumnCandidate).Left(), 0);
+  const mozc::Point candidate_zero_point =
+      candidate_window_->GetCandidateAnchorOffset();
 
   const mozc::Point target_point(preedit_rect.Left(), preedit_rect.Bottom());
   const mozc::Rect candidate_rect = WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
@@ -294,9 +300,17 @@ void CandidateController::AlignWindows() {
   has_candidate_rect_ = true;
   candidate_window_->MoveWindow(OriginPointInCocoaCoord(candidate_rect));
 
-  // Align infolist window
-  const mozc::Rect infolist_rect = WindowUtil::GetWindowRectForInfolistWindow(
-      infolist_window_->GetWindowSize(), candidate_rect, display_rect);
+  // Align infolist window. In vertical writing, keep the usage window on
+  // the outside of the candidate/preedit pair so it cannot cover the active
+  // composition. Horizontal writing preserves the historical placement.
+  const mozc::Rect infolist_rect =
+      is_vertical
+          ? WindowUtil::GetWindowRectForInfolistWindowAvoidingRect(
+                infolist_window_->GetWindowSize(), candidate_rect,
+                preedit_rect, display_rect)
+          : WindowUtil::GetWindowRectForInfolistWindow(
+                infolist_window_->GetWindowSize(), candidate_rect,
+                display_rect);
   infolist_window_->MoveWindow(OriginPointInCocoaCoord(infolist_rect));
 
   // If there is no need to show cascading window, we just finish the
@@ -311,15 +325,21 @@ void CandidateController::AlignWindows() {
   // 1. starting position is at the focused row
   const commands::CandidateWindow &candidate_window = command_.output().candidate_window();
   const int focused_row = candidate_window.focused_index() - candidate_window.candidate(0).index();
-  mozc::Rect focused_rect = candidate_layout->GetRowRect(focused_row);
+  mozc::Rect focused_rect =
+      candidate_window_->GetCascadingAnchorRect(focused_row);
   // move the focused_rect to the monitor's coordinates
   focused_rect.origin.x += candidate_rect.origin.x;
   focused_rect.origin.y += candidate_rect.origin.y;
-  // focused_rect doesn't have the width for scroll bar
-  focused_rect.size.width += candidate_layout->GetVScrollBarRect().Width();
 
-  const mozc::Rect cascading_rect = WindowUtil::GetWindowRectForCascadingWindow(
-      focused_rect, cascading_window_->GetWindowSize(), mozc::Point(0, 0), display_rect);
+  const mozc::Rect cascading_rect =
+      is_vertical
+          ? WindowUtil::GetWindowRectForCascadingWindowForVerticalWriting(
+                focused_rect, candidate_rect,
+                cascading_window_->GetWindowSize(), mozc::Point(0, 0),
+                preedit_rect, display_rect)
+          : WindowUtil::GetWindowRectForCascadingWindow(
+                focused_rect, cascading_window_->GetWindowSize(),
+                mozc::Point(0, 0), display_rect);
   cascading_window_->MoveWindow(OriginPointInCocoaCoord(cascading_rect));
 }
 
@@ -352,10 +372,20 @@ bool CandidateController::AlignRubyWindow(
       GetNearestDisplayRect(preedit_rect);
 
   mozc::Rect ruby_rect;
-  if (!WindowUtil::GetRubyWindowRect(
-          preedit_rect, ruby_size,
-          ruby_window_->GetCompositionGap(),
-          display_rect, avoid_rect, &ruby_rect)) {
+  const bool is_vertical = IsVerticalWriting(writing_direction_);
+  const int ruby_gap = ruby_window_->GetCompositionGap();
+  const bool placement_succeeded =
+      is_vertical
+          ? WindowUtil::GetRubyWindowRectForVerticalWriting(
+                preedit_rect, ruby_size,
+                ruby_window_->GetTextTopOffset(),
+                ruby_gap + kVerticalRubyGapAdjustment,
+                display_rect, avoid_rect, &ruby_rect)
+          : WindowUtil::GetRubyWindowRect(
+                preedit_rect, ruby_size,
+                ruby_gap,
+                display_rect, avoid_rect, &ruby_rect);
+  if (!placement_succeeded) {
     return false;
   }
 
