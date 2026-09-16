@@ -5533,9 +5533,24 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     return false;
   }
 
+  const absl::string_view feedback_symbol_style_source =
+      live_conversion_preedit_.empty() ? live_conversion_key_
+                                       : live_conversion_preedit_;
+
   for (const ZenzFeedbackCandidate& feedback_candidate :
        feedback_candidates) {
-    const std::string& feedback_value = feedback_candidate.value;
+    const std::string feedback_value =
+        ZenzOutputValidator::RepairUserControlledSymbols(
+            feedback_symbol_style_source, live_conversion_value_,
+            feedback_candidate.value);
+
+    if (feedback_value != feedback_candidate.value) {
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] repaired user-controlled symbols ",
+          ZenzRedactedTextStats("value", feedback_value),
+          " ", ZenzRedactedTextStats("raw_value", feedback_candidate.value),
+          " context_class=", context_class));
+    }
 
     const ZenzTextPrivacyDecision feedback_value_privacy =
         EvaluateZenzLiveValuePrivacy(feedback_value);
@@ -6203,8 +6218,8 @@ bool Session::ApplyZenzLiveCorrectionResult(
           ? pending_zenz_live_.key
           : pending_zenz_live_.symbol_style_source;
 
-  const std::string zenz_value_before_symbol_restore = zenz_value;
-  zenz_value = ZenzOutputValidator::RestoreUserVisibleSymbolStyle(
+  const std::string zenz_value_before_symbol_repair = zenz_value;
+  zenz_value = ZenzOutputValidator::RepairUserControlledSymbols(
       zenz_symbol_style_source, pending_zenz_live_.mozc_value, zenz_value);
 
   const std::string zenz_display_key =
@@ -6213,12 +6228,12 @@ bool Session::ApplyZenzLiveCorrectionResult(
           pending_zenz_live_.mozc_value,
           pending_zenz_live_.key);
 
-  if (zenz_value != zenz_value_before_symbol_restore) {
+  if (zenz_value != zenz_value_before_symbol_repair) {
     ZenzDebugOutput(absl::StrCat(
-        "[zenz] restored symbol style ",
+        "[zenz] repaired user-controlled symbols ",
         ZenzRedactedTextStats("value", zenz_value),
         " ", ZenzRedactedTextStats("raw_value",
-                                   zenz_value_before_symbol_restore),
+                                   zenz_value_before_symbol_repair),
         " context_class=", pending_zenz_live_.context_class));
   }
 

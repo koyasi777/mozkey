@@ -69,6 +69,19 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "zenz_output_validator",
+    srcs = ["zenz_output_validator.cc"],
+    hdrs = ["zenz_output_validator.h"],
+    visibility = [
+        "//rewriter:__pkg__",
+    ],
+    deps = [
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
     name = "zenz_adoption_policy",
     srcs = ["zenz_adoption_policy.cc"],
     hdrs = ["zenz_adoption_policy.h"],
@@ -155,7 +168,6 @@ mozc_cc_library(
         "zenz_client_factory.cc",
         "zenz_live_corrector.cc",
         "zenz_named_pipe_client.cc",
-        "zenz_output_validator.cc",
         "zenz_unix_socket_client.cc",
     ],
     hdrs = [
@@ -163,7 +175,6 @@ mozc_cc_library(
         "zenz_client_factory.h",
         "zenz_live_corrector.h",
         "zenz_named_pipe_client.h",
-        "zenz_output_validator.h",
         "zenz_unix_socket_client.h",
     ],
     visibility = [
@@ -179,6 +190,7 @@ mozc_cc_library(
         ":zenz_context_assembler",
         ":zenz_context_sanitizer",
         ":zenz_feedback_store",
+        ":zenz_output_validator",
         ":zenz_prompt_builder",
         ":zenz_text_privacy_analyzer",
         "//base:clock",
@@ -313,15 +325,10 @@ mozc_cc_test(
 mozc_cc_test(
     name = "zenz_output_validator_test",
     size = "small",
-    srcs = [
-        "zenz_output_validator.cc",
-        "zenz_output_validator.h",
-        "zenz_output_validator_test.cc",
-    ],
+    srcs = ["zenz_output_validator_test.cc"],
     deps = [
-        "//base:util",
+        ":zenz_output_validator",
         "//testing:gunit_main",
-        "@com_google_absl//absl/strings",
     ],
 )
 

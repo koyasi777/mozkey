@@ -1802,6 +1802,55 @@ TEST_F(SessionTest,
   EXPECT_EQ(session_peer.zenz_live_context_class_(), "empty");
 }
 
+TEST_F(SessionTest,
+       ZenzFeedbackFastPathRepairsUnrequestedTrailingPunctuation) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzLiveCorrectionWithFeedbackLearning(&session);
+
+  // Session-level feedback fast path is intentionally limited to
+  // multi-segment live conversion. With no preceding client context in this
+  // fixture, the assembled context class is "empty".
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "あしたはあめ", "empty", "明日は雨!");
+  ASSERT_FALSE(session_peer.zenz_feedback_store_().ListEntries().empty());
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "あしたはあめ";
+  session_peer.live_conversion_preedit_() = "あしたはあめ";
+  session_peer.live_conversion_value_() = "明日は飴";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("あしたは");
+  segment->set_value("明日は");
+  segment->set_value_length(Util::CharsLen("明日は"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("あめ");
+  segment->set_value("飴");
+  segment->set_value_length(Util::CharsLen("飴"));
+
+  commands::Command command;
+  ASSERT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
+
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_SINGLE_SEGMENT_AND_KEY("明日は雨", "あしたはあめ", command);
+  EXPECT_EQ(session_peer.zenz_live_value_(), "明日は雨");
+  EXPECT_EQ(session_peer.zenz_live_mozc_value_(), "明日は飴");
+}
+
 TEST_F(SessionTest, ZenzFeedbackFastPathSkipsAutoBlockedCandidate) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
