@@ -29,6 +29,21 @@ class ZenzOutputValidator {
  public:
   ZenzValidationResult Validate(const ZenzValidationInput& input) const;
 
+  // Repairs Zenz output so that sentence-final or expressive punctuation stays
+  // under user control. Existing punctuation style is restored first, then
+  // excess punctuation in the trailing punctuation run is removed when the
+  // trailing punctuation run of neither the visible input nor the original
+  // Mozc value contained that many symbols. Interior punctuation never
+  // authorizes new trailing punctuation.
+  //
+  // Interior punctuation is intentionally left untouched because it can be
+  // lexical or technical (for example, "3.14"). This function is intended to
+  // be the common ingress contract for model output and learned Zenz feedback.
+  static std::string RepairUserControlledSymbols(
+      absl::string_view key,
+      absl::string_view mozc_value,
+      absl::string_view zenz_value);
+
   // Restores user-visible symbol style that Zenz may normalize. This preserves
   // the user's current composition style instead of normalizing to either
   // fullwidth or ASCII: if the key or original Mozc value used Japanese-width

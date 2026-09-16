@@ -306,7 +306,135 @@ std::string RestoreSymbolGroupStyleFromKeyOrMozc(
                                  avoid_ascii_token_fallback_when_widening);
 }
 
+const std::vector<std::vector<char32_t>>& UserControlledTrailingSymbolGroups() {
+  static const std::vector<std::vector<char32_t>> kGroups = {
+      {U'!', U'！'},
+      {U'?', U'？'},
+      {U'.', U'．', U'。'},
+      {U'~', U'～', U'〜'},
+      {U'…', U'‥'},
+  };
+  return kGroups;
+}
+
+int FindUserControlledTrailingSymbolGroup(
+    char32_t cp,
+    const std::vector<std::vector<char32_t>>& groups) {
+  for (size_t i = 0; i < groups.size(); ++i) {
+    if (FindSymbolStyleVariantIndex(cp, groups[i]) >= 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+bool CountUserControlledTrailingSymbols(
+    absl::string_view text,
+    const std::vector<std::vector<char32_t>>& groups,
+    std::vector<int>* counts) {
+  counts->assign(groups.size(), 0);
+  if (text.empty()) {
+    return true;
+  }
+
+  const std::vector<Utf8CharForSymbolRestore> chars =
+      SplitUtf8ForSymbolRestore(text);
+  if (chars.empty()) {
+    return false;
+  }
+
+  // Only the trailing punctuation run authorizes trailing punctuation in Zenz
+  // output.  Interior punctuation is lexical/technical context, not a budget
+  // that Zenz may spend at the end.  For example, the period in "3.14" must
+  // not authorize an added final period in "3.14.".
+  for (size_t i = chars.size(); i > 0; --i) {
+    const int group =
+        FindUserControlledTrailingSymbolGroup(chars[i - 1].cp, groups);
+    if (group < 0) {
+      break;
+    }
+    ++(*counts)[group];
+  }
+
+  return true;
+}
+
+std::string SuppressUnrequestedTrailingSymbols(
+    absl::string_view key,
+    absl::string_view mozc_value,
+    absl::string_view zenz_value) {
+  if (zenz_value.empty()) {
+    return std::string(zenz_value);
+  }
+
+  const std::vector<std::vector<char32_t>>& groups =
+      UserControlledTrailingSymbolGroups();
+
+  std::vector<int> key_counts;
+  std::vector<int> mozc_counts;
+  std::vector<int> zenz_counts;
+  if (!CountUserControlledTrailingSymbols(key, groups, &key_counts) ||
+      !CountUserControlledTrailingSymbols(mozc_value, groups, &mozc_counts) ||
+      !CountUserControlledTrailingSymbols(zenz_value, groups, &zenz_counts)) {
+    return std::string(zenz_value);
+  }
+
+  std::vector<int> allowed_counts(groups.size(), 0);
+  for (size_t i = 0; i < groups.size(); ++i) {
+    allowed_counts[i] = std::max(key_counts[i], mozc_counts[i]);
+  }
+
+  const std::vector<Utf8CharForSymbolRestore> zenz_chars =
+      SplitUtf8ForSymbolRestore(zenz_value);
+  if (zenz_chars.empty()) {
+    return std::string(zenz_value);
+  }
+
+  std::vector<bool> remove(zenz_chars.size(), false);
+  bool changed = false;
+
+  // Only repair a trailing punctuation run. Interior punctuation can be part of
+  // lexical or technical output such as "3.14", and deleting it would silently
+  // change meaning. Within the trailing run, preserve at most the count already
+  // present in the visible key or original Mozc value.
+  for (size_t i = zenz_chars.size(); i > 0; --i) {
+    const int group =
+        FindUserControlledTrailingSymbolGroup(zenz_chars[i - 1].cp, groups);
+    if (group < 0) {
+      break;
+    }
+
+    if (zenz_counts[group] > allowed_counts[group]) {
+      remove[i - 1] = true;
+      --zenz_counts[group];
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return std::string(zenz_value);
+  }
+
+  std::string repaired;
+  repaired.reserve(zenz_value.size());
+  for (size_t i = 0; i < zenz_chars.size(); ++i) {
+    if (!remove[i]) {
+      repaired.append(zenz_chars[i].bytes);
+    }
+  }
+  return repaired;
+}
+
 }  // namespace
+
+std::string ZenzOutputValidator::RepairUserControlledSymbols(
+    absl::string_view key,
+    absl::string_view mozc_value,
+    absl::string_view zenz_value) {
+  const std::string restored =
+      RestoreUserVisibleSymbolStyle(key, mozc_value, zenz_value);
+  return SuppressUnrequestedTrailingSymbols(key, mozc_value, restored);
+}
 
 std::string ZenzOutputValidator::RestoreUserVisibleSymbolStyle(
     absl::string_view key,

@@ -16,6 +16,7 @@
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
 #include "session/zenz_feedback_store.h"
+#include "session/zenz_output_validator.h"
 
 namespace mozc {
 namespace {
@@ -258,7 +259,9 @@ bool ZenzFeedbackCandidateRewriter::Rewrite(
 
   for (const session::ZenzFeedbackCandidate& feedback_candidate :
        ranked_candidates) {
-    const absl::string_view zenz_value = feedback_candidate.value;
+    const std::string zenz_value =
+        session::ZenzOutputValidator::RepairUserControlledSymbols(
+            full_key, original_top_value, feedback_candidate.value);
 
     if (!IsSafeCandidateText(full_key, zenz_value)) {
       continue;

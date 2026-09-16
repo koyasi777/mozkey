@@ -572,6 +572,49 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   EXPECT_EQ(rewriter.capability(request), RewriterInterface::NOT_AVAILABLE);
 }
 
+TEST(ZenzFeedbackCandidateRewriterTest,
+     RepairsUnrequestedTrailingPunctuationInLearnedFeedback) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("あしたはあめ", "japanese_only", "明日は雨!");
+
+  Segments segments;
+  AddSegment("あしたはあめ", "明日は飴", &segments);
+
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_GE(segment.candidates_size(), 2);
+  EXPECT_EQ(segment.candidate(0).value, "明日は飴");
+  EXPECT_EQ(segment.candidate(1).value, "明日は雨");
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     SkipsLearnedFeedbackThatBecomesSameAsMozcAfterSymbolRepair) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("するな", "japanese_only", "するな!");
+
+  Segments segments;
+  AddSegment("するな", "するな", &segments);
+
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_EQ(segment.candidates_size(), 1);
+  EXPECT_EQ(segment.candidate(0).value, "するな");
+}
+
 #else  // defined(_WIN32)
 
 TEST(ZenzFeedbackCandidateRewriterTest, SkippedOnNonWindows) {
