@@ -8719,6 +8719,27 @@ bool IsValidDirectCommitTriggerKey(const config::Config& config,
            config::Config::DIRECT_COMMIT_MIDDLE_DOT));
 }
 
+bool IsKutenOrToutenChar(absl::string_view ch) {
+  absl::string_view rest;
+  char32_t codepoint = 0;
+  if (!Util::SplitLastChar32(ch, &rest, &codepoint) || !rest.empty()) {
+    return false;
+  }
+  switch (codepoint) {
+    case 0x002E:  // ASCII full stop
+    case 0xFF0E:  // Fullwidth full stop
+    case 0x3002:  // Ideographic full stop
+    case 0xFF61:  // Halfwidth ideographic full stop
+    case 0x002C:  // ASCII comma
+    case 0xFF0C:  // Fullwidth comma
+    case 0x3001:  // Ideographic comma
+    case 0xFF64:  // Halfwidth ideographic comma
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool IsValidDirectCommitChar(const config::Config& config,
                              absl::string_view last_char) {
   return
@@ -8919,11 +8940,23 @@ bool Session::CanDirectCommitAfterPunctuation(
   const std::string preedit = context_->composer().GetStringForPreedit();
   const absl::string_view last_char =
       Util::Utf8SubString(preedit, length - 1, 1);
-  if (last_char.empty()) {
+  if (last_char.empty() || !IsValidDirectCommitChar(config, last_char)) {
     return false;
   }
 
-  return IsValidDirectCommitChar(config, last_char);
+  // Keep numeric punctuation in the composition. Mozc normalizes Japanese
+  // punctuation after a number to decimal/grouping punctuation, so committing
+  // here would split inputs such as "3.14" and "1,000" at the punctuation.
+  if (length >= 2 && IsKutenOrToutenChar(last_char)) {
+    const absl::string_view last_prev_char =
+        Util::Utf8SubString(preedit, length - 2, 1);
+    if (!last_prev_char.empty() &&
+        Util::GetScriptType(last_prev_char) == Util::NUMBER) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void Session::UpdateTime() {

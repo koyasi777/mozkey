@@ -6687,6 +6687,88 @@ TEST_F(SessionTest,
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
 }
 
+TEST_F(SessionTest, DirectCommitKeepsNumericPunctuationInComposition) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_auto_conversion(false);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_direct_commit(true);
+  config.set_direct_commit_key(
+      config::Config::DIRECT_COMMIT_KUTEN |
+      config::Config::DIRECT_COMMIT_TOUTEN);
+
+  for (const absl::string_view input : {"3.14", "1,000"}) {
+    SCOPED_TRACE(input);
+
+    Session session(engine);
+    session.SetConfig(config);
+    InitSessionToPrecomposition(&session);
+
+    auto table = std::make_shared<composer::Table>();
+    table->InitializeWithRequestAndConfig(
+        commands::Request::default_instance(), config);
+    session.SetTable(table);
+
+    commands::Command command;
+    InsertCharacterChars(input, &session, &command);
+
+    EXPECT_TRUE(command.output().consumed());
+    EXPECT_FALSE(command.output().has_result());
+    EXPECT_TRUE(command.output().has_preedit());
+    EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+    EXPECT_EQ(session.context().composer().GetQueryForConversion(), input);
+  }
+}
+
+TEST_F(SessionTest,
+       PendingLiveConversionDoesNotDirectCommitNumericPunctuation) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_auto_conversion(false);
+  config.set_use_live_conversion(true);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_direct_commit(true);
+  config.set_direct_commit_key(
+      config::Config::DIRECT_COMMIT_KUTEN |
+      config::Config::DIRECT_COMMIT_TOUTEN);
+
+  for (const absl::string_view input : {"10.", "10,"}) {
+    SCOPED_TRACE(input);
+
+    Session session(engine);
+    SessionTestPeer session_peer(session);
+    session.SetConfig(config);
+    InitSessionToPrecomposition(&session);
+
+    auto table = std::make_shared<composer::Table>();
+    table->InitializeWithRequestAndConfig(
+        commands::Request::default_instance(), config);
+    session.SetTable(table);
+
+    commands::Command command;
+    InsertCharacterChars("10", &session, &command);
+
+    ASSERT_EQ(session.context().composer().GetQueryForConversion(), "10");
+    ASSERT_TRUE(session_peer.live_conversion_pending_());
+
+    command.Clear();
+    const std::string trigger(input.substr(input.size() - 1));
+    ASSERT_TRUE(SendKey(trigger, &session, &command));
+
+    EXPECT_TRUE(command.output().consumed());
+    EXPECT_FALSE(command.output().has_result());
+    EXPECT_TRUE(command.output().has_preedit());
+    EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+    EXPECT_EQ(session.context().composer().GetQueryForConversion(), input);
+  }
+}
 TEST_F(SessionTest, RomajiInput) {
   auto table = std::make_shared<composer::Table>();
   table->AddRule("pa", "ぱ", "");
