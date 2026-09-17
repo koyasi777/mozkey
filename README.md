@@ -346,6 +346,8 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 
 どの句読点・記号を単打確定の対象にするかは、設定画面のチェックボックスで選択できます。
 
+ただし、数字直後の句点・読点系文字は、数値入力を妨げないよう単打確定の対象外として扱います。これにより、句読点・記号の単打確定を有効にしたままでも、`3.14` や `1,000` のような数値を途中で確定せずに入力できます。通常の日本語入力での句点・読点の単打確定は従来どおり動作します。
+
 ライブ変換が有効な場合、句読点・記号の単打確定では、ひらがなの未変換文字列ではなく、現在表示されているライブ変換結果を確定します。
 
 句読点・記号の単打確定でも、直前の通常変換確定による学習は次の実テキスト入力まで保留されます。次の操作が Backspace、Escape、Revert、Reset、Undo などの場合、その保留学習は保持せず取り消します。一方、IMEOff / MakeSureIMEOff は取り消しではなく確定後のモード変更として扱い、保留学習は確定扱いにします。
@@ -1056,6 +1058,8 @@ Examples:
 The selectable targets include periods, commas, question marks, exclamation marks, parentheses, corner brackets, and the middle dot. `「` and `」` are configured independently. The middle dot `・` is handled as an independent Japanese separator symbol.
 
 You can choose which punctuations/symbols are committed directly in the config dialog.
+
+However, period- and comma-like punctuation immediately following a number is excluded from direct commit so that numeric input can continue normally. This allows values such as `3.14` and `1,000` to be entered without being committed at the punctuation, while ordinary punctuation direct commit in Japanese text continues to work as before.
 
 When live conversion is enabled, direct-commit punctuations/symbols commit the currently displayed live conversion result instead of committing the raw kana composition.
 
