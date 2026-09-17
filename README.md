@@ -92,7 +92,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows 版の候補ウィンドウ・用例ウィンドウ・ライブ変換中のルビ表示に使うフォントを設定画面から変更可能
 - Windows 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、主要テキストの太さを 100～900 の範囲で個別に設定可能
 - Windows / macOS 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、対応するキー設定では候補・文節移動も視覚方向に合わせて操作可能
-- macOS 版では、縦書き時の連鎖候補ウィンドウを本文から外側へ展開するよう配置
+- Windows / macOS 版では、縦書き時の連鎖候補ウィンドウを現在候補から本文の外側へ展開するよう配置し、必要に応じて反対側へフォールバック
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能
 - Windows 版の IME 切り替えインジケータが、Windows のライト / ダークテーマに合わせて表示されるように改善
@@ -491,6 +491,10 @@ Windows 版では、縦書きの入力位置を検出し、候補や用例の主
 
 候補ウィンドウは縦書きの入力位置に対して左側への配置を優先し、アプリケーションから渡される入力行の幅が狭い場合でも、入力文字と候補表示が近づきすぎないように配置を補正します。アプリケーション名ごとの個別分岐ではなく、入力位置の geometry に基づいて調整します。
 
+縦書きの候補列は、候補ごとの文字量や説明の有無に応じた自然な幅・高さで配置します。長い候補がある場合でも、他の候補列まで一律に引き伸ばさず、それぞれの候補に必要な大きさを保ちます。選択中の候補は、文字列自体が短い場合でも候補本文領域の下端まで選択背景を伸ばし、縦書きの列として現在位置を確認しやすくしています。
+
+連鎖候補ウィンドウは、現在選択している候補を基準に、縦書き本文から見て外側となる左側への展開を優先します。候補ウィンドウや入力位置との重なり、または画面端の制約により左側へ配置できない場合は右側へフォールバックします。通常の横書き時は従来の配置を維持します。
+
 ライブ変換中のルビも縦書き composition に追従します。Word などで未確定文字列が複数の縦列へ折り返す場合は、すでに表示されている composition 列と重ならない位置へルビを配置します。
 
 #### macOS
@@ -744,7 +748,7 @@ Main features added in this fork
 - Allows changing the font used for the Windows candidate window, infolist window, and live-conversion ruby display from the config dialog
 - Allows configuring the primary text weight independently from 100 to 900 for the Windows candidate window, suggestion window, and live-conversion ruby display
 - Adds vertical-writing layouts for candidate, suggestion, infolist, and live-conversion ruby displays on Windows and macOS, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
-- On macOS, places cascading candidate windows outward from the vertical composition
+- On Windows and macOS, places cascading candidate windows outward from the focused vertical candidate, with fallback to the opposite side when necessary
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog
 - Makes the Windows IME mode indicator follow the Windows light/dark theme
@@ -1239,6 +1243,10 @@ Horizontal writing, ordinary cursor movement during Composition, `Ctrl+Shift` co
 On Windows, Mozkey detects vertical composition geometry and uses DirectWrite vertical text rendering for primary candidate and infolist text.
 
 The candidate window prefers placement on the left side of a vertical composition. When an application reports a narrow input-line geometry, Mozkey adds placement clearance so that the candidate display does not sit too close to the input text. This adjustment is based on the reported composition geometry rather than application-specific name checks.
+
+In vertical mode, candidate columns keep natural per-candidate geometry based on their own text and description content. A long candidate does not force unrelated candidate columns to expand to the same size. The selection background extends through the candidate body even when the visible text is short, making the currently selected vertical column easier to identify.
+
+Cascading candidate windows are anchored to the focused candidate and prefer expanding to the left, outward from the vertical composition. If the left-side placement would collide with the candidate/preedit region or cannot fit within the working area, the renderer falls back to the right. The existing horizontal cascading placement is preserved.
 
 The live-conversion ruby display also follows vertical composition geometry. When an uncommitted composition wraps across multiple vertical columns, such as in Word, the renderer keeps the ruby outside the already occupied composition span instead of placing it over an earlier column.
 

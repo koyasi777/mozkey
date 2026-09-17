@@ -67,6 +67,23 @@ namespace {
 // layout size constants in pixel unit in the default DPI.
 constexpr int kIndicatorWidthInDefaultDPI = 4;
 
+// Vertical candidate geometry mirrors the native macOS contract.  These are
+// logical pixels at 96 DPI and are scaled with the candidate font DPI.
+constexpr int kVerticalCrossAxisEdgePadding = 2;
+constexpr int kVerticalCandidateGap = 1;
+constexpr int kVerticalCardHorizontalPadding = 2;
+constexpr int kVerticalCardVerticalPadding = 7;
+constexpr int kVerticalShortcutBodyGap = 5;
+constexpr int kVerticalValueDescriptionGap = 12;
+constexpr int kVerticalSuggestionCardVerticalPadding = 4;
+constexpr int kVerticalSuggestionShortcutBodyGap = 3;
+constexpr int kVerticalSuggestionValueDescriptionGap = 7;
+// DrawInformationIcon places the top of a vertical information marker 6 DIP
+// above the candidate bottom. Reserve one additional DIP between text and the
+// marker. This matters for PARTIAL_PREDICTION: it runs prediction-capable
+// rewriters but is presented as the compact SUGGESTION category.
+constexpr int kVerticalInformationMarkerTailReserve = 7;
+
 // DPI-invariant layout size constants in pixel unit.
 constexpr int kWindowBorder = 1;
 constexpr int kFooterSeparatorHeight = 1;
@@ -524,48 +541,41 @@ bool CandidateWindow::TryUpdateVerticalLayout() {
       item.description_size = text_renderer_->MeasureStringVertical(
           TextRenderer::FONTSET_DESCRIPTION, description);
     }
+    item.has_information_marker = candidate.has_information_id();
     metrics.push_back(item);
   }
 
-  const RendererStyleHandler::RendererStyleType style_type =
-      GetRendererStyleType(*candidate_window_);
-  const RendererStyle layout_style =
-      GetCurrentScaledRendererStyle(style_type, dpi_);
-  const int padding = std::max(
-      0, layout_style.has_row_rect_padding()
-             ? layout_style.row_rect_padding()
-             : kRowRectPadding);
+  const double dpi_scale = GetDPIScalingFactor(dpi_);
+  const auto scale_metric = [dpi_scale](int value) {
+    return std::max(
+        0, static_cast<int>(std::lround(value * dpi_scale)));
+  };
 
-  // Keep ordinary conversion/prediction geometry exactly as before.  The
-  // passive SUGGESTION popup is visually denser because it normally contains
-  // only vertical candidate strings, so give only that popup additional outer
-  // breathing room.  Do not use column_padding for the left/right edges:
-  // widening every candidate column would change the already-approved
-  // conversion candidate spacing.
-  int vertical_padding = padding;
-  int cross_axis_edge_padding = 0;
-  if (candidate_window_->category() == commands::SUGGESTION) {
-    const Size candidate_em = text_renderer_->MeasureStringVertical(
-        TextRenderer::FONTSET_CANDIDATE, L"日");
-    const int em_cross = std::max(1, candidate_em.width);
-    const int em_inline = std::max(1, candidate_em.height);
-
-    // About 0.15em at the physical left/right edges and about 0.33em at
-    // the top/bottom.  Measurements come from the active candidate font, so
-    // the result follows font size and DPI.
-    cross_axis_edge_padding =
-        std::max(1, (3 * em_cross + 19) / 20);
-    vertical_padding =
-        std::max(padding, std::max(1, (em_inline + 2) / 3));
-  }
+  const bool is_passive_suggestion =
+      candidate_window_->category() == commands::SUGGESTION;
 
   VerticalCandidateLayout::Parameters parameters;
   parameters.window_border = kWindowBorder;
-  parameters.column_padding = padding;
-  parameters.vertical_padding = vertical_padding;
-  parameters.section_gap = padding;
+  parameters.cross_axis_edge_padding =
+      scale_metric(kVerticalCrossAxisEdgePadding);
+  parameters.candidate_gap = scale_metric(kVerticalCandidateGap);
+  parameters.card_horizontal_padding =
+      scale_metric(kVerticalCardHorizontalPadding);
+  parameters.card_vertical_padding =
+      scale_metric(is_passive_suggestion
+                       ? kVerticalSuggestionCardVerticalPadding
+                       : kVerticalCardVerticalPadding);
+  parameters.shortcut_body_gap =
+      scale_metric(is_passive_suggestion
+                       ? kVerticalSuggestionShortcutBodyGap
+                       : kVerticalShortcutBodyGap);
+  parameters.value_description_gap =
+      scale_metric(is_passive_suggestion
+                       ? kVerticalSuggestionValueDescriptionGap
+                       : kVerticalValueDescriptionGap);
+  parameters.information_marker_tail_reserve =
+      scale_metric(kVerticalInformationMarkerTailReserve);
   parameters.footer_size = MeasureVerticalFooterSize();
-  parameters.cross_axis_edge_padding = cross_axis_edge_padding;
 
   vertical_layout_->Initialize(metrics, parameters);
   layout_mode_ = LayoutMode::kVertical;
@@ -1283,14 +1293,22 @@ void CandidateWindow::DrawSelectedRect(HDC dc) {
     const auto style = GetCurrentRendererStyle(
         GetRendererStyleType(*candidate_window_));
 
-    CRect selected_rect = ToCRect(GetCandidateRect(focused_array_index));
-
-    selected_rect.DeflateRect(4, 1);
-
-    const int radius = GetRendererWindowCornerRadiusInPixels(
-        RendererStyleHandler::GetCandidateWindowCornerRadius(
-            GetRendererStyleType(*candidate_window_)),
-        dpi_, selected_rect.Width(), selected_rect.Height());
+    CRect selected_rect;
+    int radius = 0;
+    if (IsVerticalLayout()) {
+      // Keep natural candidate cards for text layout, but paint selection as
+      // a full-height stripe to the end of the candidate body.  Focus then
+      // remains visually stable when moving between short and long strings.
+      selected_rect = ToCRect(
+          vertical_layout_->GetCandidateSelectionRect(focused_array_index));
+    } else {
+      selected_rect = ToCRect(GetCandidateRect(focused_array_index));
+      selected_rect.DeflateRect(4, 1);
+      radius = GetRendererWindowCornerRadiusInPixels(
+          RendererStyleHandler::GetCandidateWindowCornerRadius(
+              GetRendererStyleType(*candidate_window_)),
+          dpi_, selected_rect.Width(), selected_rect.Height());
+    }
 
     wil::unique_select_object prev_pen =
         wil::SelectObject(dc, static_cast<HPEN>(::GetStockObject(DC_PEN)));

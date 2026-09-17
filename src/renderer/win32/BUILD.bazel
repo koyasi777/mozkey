@@ -137,6 +137,18 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "cascading_window_layout",
+    srcs = ["cascading_window_layout.cc"],
+    hdrs = ["cascading_window_layout.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//base:coordinates",
+        "//renderer:window_util",
+    ],
+)
+
+mozc_cc_library(
     name = "candidate_window",
     srcs = ["candidate_window.cc"],
     hdrs = ["candidate_window.h"],
@@ -318,6 +330,7 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":candidate_window",
+        ":cascading_window_layout",
         ":indicator_window",
         ":infolist_window",
         ":ruby_window",
@@ -374,6 +387,18 @@ mozc_cc_library(
         "//renderer:window_effect_util",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+    ],
+)
+
+mozc_cc_test(
+    name = "cascading_window_layout_test",
+    srcs = ["cascading_window_layout_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":cascading_window_layout",
+        "//base:coordinates",
+        "//testing:gunit_main",
     ],
 )
 
