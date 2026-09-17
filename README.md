@@ -13,7 +13,7 @@
   <img alt="Based on Mozc" src="https://img.shields.io/badge/based%20on-Mozc-88A2DD">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-Zenz-53D4C7">
   <img alt="Release build" src="https://img.shields.io/badge/release-Windows%20MSI-178B8B">
-  <img alt="macOS status" src="https://img.shields.io/badge/macOS-Zenz%20tested-2EA44F">
+  <img alt="macOS status" src="https://img.shields.io/badge/macOS-tested-2EA44F">
   <img alt="Linux status" src="https://img.shields.io/badge/Linux-untested-lightgrey">
 </p>
 
@@ -37,7 +37,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 
 現時点で Releases から公開しているビルド済みパッケージは Windows 向けです。
 
-Windows に加え、macOS でもこの fork の Zenz 文脈取得とローカル runtime を実機で検証しています。macOS では、Zenz runtime を含む PKG の build / install、`mozc_zenz_scorer` / `llama-server` の起動、およびカーソル前後の Zenz context acquisition を確認しています。
+Windows に加え、macOS でもこの fork を実機で検証しています。macOS についても、ビルドだけでなく、実際の PKG / install / runtime / 入力・表示経路まで確認しています。
 
 Linux については、upstream Mozc 自体は対応していますが、この fork 固有の Zenz 構成や追加機能はまだ実機確認できていません。
 
@@ -91,7 +91,8 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - サジェストウィンドウとルビ表示は、候補ウィンドウの配色に追従するか、個別のテーマ・カスタム配色を使うかを選択可能
 - Windows 版の候補ウィンドウ・用例ウィンドウ・ライブ変換中のルビ表示に使うフォントを設定画面から変更可能
 - Windows 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、主要テキストの太さを 100～900 の範囲で個別に設定可能
-- Windows 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、縦書き時の候補・文節移動も視覚方向に合わせて操作可能
+- Windows / macOS 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、対応するキー設定では候補・文節移動も視覚方向に合わせて操作可能
+- macOS 版では、縦書き時の連鎖候補ウィンドウを本文から外側へ展開するよう配置
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能
 - Windows 版の IME 切り替えインジケータが、Windows のライト / ダークテーマに合わせて表示されるように改善
@@ -469,15 +470,11 @@ Windows 版では、設定画面から候補ウィンドウ、サジェストウ
 
 IME 切り替えインジケータは Windows のライト / ダークテーマに追従し、現在の入力モードを確認しやすいように配色を切り替えます。
 
-### Windows 縦書き対応
+### 縦書き対応（Windows / macOS）
 
-Windows 版では、縦書きの入力位置を検出し、候補ウィンドウ、予測・サジェスト、用例表示、ライブ変換中のルビを縦組みに合わせて表示します。候補や用例の主要テキストには DirectWrite の縦書き描画を使用します。
+Windows / macOS 版では、縦書き入力時に候補ウィンドウ、予測・サジェスト、用例表示、ライブ変換中のルビを縦組みに合わせて表示します。横書き時の既存動作は維持します。
 
-候補ウィンドウは縦書きの入力位置に対して左側への配置を優先し、アプリケーションから渡される入力行の幅が狭い場合でも、入力文字と候補表示が近づきすぎないように配置を補正します。アプリケーション名ごとの個別分岐ではなく、入力位置の geometry に基づいて調整します。
-
-ライブ変換中のルビも縦書き composition に追従します。Word などで未確定文字列が複数の縦列へ折り返す場合は、すでに表示されている composition 列と重ならない位置へルビを配置します。
-
-縦書きの候補操作では、現在のキー設定が対応する既存コマンド割り当てに一致する場合に、視覚方向に合わせて矢印キーを解釈します。
+縦書きの候補操作では、Windows / macOS のどちらでも、縦書き状態を session 側へ伝え、現在のキー設定が対応する既存コマンド割り当てに一致する場合に、視覚方向に合わせて矢印キーを解釈します。
 
 - Suggestion では Left で候補へ移動
 - Conversion / Prediction では Left / Right で候補の前後へ移動し、Up / Down で前後の文節へ移動
@@ -485,6 +482,28 @@ Windows 版では、縦書きの入力位置を検出し、候補ウィンドウ
 - 既存の `Shift+Left` / `Shift+Right` による文節幅変更も互換操作として維持
 
 通常の横書き動作、通常 Composition 中のカーソル操作、`Ctrl+Shift` 系の操作、および対応するコマンド割り当てを持たないキー設定は従来動作を維持します。
+
+#### Windows
+
+Windows 版では、縦書きの入力位置を検出し、候補や用例の主要テキストを DirectWrite の縦書き描画で表示します。
+
+候補ウィンドウは縦書きの入力位置に対して左側への配置を優先し、アプリケーションから渡される入力行の幅が狭い場合でも、入力文字と候補表示が近づきすぎないように配置を補正します。アプリケーション名ごとの個別分岐ではなく、入力位置の geometry に基づいて調整します。
+
+ライブ変換中のルビも縦書き composition に追従します。Word などで未確定文字列が複数の縦列へ折り返す場合は、すでに表示されている composition 列と重ならない位置へルビを配置します。
+
+#### macOS
+
+macOS 版では、IMK 側で取得した writing direction をレンダラーへ伝播し、候補・用例・ルビの主要テキストを Core Text の縦書き描画で表示します。
+
+候補／サジェストでは、Core Text が全文を確実に描画できる技術的な text frame と、画面上で実際に見せる候補列の幅を分離しています。表示幅は CJK の標準的な列幅を下限としつつ、実際のグリフ幅がそれを超える場合だけ拡張します。これにより、日本語・ASCII・半角カナなどが混在しても、必要以上に太い候補列になりにくいようにしています。
+
+縦書き時の候補／サジェストと本文との間隔は 6 pt とし、ライブ変換中のルビも実効 6 pt の間隔で配置します。横書き時の既存の間隔・配置は変更しません。
+
+用例表示（Infolist）は縦書き時に列ごとの Core Text frame を使って描画し、縦組みの表示方向に合わせて配置します。ルビ表示も、描画用 frame を確保しつつ、可視部分は CJK の標準列幅と実際のグリフ幅に基づいて過不足なく配置します。
+
+連鎖候補ウィンドウは、現在の候補位置を基準に、縦書き本文から見て外側となる左側への展開を優先します。候補ウィンドウや preedit との重なりを避けられない場合は右側へフォールバックし、同じ階層の連鎖候補同士も重ならないように配置します。
+
+これらの縦書き処理は macOS 専用の layout / writing-direction ロジックとして分離し、候補レイアウト、Infolist レイアウト、writing direction、ウィンドウ配置の単体テストを追加しています。通常の横書き経路は従来動作を維持します。
 
 ### Windows 未確定文字の表示色
 
@@ -663,7 +682,7 @@ Download / Install
 
 At the moment, prebuilt packages published from Releases are available for Windows.
 
-In addition to Windows, the Zenz context / runtime path has been tested on real macOS hardware. On macOS, a Zenz-runtime-enabled PKG has been built and installed, `mozc_zenz_scorer` / `llama-server` startup has been verified, and preceding / following Zenz context acquisition has been tested.
+In addition to Windows, this fork is also tested on real macOS hardware. The macOS path is verified beyond successful builds, including actual package/install, runtime, input, and rendering workflows.
 
 Linux is supported by upstream Mozc itself, but this fork-specific Zenz configuration and added features have not yet been tested on a real Linux environment.
 
@@ -722,7 +741,8 @@ Main features added in this fork
 - Allows the suggestion window and ruby display to either follow the candidate window color theme or use their own theme/custom colors
 - Allows changing the font used for the Windows candidate window, infolist window, and live-conversion ruby display from the config dialog
 - Allows configuring the primary text weight independently from 100 to 900 for the Windows candidate window, suggestion window, and live-conversion ruby display
-- Adds Windows vertical-writing support for candidate, suggestion, infolist, and live-conversion ruby displays, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
+- Adds vertical-writing layouts for candidate, suggestion, infolist, and live-conversion ruby displays on Windows and macOS, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
+- On macOS, places cascading candidate windows outward from the vertical composition
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog
 - Makes the Windows IME mode indicator follow the Windows light/dark theme
@@ -1197,15 +1217,11 @@ the config dialog.
 The IME mode indicator follows the Windows light/dark theme and changes its
 colors to keep the current input mode easy to recognize.
 
-### Windows vertical writing support
+### Vertical writing support (Windows / macOS)
 
-On Windows, Mozkey detects vertical composition geometry and lays out the candidate window, prediction/suggestion display, infolist, and live-conversion ruby for vertical writing. Primary candidate and infolist text uses DirectWrite vertical text rendering.
+On Windows and macOS, Mozkey lays out the candidate window, prediction/suggestion display, infolist, and live-conversion ruby for vertical writing while preserving the existing horizontal-writing behavior.
 
-The candidate window prefers placement on the left side of a vertical composition. When an application reports a narrow input-line geometry, Mozkey adds placement clearance so that the candidate display does not sit too close to the input text. This adjustment is based on the reported composition geometry rather than application-specific name checks.
-
-The live-conversion ruby display also follows vertical composition geometry. When an uncommitted composition wraps across multiple vertical columns, such as in Word, the renderer keeps the ruby outside the already occupied composition span instead of placing it over an earlier column.
-
-For candidate navigation in vertical writing, Mozkey reinterprets arrow keys only when the active keymap uses the supported existing command bindings.
+For candidate navigation in vertical writing, both Windows and macOS pass the vertical-writing state into the session layer. When the active keymap uses the supported existing command bindings, Mozkey reinterprets arrow keys to match the visual writing direction.
 
 - In Suggestion state, Left enters the candidate list.
 - In Conversion / Prediction state, Left / Right move through candidates while Up / Down move between segments.
@@ -1213,6 +1229,28 @@ For candidate navigation in vertical writing, Mozkey reinterprets arrow keys onl
 - Existing `Shift+Left` / `Shift+Right` segment-width operations remain available for compatibility.
 
 Horizontal writing, ordinary cursor movement during Composition, `Ctrl+Shift` combinations, and keymaps that do not use the supported command bindings retain their existing behavior.
+
+#### Windows
+
+On Windows, Mozkey detects vertical composition geometry and uses DirectWrite vertical text rendering for primary candidate and infolist text.
+
+The candidate window prefers placement on the left side of a vertical composition. When an application reports a narrow input-line geometry, Mozkey adds placement clearance so that the candidate display does not sit too close to the input text. This adjustment is based on the reported composition geometry rather than application-specific name checks.
+
+The live-conversion ruby display also follows vertical composition geometry. When an uncommitted composition wraps across multiple vertical columns, such as in Word, the renderer keeps the ruby outside the already occupied composition span instead of placing it over an earlier column.
+
+#### macOS
+
+On macOS, Mozkey propagates the writing direction obtained by the IMK input side into the renderer and uses Core Text vertical text rendering for primary candidate, infolist, and ruby text.
+
+For candidate and suggestion rows, the technical Core Text frame required to render the full string is kept separate from the visible candidate-column width. The visible width uses a nominal CJK column width as its floor and expands only when the actual glyph ink requires more space. This avoids unnecessarily wide columns for Japanese, ASCII, and half-width katakana while preserving enough room for genuinely wide glyphs.
+
+The vertical gap between the candidate/suggestion display and the composition text is 6 pt. The live-conversion ruby is also placed with an effective 6 pt gap. Existing horizontal-writing spacing and placement remain unchanged.
+
+The infolist uses compact per-column Core Text frames in vertical mode. The ruby display similarly keeps a sufficiently large technical text frame while sizing the visible pill from the nominal CJK column width and actual glyph ink.
+
+Cascading candidate windows are anchored to the focused candidate and prefer expanding to the left, which is outward from the vertical composition. If that placement would collide with the candidate/preedit region or run out of room, the renderer falls back to the right side. Sibling cascade windows are also kept from overlapping each other.
+
+The macOS vertical-writing implementation is separated into dedicated layout and writing-direction logic, with unit tests for candidate layout, infolist layout, writing direction, and window placement. The existing horizontal-writing path retains its previous behavior.
 
 ### Windows preedit display colors
 
