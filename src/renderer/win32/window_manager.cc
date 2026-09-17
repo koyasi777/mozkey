@@ -42,6 +42,7 @@
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
+#include "renderer/win32/cascading_window_layout.h"
 #include "renderer/win32/indicator_window.h"
 #include "renderer/win32/infolist_window.h"
 #include "renderer/win32/win32_dpi_util.h"
@@ -577,12 +578,20 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     const commands::CandidateWindow& sub_candidate_window =
         candidate_window.sub_candidate_window();
 
+    const CascadingWindowLayoutMode cascading_layout_mode =
+        GetCascadingWindowLayoutMode(vertical);
     if (candidate_changed) {
-      cascading_window_->UpdateLayout(sub_candidate_window);
+      if (cascading_layout_mode == CascadingWindowLayoutMode::kVertical) {
+        cascading_window_->UpdateLayout(
+            sub_candidate_window, CandidateWindow::LayoutMode::kVertical);
+      } else {
+        cascading_window_->UpdateLayout(sub_candidate_window);
+      }
     }
 
-    // Put the cascading window right to the selected row of this candidate
-    // window.
+    // Anchor the cascading window to the selected candidate. Horizontal
+    // writing preserves the legacy right/left placement, while vertical
+    // writing continues outward from the candidate/preedit obstacle.
     const Rect selected_row = main_window_->GetSelectionRectInScreenCord();
     const Rect selected_row_with_window_border(
         Point(main_window_rect.Left(), selected_row.Top()),
@@ -597,10 +606,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     const Size cascading_window_size = cascading_window_->GetLayoutSize();
 
     // cascading window should be in the same working area as the main window.
-    const Rect cascading_window_rect =
-        WindowUtil::GetWindowRectForCascadingWindow(
-            selected_row_with_window_border, cascading_window_size,
-            cascading_window_zero_point, working_area);
+    const Rect cascading_window_rect = GetCascadingWindowRect(
+        cascading_layout_mode, selected_row, selected_row_with_window_border,
+        main_window_rect, cascading_window_size, cascading_window_zero_point,
+        preedit_rect_for_transition, working_area);
 
     cascading_window_->SetWindowPos(
         HWND_TOPMOST, cascading_window_rect.Left(), cascading_window_rect.Top(),

@@ -10,34 +10,39 @@ namespace mozc {
 namespace renderer {
 namespace win32 {
 
-// Computes the geometry of an MS-IME-style vertical candidate body.
+// Pure physical geometry for the native Windows vertical candidate window.
 //
-// Candidate order is preserved semantically: candidate index 0 remains the
-// first candidate.  Only its visual placement changes.  Candidate 0 occupies
-// the rightmost column and subsequent candidates proceed to the left.
+// Semantic candidate order is preserved: candidate index 0 is physically
+// rightmost and later candidates proceed to the left.
 //
-// This class is intentionally renderer-independent.  Text measurement and
-// drawing are handled by CandidateWindow/TextRenderer; this class only turns
-// measured sizes into rectangles.
+// Each candidate is a natural-size vertical card.  Shortcut, value, and
+// description are stacked on the inline axis inside that card.  A long
+// candidate therefore changes its own height and the window height, but does
+// not stretch the selectable rectangles of its siblings.
+//
+// Text measurement, GDI drawing, colors, and writing-direction detection are
+// deliberately outside this class.
 class VerticalCandidateLayout {
  public:
   struct CandidateMetrics {
     Size shortcut_size;
     Size value_size;
     Size description_size;
+    bool has_information_marker = false;
   };
 
   struct Parameters {
     int window_border = 0;
-    int column_padding = 0;
-    int vertical_padding = 0;
-    int section_gap = 0;
-    Size footer_size;
-
-    // Extra blank space at the physical left/right edges of a vertical popup.
-    // This is intentionally independent from column_padding so callers can
-    // add outer breathing room without widening every candidate column.
     int cross_axis_edge_padding = 0;
+    int candidate_gap = 0;
+    int card_horizontal_padding = 0;
+    int card_vertical_padding = 0;
+    int shortcut_body_gap = 0;
+    int value_description_gap = 0;
+    // Minimum trailing space from the final text glyph to the card bottom
+    // when DrawInformationIcon needs to occupy the tail of this candidate.
+    int information_marker_tail_reserve = 0;
+    Size footer_size;
   };
 
   VerticalCandidateLayout() = default;
@@ -50,11 +55,15 @@ class VerticalCandidateLayout {
   size_t candidate_count() const { return candidates_.size(); }
   Size GetTotalSize() const { return total_size_; }
 
-  // Returns the complete selectable column for the candidate.
+  // Returns the natural-size candidate card used for content layout and
+  // hit-testing.
   Rect GetCandidateRect(size_t index) const;
 
-  // Returns the actual content rectangle for each section.  Empty sections
-  // return an empty rectangle at the section origin.
+  // Returns the visual selection stripe for a candidate.  It keeps the
+  // candidate's natural width but extends to the bottom of the candidate
+  // body so focus does not visually shrink or grow with the text length.
+  Rect GetCandidateSelectionRect(size_t index) const;
+
   Rect GetShortcutRect(size_t index) const;
   Rect GetValueRect(size_t index) const;
   Rect GetDescriptionRect(size_t index) const;

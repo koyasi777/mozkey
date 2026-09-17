@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <initializer_list>
 #include <vector>
 
 #include "base/coordinates.h"
@@ -11,22 +12,73 @@ namespace renderer {
 namespace win32 {
 namespace {
 
-int NonNegative(int value) {
-  return std::max(0, value);
+int NonNegative(int value) { return std::max(0, value); }
+
+Size NormalizeSize(const Size& size) {
+  if (size.width <= 0 || size.height <= 0) {
+    return Size();
+  }
+  return Size(size.width, size.height);
 }
 
-Size NonNegativeSize(const Size& size) {
-  return Size(NonNegative(size.width), NonNegative(size.height));
+bool HasArea(const Size& size) {
+  return size.width > 0 && size.height > 0;
 }
 
-int MaxWidth(const VerticalCandidateLayout::CandidateMetrics& metrics) {
-  return std::max(
-      metrics.shortcut_size.width,
-      std::max(metrics.value_size.width, metrics.description_size.width));
+int MaxWidth(std::initializer_list<Size> sizes) {
+  int width = 0;
+  for (const Size& size : sizes) {
+    if (HasArea(size)) {
+      width = std::max(width, size.width);
+    }
+  }
+  return width;
 }
 
-int CenteredLeft(const Rect& column, int content_width) {
-  return column.Left() + (column.Width() - content_width) / 2;
+int CandidateWidth(
+    const VerticalCandidateLayout::CandidateMetrics& item,
+    const VerticalCandidateLayout::Parameters& parameters) {
+  const int content_width =
+      MaxWidth({item.shortcut_size, item.value_size, item.description_size});
+  return content_width + parameters.card_horizontal_padding * 2;
+}
+
+int CandidateHeight(
+    const VerticalCandidateLayout::CandidateMetrics& item,
+    const VerticalCandidateLayout::Parameters& parameters) {
+  const int trailing_padding =
+      item.has_information_marker
+          ? std::max(parameters.card_vertical_padding,
+                     parameters.information_marker_tail_reserve)
+          : parameters.card_vertical_padding;
+  int height = parameters.card_vertical_padding + trailing_padding;
+
+  const bool has_shortcut = HasArea(item.shortcut_size);
+  const bool has_value = HasArea(item.value_size);
+  const bool has_description = HasArea(item.description_size);
+  const bool has_body = has_value || has_description;
+
+  if (has_shortcut) {
+    height += item.shortcut_size.height;
+  }
+  if (has_shortcut && has_body) {
+    height += parameters.shortcut_body_gap;
+  }
+  if (has_value) {
+    height += item.value_size.height;
+  }
+  if (has_value && has_description) {
+    height += parameters.value_description_gap;
+  }
+  if (has_description) {
+    height += item.description_size.height;
+  }
+
+  return height;
+}
+
+int CenteredLeft(const Rect& rect, int width) {
+  return rect.Left() + (rect.Width() - width) / 2;
 }
 
 }  // namespace
@@ -40,100 +92,120 @@ void VerticalCandidateLayout::Initialize(
 
   Parameters parameters = input_parameters;
   parameters.window_border = NonNegative(parameters.window_border);
-  parameters.column_padding = NonNegative(parameters.column_padding);
-  parameters.vertical_padding = NonNegative(parameters.vertical_padding);
-  parameters.section_gap = NonNegative(parameters.section_gap);
-  parameters.footer_size = NonNegativeSize(parameters.footer_size);
   parameters.cross_axis_edge_padding =
       NonNegative(parameters.cross_axis_edge_padding);
+  parameters.candidate_gap = NonNegative(parameters.candidate_gap);
+  parameters.card_horizontal_padding =
+      NonNegative(parameters.card_horizontal_padding);
+  parameters.card_vertical_padding =
+      NonNegative(parameters.card_vertical_padding);
+  parameters.shortcut_body_gap =
+      NonNegative(parameters.shortcut_body_gap);
+  parameters.value_description_gap =
+      NonNegative(parameters.value_description_gap);
+  parameters.information_marker_tail_reserve =
+      NonNegative(parameters.information_marker_tail_reserve);
+  parameters.footer_size = NormalizeSize(parameters.footer_size);
 
   std::vector<CandidateMetrics> metrics;
   metrics.reserve(input_candidates.size());
 
-  int shortcut_zone_height = 0;
-  int value_zone_height = 0;
-  int description_zone_height = 0;
   int body_width = 0;
+  int body_height = 0;
 
   for (const CandidateMetrics& input : input_candidates) {
     CandidateMetrics item = input;
-    item.shortcut_size = NonNegativeSize(item.shortcut_size);
-    item.value_size = NonNegativeSize(item.value_size);
-    item.description_size = NonNegativeSize(item.description_size);
+    item.shortcut_size = NormalizeSize(item.shortcut_size);
+    item.value_size = NormalizeSize(item.value_size);
+    item.description_size = NormalizeSize(item.description_size);
     metrics.push_back(item);
 
-    shortcut_zone_height =
-        std::max(shortcut_zone_height, item.shortcut_size.height);
-    value_zone_height = std::max(value_zone_height, item.value_size.height);
-    description_zone_height =
-        std::max(description_zone_height, item.description_size.height);
+    body_width += CandidateWidth(item, parameters);
+    body_height =
+        std::max(body_height, CandidateHeight(item, parameters));
+  }
 
+  if (metrics.size() > 1) {
     body_width +=
-        MaxWidth(item) + parameters.column_padding * 2;
+        static_cast<int>(metrics.size() - 1) * parameters.candidate_gap;
   }
 
-  const bool has_candidates = !metrics.empty();
-  const bool has_shortcut_zone = shortcut_zone_height > 0;
-  const bool has_value_zone = value_zone_height > 0;
-  const bool has_description_zone = description_zone_height > 0;
-
-  int body_height = 0;
-  if (has_candidates) {
-    body_height = parameters.vertical_padding * 2 + shortcut_zone_height +
-                  value_zone_height + description_zone_height;
-
-    int visible_sections = 0;
-    visible_sections += has_shortcut_zone ? 1 : 0;
-    visible_sections += has_value_zone ? 1 : 0;
-    visible_sections += has_description_zone ? 1 : 0;
-    if (visible_sections > 1) {
-      body_height += parameters.section_gap * (visible_sections - 1);
-    }
-  }
-
-  const int body_edge_padding =
-      has_candidates ? parameters.cross_axis_edge_padding : 0;
-  const int body_width_with_edges =
-      body_width + body_edge_padding * 2;
+  const int body_with_edges =
+      metrics.empty()
+          ? 0
+          : body_width + parameters.cross_axis_edge_padding * 2;
   const int inner_width =
-      std::max(body_width_with_edges, parameters.footer_size.width);
+      std::max(body_with_edges, parameters.footer_size.width);
+
   total_size_ =
       Size(parameters.window_border * 2 + inner_width,
            parameters.window_border * 2 + body_height +
                parameters.footer_size.height);
 
-  const int body_top = parameters.window_border;
-  int column_right =
-      total_size_.width - parameters.window_border - body_edge_padding;
-
-  int shortcut_top = body_top + parameters.vertical_padding;
-  int value_top = shortcut_top + shortcut_zone_height;
-  if (has_shortcut_zone && has_value_zone) {
-    value_top += parameters.section_gap;
+  if (metrics.empty()) {
+    footer_rect_ =
+        Rect(parameters.window_border, parameters.window_border,
+             inner_width, parameters.footer_size.height);
+    return;
   }
 
-  int description_top = value_top + value_zone_height;
-  if (has_description_zone && (has_shortcut_zone || has_value_zone)) {
-    description_top += parameters.section_gap;
-  }
+  // Keep candidate 0 attached to the right flow edge even when a horizontal
+  // footer is wider than the vertical candidate body.  Any footer-only surplus
+  // width remains on the physical left instead of moving the active candidate
+  // away from the composition text.
+  int candidate_right =
+      total_size_.width - parameters.window_border -
+      parameters.cross_axis_edge_padding;
+  const int candidate_top = parameters.window_border;
 
   candidates_.reserve(metrics.size());
-  for (const CandidateMetrics& item : metrics) {
-    const int column_width =
-        MaxWidth(item) + parameters.column_padding * 2;
-    const int column_left = column_right - column_width;
-    const Rect candidate_rect(column_left, body_top, column_width, body_height);
 
-    const Rect shortcut_rect(
-        CenteredLeft(candidate_rect, item.shortcut_size.width), shortcut_top,
-        item.shortcut_size.width, item.shortcut_size.height);
-    const Rect value_rect(
-        CenteredLeft(candidate_rect, item.value_size.width), value_top,
-        item.value_size.width, item.value_size.height);
-    const Rect description_rect(
-        CenteredLeft(candidate_rect, item.description_size.width),
-        description_top, item.description_size.width,
-        item.description_size.height);
+  for (const CandidateMetrics& item : metrics) {
+    const int candidate_width = CandidateWidth(item, parameters);
+    const int candidate_height = CandidateHeight(item, parameters);
+    const int candidate_left = candidate_right - candidate_width;
+
+    const Rect candidate_rect(candidate_left, candidate_top,
+                              candidate_width, candidate_height);
+
+    int cursor_y =
+        candidate_rect.Top() + parameters.card_vertical_padding;
+
+    Rect shortcut_rect;
+    if (HasArea(item.shortcut_size)) {
+      shortcut_rect =
+          Rect(CenteredLeft(candidate_rect, item.shortcut_size.width),
+               cursor_y, item.shortcut_size.width,
+               item.shortcut_size.height);
+      cursor_y += item.shortcut_size.height;
+    }
+
+    const bool has_value = HasArea(item.value_size);
+    const bool has_description = HasArea(item.description_size);
+    const bool has_body = has_value || has_description;
+
+    if (HasArea(item.shortcut_size) && has_body) {
+      cursor_y += parameters.shortcut_body_gap;
+    }
+
+    Rect value_rect;
+    if (has_value) {
+      value_rect =
+          Rect(CenteredLeft(candidate_rect, item.value_size.width),
+               cursor_y, item.value_size.width, item.value_size.height);
+      cursor_y += item.value_size.height;
+    }
+
+    Rect description_rect;
+    if (has_description) {
+      if (has_value) {
+        cursor_y += parameters.value_description_gap;
+      }
+      description_rect =
+          Rect(CenteredLeft(candidate_rect, item.description_size.width),
+               cursor_y, item.description_size.width,
+               item.description_size.height);
+    }
 
     candidates_.push_back(CandidateGeometry{
         candidate_rect,
@@ -142,13 +214,13 @@ void VerticalCandidateLayout::Initialize(
         description_rect,
     });
 
-    // Candidate 0 is rightmost.  Preserve semantic candidate order while
-    // advancing visual columns from right to left.
-    column_right = column_left;
+    candidate_right =
+        candidate_left - parameters.candidate_gap;
   }
 
   footer_rect_ =
-      Rect(parameters.window_border, parameters.window_border + body_height,
+      Rect(parameters.window_border,
+           parameters.window_border + body_height,
            inner_width, parameters.footer_size.height);
 }
 
@@ -157,6 +229,18 @@ Rect VerticalCandidateLayout::GetCandidateRect(size_t index) const {
     return Rect();
   }
   return candidates_[index].candidate_rect;
+}
+
+Rect VerticalCandidateLayout::GetCandidateSelectionRect(size_t index) const {
+  if (index >= candidates_.size()) {
+    return Rect();
+  }
+
+  const Rect& candidate_rect = candidates_[index].candidate_rect;
+  const int selection_height =
+      std::max(0, footer_rect_.Top() - candidate_rect.Top());
+  return Rect(candidate_rect.Left(), candidate_rect.Top(),
+              candidate_rect.Width(), selection_height);
 }
 
 Rect VerticalCandidateLayout::GetShortcutRect(size_t index) const {

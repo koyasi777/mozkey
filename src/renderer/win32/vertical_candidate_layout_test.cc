@@ -10,6 +10,9 @@ namespace renderer {
 namespace win32 {
 namespace {
 
+using Metrics = VerticalCandidateLayout::CandidateMetrics;
+using Parameters = VerticalCandidateLayout::Parameters;
+
 void ExpectRect(const Rect& actual, int x, int y, int width, int height) {
   EXPECT_EQ(actual.Left(), x);
   EXPECT_EQ(actual.Top(), y);
@@ -17,149 +20,230 @@ void ExpectRect(const Rect& actual, int x, int y, int width, int height) {
   EXPECT_EQ(actual.Height(), height);
 }
 
-VerticalCandidateLayout::CandidateMetrics Metrics(
-    const Size& shortcut_size, const Size& value_size,
-    const Size& description_size) {
-  return VerticalCandidateLayout::CandidateMetrics{
-      shortcut_size, value_size, description_size};
+Parameters DefaultParameters() {
+  Parameters p;
+  p.window_border = 1;
+  p.cross_axis_edge_padding = 2;
+  p.candidate_gap = 1;
+  p.card_horizontal_padding = 2;
+  p.card_vertical_padding = 7;
+  p.shortcut_body_gap = 5;
+  p.value_description_gap = 12;
+  p.information_marker_tail_reserve = 7;
+  return p;
 }
 
-TEST(VerticalCandidateLayoutTest, CandidatesProceedFromRightToLeft) {
+Parameters PassiveSuggestionParameters() {
+  Parameters p = DefaultParameters();
+  p.card_vertical_padding = 4;
+  p.shortcut_body_gap = 3;
+  p.value_description_gap = 7;
+  return p;
+}
+
+TEST(VerticalCandidateLayoutTest,
+     CandidatesUseNaturalWidthsAndProceedFromRightToLeft) {
   VerticalCandidateLayout layout;
-  VerticalCandidateLayout::Parameters parameters;
-  parameters.window_border = 1;
-  parameters.column_padding = 2;
-  parameters.vertical_padding = 3;
-  parameters.section_gap = 4;
+  const Parameters p = DefaultParameters();
 
-  std::vector<VerticalCandidateLayout::CandidateMetrics> metrics = {
-      Metrics(Size(8, 10), Size(16, 40), Size()),
-      Metrics(Size(8, 10), Size(20, 60), Size()),
-  };
-
-  layout.Initialize(metrics, parameters);
+  layout.Initialize(
+      {
+          {Size(8, 10), Size(16, 40), Size()},
+          {Size(8, 10), Size(20, 60), Size()},
+      },
+      p);
 
   EXPECT_EQ(layout.candidate_count(), 2);
-  EXPECT_EQ(layout.GetTotalSize().width, 46);
-  EXPECT_EQ(layout.GetTotalSize().height, 82);
+  EXPECT_EQ(layout.GetTotalSize().width, 51);
+  EXPECT_EQ(layout.GetTotalSize().height, 91);
 
-  // Candidate 0 is the rightmost column; candidate 1 is immediately to its
-  // left.  Candidate order itself is not reversed.
-  ExpectRect(layout.GetCandidateRect(0), 25, 1, 20, 80);
-  ExpectRect(layout.GetCandidateRect(1), 1, 1, 24, 80);
+  // Candidate 0 is rightmost. Width is local to each candidate, with a 1 px
+  // physical gap between cards and 2 px breathing room at both popup edges.
+  ExpectRect(layout.GetCandidateRect(0), 28, 1, 20, 69);
+  ExpectRect(layout.GetCandidateRect(1), 3, 1, 24, 89);
 
-  // Candidate text starts at the same vertical position even when the
-  // candidates have different lengths.
-  ExpectRect(layout.GetValueRect(0), 27, 18, 16, 40);
-  ExpectRect(layout.GetValueRect(1), 3, 18, 20, 60);
+  ExpectRect(layout.GetValueRect(0), 30, 23, 16, 40);
+  ExpectRect(layout.GetValueRect(1), 5, 23, 20, 60);
 }
 
-TEST(VerticalCandidateLayoutTest, SectionsUseSharedVerticalZones) {
+TEST(VerticalCandidateLayoutTest,
+     CandidateHeightIsNaturalAndSectionsUseLocalGaps) {
   VerticalCandidateLayout layout;
-  VerticalCandidateLayout::Parameters parameters;
-  parameters.window_border = 2;
-  parameters.column_padding = 3;
-  parameters.vertical_padding = 4;
-  parameters.section_gap = 5;
+  const Parameters p = DefaultParameters();
 
-  std::vector<VerticalCandidateLayout::CandidateMetrics> metrics = {
-      Metrics(Size(8, 10), Size(14, 30), Size(12, 20)),
-      Metrics(Size(10, 12), Size(16, 50), Size(18, 8)),
-  };
+  layout.Initialize(
+      {
+          {Size(8, 10), Size(14, 30), Size(12, 20)},
+          {Size(10, 12), Size(16, 50), Size(18, 8)},
+      },
+      p);
 
-  layout.Initialize(metrics, parameters);
+  ExpectRect(layout.GetCandidateRect(0), 26, 1, 18, 91);
+  ExpectRect(layout.GetCandidateRect(1), 3, 1, 22, 101);
 
-  // shortcut zone = 12, value zone = 50, description zone = 20.
-  // body height = 2*4 + 12 + 5 + 50 + 5 + 20 = 100.
-  ExpectRect(layout.GetCandidateRect(0), 26, 2, 20, 100);
-  ExpectRect(layout.GetCandidateRect(1), 2, 2, 24, 100);
+  // Each candidate starts its value after its own shortcut height.
+  ExpectRect(layout.GetValueRect(0), 28, 23, 14, 30);
+  ExpectRect(layout.GetValueRect(1), 6, 25, 16, 50);
 
-  // All value strings share the same top regardless of shortcut height.
-  ExpectRect(layout.GetValueRect(0), 29, 23, 14, 30);
-  ExpectRect(layout.GetValueRect(1), 6, 23, 16, 50);
-
-  // Description starts after the tallest value zone, not after each
-  // candidate's individual value height.
-  ExpectRect(layout.GetDescriptionRect(0), 30, 78, 12, 20);
-  ExpectRect(layout.GetDescriptionRect(1), 5, 78, 18, 8);
+  // Description is a vertical tail below the value, separated by the explicit
+  // value/description gap.
+  ExpectRect(layout.GetDescriptionRect(0), 29, 65, 12, 20);
+  ExpectRect(layout.GetDescriptionRect(1), 5, 87, 18, 8);
 }
 
-TEST(VerticalCandidateLayoutTest, FooterCanWidenWindowAndBodyStaysRightAligned) {
+TEST(VerticalCandidateLayoutTest, LongCandidateDoesNotStretchSiblingCard) {
   VerticalCandidateLayout layout;
-  VerticalCandidateLayout::Parameters parameters;
-  parameters.window_border = 1;
-  parameters.column_padding = 2;
-  parameters.vertical_padding = 3;
-  parameters.section_gap = 4;
-  parameters.footer_size = Size(100, 20);
+  const Parameters p = DefaultParameters();
 
-  std::vector<VerticalCandidateLayout::CandidateMetrics> metrics = {
-      Metrics(Size(8, 10), Size(16, 40), Size()),
-      Metrics(Size(8, 10), Size(20, 60), Size()),
-  };
+  layout.Initialize(
+      {
+          {Size(), Size(16, 100), Size()},
+          {Size(), Size(16, 40), Size()},
+      },
+      p);
 
-  layout.Initialize(metrics, parameters);
+  EXPECT_EQ(layout.GetCandidateRect(0).Height(), 114);
+  EXPECT_EQ(layout.GetCandidateRect(1).Height(), 54);
+  EXPECT_EQ(layout.GetTotalSize().height, 116);
+}
+
+TEST(VerticalCandidateLayoutTest,
+     SelectionStripeExtendsToBodyEndWithoutChangingNaturalCardHeight) {
+  VerticalCandidateLayout layout;
+  const Parameters p = DefaultParameters();
+
+  layout.Initialize(
+      {
+          {Size(), Size(16, 100), Size()},
+          {Size(), Size(16, 40), Size()},
+      },
+      p);
+
+  // Natural card geometry remains content-sized.
+  EXPECT_EQ(layout.GetCandidateRect(0).Height(), 114);
+  EXPECT_EQ(layout.GetCandidateRect(1).Height(), 54);
+
+  // Selection is a stable full-height stripe ending immediately before the
+  // footer/body boundary for both short and long candidates.
+  EXPECT_EQ(layout.GetCandidateSelectionRect(0).Height(), 114);
+  EXPECT_EQ(layout.GetCandidateSelectionRect(1).Height(), 114);
+  EXPECT_EQ(layout.GetCandidateSelectionRect(0).Width(),
+            layout.GetCandidateRect(0).Width());
+  EXPECT_EQ(layout.GetCandidateSelectionRect(1).Width(),
+            layout.GetCandidateRect(1).Width());
+}
+
+TEST(VerticalCandidateLayoutTest,
+     FooterMayWidenWindowWithoutMovingCandidateZeroOffRightFlowEdge) {
+  VerticalCandidateLayout layout;
+  Parameters p = DefaultParameters();
+  p.footer_size = Size(100, 20);
+
+  layout.Initialize(
+      {
+          {Size(8, 10), Size(16, 40), Size()},
+          {Size(8, 10), Size(20, 60), Size()},
+      },
+      p);
 
   EXPECT_EQ(layout.GetTotalSize().width, 102);
-  EXPECT_EQ(layout.GetTotalSize().height, 102);
+  EXPECT_EQ(layout.GetFooterRect().Width(), 100);
 
-  // A wide horizontal footer may enlarge the window, but the vertical
-  // candidate body remains attached to the right edge so candidate 0 stays
-  // nearest the composition text.
-  ExpectRect(layout.GetCandidateRect(0), 81, 1, 20, 80);
-  ExpectRect(layout.GetCandidateRect(1), 57, 1, 24, 80);
-  ExpectRect(layout.GetFooterRect(), 1, 81, 100, 20);
+  const Rect candidate_zero = layout.GetCandidateRect(0);
+  EXPECT_EQ(candidate_zero.Right(),
+            layout.GetTotalSize().width - p.window_border -
+                p.cross_axis_edge_padding);
+  ExpectRect(layout.GetCandidateRect(0), 79, 1, 20, 69);
+  ExpectRect(layout.GetCandidateRect(1), 54, 1, 24, 89);
+}
+
+TEST(VerticalCandidateLayoutTest,
+     PassiveSuggestionUsesCompactButNonzeroVerticalBreathingRoom) {
+  VerticalCandidateLayout layout;
+  const Parameters p = PassiveSuggestionParameters();
+
+  layout.Initialize(
+      {
+          {Size(), Size(20, 53), Size()},
+          {Size(), Size(20, 105), Size()},
+      },
+      p);
+
+  EXPECT_EQ(layout.GetCandidateRect(0).Width(), 24);
+  EXPECT_EQ(layout.GetCandidateRect(1).Width(), 24);
+  EXPECT_EQ(layout.GetCandidateRect(0).Height(), 61);
+  EXPECT_EQ(layout.GetCandidateRect(1).Height(), 113);
+}
+
+TEST(VerticalCandidateLayoutTest,
+     InformationMarkerAddsOnlyRequiredTrailingReserveToCompactSuggestion) {
+  VerticalCandidateLayout layout;
+  const Parameters p = PassiveSuggestionParameters();
+
+  Metrics without_marker{Size(), Size(20, 53), Size()};
+  Metrics with_marker{Size(), Size(20, 53), Size()};
+  with_marker.has_information_marker = true;
+
+  layout.Initialize({without_marker, with_marker}, p);
+
+  const Rect plain_candidate = layout.GetCandidateRect(0);
+  const Rect marked_candidate = layout.GetCandidateRect(1);
+  const Rect plain_value = layout.GetValueRect(0);
+  const Rect marked_value = layout.GetValueRect(1);
+
+  // Top padding and text placement remain the compact SUGGESTION geometry.
+  EXPECT_EQ(plain_value.Top(), marked_value.Top());
+  EXPECT_EQ(plain_value.Bottom(), marked_value.Bottom());
+
+  // Only the trailing edge grows from 4 to the 7 DIP marker reserve.
+  EXPECT_EQ(plain_candidate.Height(), 61);
+  EXPECT_EQ(marked_candidate.Height(), 64);
+  EXPECT_EQ(plain_candidate.Bottom() - plain_value.Bottom(), 4);
+  EXPECT_EQ(marked_candidate.Bottom() - marked_value.Bottom(), 7);
+}
+
+TEST(VerticalCandidateLayoutTest,
+     CrossAxisEdgePaddingAndCandidateGapDoNotWidenCandidateCards) {
+  VerticalCandidateLayout layout;
+  Parameters p = DefaultParameters();
+  p.cross_axis_edge_padding = 5;
+  p.candidate_gap = 3;
+
+  layout.Initialize(
+      {
+          {Size(), Size(10, 30), Size()},
+          {Size(), Size(10, 30), Size()},
+      },
+      p);
+
+  EXPECT_EQ(layout.GetCandidateRect(0).Width(), 14);
+  EXPECT_EQ(layout.GetCandidateRect(1).Width(), 14);
+  EXPECT_EQ(layout.GetTotalSize().width, 43);
+
+  EXPECT_EQ(layout.GetCandidateRect(0).Right() -
+                layout.GetCandidateRect(1).Right(),
+            17);
 }
 
 TEST(VerticalCandidateLayoutTest, EmptyOptionalSectionsDoNotCreateGaps) {
   VerticalCandidateLayout layout;
-  VerticalCandidateLayout::Parameters parameters;
-  parameters.window_border = 1;
-  parameters.column_padding = 2;
-  parameters.vertical_padding = 3;
-  parameters.section_gap = 9;
+  const Parameters p = DefaultParameters();
 
-  std::vector<VerticalCandidateLayout::CandidateMetrics> metrics = {
-      Metrics(Size(), Size(16, 40), Size()),
-  };
+  layout.Initialize({{Size(), Size(16, 40), Size()}}, p);
 
-  layout.Initialize(metrics, parameters);
-
-  // No shortcut/description zones means no section gaps are inserted.
-  ExpectRect(layout.GetCandidateRect(0), 1, 1, 20, 46);
-  ExpectRect(layout.GetValueRect(0), 3, 4, 16, 40);
-}
-
-TEST(VerticalCandidateLayoutTest,
-     CrossAxisEdgePaddingAddsMarginsWithoutWideningCandidateColumn) {
-  VerticalCandidateLayout layout;
-  VerticalCandidateLayout::Parameters parameters;
-  parameters.window_border = 1;
-  parameters.column_padding = 2;
-  parameters.vertical_padding = 3;
-  parameters.cross_axis_edge_padding = 5;
-
-  std::vector<VerticalCandidateLayout::CandidateMetrics> metrics = {
-      Metrics(Size(), Size(10, 30), Size()),
-  };
-
-  layout.Initialize(metrics, parameters);
-
-  // Candidate column width remains 10 + 2 * 2 = 14.  Only the physical
-  // left/right edges gain 5 px each.
-  EXPECT_EQ(layout.GetTotalSize().width, 26);
-  EXPECT_EQ(layout.GetTotalSize().height, 38);
-  ExpectRect(layout.GetCandidateRect(0), 6, 1, 14, 36);
-  ExpectRect(layout.GetValueRect(0), 8, 4, 10, 30);
+  ExpectRect(layout.GetCandidateRect(0), 3, 1, 20, 54);
+  ExpectRect(layout.GetValueRect(0), 5, 8, 16, 40);
+  EXPECT_TRUE(layout.GetShortcutRect(0).IsRectEmpty());
+  EXPECT_TRUE(layout.GetDescriptionRect(0).IsRectEmpty());
 }
 
 TEST(VerticalCandidateLayoutTest, EmptyCandidateListKeepsFooterGeometryValid) {
   VerticalCandidateLayout layout;
-  VerticalCandidateLayout::Parameters parameters;
-  parameters.window_border = 2;
-  parameters.footer_size = Size(50, 18);
+  Parameters p = DefaultParameters();
+  p.window_border = 2;
+  p.footer_size = Size(50, 18);
 
-  layout.Initialize({}, parameters);
+  layout.Initialize({}, p);
 
   EXPECT_EQ(layout.candidate_count(), 0);
   EXPECT_EQ(layout.GetTotalSize().width, 54);
