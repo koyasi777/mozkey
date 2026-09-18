@@ -49,7 +49,7 @@
 #include "dictionary/pos_matcher.h"
 #include "engine/modules.h"
 #include "prediction/suggestion_filter.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 
 namespace mozc {
 
@@ -61,10 +61,10 @@ class ImmutableConverter : public ImmutableConverterInterface {
   ~ImmutableConverter() override = default;
 
   // Accepts the internal lattice structure for debugging.
-  [[nodiscard]] bool Convert(const ConversionRequest& request,
+  [[nodiscard]] bool Convert(const ConversionOptions& options,
                              Segments* segments, Lattice* lattice) const;
 
-  [[nodiscard]] bool Convert(const ConversionRequest& request,
+  [[nodiscard]] bool Convert(const ConversionOptions& options,
                              Segments* segments) const override;
 
  private:
@@ -81,11 +81,11 @@ class ImmutableConverter : public ImmutableConverterInterface {
     FIRST_INNER_SEGMENT,
   };
 
-  void ExpandCandidates(const ConversionRequest& request,
+  void ExpandCandidates(const ConversionOptions& options,
                         absl::string_view original_key, NBestGenerator* nbest,
                         Segment* segment, size_t expand_size) const;
   void InsertDummyCandidates(Segment* segment, size_t expand_size) const;
-  std::vector<Node*> Lookup(int begin_pos, const ConversionRequest& request,
+  std::vector<Node*> Lookup(int begin_pos, const ConversionOptions& options,
                             bool is_reverse, Lattice* lattice) const;
   void AddCharacterTypeBasedNodes(absl::string_view key_substr,
                                   Lattice* lattice,
@@ -100,20 +100,20 @@ class ImmutableConverter : public ImmutableConverterInterface {
   bool ResegmentPrefixAndArabicNumber(size_t pos, Lattice* lattice) const;
   bool ResegmentPersonalName(size_t pos, Lattice* lattice) const;
 
-  bool MakeLattice(const ConversionRequest& request, Segments* segments,
+  bool MakeLattice(const ConversionOptions& options, Segments* segments,
                    Lattice* lattice) const;
   bool MakeLatticeNodesForHistorySegments(const Segments& segments,
-                                          const ConversionRequest& request,
+                                          const ConversionOptions& options,
                                           Lattice* lattice) const;
   void MakeLatticeNodesForConversionSegments(const Segments& segments,
-                                             const ConversionRequest& request,
+                                             const ConversionOptions& options,
                                              absl::string_view history_key,
                                              Lattice* lattice) const;
   // Fixes for "好む" vs "この|無", "大|代" vs "代々" preferences.
   // If the last node ends with "prefix", give an extra
   // wcost penalty. In this case  "無" doesn't tend to appear at
   // user input.
-  void ApplyPrefixSuffixPenalty(const ConversionRequest& request,
+  void ApplyPrefixSuffixPenalty(const ConversionOptions& options,
                                 absl::string_view conversion_key,
                                 Lattice* lattice) const;
 
@@ -202,26 +202,26 @@ class ImmutableConverter : public ImmutableConverterInterface {
 
   // Inserts first segment from conversion result to candidates.
   // Costs will be modified using the existing candidates.
-  void InsertFirstSegmentToCandidates(const ConversionRequest& request,
+  void InsertFirstSegmentToCandidates(const ConversionOptions& options,
                                       Segments* segments,
                                       const Lattice& lattice,
                                       absl::Span<const uint16_t> group,
                                       size_t max_candidates_size,
                                       bool allow_exact) const;
 
-  void InsertCandidates(const ConversionRequest& request, Segments* segments,
+  void InsertCandidates(const ConversionOptions& options, Segments* segments,
                         const Lattice& lattice,
                         absl::Span<const uint16_t> group,
                         size_t max_candidates_size,
                         InsertCandidatesType type) const;
 
   void InsertCandidatesForRealtimeWithCandidateChecker(
-      const ConversionRequest& request, const Lattice& lattice,
+      const ConversionOptions& options, const Lattice& lattice,
       absl::Span<const uint16_t> group, Segments* segments) const;
 
   // Helper function for InsertCandidates().
   // Returns true if |node| is valid node for segment end.
-  bool IsSegmentEndNode(const ConversionRequest& request,
+  bool IsSegmentEndNode(const ConversionOptions& options,
                         const Segments& segments, const Node* node,
                         absl::Span<const uint16_t> group,
                         bool is_single_segment) const;
@@ -233,7 +233,7 @@ class ImmutableConverter : public ImmutableConverterInterface {
                                   InsertCandidatesType type, size_t begin_pos,
                                   const Node* node, Segments* segments) const;
 
-  bool MakeSegments(const ConversionRequest& request, const Lattice& lattice,
+  bool MakeSegments(const ConversionOptions& options, const Lattice& lattice,
                     Segments* segments) const;
 
   std::vector<uint16_t> MakeGroup(const Segments& segments) const;
@@ -247,12 +247,12 @@ class ImmutableConverter : public ImmutableConverterInterface {
     return connector_.GetTransitionCost(lnode->rid, rnode->lid) + rnode->wcost;
   }
 
-  void InsertCandidatesForConversion(const ConversionRequest& request,
+  void InsertCandidatesForConversion(const ConversionOptions& options,
                                      const Lattice& lattice,
                                      absl::Span<const uint16_t> group,
                                      Segments* segments) const;
 
-  void InsertCandidatesForPrediction(const ConversionRequest& request,
+  void InsertCandidatesForPrediction(const ConversionOptions& options,
                                      const Lattice& lattice,
                                      absl::Span<const uint16_t> group,
                                      Segments* segments) const;

@@ -32,13 +32,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ostream>
 #include <type_traits>
 
 namespace mozc {
 
 inline constexpr size_t kMaxConversionCandidatesSize = 200;
 
-enum RequestType {
+enum class RequestType {
   CONVERSION,          // normal conversion
   REVERSE_CONVERSION,  // reverse conversion
   PREDICTION,          // show prediction with user tab key
@@ -46,6 +47,10 @@ enum RequestType {
   PARTIAL_PREDICTION,  // show prediction using the text before cursor
   PARTIAL_SUGGESTION,  // show suggestion using the text before cursor
 };
+
+inline std::ostream& operator<<(std::ostream& os, RequestType type) {
+  return os << static_cast<int>(type);
+}
 
 enum ComposerKeySelection {
   // Use Composer::GetQueryForConversion() to generate conversion key. This
@@ -67,7 +72,7 @@ enum ComposerKeySelection {
 // Since it is small (~40 bytes), passing and returning by value is preferred
 // to avoid reference lifetime issues.
 struct ConversionOptions {
-  RequestType request_type = CONVERSION;
+  RequestType request_type = RequestType::CONVERSION;
 
   // Which composer's method to use for conversion key; see the comment around
   // the definition of ComposerKeySelection above.
@@ -104,6 +109,22 @@ struct ConversionOptions {
   // If true, use conversion_segment(0).key() instead of ComposerData.
   // TODO(b/365909808): Create a new string field to store the key.
   bool use_already_typing_corrected_key = false;
+
+  // Input mode for key corrector.
+  enum class InputMode {
+    ROMAN,
+    KANA,
+  };
+  InputMode input_mode = InputMode::ROMAN;
+
+  // Spelling correction. Populated from Config.
+  bool use_spelling_correction = true;
+
+  // Zip code conversion. Populated from Config.
+  bool use_zip_code_conversion = true;
+
+  // T13N conversion. Populated from Config.
+  bool use_t13n_conversion = true;
 
   // Enables incognito mode even when Config.incognito_mode() or
   // Request.is_incognito_mode() is false. Use this flag to dynamically change

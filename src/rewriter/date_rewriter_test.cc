@@ -52,6 +52,7 @@
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
+#include "request/options.h"
 #include "rewriter/rewriter_interface.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
@@ -113,7 +114,7 @@ Matcher<const converter::Candidate*> ValueAndDescAre(absl::string_view value,
 // An action that invokes a DictionaryInterface::Callback with the token whose
 // value is set to the given one.
 struct InvokeCallbackWithUserDictionaryToken {
-  void operator()(absl::string_view key, const ConversionRequest& convreq,
+  void operator()(absl::string_view key, const ConversionOptions& options,
                   DictionaryInterface::Callback* callback) {
     for (absl::string_view value : values) {
       const Token token(key, value, MockDictionary::kDefaultCost,

@@ -52,7 +52,7 @@
 #include "dictionary/pos_matcher.h"
 #include "prediction/suggestion_filter.h"
 #include "protocol/commands.pb.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 #include "request/request_util.h"
 
 namespace mozc {
@@ -240,13 +240,13 @@ void CandidateFilter::Reset() {
 }
 
 CandidateFilter::ResultType CandidateFilter::CheckRequestType(
-    const ConversionRequest& request, const absl::string_view original_key,
+    const ConversionOptions& options, const absl::string_view original_key,
     const Candidate& candidate,
     const absl::Span<const Node* const> nodes) const {
   // Filtering by the suggestion filter, which is applied only for the
   // PREDICTION and SUGGESTION modes.
-  switch (request.request_type()) {
-    case ConversionRequest::PREDICTION:
+  switch (options.request_type) {
+    case RequestType::PREDICTION:
       // - For Mobile
       // (To be precise, in mixed_conversion mode;
       //  Mobile IME with physical keyboard can set mixed_conversion=false and
@@ -271,7 +271,7 @@ CandidateFilter::ResultType CandidateFilter::CheckRequestType(
         break;
       }
       [[fallthrough]];
-    case ConversionRequest::SUGGESTION:
+    case RequestType::SUGGESTION:
       // - For Desktop
       // In contrast to the PREDICTION mode, the SUGGESTION is triggered without
       // any user actions, i.e., suggestion candidates are automatically
@@ -298,13 +298,13 @@ CandidateFilter::ResultType CandidateFilter::CheckRequestType(
 }
 
 CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
-    const ConversionRequest& request, const absl::string_view original_key,
+    const ConversionOptions& options, const absl::string_view original_key,
     const Candidate* candidate, const absl::Span<const Node* const> top_nodes,
     const absl::Span<const Node* const> nodes) {
   DCHECK(candidate);
 
   if (ResultType result =
-          CheckRequestType(request, original_key, *candidate, nodes);
+          CheckRequestType(options, original_key, *candidate, nodes);
       result != GOOD_CANDIDATE) {
     return result;
   }
@@ -317,7 +317,7 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
     return CandidateFilter::GOOD_CANDIDATE;
   }
 
-  if (request_util::ShouldFilterNoisyNumberCandidate(request)) {
+  if (request_util::ShouldFilterNoisyNumberCandidate(options)) {
     if (IsNoisyNumberCandidate(pos_matcher_, nodes)) {
       return CandidateFilter::BAD_CANDIDATE;
     }
@@ -616,10 +616,10 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
 }
 
 CandidateFilter::ResultType CandidateFilter::FilterCandidate(
-    const ConversionRequest& request, const absl::string_view original_key,
+    const ConversionOptions& options, const absl::string_view original_key,
     const Candidate* candidate, const absl::Span<const Node* const> top_nodes,
     const absl::Span<const Node* const> nodes) {
-  if (request.request_type() == ConversionRequest::REVERSE_CONVERSION) {
+  if (options.request_type == RequestType::REVERSE_CONVERSION) {
     // In reverse conversion, only remove duplicates because the filtering
     // criteria of FilterCandidateInternal() are completely designed for
     // (forward) conversion.
@@ -627,7 +627,7 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidate(
     return inserted ? GOOD_CANDIDATE : BAD_CANDIDATE;
   } else {
     const ResultType result = FilterCandidateInternal(
-        request, original_key, candidate, top_nodes, nodes);
+        options, original_key, candidate, top_nodes, nodes);
     if (result != GOOD_CANDIDATE) {
       return result;
     }

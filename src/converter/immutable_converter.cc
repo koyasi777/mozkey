@@ -73,7 +73,7 @@
 #include "engine/modules.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
-#include "request/conversion_request.h"
+#include "request/options.h"
 
 namespace mozc {
 namespace {
@@ -122,7 +122,7 @@ class KeyCorrectedNodeListBuilder : public BaseNodeListBuilder {
 };
 
 void InsertCorrectedNodes(size_t pos, absl::string_view key,
-                          const ConversionRequest& request,
+                          const ConversionOptions& options,
                           const KeyCorrector* key_corrector,  // nullable
                           const DictionaryInterface& dictionary,
                           Lattice* lattice) {
@@ -135,7 +135,7 @@ void InsertCorrectedNodes(size_t pos, absl::string_view key,
   }
   KeyCorrectedNodeListBuilder builder(pos, key, *key_corrector,
                                       lattice->node_allocator());
-  dictionary.LookupPrefix(prefix, request, &builder);
+  dictionary.LookupPrefix(prefix, options, &builder);
   lattice->Insert(pos, builder.result_view());
 }
 
@@ -2277,7 +2277,7 @@ bool ImmutableConverter::ResegmentPersonalName(size_t pos,
 }
 
 std::vector<Node*> ImmutableConverter::Lookup(int begin_pos,
-                                              const ConversionRequest& request,
+                                              const ConversionOptions& options,
                                               bool is_reverse,
                                               Lattice* lattice) const {
   absl::string_view key = lattice->key();
@@ -2286,9 +2286,9 @@ std::vector<Node*> ImmutableConverter::Lookup(int begin_pos,
 
   BaseNodeListBuilder builder(lattice->node_allocator(), kMaxNodesSize);
   if (is_reverse) {
-    dictionary_.LookupReverse(key_substr, request, &builder);
+    dictionary_.LookupReverse(key_substr, options, &builder);
   } else {
-    dictionary_.LookupPrefix(key_substr, request, &builder);
+    dictionary_.LookupPrefix(key_substr, options, &builder);
   }
   AddCharacterTypeBasedNodes(key_substr, lattice, &builder);
 
@@ -2720,7 +2720,7 @@ void ImmutableConverter::PredictionViterbiInternal(int calc_begin_pos,
   }
 }
 
-bool ImmutableConverter::MakeLattice(const ConversionRequest& request,
+bool ImmutableConverter::MakeLattice(const ConversionOptions& options,
                                      Segments* segments,
                                      Lattice* lattice) const {
   if (segments == nullptr) {
@@ -2741,11 +2741,10 @@ bool ImmutableConverter::MakeLattice(const ConversionRequest& request,
   NormalizeHistorySegments(segments);
 
   const bool is_reverse =
-      (request.request_type() == ConversionRequest::REVERSE_CONVERSION);
+      (options.request_type == RequestType::REVERSE_CONVERSION);
 
-  const bool is_prediction =
-      (request.request_type() == ConversionRequest::SUGGESTION ||
-       request.request_type() == ConversionRequest::PREDICTION);
+  const bool is_prediction = (options.request_type == RequestType::SUGGESTION ||
+                              options.request_type == RequestType::PREDICTION);
 
   // In suggestion mode, ImmutableConverter will not accept multiple-segments.
   // The result always consists of one segment.
@@ -2789,7 +2788,7 @@ bool ImmutableConverter::MakeLattice(const ConversionRequest& request,
 
   {
     std::string key = absl::StrCat(history_key, conversion_key);
-    lattice->SetKey(std::move(key), request.options().bos_id);
+    lattice->SetKey(std::move(key), options.bos_id);
   }
 
   if (is_reverse) {
@@ -2800,14 +2799,14 @@ bool ImmutableConverter::MakeLattice(const ConversionRequest& request,
 
   bool is_valid_lattice = true;
   // Perform the main part of lattice construction.
-  if (!MakeLatticeNodesForHistorySegments(*segments, request, lattice) ||
+  if (!MakeLatticeNodesForHistorySegments(*segments, options, lattice) ||
       lattice->end_nodes(history_key.size()).empty()) {
     is_valid_lattice = false;
   }
 
   // Can not apply key corrector to invalid lattice.
   if (is_valid_lattice) {
-    MakeLatticeNodesForConversionSegments(*segments, request, history_key,
+    MakeLatticeNodesForConversionSegments(*segments, options, history_key,
                                           lattice);
   }
 
@@ -2826,10 +2825,10 @@ bool ImmutableConverter::MakeLattice(const ConversionRequest& request,
     return false;
   }
 
-  ApplyPrefixSuffixPenalty(request, conversion_key, lattice);
+  ApplyPrefixSuffixPenalty(options, conversion_key, lattice);
 
   // Re-segment personal-names, numbers ...etc
-  if (request.request_type() == ConversionRequest::CONVERSION) {
+  if (options.request_type == RequestType::CONVERSION) {
     Resegment(*segments, history_key, conversion_key, lattice);
   }
 
@@ -2846,7 +2845,7 @@ bool ImmutableConverter::MakeLattice(const ConversionRequest& request,
     // Apply only to normal conversion and only before the user explicitly
     // resizes segments.  Manual segment resizing is a stronger signal than
     // this automatic guard.
-    if (request.request_type() == ConversionRequest::CONVERSION &&
+    if (options.request_type == RequestType::CONVERSION &&
         !segments->resized()) {
       ApplyShortCompoundSplitGuard(history_key, lattice);
     }
@@ -2856,10 +2855,10 @@ bool ImmutableConverter::MakeLattice(const ConversionRequest& request,
 }
 
 bool ImmutableConverter::MakeLatticeNodesForHistorySegments(
-    const Segments& segments, const ConversionRequest& request,
+    const Segments& segments, const ConversionOptions& options,
     Lattice* lattice) const {
   const bool is_reverse =
-      (request.request_type() == ConversionRequest::REVERSE_CONVERSION);
+      (options.request_type == RequestType::REVERSE_CONVERSION);
   const size_t history_segments_size = segments.history_segments_size();
 
   size_t segments_pos = 0;
@@ -2925,11 +2924,11 @@ bool ImmutableConverter::MakeLatticeNodesForHistorySegments(
     // The bigram-like lookup ("卓也" from "及川") is covered in
     // dictionary_predictor.
     const bool is_prediction =
-        (request.request_type() == ConversionRequest::SUGGESTION ||
-         request.request_type() == ConversionRequest::PREDICTION);
+        (options.request_type == RequestType::SUGGESTION ||
+         options.request_type == RequestType::PREDICTION);
     if (!is_prediction && s + 1 == history_segments_size) {
       for (const Node* compound_node :
-           Lookup(segments_pos, request, is_reverse, lattice)) {
+           Lookup(segments_pos, options, is_reverse, lattice)) {
         // No overlaps
         if (compound_node->key.size() <= rnode->key.size() ||
             compound_node->value.size() <= rnode->value.size() ||
@@ -2999,17 +2998,16 @@ bool ImmutableConverter::MakeLatticeNodesForHistorySegments(
 }
 
 void ImmutableConverter::MakeLatticeNodesForConversionSegments(
-    const Segments& segments, const ConversionRequest& request,
+    const Segments& segments, const ConversionOptions& options,
     absl::string_view history_key, Lattice* lattice) const {
   absl::string_view key = lattice->key();
-  const bool is_conversion =
-      (request.request_type() == ConversionRequest::CONVERSION);
+  const bool is_conversion = (options.request_type == RequestType::CONVERSION);
   // Do not use KeyCorrector if user changes the boundary.
   // http://b/issue?id=2804996
   std::unique_ptr<KeyCorrector> key_corrector;
   if (is_conversion && !segments.resized()) {
     KeyCorrector::InputMode mode = KeyCorrector::ROMAN;
-    if (request.config().preedit_method() != config::Config::ROMAN) {
+    if (options.input_mode == ConversionOptions::InputMode::KANA) {
       mode = KeyCorrector::KANA;
     }
     key_corrector =
@@ -3017,11 +3015,11 @@ void ImmutableConverter::MakeLatticeNodesForConversionSegments(
   }
 
   const bool is_reverse =
-      (request.request_type() == ConversionRequest::REVERSE_CONVERSION);
+      (options.request_type == RequestType::REVERSE_CONVERSION);
   for (size_t pos = history_key.size(); pos < key.size(); ++pos) {
     if (lattice->end_nodes(pos).empty()) continue;
 
-    std::vector<Node*> rnodes = Lookup(pos, request, is_reverse, lattice);
+    std::vector<Node*> rnodes = Lookup(pos, options, is_reverse, lattice);
     // If history key is NOT empty and user input seems to starts with
     // a particle ("はにで..."), mark the node as STARTS_WITH_PARTICLE.
     // We change the segment boundary if STARTS_WITH_PARTICLE attribute
@@ -3035,18 +3033,18 @@ void ImmutableConverter::MakeLatticeNodesForConversionSegments(
       }
     }
     lattice->Insert(pos, rnodes);
-    InsertCorrectedNodes(pos, key, request, key_corrector.get(), dictionary_,
+    InsertCorrectedNodes(pos, key, options, key_corrector.get(), dictionary_,
                          lattice);
   }
 }
 
 void ImmutableConverter::ApplyPrefixSuffixPenalty(
-    const ConversionRequest& request, absl::string_view conversion_key,
+    const ConversionOptions& options, absl::string_view conversion_key,
     Lattice* lattice) const {
   absl::string_view key = lattice->key();
   DCHECK_LE(conversion_key.size(), key.size());
 
-  if (!request.options().disable_prefix_penalty) {
+  if (!options.disable_prefix_penalty) {
     for (Node* node :
          lattice->begin_nodes(key.size() - conversion_key.size())) {
       // TODO(taku):
@@ -3548,12 +3546,12 @@ void ImmutableConverter::Resegment(const Segments& segments,
 
 // Single segment conversion results should be set to |segments|.
 void ImmutableConverter::InsertFirstSegmentToCandidates(
-    const ConversionRequest& request, Segments* segments,
+    const ConversionOptions& options, Segments* segments,
     const Lattice& lattice, absl::Span<const uint16_t> group,
     size_t max_candidates_size, bool allow_exact) const {
   const size_t only_first_segment_candidate_pos =
       segments->conversion_segment(0).candidates_size();
-  InsertCandidates(request, segments, lattice, group, max_candidates_size,
+  InsertCandidates(options, segments, lattice, group, max_candidates_size,
                    ONLY_FIRST_SEGMENT);
   // Note that inserted candidates might consume the entire key.
   // e.g. key: "なのは", value: "ナノは"
@@ -3615,7 +3613,7 @@ void ImmutableConverter::InsertFirstSegmentToCandidates(
   }
 }
 
-bool ImmutableConverter::IsSegmentEndNode(const ConversionRequest& request,
+bool ImmutableConverter::IsSegmentEndNode(const ConversionOptions& options,
                                           const Segments& segments,
                                           const Node* node,
                                           absl::Span<const uint16_t> group,
@@ -3627,7 +3625,7 @@ bool ImmutableConverter::IsSegmentEndNode(const ConversionRequest& request,
 
   // In reverse conversion, group consecutive white spaces into one segment.
   // For example, "ほん むりょう" -> "ほん", " ", "むりょう".
-  if (request.request_type() == ConversionRequest::REVERSE_CONVERSION) {
+  if (options.request_type == RequestType::REVERSE_CONVERSION) {
     const bool this_node_is_ws = ContainsWhiteSpacesOnly(node->key);
     const bool next_node_is_ws = ContainsWhiteSpacesOnly(node->next->key);
     if (this_node_is_ws) {
@@ -3685,7 +3683,7 @@ Segment* ImmutableConverter::GetInsertTargetSegment(
   return segment;
 }
 
-void ImmutableConverter::InsertCandidates(const ConversionRequest& request,
+void ImmutableConverter::InsertCandidates(const ConversionOptions& options,
                                           Segments* segments,
                                           const Lattice& lattice,
                                           absl::Span<const uint16_t> group,
@@ -3717,7 +3715,7 @@ void ImmutableConverter::InsertCandidates(const ConversionRequest& request,
       begin_pos = node->begin_pos;
     }
 
-    if (!IsSegmentEndNode(request, *segments, node, group, is_single_segment)) {
+    if (!IsSegmentEndNode(options, *segments, node, group, is_single_segment)) {
       continue;
     }
 
@@ -3725,23 +3723,23 @@ void ImmutableConverter::InsertCandidates(const ConversionRequest& request,
         GetInsertTargetSegment(lattice, group, type, begin_pos, node, segments);
     DCHECK(segment);
 
-    NBestGenerator::Options options;
+    NBestGenerator::Options nbest_options;
     if (type == SINGLE_SEGMENT || type == FIRST_INNER_SEGMENT) {
       // For real time conversion.
-      options.boundary_mode = NBestGenerator::ONLY_EDGE;
-      options.candidate_mode |= NBestGenerator::FILL_INNER_SEGMENT_INFO;
+      nbest_options.boundary_mode = NBestGenerator::ONLY_EDGE;
+      nbest_options.candidate_mode |= NBestGenerator::FILL_INNER_SEGMENT_INFO;
     } else if (segment->segment_type() == Segment::FIXED_BOUNDARY) {
       // Boundary is specified. Skip boundary check in n-best generator.
-      options.boundary_mode = NBestGenerator::ONLY_MID;
+      nbest_options.boundary_mode = NBestGenerator::ONLY_MID;
     }
     if (type == FIRST_INNER_SEGMENT) {
       // Inserts only first segment from realtime conversion path.
-      options.candidate_mode |=
+      nbest_options.candidate_mode |=
           NBestGenerator::BUILD_FROM_ONLY_FIRST_INNER_SEGMENT;
-      options.candidate_mode |= NBestGenerator::FILL_INNER_SEGMENT_INFO;
+      nbest_options.candidate_mode |= NBestGenerator::FILL_INNER_SEGMENT_INFO;
     }
-    nbest_generator.Reset(prev, node->next, options);
-    nbest_generator.SetCandidates(request, original_key, expand_size, segment);
+    nbest_generator.Reset(prev, node->next, nbest_options);
+    nbest_generator.SetCandidates(options, original_key, expand_size, segment);
 
     if (type == MULTI_SEGMENTS || type == SINGLE_SEGMENT) {
       InsertDummyCandidates(segment, expand_size);
@@ -3759,7 +3757,7 @@ void ImmutableConverter::InsertCandidates(const ConversionRequest& request,
   }
 }
 
-bool ImmutableConverter::MakeSegments(const ConversionRequest& request,
+bool ImmutableConverter::MakeSegments(const ConversionOptions& options,
                                       const Lattice& lattice,
                                       Segments* segments) const {
   if (segments == nullptr) {
@@ -3768,29 +3766,29 @@ bool ImmutableConverter::MakeSegments(const ConversionRequest& request,
   }
 
   const std::vector<uint16_t> group = MakeGroup(*segments);
-  const ConversionRequest::RequestType type = request.request_type();
+  const RequestType type = options.request_type;
 
-  if (type == ConversionRequest::CONVERSION ||
-      type == ConversionRequest::REVERSE_CONVERSION) {
-    InsertCandidatesForConversion(request, lattice, group, segments);
+  if (type == RequestType::CONVERSION ||
+      type == RequestType::REVERSE_CONVERSION) {
+    InsertCandidatesForConversion(options, lattice, group, segments);
   } else {
-    InsertCandidatesForPrediction(request, lattice, group, segments);
+    InsertCandidatesForPrediction(options, lattice, group, segments);
   }
 
   return true;
 }
 
 void ImmutableConverter::InsertCandidatesForConversion(
-    const ConversionRequest& request, const Lattice& lattice,
+    const ConversionOptions& options, const Lattice& lattice,
     absl::Span<const uint16_t> group, Segments* segments) const {
-  DCHECK(!request.options().create_partial_candidates);
+  DCHECK(!options.create_partial_candidates);
   // Currently, we assume that REVERSE_CONVERSION only
   // requires 1 result.
   // TODO(taku): support to set the size on REVESER_CONVERSION mode.
   const size_t max_candidates_size =
-      ((request.request_type() == ConversionRequest::REVERSE_CONVERSION)
+      ((options.request_type == RequestType::REVERSE_CONVERSION)
            ? 1
-           : request.options().max_conversion_candidates_size);
+           : options.max_conversion_candidates_size);
 
   // InsertCandidates inserts new segments after the existing
   // conversion segments. So we have to erase old conversion segments.
@@ -3799,7 +3797,7 @@ void ImmutableConverter::InsertCandidatesForConversion(
   // TODO(toshiyuki): We want more beautiful structure.
   const size_t old_conversion_segments_size =
       segments->conversion_segments_size();
-  InsertCandidates(request, segments, lattice, group, max_candidates_size,
+  InsertCandidates(options, segments, lattice, group, max_candidates_size,
                    MULTI_SEGMENTS);
   if (old_conversion_segments_size > 0) {
     segments->erase_segments(segments->history_segments_size(),
@@ -3808,7 +3806,7 @@ void ImmutableConverter::InsertCandidatesForConversion(
 }
 
 void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
-    const ConversionRequest& request, const Lattice& lattice,
+    const ConversionOptions& options, const Lattice& lattice,
     absl::Span<const uint16_t> group, Segments* segments) const {
   constexpr int kSingleSegmentCharCoverage = 12;
   Segment* target_segment = segments->mutable_conversion_segment(0);
@@ -3817,7 +3815,7 @@ void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
   {
     // Candidates for the whole path
     constexpr int kMaxSize = 3;
-    InsertCandidates(request, &tmp_segments, lattice, group, kMaxSize,
+    InsertCandidates(options, &tmp_segments, lattice, group, kMaxSize,
                      SINGLE_SEGMENT);
 
     // At least one candidate should be added.
@@ -3851,8 +3849,8 @@ void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
 
   {
     // Candidates for the first segment of each n-best path.
-    InsertCandidates(request, &tmp_segments, lattice, group,
-                     request.options().max_conversion_candidates_size -
+    InsertCandidates(options, &tmp_segments, lattice, group,
+                     options.max_conversion_candidates_size -
                          target_segment->candidates_size(),
                      FIRST_INNER_SEGMENT);
     constexpr int kMaxCostDiffForFirstInnerSegment = 3107;  // 500*log(500)
@@ -3885,20 +3883,19 @@ void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
 }
 
 void ImmutableConverter::InsertCandidatesForPrediction(
-    const ConversionRequest& request, const Lattice& lattice,
+    const ConversionOptions& options, const Lattice& lattice,
     absl::Span<const uint16_t> group, Segments* segments) const {
-  const size_t max_candidates_size =
-      request.options().max_conversion_candidates_size;
+  const size_t max_candidates_size = options.max_conversion_candidates_size;
 
-  if (!request.options().create_partial_candidates) {
+  if (!options.create_partial_candidates) {
     // Desktop (or physical keyboard / handwriting in Mobile)
-    InsertCandidates(request, segments, lattice, group, max_candidates_size,
+    InsertCandidates(options, segments, lattice, group, max_candidates_size,
                      SINGLE_SEGMENT);
     return;
   }
 
   // Mobile
-  InsertCandidatesForRealtimeWithCandidateChecker(request, lattice, group,
+  InsertCandidatesForRealtimeWithCandidateChecker(options, lattice, group,
                                                   segments);
 }
 
@@ -3914,13 +3911,12 @@ std::vector<uint16_t> ImmutableConverter::MakeGroup(
   return group;
 }
 
-bool ImmutableConverter::Convert(const ConversionRequest& request,
+bool ImmutableConverter::Convert(const ConversionOptions& options,
                                  Segments* segments, Lattice* lattice) const {
-  const bool is_prediction =
-      (request.request_type() == ConversionRequest::PREDICTION ||
-       request.request_type() == ConversionRequest::SUGGESTION);
+  const bool is_prediction = (options.request_type == RequestType::PREDICTION ||
+                              options.request_type == RequestType::SUGGESTION);
 
-  if (!MakeLattice(request, segments, lattice)) {
+  if (!MakeLattice(options, segments, lattice)) {
     LOG(WARNING) << "could not make lattice";
     return false;
   }
@@ -3938,7 +3934,7 @@ bool ImmutableConverter::Convert(const ConversionRequest& request,
   }
 
   MOZC_VLOG(2) << lattice->DebugString();
-  if (!MakeSegments(request, *lattice, segments)) {
+  if (!MakeSegments(options, *lattice, segments)) {
     LOG(WARNING) << "make segments failed";
     return false;
   }
@@ -3946,7 +3942,7 @@ bool ImmutableConverter::Convert(const ConversionRequest& request,
   return true;
 }
 
-bool ImmutableConverter::Convert(const ConversionRequest& request,
+bool ImmutableConverter::Convert(const ConversionOptions& options,
                                  Segments* segments) const {
 #if defined(__ANDROID__) || defined(_WIN32) || defined(__APPLE__)
   // These platforms run the converter persistently on the same thread. Using
@@ -3960,7 +3956,7 @@ bool ImmutableConverter::Convert(const ConversionRequest& request,
   Lattice lattice;
 #endif  // defined(__ANDROID__) || defined(_WIN32) || defined(__APPLE__)
 
-  return Convert(request, segments, &lattice);
+  return Convert(options, segments, &lattice);
 }
 
 }  // namespace mozc

@@ -2524,7 +2524,7 @@ bool UserHistoryPredictor::IsProperNoun(const ConversionRequest& request,
       }
       return dictionary::InlineCallback::TRAVERSE_CONTINUE;
     });
-    modules_.GetDictionary().LookupExact(request_key, request, &cb);
+    modules_.GetDictionary().LookupExact(request_key, request.options(), &cb);
     return found;
   };
 

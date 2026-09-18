@@ -80,6 +80,7 @@
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
+#include "request/options.h"
 #include "request/request_test_util.h"
 #include "storage/encrypted_string_storage.h"
 #include "storage/lru_cache.h"
@@ -5779,7 +5780,7 @@ TEST_F(UserHistoryPredictorTest, IsProperNounTest) {
 
   EXPECT_CALL(*dictionary, LookupExact(_, _, _))
       .WillRepeatedly([&](absl::string_view key,
-                          const ConversionRequest& request,
+                          const ConversionOptions& options,
                           dictionary::DictionaryInterface::Callback* cb) {
         dictionary::Token token;
         // "たなか" is registered as proper noun.

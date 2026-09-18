@@ -342,7 +342,7 @@ std::optional<Token> FindKeyAndValue(const DictionaryInterface& dic,
     result_token = token;
     return TRAVERSE_DONE;
   });
-  dic.LookupPrefix(key, request, &cb);
+  dic.LookupPrefix(key, request.options(), &cb);
   return result_token;
 }
 
@@ -821,7 +821,7 @@ void DictionaryPredictionAggregator::AggregateUnigramForHandwriting(
                    : TRAVERSE_DONE;
       });
 
-      dictionary_.LookupExact(query_info->query, request, &cb);
+      dictionary_.LookupExact(query_info->query, request.options(), &cb);
 
       // Rewrite key with the look-up query.
       asis_result.key = query_info->query;
@@ -1002,7 +1002,7 @@ void DictionaryPredictionAggregator::AggregatePrefix(
     return (results->size() < limit) ? TRAVERSE_CONTINUE : TRAVERSE_DONE;
   });
 
-  dictionary_.LookupPrefix(lookup_key, request, &cb);
+  dictionary_.LookupPrefix(lookup_key, request.options(), &cb);
 }
 
 void DictionaryPredictionAggregator::AggregateSingleKanji(
@@ -1025,7 +1025,7 @@ void DictionaryPredictionAggregator::GetPredictiveResultsForUnigram(
     PredictiveLookupCallback callback(types, lookup_limit, request.key().size(),
                                       empty_expanded, zip_code_id_, unknown_id_,
                                       results);
-    dictionary.LookupPredictive(request.key(), request, &callback);
+    dictionary.LookupPredictive(request.key(), request.options(), &callback);
     return;
   }
 
@@ -1040,7 +1040,7 @@ void DictionaryPredictionAggregator::GetPredictiveResultsForUnigram(
     PredictiveLookupCallback callback(types, lookup_limit, base.size(),
                                       expanded, zip_code_id_, unknown_id_,
                                       results);
-    dictionary.LookupPredictive(base, request, &callback);
+    dictionary.LookupPredictive(base, request.options(), &callback);
     return;
   }
 
@@ -1052,7 +1052,7 @@ void DictionaryPredictionAggregator::GetPredictiveResultsForUnigram(
     PredictiveLookupCallback callback(types, lookup_limit, request_key.size(),
                                       empty_expanded, zip_code_id_, unknown_id_,
                                       results);
-    dictionary.LookupPredictive(request_key, request, &callback);
+    dictionary.LookupPredictive(request_key, request.options(), &callback);
   }
 }
 
@@ -1068,7 +1068,7 @@ void DictionaryPredictionAggregator::GetPredictiveResultsForBigram(
     PredictiveBigramLookupCallback callback(
         types, lookup_limit, request_key.size(), expanded, history_key,
         history_value, zip_code_id_, unknown_id_, results);
-    dictionary.LookupPredictive(request_key, request, &callback);
+    dictionary.LookupPredictive(request_key, request.options(), &callback);
     return;
   }
 
@@ -1085,7 +1085,7 @@ void DictionaryPredictionAggregator::GetPredictiveResultsForBigram(
   PredictiveBigramLookupCallback callback(
       types, lookup_limit, request_key.size(), expanded, history_key,
       history_value, zip_code_id_, unknown_id_, results);
-  dictionary.LookupPredictive(request_key, request, &callback);
+  dictionary.LookupPredictive(request_key, request.options(), &callback);
 }
 
 void DictionaryPredictionAggregator::GetPredictiveResultsForEnglishKey(
@@ -1102,7 +1102,7 @@ void DictionaryPredictionAggregator::GetPredictiveResultsForEnglishKey(
     PredictiveLookupCallback callback(types, lookup_limit, key.size(),
                                       empty_expanded, zip_code_id_, unknown_id_,
                                       results);
-    dictionary.LookupPredictive(key, request, &callback);
+    dictionary.LookupPredictive(key, request.options(), &callback);
     for (size_t i = prev_results_size; i < results->size(); ++i) {
       Util::UpperString(&(*results)[i].value);
     }
@@ -1114,7 +1114,7 @@ void DictionaryPredictionAggregator::GetPredictiveResultsForEnglishKey(
     PredictiveLookupCallback callback(types, lookup_limit, key.size(),
                                       empty_expanded, zip_code_id_, unknown_id_,
                                       results);
-    dictionary.LookupPredictive(key, request, &callback);
+    dictionary.LookupPredictive(key, request.options(), &callback);
     for (size_t i = prev_results_size; i < results->size(); ++i) {
       Util::CapitalizeString(&(*results)[i].value);
     }
@@ -1123,7 +1123,7 @@ void DictionaryPredictionAggregator::GetPredictiveResultsForEnglishKey(
     PredictiveLookupCallback callback(types, lookup_limit, request_key.size(),
                                       empty_expanded, zip_code_id_, unknown_id_,
                                       results);
-    dictionary.LookupPredictive(request_key, request, &callback);
+    dictionary.LookupPredictive(request_key, request.options(), &callback);
   }
   // If input mode is FULL_ASCII, then convert the results to full-width.
   if (request.composer().GetInputMode() == transliteration::FULL_ASCII) {
