@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include "dictionary/dictionary_token.h"
 
@@ -121,7 +122,7 @@ struct Node {
     value.clear();
   }
 
-  inline void InitFromToken(const dictionary::Token& token) {
+  void InitFromToken(dictionary::Token token) {
     prev = nullptr;
     next = nullptr;
     constrained_prev = nullptr;
@@ -143,8 +144,8 @@ struct Node {
       attributes |= USER_DICTIONARY;
       attributes |= NO_VARIANTS_EXPANSION;
     }
-    key = token.key;
-    value = token.value;
+    key = std::move(token.key);
+    value = std::move(token.value);
   }
 };
 
