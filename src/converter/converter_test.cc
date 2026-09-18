@@ -2294,12 +2294,30 @@ TEST_F(ConverterTest, IntegrationWithCalculatorRewriter) {
   std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
 
   {
+    // Default (enable_multi_segment_candidate = false).
     Segments segments;
     const ConversionRequest convreq =
         ConversionRequestBuilder().SetKey("1+1=").Build();
     ASSERT_TRUE(converter->StartConversion(convreq, &segments));
     EXPECT_EQ(segments.conversion_segments_size(), 1);
     EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "2");
+  }
+
+  {
+    // enable_multi_segment_candidate = true.
+    Segments segments;
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_enable_multi_segment_candidate(true);
+    const ConversionRequest convreq = ConversionRequestBuilder()
+                                          .SetRequest(request_proto)
+                                          .SetKey("1+1=")
+                                          .Build();
+    ASSERT_TRUE(converter->StartConversion(convreq, &segments));
+    EXPECT_EQ(segments.conversion_segments_size(), 4);
+    EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "2");
+    EXPECT_EQ(
+        segments.conversion_segment(0).candidate(0).converted_segment_count, 4);
   }
 }
 
@@ -2311,11 +2329,29 @@ TEST_F(ConverterTest, IntegrationWithDateRewriter) {
       std::make_unique<DateRewriter>(dictionary), STUB_PREDICTOR);
 
   {
+    // Default (enable_multi_segment_candidate = false):
+    // Multi-segment is merged into 1 segment via CheckResizeSegmentsRequest.
     Segments segments;
     const ConversionRequest convreq =
         ConversionRequestBuilder().SetKey("へいせい30ねん").Build();
     ASSERT_TRUE(converter->StartConversion(convreq, &segments));
     EXPECT_EQ(segments.conversion_segments_size(), 1);
+    EXPECT_TRUE(FindCandidateByValue("2018年", segments.conversion_segment(0)));
+  }
+
+  {
+    // enable_multi_segment_candidate = true:
+    // Multi-segment candidates are generated directly across segments.
+    Segments segments;
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_enable_multi_segment_candidate(true);
+    const ConversionRequest convreq = ConversionRequestBuilder()
+                                          .SetRequest(request_proto)
+                                          .SetKey("へいせい30ねん")
+                                          .Build();
+    ASSERT_TRUE(converter->StartConversion(convreq, &segments));
+    EXPECT_GE(segments.conversion_segments_size(), 1);
     EXPECT_TRUE(FindCandidateByValue("2018年", segments.conversion_segment(0)));
   }
 
@@ -2335,12 +2371,33 @@ TEST_F(ConverterTest, IntegrationWithSymbolRewriter) {
   std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
 
   {
+    // Default (enable_multi_segment_candidate = false).
     Segments segments;
     const ConversionRequest convreq =
         ConversionRequestBuilder().SetKey("ー>").Build();
     ASSERT_TRUE(converter->StartConversion(convreq, &segments));
     EXPECT_EQ(segments.conversion_segments_size(), 1);
     EXPECT_TRUE(FindCandidateByValue("→", segments.conversion_segment(0)));
+  }
+
+  {
+    // enable_multi_segment_candidate = true.
+    Segments segments;
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_enable_multi_segment_candidate(true);
+    const ConversionRequest convreq = ConversionRequestBuilder()
+                                          .SetRequest(request_proto)
+                                          .SetKey("ー>")
+                                          .Build();
+    ASSERT_TRUE(converter->StartConversion(convreq, &segments));
+    EXPECT_EQ(segments.conversion_segments_size(), 2);
+    const int index =
+        GetCandidateIndexByValue("→", segments.conversion_segment(0));
+    EXPECT_NE(index, -1);
+    EXPECT_EQ(
+        segments.conversion_segment(0).candidate(index).converted_segment_count,
+        2);
   }
 }
 
@@ -2349,12 +2406,33 @@ TEST_F(ConverterTest, IntegrationWithUnicodeRewriter) {
   std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
 
   {
+    // Default (enable_multi_segment_candidate = false).
     Segments segments;
     const ConversionRequest convreq =
         ConversionRequestBuilder().SetKey("U+3042").Build();
     ASSERT_TRUE(converter->StartConversion(convreq, &segments));
     EXPECT_EQ(segments.conversion_segments_size(), 1);
     EXPECT_TRUE(FindCandidateByValue("あ", segments.conversion_segment(0)));
+  }
+
+  {
+    // enable_multi_segment_candidate = true.
+    Segments segments;
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_enable_multi_segment_candidate(true);
+    const ConversionRequest convreq = ConversionRequestBuilder()
+                                          .SetRequest(request_proto)
+                                          .SetKey("U+3042")
+                                          .Build();
+    ASSERT_TRUE(converter->StartConversion(convreq, &segments));
+    EXPECT_EQ(segments.conversion_segments_size(), 3);
+    const int index =
+        GetCandidateIndexByValue("あ", segments.conversion_segment(0));
+    EXPECT_NE(index, -1);
+    EXPECT_EQ(
+        segments.conversion_segment(0).candidate(index).converted_segment_count,
+        3);
   }
 }
 
@@ -2363,12 +2441,33 @@ TEST_F(ConverterTest, IntegrationWithSmallLetterRewriter) {
   std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
 
   {
+    // Default (enable_multi_segment_candidate = false).
     Segments segments;
     const ConversionRequest convreq =
         ConversionRequestBuilder().SetKey("^123").Build();
     ASSERT_TRUE(converter->StartConversion(convreq, &segments));
     EXPECT_EQ(segments.conversion_segments_size(), 1);
     EXPECT_TRUE(FindCandidateByValue("¹²³", segments.conversion_segment(0)));
+  }
+
+  {
+    // enable_multi_segment_candidate = true.
+    Segments segments;
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_enable_multi_segment_candidate(true);
+    const ConversionRequest convreq = ConversionRequestBuilder()
+                                          .SetRequest(request_proto)
+                                          .SetKey("^123")
+                                          .Build();
+    ASSERT_TRUE(converter->StartConversion(convreq, &segments));
+    EXPECT_EQ(segments.conversion_segments_size(), 2);
+    const int index =
+        GetCandidateIndexByValue("¹²³", segments.conversion_segment(0));
+    EXPECT_NE(index, -1);
+    EXPECT_EQ(
+        segments.conversion_segment(0).candidate(index).converted_segment_count,
+        2);
   }
 }
 
