@@ -88,10 +88,14 @@ inline int BitCount0(uint32_t x) {
   return std::popcount(~x);
 }
 
-// Returns 1-bits in the data to length words.
+// Returns 1-bits in the data to length 32-bit words.
+// Processes in 64-bit words as much as possible for speed.
 int Count1Bits(const uint8_t *data, int length) {
   int num_bits = 0;
-  for (; length > 0; --length) {
+  for (; length >= 2; length -= 2) {
+    num_bits += std::popcount(LoadUnalignedAdvance<uint64_t>(data));
+  }
+  if (length == 1) {
     num_bits += std::popcount(LoadUnalignedAdvance<uint32_t>(data));
   }
   return num_bits;
@@ -200,11 +204,11 @@ void SimpleSuccinctBitVectorIndex::Reset() {
 int SimpleSuccinctBitVectorIndex::Rank1(int n) const {
   // Look up pre-computed 1-bits for the preceding chunks.
   const int num_chunks = n / (chunk_size_ * 8);
-  int result = index_[n / (chunk_size_ * 8)];
+  int result = index_[num_chunks];
 
   // Count 1-bits for remaining "words".
   result += Count1Bits(data_ + num_chunks * chunk_size_,
-                       (n / 8 - num_chunks * chunk_size_) / 4);
+                       (n / 32) - num_chunks * (chunk_size_ / 4));
 
   // Count 1-bits for remaining "bits".
   if (n % 32 > 0) {
