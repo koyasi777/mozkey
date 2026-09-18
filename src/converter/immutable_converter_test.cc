@@ -372,7 +372,7 @@ TEST(ImmutableConverterTest, NotConnectedTest) {
   const ConversionRequest request;
   converter.MakeLattice(request.options(), &segments, &lattice);
 
-  converter.Viterbi(segments, &lattice);
+  converter.Viterbi(request.options(), segments, &lattice);
 
   // Intentionally segmented position - 1
   const size_t pos = strlen("しょうめ");
@@ -619,6 +619,136 @@ TEST(ImmutableConverterTest, T13nConversionTwice) {
 
   ASSERT_NE(GetCandidateIndexByValue("Google", segments.conversion_segment(0)),
             -1);
+}
+
+TEST(ImmutableConverterTest, ParticleOmissionBonusTest) {
+  auto data_and_converter = std::make_unique<MockDataAndImmutableConverter>();
+  const std::string kRequestKey = "あんけーとひかえる";
+
+  int cost_bonus_2000 = 0;
+  {
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(kRequestKey);
+
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_particle_omission_transition_cost_bonus(2000);
+
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetRequest(request_proto)
+            .SetRequestType(ConversionRequest::CONVERSION)
+            .Build();
+
+    EXPECT_TRUE(data_and_converter->GetConverter()->Convert(request.options(),
+                                                            &segments));
+    ASSERT_GT(segments.segments_size(), 0);
+    ASSERT_GT(segments.segment(0).candidates_size(), 0);
+    std::string converted_value;
+    for (size_t i = 0; i < segments.segments_size(); ++i) {
+      converted_value += segments.segment(i).candidate(0).value;
+    }
+    EXPECT_EQ(converted_value, "アンケート控える");
+    cost_bonus_2000 = segments.segment(0).candidate(0).cost;
+  }
+
+  int cost_bonus_2001 = 0;
+  {
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(kRequestKey);
+
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_particle_omission_transition_cost_bonus(2001);
+
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetRequest(request_proto)
+            .SetRequestType(ConversionRequest::CONVERSION)
+            .Build();
+
+    EXPECT_TRUE(data_and_converter->GetConverter()->Convert(request.options(),
+                                                            &segments));
+    ASSERT_GT(segments.segments_size(), 0);
+    ASSERT_GT(segments.segment(0).candidates_size(), 0);
+    std::string converted_value;
+    for (size_t i = 0; i < segments.segments_size(); ++i) {
+      converted_value += segments.segment(i).candidate(0).value;
+    }
+    EXPECT_EQ(converted_value, "アンケート控える");
+    cost_bonus_2001 = segments.segment(0).candidate(0).cost;
+  }
+
+  // Cost of the first segment should be reduced by 1 for bonus 2001 compared to
+  // 2000.
+  EXPECT_EQ(cost_bonus_2000 - cost_bonus_2001, 1);
+}
+
+TEST(ImmutableConverterTest, ParticleOmissionBonusPredictionTest) {
+  auto data_and_converter = std::make_unique<MockDataAndImmutableConverter>();
+  const std::string kRequestKey = "あんけーとひかえる";
+
+  int cost_bonus_2000 = 0;
+  {
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(kRequestKey);
+
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_particle_omission_transition_cost_bonus(2000);
+
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetRequest(request_proto)
+            .SetRequestType(ConversionRequest::PREDICTION)
+            .Build();
+
+    EXPECT_TRUE(data_and_converter->GetConverter()->Convert(request.options(),
+                                                            &segments));
+    ASSERT_GT(segments.segments_size(), 0);
+    ASSERT_GT(segments.segment(0).candidates_size(), 0);
+    std::string converted_value;
+    for (size_t i = 0; i < segments.segments_size(); ++i) {
+      converted_value += segments.segment(i).candidate(0).value;
+    }
+    EXPECT_EQ(converted_value, "アンケート控える");
+    cost_bonus_2000 = segments.segment(0).candidate(0).cost;
+  }
+
+  int cost_bonus_2001 = 0;
+  {
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(kRequestKey);
+
+    commands::Request request_proto;
+    request_proto.mutable_decoder_experiment_params()
+        ->set_particle_omission_transition_cost_bonus(2001);
+
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetRequest(request_proto)
+            .SetRequestType(ConversionRequest::PREDICTION)
+            .Build();
+
+    EXPECT_TRUE(data_and_converter->GetConverter()->Convert(request.options(),
+                                                            &segments));
+    ASSERT_GT(segments.segments_size(), 0);
+    ASSERT_GT(segments.segment(0).candidates_size(), 0);
+    std::string converted_value;
+    for (size_t i = 0; i < segments.segments_size(); ++i) {
+      converted_value += segments.segment(i).candidate(0).value;
+    }
+    EXPECT_EQ(converted_value, "アンケート控える");
+    cost_bonus_2001 = segments.segment(0).candidate(0).cost;
+  }
+
+  // Cost of the first segment should be reduced by 1 for bonus 2001 compared to
+  // 2000.
+  EXPECT_EQ(cost_bonus_2000 - cost_bonus_2001, 1);
 }
 
 }  // namespace mozc

@@ -32,12 +32,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "base/container/arena.h"
+#include "converter/caching_connector.h"
 #include "converter/candidate.h"
 #include "converter/candidate_filter.h"
 #include "converter/connector.h"
@@ -54,6 +56,7 @@
 
 namespace mozc {
 
+template <typename TConnector>
 class NBestGenerator {
  public:
   enum BoundaryCheckMode {
@@ -100,7 +103,7 @@ class NBestGenerator {
 
   // Try to enumerate N-best results between begin_node and end_node.
   NBestGenerator(const dictionary::UserDictionaryInterface& user_dictionary,
-                 const Segmenter& segmenter, const Connector& connector,
+                 const Segmenter& segmenter, TConnector& connector,
                  const dictionary::PosMatcher& pos_matcher,
                  const Lattice& lattice,
                  const SuggestionFilter& suggestion_filter);
@@ -109,13 +112,12 @@ class NBestGenerator {
   ~NBestGenerator() = default;
 
   // Reset the iterator status.
-  void Reset(const Node* absl_nonnull begin_node,
-             const Node* absl_nonnull end_node, Options options);
+  void Reset(const Node& begin_node, const Node& end_node, Options options);
 
   // Set candidates.
   void SetCandidates(const ConversionOptions& options,
                      absl::string_view original_key, size_t expand_size,
-                     Segment* absl_nonnull segment);
+                     Segment& segment);
 
  private:
   enum BoundaryCheckResult {
@@ -203,7 +205,9 @@ class NBestGenerator {
   BoundaryCheckResult CheckOnlyEdge(const Node& lnode, const Node& rnode,
                                     bool is_edge) const;
 
-  int GetTransitionCost(const Node& lnode, const Node& rnode) const;
+  // This is not const because it calls non-const methods on caching_connector
+  // (to update its cache).
+  int GetTransitionCost(const Node& lnode, const Node& rnode);
 
   // Create queue element from arena
   const QueueElement* absl_nonnull CreateNewElement(
@@ -213,7 +217,7 @@ class NBestGenerator {
   // References to relevant modules.
   const dictionary::UserDictionaryInterface& user_dictionary_;
   const Segmenter& segmenter_;
-  const Connector& connector_;
+  TConnector& connector_;
   const dictionary::PosMatcher& pos_matcher_;
   const Lattice& lattice_;
 
