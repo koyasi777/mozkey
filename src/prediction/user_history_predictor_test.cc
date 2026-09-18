@@ -5156,9 +5156,9 @@ TEST_F(UserHistoryPredictorTest, NumberCounterSuffixPrecedingHistory) {
   // Learn "階" after a number.
   {
     const ConversionRequest convreq =
-        SetUpInputForPredictionWithHistory("かい", "3", "3", &composer_,
-                                           &segments_proxy);
+        SetUpInputForPrediction("かい", &composer_, &segments_proxy);
     segments_proxy.AddCandidate(0, "階");
+    segments_proxy.PrependHistory("3", "3");
     predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
 
     UserHistoryPredictorTestPeer predictor_peer(*predictor);
