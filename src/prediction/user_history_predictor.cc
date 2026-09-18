@@ -1114,6 +1114,12 @@ bool UserHistoryPredictor::AllowLowFreqFullSentenceEntryMatch(
                .first.size() < request_key.size();
   }
 
+  // Allow right-prefix matching for entries explicitly marked as safe for
+  // partial matching, such as compound nouns and proper nouns.
+  if (mtype == MatchType::RIGHT_PREFIX_MATCH && entry.allow_partial_match()) {
+    return true;
+  }
+
   return false;
 }
 
@@ -2201,7 +2207,8 @@ UserHistoryPredictor::MakeLearningSegments(
       make_history_learning_segments(request.history_result());
   learning_segments.conversion_segments = make_learning_segments(result);
   learning_segments.inner_segment_boundary = result.inner_segment_boundary;
-  learning_segments.allow_partial_match = IsProperNoun(request, result);
+  learning_segments.allow_partial_match =
+      ShouldAllowPartialMatch(request, result, learning_segments);
 
   return learning_segments;
 }
@@ -2310,7 +2317,7 @@ void UserHistoryPredictor::InsertHistoryForConversionSegments(
     Insert(request, 0, 0, learning_segments.conversion_segments_key,
            learning_segments.conversion_segments_value, "",
            learning_segments.inner_segment_boundary, {},
-           false, /* allow_partial_match */
+           learning_segments.allow_partial_match, /* allow_partial_match */
            last_access_time, revert_entries);
   }
 
@@ -2641,6 +2648,44 @@ bool UserHistoryPredictor::IsProperNoun(const ConversionRequest& request,
           pos_matcher.IsUniqueNoun(result.lid) ||  // proper noun POS
           pos_matcher.IsUniqueNoun(result.rid) ||
           (stype == Util::KANJI && is_proper_noun_key_in_dic(result.key)));
+}
+
+
+bool UserHistoryPredictor::ShouldAllowPartialMatch(
+    const ConversionRequest& request, const Result& result,
+    const SegmentsForLearning& learning_segments) const {
+  if (IsProperNoun(request, result)) {
+    return true;
+  }
+
+  if (!request.request()
+           .decoder_experiment_params()
+           .user_history_enable_compound_noun_partial_match()) {
+    return false;
+  }
+
+  if (learning_segments.conversion_segments.size() <= 1) {
+    return false;
+  }
+
+  // Do not enable partial matching when any conversion segment contains a
+  // functional suffix such as a particle.
+  for (const auto& seg : learning_segments.conversion_segments) {
+    if ((!seg.content_key.empty() && seg.key != seg.content_key) ||
+        (!seg.content_value.empty() && seg.value != seg.content_value)) {
+      return false;
+    }
+  }
+
+  // The compound must end in a noun-like POS (or unspecified POS).
+  const auto& pos_matcher = modules_.GetPosMatcher();
+  if (result.rid != 0 && !pos_matcher.IsContentNoun(result.rid) &&
+      !pos_matcher.IsGeneralNoun(result.rid) &&
+      !pos_matcher.IsUniqueNoun(result.rid)) {
+    return false;
+  }
+
+  return true;
 }
 
 // Example
