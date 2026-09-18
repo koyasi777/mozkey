@@ -271,6 +271,32 @@ mozc_cc_library(
     ],
 )
 
+mozc_cc_library(
+    name = "caching_connector",
+    hdrs = ["caching_connector.h"],
+    visibility = [
+        "//:__subpackages__",
+    ],
+    deps = [
+        ":connector",
+        "//dictionary:pos_matcher",
+        "@com_google_absl//absl/log:check",
+    ],
+)
+
+mozc_cc_test(
+    name = "caching_connector_test",
+    srcs = ["caching_connector_test.cc"],
+    deps = [
+        ":caching_connector",
+        ":connector",
+        "//data_manager/testing:mock_data_manager",
+        "//dictionary:pos_matcher",
+        "//engine:modules",
+        "//testing:gunit_main",
+    ],
+)
+
 mozc_cc_test(
     name = "connector_test",
     size = "small",
@@ -302,6 +328,7 @@ mozc_cc_library(
     hdrs = ["nbest_generator.h"],
     deps = [
         ":attribute",
+        ":caching_connector",
         ":candidate_filter",
         ":connector",
         ":inner_segment",
@@ -329,6 +356,7 @@ mozc_cc_test(
         "nbest_generator_test.cc",
     ],
     deps = [
+        ":caching_connector",
         ":immutable_converter",
         ":lattice",
         ":nbest_generator",
@@ -463,6 +491,7 @@ mozc_cc_library(
     ],
     deps = [
         ":attribute",
+        ":caching_connector",
         ":connector",
         ":immutable_converter_interface",
         ":key_corrector",

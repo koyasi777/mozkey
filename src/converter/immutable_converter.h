@@ -81,9 +81,6 @@ class ImmutableConverter : public ImmutableConverterInterface {
     FIRST_INNER_SEGMENT,
   };
 
-  void ExpandCandidates(const ConversionOptions& options,
-                        absl::string_view original_key, NBestGenerator* nbest,
-                        Segment* segment, size_t expand_size) const;
   void InsertDummyCandidates(Segment* segment, size_t expand_size) const;
   std::vector<Node*> Lookup(int begin_pos, const ConversionOptions& options,
                             bool is_reverse, Lattice* lattice) const;
@@ -192,10 +189,13 @@ class ImmutableConverter : public ImmutableConverterInterface {
   void ApplyShortCompoundSplitGuard(absl::string_view history_key,
                                     Lattice* lattice) const;
 
-  bool Viterbi(const Segments& segments, Lattice* lattice) const;
+  bool Viterbi(const ConversionOptions& options, const Segments& segments,
+               Lattice* lattice) const;
 
-  bool PredictionViterbi(const Segments& segments, Lattice* lattice) const;
-  void PredictionViterbiInternal(int calc_begin_pos, int calc_end_pos,
+  bool PredictionViterbi(const ConversionOptions& options,
+                         const Segments& segments, Lattice* lattice) const;
+  void PredictionViterbiInternal(const ConversionOptions& options,
+                                 int calc_begin_pos, int calc_end_pos,
                                  Lattice* lattice) const;
 
   // TODO(toshiyuki): Change parameter order for mutable |segments|.
@@ -214,6 +214,13 @@ class ImmutableConverter : public ImmutableConverterInterface {
                         absl::Span<const uint16_t> group,
                         size_t max_candidates_size,
                         InsertCandidatesType type) const;
+
+  template <typename TConnector>
+  void InsertCandidatesImpl(TConnector& conn, const ConversionOptions& options,
+                            Segments* segments, const Lattice& lattice,
+                            absl::Span<const uint16_t> group,
+                            size_t max_candidates_size,
+                            InsertCandidatesType type) const;
 
   void InsertCandidatesForRealtimeWithCandidateChecker(
       const ConversionOptions& options, const Lattice& lattice,

@@ -718,6 +718,10 @@ message DecoderExperimentParams {
   // Use NextTopStates instead of NextStates in Predictor.
   optional bool ngram_use_next_top_states = 149 [default = false];
 
+  // Transition cost bonus for particle omission (e.g. "さかなくう" ->
+  // "魚食う"). This is used for experiments to improve core LM conversion.
+  optional int32 particle_omission_transition_cost_bonus = 150 [default = 0];
+
   // If true, enables multi-segment candidate generation.
   optional bool enable_multi_segment_candidate = 156 [default = false];
 }

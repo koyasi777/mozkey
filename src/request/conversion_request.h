@@ -173,9 +173,7 @@ class ConversionRequest {
   }
   // Returns options by value. Cheap to copy and avoids reference lifetime
   // issues.
-  Options options() const {
-    return options_;
-  }
+  Options options() const { return options_; }
   const prediction::Result& history_result() const
       ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return *history_result_;
@@ -275,6 +273,10 @@ class ConversionRequestBuilder {
     } else {
       request_.options_.input_mode = ConversionOptions::InputMode::KANA;
     }
+    request_.options_.particle_omission_transition_cost_bonus =
+        request_.request()
+            .decoder_experiment_params()
+            .particle_omission_transition_cost_bonus();
     return request_;
   }
 
