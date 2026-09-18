@@ -1616,9 +1616,12 @@ void LearnNumberStyle(const ConversionRequest& request,
   rewriter.Finish(request, segments);
 }
 
-TEST_F(NumberRewriterTest, NumberStyleLearningNotEnabled) {
+TEST_F(NumberRewriterTest, NumberStyleLearningNotEnabledInIncognito) {
   std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
-  const ConversionRequest convreq;
+  commands::Request request;
+  request.set_is_incognito_mode(true);
+  const ConversionRequest convreq =
+      ConversionRequestBuilder().SetRequest(request).Build();
   LearnNumberStyle(convreq, pos_matcher_, *rewriter);
 
   {
@@ -1627,7 +1630,7 @@ TEST_F(NumberRewriterTest, NumberStyleLearningNotEnabled) {
     rewriter->Rewrite(convreq, &new_segments);
     ASSERT_EQ(new_segments.conversion_segments_size(), 1);
     ASSERT_GT(new_segments.conversion_segment(0).candidates_size(), 3);
-    // Learned style should not be applied.
+    // Learned style should not be applied in incognito mode.
     ASSERT_NE(new_segments.conversion_segment(0).candidate(3).value, "2,000");
   }
 }
@@ -1638,6 +1641,7 @@ class NumberStyleLearningTest : public NumberRewriterTest,
 INSTANTIATE_TEST_SUITE_P(
     NumberStyleLearningTestForRequest, NumberStyleLearningTest,
     ::testing::Values(
+        commands::Request(),
         []() {
           commands::Request request;
           request_test_util::FillMobileRequest(&request);
@@ -1703,6 +1707,66 @@ TEST_P(NumberStyleLearningTest, NumberRewriterTest) {
     ASSERT_GT(new_segments.conversion_segment(0).candidates_size(), 3);
     ASSERT_NE(new_segments.conversion_segment(0).candidate(3).value, "2,000");
   }
+}
+
+TEST_F(NumberRewriterTest, NumberStyleLearningExplicitHalfWidth) {
+  std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
+
+  config::Config config;
+  auto* rule = config.add_character_form_rules();
+  rule->set_group("0");
+  rule->set_conversion_character_form(config::Config::HALF_WIDTH);
+  const ConversionRequest request =
+      ConversionRequestBuilder().SetConfig(config).Build();
+
+  Segments segments;
+  Segment* seg = segments.push_back_segment();
+  seg->set_key("1234");
+  converter::Candidate* candidate = seg->add_candidate();
+  candidate->value = "１，２３４";
+  candidate->content_value = "１，２３４";
+  candidate->content_key = "1234";
+  candidate->lid = pos_matcher_.GetNumberId();
+  candidate->rid = pos_matcher_.GetNumberId();
+  candidate->style =
+      NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH;
+  seg->set_segment_type(Segment::FIXED_VALUE);
+  rewriter->Finish(request, segments);
+
+  Segments new_segments =
+      PrepareNumberSegments("1234", "1234", 3, pos_matcher_);
+  EXPECT_TRUE(rewriter->Rewrite(request, &new_segments));
+  EXPECT_EQ(new_segments.conversion_segment(0).candidate(3).value, "1,234");
+}
+
+TEST_F(NumberRewriterTest, NumberStyleLearningExplicitFullWidth) {
+  std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
+
+  config::Config config;
+  auto* rule = config.add_character_form_rules();
+  rule->set_group("0");
+  rule->set_conversion_character_form(config::Config::FULL_WIDTH);
+  const ConversionRequest request =
+      ConversionRequestBuilder().SetConfig(config).Build();
+
+  Segments segments;
+  Segment* seg = segments.push_back_segment();
+  seg->set_key("1234");
+  converter::Candidate* candidate = seg->add_candidate();
+  candidate->value = "1,234";
+  candidate->content_value = "1,234";
+  candidate->content_key = "1234";
+  candidate->lid = pos_matcher_.GetNumberId();
+  candidate->rid = pos_matcher_.GetNumberId();
+  candidate->style =
+      NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH;
+  seg->set_segment_type(Segment::FIXED_VALUE);
+  rewriter->Finish(request, segments);
+
+  Segments new_segments =
+      PrepareNumberSegments("1234", "1234", 3, pos_matcher_);
+  EXPECT_TRUE(rewriter->Rewrite(request, &new_segments));
+  EXPECT_EQ(new_segments.conversion_segment(0).candidate(3).value, "１，２３４");
 }
 
 TEST_F(NumberRewriterTest, NoModification) {
