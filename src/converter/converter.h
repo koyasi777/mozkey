@@ -246,8 +246,43 @@ class Converter final : public ConverterInterface {
   bool PredictForRequestWithSegments(const ConversionRequest& request,
                                      Segments* segments) const;
 
-  // Post processing after conversion.
-  // Rewriter, SuppressionDictionary, etc.
+  // Resizes conversion segments to match inner segment boundaries of result
+  // and re-runs conversion if needed. Returns false if resizing/conversion
+  // fails.
+  bool ResizeSegmentsByResult(const ConversionRequest& request,
+                              const prediction::Result& result,
+                              Segments* segments) const;
+
+  // Applies each inner segment of `result` to the corresponding conversion
+  // segment at `target_pos`.
+  void ApplyResultToSegments(const prediction::Result& result,
+                             size_t target_pos, uint32_t additional_attributes,
+                             Segments* segments) const;
+
+  // Generates prediction results from UserHistoryPredictor and
+  // SupplementalModel (PostCorrection) for conversion.
+  std::vector<prediction::Result> PredictForConversion(
+      const ConversionRequest& request, const Segments& segments,
+      const prediction::Result& default_result) const;
+
+  // Populates prediction results into conversion segments.
+  void PopulatePredictionResultsToSegments(
+      const ConversionRequest& request,
+      const prediction::Result& default_result,
+      absl::Span<const prediction::Result> results, Segments* segments) const;
+
+  // Applies prediction-layer outputs (e.g., user history prediction and
+  // supplemental model post-correction) to conversion segments to minimize the
+  // behavioral discrepancy between prediction and conversion pipelines and
+  // allow conversion to benefit from improvements introduced in prediction.
+  //
+  // NOTE: This method is a short-term workaround. Because conversion currently
+  // requires tricky conversions and segment resizing between `Segments` and
+  // `prediction::Result`, the long-term goal is to eliminate dependency on
+  // `Segments` entirely in favor of a unified `Result`-based pipeline.
+  void MaybeApplyPredictionToConversion(const ConversionRequest& request,
+                                        Segments* segments) const;
+
   void ApplyPostProcessing(const ConversionRequest& request,
                            Segments* segments) const;
 

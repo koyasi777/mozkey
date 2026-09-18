@@ -68,6 +68,7 @@
 #include "prediction/result.h"
 #include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
+#include "request/request_util.h"
 #include "rewriter/rewriter_interface.h"
 #include "transliteration/transliteration.h"
 
@@ -777,7 +778,286 @@ void Converter::ApplyConversion(Segments* segments,
     MOZC_VLOG(1) << "Convert failed for key: " << segments->segment(0).key();
   }
 
+  MaybeApplyPredictionToConversion(request, segments);
   ApplyPostProcessing(request, segments);
+}
+
+bool Converter::ResizeSegmentsByResult(const ConversionRequest& request,
+                                       const prediction::Result& result,
+                                       Segments* segments) const {
+  std::vector<uint8_t> new_sizes;
+  for (const auto& inner_seg : result.inner_segments()) {
+    const size_t char_len = Util::CharsLen(inner_seg.GetKey());
+    if (char_len == 0 || char_len > std::numeric_limits<uint8_t>::max()) {
+      return false;
+    }
+    new_sizes.push_back(static_cast<uint8_t>(char_len));
+  }
+
+  bool need_resize = (segments->conversion_segments_size() < new_sizes.size());
+  if (!need_resize) {
+    for (size_t i = 0; i < new_sizes.size(); ++i) {
+      if (segments->conversion_segment(i).key_len() != new_sizes[i]) {
+        need_resize = true;
+        break;
+      }
+    }
+  }
+
+  if (need_resize) {
+    if (!ResizeSegments(segments, request, 0, new_sizes)) {
+      LOG(WARNING) << "Failed to resize or convert segments for result match";
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void Converter::ApplyResultToSegments(const prediction::Result& result,
+                                      size_t target_pos,
+                                      uint32_t additional_attributes,
+                                      Segments* segments) const {
+  if (result.inner_segments().size() != segments->conversion_segments_size()) {
+    return;
+  }
+
+  size_t seg_idx = 0;
+  for (const auto& inner_seg : result.inner_segments()) {
+    if (seg_idx >= segments->conversion_segments_size()) break;
+    Segment* segment = segments->mutable_conversion_segment(seg_idx++);
+
+    // Find existing candidate with matching value.
+    int existing_index = -1;
+    for (int i = 0; i < segment->candidates_size(); ++i) {
+      if (segment->candidate(i).value == inner_seg.GetValue()) {
+        existing_index = i;
+        break;
+      }
+    }
+
+    const size_t pos = std::min(
+        target_pos, static_cast<size_t>(segment->candidates_size() - 1));
+    if (existing_index >= 0) {
+      segment->move_candidate(existing_index, pos);
+      Candidate* cand = segment->mutable_candidate(pos);
+      cand->cost = std::min(cand->cost, result.cost);
+      cand->wcost = std::min(cand->wcost, result.wcost);
+      cand->attributes |= (result.attributes | additional_attributes);
+      if (!result.inner_segment_boundary.empty()) {
+        cand->inner_segment_boundary = result.inner_segment_boundary;
+      }
+    } else {
+      Candidate* cand = (pos == 0) ? segment->push_front_candidate()
+                                   : segment->insert_candidate(pos);
+      strings::Assign(cand->key, inner_seg.GetKey());
+      strings::Assign(cand->value, inner_seg.GetValue());
+      strings::Assign(cand->content_key, inner_seg.GetContentKey());
+      strings::Assign(cand->content_value, inner_seg.GetContentValue());
+      cand->lid = result.lid;
+      cand->rid = result.rid;
+      cand->wcost = result.wcost;
+      cand->cost = result.cost;
+      cand->attributes = (result.attributes | additional_attributes);
+      cand->consumed_key_size = result.consumed_key_size;
+      cand->inner_segment_boundary = result.inner_segment_boundary;
+    }
+  }
+}
+
+namespace {
+
+// Merges user history prediction results and post-correction (supplemental
+// model) results into a single list with deduplication.
+//
+// Ordering rules:
+// - Default: Prioritizes user history results over post-correction results.
+// - Weak history: If the top user history candidate is weak (has
+//   Attribute::WEAK_USER_HISTORY_PREDICTION), the top post-correction/default
+//   result is prioritized at position 0 to prevent low-confidence history from
+//   overriding Viterbi/PostCorrect, and history candidates are demoted to
+//   subsequent positions (consistent with Predictor::DemoteWeakUserHistory).
+// - Deduplication: Candidates with duplicate values (spellings) are skipped.
+std::vector<prediction::Result> MergePredictionResults(
+    std::vector<prediction::Result> user_history_results,
+    std::vector<prediction::Result> pc_results) {
+  std::vector<prediction::Result> results;
+  const bool is_weak_history = !user_history_results.empty() &&
+                               (user_history_results.front().attributes &
+                                Attribute::WEAK_USER_HISTORY_PREDICTION);
+
+  auto append_unique = [](prediction::Result res,
+                          std::vector<prediction::Result>* dst) {
+    if (std::none_of(dst->begin(), dst->end(),
+                     [&res](const prediction::Result& r) {
+                       return r.value == res.value;
+                     })) {
+      dst->push_back(std::move(res));
+    }
+  };
+
+  if (is_weak_history && !pc_results.empty()) {
+    // When the top history candidate is weak, prevent it from becoming the top
+    // candidate by prioritizing pc_results.front() (default conversion or
+    // post-corrected result) at position 0 and demoting history candidates
+    // to subsequent positions (consistent with
+    // Predictor::DemoteWeakUserHistory).
+    results.push_back(pc_results.front());
+    for (prediction::Result& res : user_history_results) {
+      append_unique(std::move(res), &results);
+    }
+    for (size_t i = 1; i < pc_results.size(); ++i) {
+      append_unique(std::move(pc_results[i]), &results);
+    }
+  } else {
+    // Normal history: user history results followed by post-correction results.
+    results = std::move(user_history_results);
+    for (prediction::Result& res : pc_results) {
+      append_unique(std::move(res), &results);
+    }
+  }
+  return results;
+}
+
+}  // namespace
+
+std::vector<prediction::Result> Converter::PredictForConversion(
+    const ConversionRequest& request, const Segments& segments,
+    const prediction::Result& default_result) const {
+  // Build ConversionRequest with history_result extracted from segments,
+  // consistent with PredictForRequestWithSegments.
+  const prediction::Result history_result = HistorySegmentsToResult(segments);
+  const ConversionRequest conv_req = ConversionRequestBuilder()
+                                         .SetConversionRequestView(request)
+                                         .SetHistoryResultView(history_result)
+                                         .Build();
+
+  // 1. Run SupplementalModel (PostCorrect) on default_result.
+  // Stop applying post correction when handwriting mode, consistent with
+  // DictionaryPredictor::MaybeApplyPostCorrection.
+  std::vector<prediction::Result> pc_results = {default_result};
+  if (!request_util::IsHandwriting(conv_req) &&
+      modules_->GetSupplementalModel().IsAvailable() &&
+      RewriterInterface::DisableLegacyRewriter(
+          conv_req, RewriterInterface::kDisableCollocation)) {
+    modules_->GetSupplementalModel().PostCorrect(conv_req, pc_results);
+  }
+
+  // 2. Run UserHistoryPredictor.
+  std::vector<prediction::Result> user_history_results;
+  constexpr int kLegacyHistoryMode =
+      RewriterInterface::kDisableUserSegmentHistory |
+      RewriterInterface::kDisableUserBoundaryHistory;
+  if (predictor_ &&
+      RewriterInterface::DisableLegacyRewriter(conv_req, kLegacyHistoryMode)) {
+    user_history_results = predictor_->Convert(conv_req);
+  }
+
+  const bool is_default_multi_segment =
+      (segments.conversion_segments_size() > 1);
+
+  // Fail-safe: Older history entries lack inner_segment boundary information,
+  // indicated by Attribute::USER_HISTORY_EMPTY_INNER_SEGMENT_BOUNDARY.
+  // If top_result is a single-segment prediction without boundary info, but
+  // the default Viterbi conversion produced multiple segments, we cannot
+  // safely infer sub-segment boundaries. Skip applying history prediction to
+  // avoid corrupting the multi-segment structure.
+  if (!user_history_results.empty()) {
+    const prediction::Result& history_top = user_history_results.front();
+    const bool is_history_multi_segment =
+        (history_top.inner_segment_boundary.size() > 1);
+    const bool missing_boundary_error =
+        !is_history_multi_segment && is_default_multi_segment &&
+        (history_top.attributes &
+         Attribute::USER_HISTORY_EMPTY_INNER_SEGMENT_BOUNDARY);
+    if (missing_boundary_error || history_top.key.empty() ||
+        history_top.value.empty()) {
+      user_history_results.clear();
+    }
+  }
+
+  // 3. Merge results: user_history_results -> pc_results.
+  return MergePredictionResults(std::move(user_history_results),
+                                std::move(pc_results));
+}
+
+void Converter::PopulatePredictionResultsToSegments(
+    const ConversionRequest& request, const prediction::Result& default_result,
+    absl::Span<const prediction::Result> results, Segments* segments) const {
+  if (results.empty()) {
+    return;
+  }
+
+  const prediction::Result& top_result = results.front();
+  const bool is_default_multi_segment =
+      (segments->conversion_segments_size() > 1);
+  const bool top_is_same_as_default =
+      (top_result.value == default_result.value &&
+       top_result.inner_segment_boundary ==
+           default_result.inner_segment_boundary);
+
+  // If there is no change in the top candidate and the conversion has multiple
+  // segments, do nothing.
+  if (top_is_same_as_default && is_default_multi_segment) {
+    return;
+  }
+
+  // 1. Resize segments if needed to match top_result's inner segment
+  // boundaries.
+  if (!ResizeSegmentsByResult(request, top_result, segments)) {
+    return;
+  }
+
+  // 2. Apply results across conversion segments.
+  // For single-segment conversion, apply up to 5 results.
+  // If the 1st candidate is identical to the default result, apply starting
+  // from candidate position 1.
+  const bool is_single_segment =
+      (!is_default_multi_segment && segments->conversion_segments_size() == 1);
+  const size_t start_idx = top_is_same_as_default ? 1 : 0;
+
+  if (is_single_segment) {
+    const size_t max_results = std::min<size_t>(results.size(), 5);
+    for (size_t i = start_idx; i < max_results; ++i) {
+      const prediction::Result& res = results[i];
+      if (res.key.empty() || res.value.empty()) continue;
+      ApplyResultToSegments(res, /*target_pos=*/i, Attribute::DEFAULT_ATTRIBUTE,
+                            segments);
+    }
+  } else if (!top_is_same_as_default) {
+    // Multi-segment conversion: only apply top_result when it modifies default.
+    ApplyResultToSegments(top_result, /*target_pos=*/0,
+                          Attribute::DEFAULT_ATTRIBUTE, segments);
+  }
+}
+
+void Converter::MaybeApplyPredictionToConversion(
+    const ConversionRequest& request, Segments* segments) const {
+  if (segments == nullptr || segments->conversion_segments_size() == 0 ||
+      segments->resized()) {
+    return;
+  }
+
+  // 1. Build a single Result from the top candidates of default conversion
+  // segments.
+  const std::optional<prediction::Result> default_result =
+      ConversionSegmentsToResult(segments->conversion_segments());
+  if (!default_result.has_value()) {
+    return;
+  }
+
+  // 2. Generate and merge prediction results from UserHistoryPredictor and
+  // SupplementalModel (PostCorrection).
+  const std::vector<prediction::Result> results =
+      PredictForConversion(request, *segments, *default_result);
+  if (results.empty()) {
+    return;
+  }
+
+  // 3. Populate prediction results into conversion segments (including segment
+  // resizing if needed).
+  PopulatePredictionResultsToSegments(request, *default_result, results,
+                                      segments);
 }
 
 void Converter::CompletePosIds(Candidate* candidate) const {
