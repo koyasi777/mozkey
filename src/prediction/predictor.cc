@@ -279,7 +279,8 @@ std::vector<Result> Predictor::PredictForMixedConversion(
 }
 
 // static
-void Predictor::DemoteWeakUserHistory(absl::Span<Result> results) {
+void Predictor::DemoteWeakUserHistory(const ConversionRequest& request,
+                                      absl::Span<Result> results) {
   auto is_weak = [](const Result& result) {
     return result.attributes & prediction::WEAK_USER_HISTORY_PREDICTION;
   };
@@ -288,8 +289,25 @@ void Predictor::DemoteWeakUserHistory(absl::Span<Result> results) {
     return;
   }
 
-  if (auto first_no_weak = absl::c_find_if_not(results, is_weak);
-      first_no_weak != results.end()) {
+  // When the top candidate is weak (e.g., multi-segment prefix user history
+  // before reaching the last segment), promote only the first non-weak
+  // exact-match candidate (or first non-weak candidate if none matches
+  // request.key()) to position 0. This protects short exact-match visibility at
+  // rank 1 while preserving the user's learned multi-segment history at rank 2
+  // (ahead of unlearned dictionary homophones), matching the legacy
+  // UserSegmentHistoryRewriter behavior and
+  // converter_util.cc::MergePredictionResults.
+  //
+  // TODO(taku): Once the UserSegmentHistoryRewriter migration finishes,
+  // refactor and unify candidate scoring so explicit weak-candidate demotion is
+  // no longer needed.
+  auto first_no_weak = absl::c_find_if(results, [&](const Result& r) {
+    return !is_weak(r) && r.key == request.key();
+  });
+  if (first_no_weak == results.end()) {
+    first_no_weak = absl::c_find_if_not(results, is_weak);
+  }
+  if (first_no_weak != results.end()) {
     std::rotate(results.begin(), first_no_weak, std::next(first_no_weak));
   }
 }
@@ -312,7 +330,7 @@ std::vector<Result> Predictor::MixCandidates(
   absl::c_move(user_history_results, std::back_inserter(results));
   absl::c_move(dictionary_results, std::back_inserter(results));
 
-  DemoteWeakUserHistory(absl::MakeSpan(results));
+  DemoteWeakUserHistory(request, absl::MakeSpan(results));
 
   return results;
 }

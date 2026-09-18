@@ -1811,6 +1811,45 @@ std::vector<Result> UserHistoryPredictor::MakeResults(
     }
     if (result_entry->attributes() & Attribute::WEAK_CANDIDATE) {
       result.attributes |= converter::Attribute::WEAK_USER_HISTORY_PREDICTION;
+    } else if (IsMixedConversionEnabled(request) && !request.key().empty() &&
+               result_entry->inner_segment_boundary_size() > 1) {
+      // b/555130585: In mobile mixed conversion, demote multi-segment prefix
+      // history candidates when input has not reached the last segment (e.g.,
+      // "きょうは" for "今日は行った", or "きょうはえきに" for
+      // "今日は駅に行った") to prevent displacing shorter single-segment
+      // candidates from the limited mobile suggestion strip.
+      //
+      // Background: Previously, this ranking behavior was not explicitly
+      // designed, but occurred as an unintended side effect of invoking
+      // UserSegmentHistoryRewriter twice:
+      // 1) First inside RealtimeDecoder::Decode when generating conversion
+      //    candidates.
+      // 2) Second in Converter::ApplyPostProcessing after Predictor merged
+      //    UserHistoryPredictor and DictionaryPredictor candidates.
+      // In the second pass, UserSegmentHistoryRewriter assigned score > 0 only
+      // to exact-match candidates (key == request.key()) and score == 0 to
+      // predictive candidates (both multi-segment prefix history and dictionary
+      // prefix completions), implicitly promoting exact-match candidates above
+      // multi-segment prefix history.
+      //
+      // TODO(taku): This WEAK_USER_HISTORY_PREDICTION tagging and
+      // desktop/mobile branching exist as a workaround to reproduce the legacy
+      // 2-pass rewriter side effect without regressions. Once the
+      // UserSegmentHistoryRewriter migration is complete, refactor and simplify
+      // the scoring/ranking pipeline so that exact-match vs. predictive
+      // candidate priority is handled cleanly without multi-bucket demotion or
+      // platform-specific workarounds.
+      const converter::InnerSegments inner_segments(
+          result_entry->key(), result_entry->value(),
+          result_entry->inner_segment_boundary());
+      const size_t prefix_before_last_segment_len =
+          inner_segments
+              .GetPrefixKeyAndValue(
+                  result_entry->inner_segment_boundary_size() - 1)
+              .first.size();
+      if (request.key().size() <= prefix_before_last_segment_len) {
+        result.attributes |= converter::Attribute::WEAK_USER_HISTORY_PREDICTION;
+      }
     }
     if (result_entry->attributes() & Attribute::BIGRAM_BOOST) {
       result.attributes |= converter::Attribute::BIGRAM;

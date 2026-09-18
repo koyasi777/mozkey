@@ -5147,6 +5147,160 @@ TEST_F(UserHistoryPredictorTest, RemoveRedundantCandidates) {
   run_test({"東京", "東京は", "大阪駅", "大阪"}, {"東京", "大阪駅", "大阪"});
 }
 
+TEST_F(UserHistoryPredictorTest, MultiSegmentWeakCandidateWithinFirstSegment) {
+  request_.mutable_decoder_experiment_params()
+      ->set_disable_legacy_rewriter_mode(1);
+  UserHistoryPredictor* predictor = GetUserHistoryPredictorWithClearedHistory();
+  SegmentsProxy segments_proxy;
+  {
+    constexpr absl::string_view kKey = "きょうはいった";
+    constexpr absl::string_view kValue = "今日は言った";
+    const ConversionRequest convreq =
+        SetUpInputForPrediction(kKey, &composer_, &segments_proxy);
+    segments_proxy.AddCandidate(0, kValue);
+    // "きょうは, 今日は"
+    segments_proxy.PushBackInnerSegmentBoundary(0, 0, 12, 9, 9, 6);
+    // "いった, 言った"
+    segments_proxy.PushBackInnerSegmentBoundary(0, 0, 9, 9, 6, 6);
+    predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
+  }
+
+  // 1. In desktop mode (mixed_conversion = false), WEAK is NOT set.
+  {
+    request_.set_mixed_conversion(false);
+    segments_proxy.MakeSegments("きょうは");
+    ConversionRequest::Options options = {
+        .request_type = ConversionRequest::SUGGESTION,
+        .max_user_history_prediction_candidates_size = 10,
+    };
+    const ConversionRequest convreq = CreateConversionRequestWithOptions(
+        composer_, std::move(options), segments_proxy);
+    const std::vector<Result> results = predictor->Predict(convreq);
+    auto it = std::find_if(results.begin(), results.end(), [](const Result& r) {
+      return r.value == "今日は言った";
+    });
+    ASSERT_NE(it, results.end());
+    EXPECT_FALSE(it->attributes &
+                 converter::Attribute::WEAK_USER_HISTORY_PREDICTION);
+  }
+
+  // 2. In mobile mode (mixed_conversion = true), query "きょうは" (within 1st
+  // segment): "今日は言った" must have WEAK attribute.
+  {
+    request_.set_mixed_conversion(true);
+    segments_proxy.MakeSegments("きょうは");
+    ConversionRequest::Options options = {
+        .request_type = ConversionRequest::SUGGESTION,
+        .max_user_history_prediction_candidates_size = 10,
+    };
+    const ConversionRequest convreq = CreateConversionRequestWithOptions(
+        composer_, std::move(options), segments_proxy);
+    const std::vector<Result> results = predictor->Predict(convreq);
+    auto it = std::find_if(results.begin(), results.end(), [](const Result& r) {
+      return r.value == "今日は言った";
+    });
+    if (it != results.end()) {
+      EXPECT_TRUE(it->attributes &
+                  converter::Attribute::WEAK_USER_HISTORY_PREDICTION);
+    }
+  }
+
+  // 2. Query "きょうはい" (across 1st segment into last segment):
+  // "今日は言った" must NOT have WEAK attribute.
+  {
+    segments_proxy.MakeSegments("きょうはい");
+    ConversionRequest::Options options = {
+        .request_type = ConversionRequest::SUGGESTION,
+        .max_user_history_prediction_candidates_size = 10,
+    };
+    const ConversionRequest convreq = CreateConversionRequestWithOptions(
+        composer_, std::move(options), segments_proxy);
+    const std::vector<Result> results = predictor->Predict(convreq);
+    auto it = std::find_if(results.begin(), results.end(), [](const Result& r) {
+      return r.value == "今日は言った";
+    });
+    ASSERT_NE(it, results.end());
+    EXPECT_FALSE(it->attributes &
+                 converter::Attribute::WEAK_USER_HISTORY_PREDICTION);
+  }
+
+  // 3. Test 3-segment entry: "今日は駅に行った" ("きょうは|えきに|いった")
+  {
+    constexpr absl::string_view kKey3 = "きょうはえきにいった";
+    constexpr absl::string_view kValue3 = "今日は駅に行った";
+    const ConversionRequest convreq3 =
+        SetUpInputForPrediction(kKey3, &composer_, &segments_proxy);
+    segments_proxy.AddCandidate(0, kValue3);
+    // "きょうは, 今日は"
+    segments_proxy.PushBackInnerSegmentBoundary(0, 0, 12, 9, 9, 6);
+    // "えきに, 駅に"
+    segments_proxy.PushBackInnerSegmentBoundary(0, 0, 9, 6, 6, 3);
+    // "いった, 行った"
+    segments_proxy.PushBackInnerSegmentBoundary(0, 0, 9, 9, 6, 6);
+    predictor->Finish(convreq3, segments_proxy.MakeLearningResults(),
+                      kRevertId);
+
+    // Query "きょうはえきに" (ends at 2nd segment): WEAK.
+    segments_proxy.MakeSegments("きょうはえきに");
+    ConversionRequest::Options options = {
+        .request_type = ConversionRequest::SUGGESTION,
+        .max_user_history_prediction_candidates_size = 10,
+    };
+    const ConversionRequest convreq_seg2 = CreateConversionRequestWithOptions(
+        composer_, std::move(options), segments_proxy);
+    const std::vector<Result> results_seg2 = predictor->Predict(convreq_seg2);
+    auto it2 = std::find_if(
+        results_seg2.begin(), results_seg2.end(),
+        [](const Result& r) { return r.value == "今日は駅に行った"; });
+    if (it2 != results_seg2.end()) {
+      EXPECT_TRUE(it2->attributes &
+                  converter::Attribute::WEAK_USER_HISTORY_PREDICTION);
+    }
+
+    // Query "きょうはえきにい" (reaches 3rd segment): NOT WEAK.
+    segments_proxy.MakeSegments("きょうはえきにい");
+    ConversionRequest::Options options_seg3 = {
+        .request_type = ConversionRequest::SUGGESTION,
+        .max_user_history_prediction_candidates_size = 10,
+    };
+    const ConversionRequest convreq_seg3 = CreateConversionRequestWithOptions(
+        composer_, std::move(options_seg3), segments_proxy);
+    const std::vector<Result> results_seg3 = predictor->Predict(convreq_seg3);
+    auto it3 = std::find_if(
+        results_seg3.begin(), results_seg3.end(),
+        [](const Result& r) { return r.value == "今日は駅に行った"; });
+    ASSERT_NE(it3, results_seg3.end());
+    EXPECT_FALSE(it3->attributes &
+                 converter::Attribute::WEAK_USER_HISTORY_PREDICTION);
+  }
+
+  // 4. Zero-query prediction (request.key().empty()): Multi-segment bigram
+  // history must NOT have WEAK attribute.
+  {
+    UserHistoryPredictor::Entry* kinou =
+        InsertEntry(predictor, "きのう", "昨日");
+    UserHistoryPredictor::Entry* kyouwa_itta =
+        AppendEntry(predictor, "きょうはいった", "今日は言った", kinou);
+    kyouwa_itta->set_suggestion_freq(2);
+    kyouwa_itta->add_inner_segment_boundary(
+        converter::EncodeLengths(12, 9, 9, 6).value());
+    kyouwa_itta->add_inner_segment_boundary(
+        converter::EncodeLengths(9, 9, 6, 6).value());
+
+    request_.set_zero_query_suggestion(true);
+    const ConversionRequest convreq_zero = SetUpInputForSuggestionWithHistory(
+        "", "きのう", "昨日", &composer_, &segments_proxy);
+    segments_proxy.PushBackInnerSegmentBoundary(0, 0, 9, 6, 9, 6);
+    const std::vector<Result> results_zero = predictor->Predict(convreq_zero);
+    auto it_zero =
+        std::find_if(results_zero.begin(), results_zero.end(),
+                     [](const Result& r) { return r.value == "今日は言った"; });
+    ASSERT_NE(it_zero, results_zero.end());
+    EXPECT_FALSE(it_zero->attributes &
+                 converter::Attribute::WEAK_USER_HISTORY_PREDICTION);
+  }
+}
+
 TEST_F(UserHistoryPredictorTest, ContentValueZeroQuery) {
   UserHistoryPredictor* predictor = GetUserHistoryPredictorWithClearedHistory();
 

@@ -30,6 +30,8 @@
 #ifndef MOZC_CONVERTER_CONVERTER_UTIL_H_
 #define MOZC_CONVERTER_CONVERTER_UTIL_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -112,6 +114,65 @@ void PopulateCandidateFromResult(const prediction::Result& result,
 // inner segment into an independent HISTORY Segment with its respective key,
 // value, content_key, and content_value.
 Segments PrepareSegmentsFromRequest(const ConversionRequest& request);
+
+// Merges user history prediction results and post-correction (supplemental
+// model) results into a single list with deduplication.
+//
+// Ordering rules:
+// - Default: Prioritizes user history results over post-correction results.
+// - Weak history: If the top user history candidate is weak (has
+//   Attribute::WEAK_USER_HISTORY_PREDICTION), the top post-correction/default
+//   result is prioritized at position 0 to prevent low-confidence history from
+//   overriding Viterbi/PostCorrect, and history candidates are demoted to
+//   subsequent positions (consistent with Predictor::DemoteWeakUserHistory).
+// - Deduplication: Candidates with duplicate values (spellings) are skipped.
+std::vector<prediction::Result> MergePredictionResults(
+    std::vector<prediction::Result> user_history_results,
+    std::vector<prediction::Result> pc_results);
+
+// Applies prediction `result` across conversion `segments` without resizing
+// segment boundaries.
+//
+// Key boundaries between `segments` (conversion segment sequence) and
+// `result.inner_segments()` (prediction inner segment sequence) are
+// synchronized from front to back using a two-pointer walk.
+//
+// For each synchronized interval:
+// - If the interval covers N > 1 conversion segments:
+//     Inner segments in the interval are concatenated into a combined value,
+//     and inserted/promoted in the start conversion segment as a multi-segment
+//     candidate with `converted_segment_count = N`.
+// - If the interval covers N == 1 conversion segment:
+//     The inner segment candidate is inserted or promoted to `target_pos`.
+//     To prevent higher-priority prediction candidates (e.g. from result 0)
+//     from being demoted by subsequent lower-priority results, existing
+//     candidates are only moved forward when `existing_index > target_pos`.
+//
+// Example:
+//   Conversion segments:
+//     Segment 0: key = "ここで" (9B),       value = "ここで"
+//     Segment 1: key = "はきものを" (15B),   value = "履物を"
+//     Segment 2: key = "ぬぐ" (6B),         value = "脱ぐ"
+//   Prediction result:
+//     key = "ここではきものをぬぐ", value = "ここでは着物を脱ぐ"
+//     inner_segments:
+//       Inner 0: key = "ここでは" (12B),    value = "ここでは"
+//       Inner 1: key = "きものを" (12B),    value = "着物を"
+//       Inner 2: key = "ぬぐ" (6B),         value = "脱ぐ"
+//
+//   1st synchronized interval (cumulative key bytes = 24B):
+//     - Conversion segments: [0, 2) (Segment 0 "ここで" + Segment 1
+//     "はきものを")
+//     - Inner segments: [0, 2) (Inner 0 "ここでは" + Inner 1 "きものを")
+//     - num_segs = 2 (> 1) -> Concatenates into combined value
+//     "ここでは着物を",
+//       and adds to Segment 0 with converted_segment_count = 2.
+//   2nd synchronized interval (cumulative key bytes = 6B):
+//     - Conversion segments: [2, 3) (Segment 2 "ぬぐ")
+//     - Inner segments: [2, 3) (Inner 2 "ぬぐ")
+//     - num_segs = 1 -> Promotes existing candidate "脱ぐ" in Segment 2.
+void ApplyResultToSegmentsMultiSegment(const prediction::Result& result,
+                                       size_t target_pos, Segments& segments);
 
 }  // namespace mozc::converter
 
