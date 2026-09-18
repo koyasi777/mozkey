@@ -5223,6 +5223,41 @@ TEST_F(UserHistoryPredictorTest, NumberCounterSuffixPrecedingHistory) {
   }
 }
 
+TEST_F(UserHistoryPredictorTest, BracketPairLearning) {
+  UserHistoryPredictor* predictor = GetUserHistoryPredictorWithClearedHistory();
+  SegmentsProxy segments_proxy;
+
+  // Committing an opening bracket also learns the paired closing bracket.
+  {
+    const ConversionRequest convreq =
+        SetUpInputForPrediction("「", &composer_, &segments_proxy);
+    segments_proxy.AddCandidate(0, "「");
+    predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
+  }
+
+  {
+    const ConversionRequest convreq =
+        SetUpInputForPrediction("」", &composer_, &segments_proxy);
+    const std::vector<Result> results = predictor->Predict(convreq);
+    auto it = absl::c_find_if(results, [](const Result& result) {
+      return result.key == "」" && result.value == "」";
+    });
+    ASSERT_NE(it, results.end());
+  }
+
+  // Reverting the opening bracket commit also rolls back the paired learning.
+  {
+    predictor->Revert(kRevertId);
+    const ConversionRequest convreq =
+        SetUpInputForPrediction("」", &composer_, &segments_proxy);
+    const std::vector<Result> results = predictor->Predict(convreq);
+    auto it = absl::c_find_if(results, [](const Result& result) {
+      return result.key == "」" && result.value == "」";
+    });
+    EXPECT_EQ(it, results.end());
+  }
+}
+
 TEST_F(UserHistoryPredictorTest, MultiSegmentWeakCandidateWithinFirstSegment) {
   request_.mutable_decoder_experiment_params()
       ->set_disable_legacy_rewriter_mode(1);
