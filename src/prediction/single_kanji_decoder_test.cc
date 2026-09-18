@@ -157,10 +157,10 @@ TEST_F(SingleKanjiDecoderTest, Result) {
   EXPECT_GT(results.size(), 1);
   const auto& result = results[0];
   EXPECT_EQ(result.key, "あけぼの");
-  EXPECT_EQ(result.types, SINGLE_KANJI);
+  EXPECT_TRUE(result.attributes & converter::Attribute::SINGLE_KANJI);
   EXPECT_EQ(result.lid, pos_matcher().GetGeneralSymbolId());
   EXPECT_EQ(result.rid, pos_matcher().GetGeneralSymbolId());
-  EXPECT_FALSE(result.candidate_attributes &
+  EXPECT_FALSE(result.attributes &
                converter::Attribute::PARTIALLY_KEY_CONSUMED);
   EXPECT_EQ(result.consumed_key_size, 0);
 }
@@ -173,11 +173,10 @@ TEST_F(SingleKanjiDecoderTest, PrefixResult) {
   EXPECT_GT(results.size(), 1);
   const auto& result = results[0];
   EXPECT_EQ(result.key, "あけぼの");
-  EXPECT_EQ(result.types, SINGLE_KANJI);
+  EXPECT_TRUE(result.attributes & converter::Attribute::SINGLE_KANJI);
   EXPECT_EQ(result.lid, pos_matcher().GetGeneralSymbolId());
   EXPECT_EQ(result.rid, pos_matcher().GetGeneralSymbolId());
-  EXPECT_TRUE(result.candidate_attributes &
-              converter::Attribute::PARTIALLY_KEY_CONSUMED);
+  EXPECT_TRUE(result.attributes & converter::Attribute::PARTIALLY_KEY_CONSUMED);
   EXPECT_EQ(result.consumed_key_size, strings::CharsLen("あけぼの"));
 }
 

@@ -492,7 +492,7 @@ TEST_F(MixedDecodingPredictorTest, MixCandidates) {
     const std::vector<Result> results =
         predict(std::move(predictor_results), std::move(history_results));
     EXPECT_EQ(results.size(), expected_size);
-    return results[0].candidate_attributes & converter::Attribute::NO_DELETABLE;
+    return results[0].attributes & converter::Attribute::NO_DELETABLE;
   };
 
   {
@@ -535,7 +535,7 @@ TEST_F(MixedDecodingPredictorTest, MixCandidates) {
 
     predictor_results[0].value = "dic_value";
     history_results[0].value = "history_value";
-    history_results[0].types |= prediction::WEAK_USER_HISTORY_PREDICTION;
+    history_results[0].attributes |= prediction::WEAK_USER_HISTORY_PREDICTION;
     std::vector<Result> mixed_results =
         predict(std::move(predictor_results), std::move(history_results));
 
@@ -554,7 +554,7 @@ TEST_F(MixedDecodingPredictorTest, DemoteWeakUserHistoryTest) {
       results[i].value = absl::StrCat(i);
     }
     for (const int i : index) {
-      results[i].types |= prediction::WEAK_USER_HISTORY_PREDICTION;
+      results[i].attributes |= prediction::WEAK_USER_HISTORY_PREDICTION;
     }
     PredictorTestPeer::DemoteWeakUserHistory(absl::MakeSpan(results));
     std::vector<absl::string_view> v;

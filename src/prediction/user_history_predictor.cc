@@ -83,6 +83,7 @@ namespace mozc::prediction {
 namespace {
 
 using ::mozc::composer::TypeCorrectedQuery;
+using ::mozc::converter::Attribute;
 
 // Finds suffix matches of history_segments from the most recent 500 histories
 // in LRU.
@@ -184,10 +185,9 @@ bool StartsWithValidLetter(absl::string_view value) {
 // don't use the description, since "did you mean" like description must be
 // provided at an appropriate timing and context.
 absl::string_view GetDescription(const Result& result) {
-  if (result.candidate_attributes &
-      (converter::Attribute::SPELLING_CORRECTION |
-       converter::Attribute::TYPING_CORRECTION |
-       converter::Attribute::AUTO_PARTIAL_SUGGESTION)) {
+  if (result.attributes &
+      (Attribute::SPELLING_CORRECTION | Attribute::TYPING_CORRECTION |
+       Attribute::AUTO_PARTIAL_SUGGESTION)) {
     return "";
   }
   return result.description;
@@ -1777,9 +1777,8 @@ std::vector<Result> UserHistoryPredictor::MakeResults(
     Result result;
     result.key = result_entry->key();
     result.value = result_entry->value();
-    result.candidate_attributes |=
-        converter::Attribute::USER_HISTORY_PREDICTION |
-        converter::Attribute::NO_VARIANTS_EXPANSION;
+    result.attributes |= converter::Attribute::USER_HISTORY_PREDICTION |
+                         converter::Attribute::NO_VARIANTS_EXPANSION;
     // Do not populate inner segment information from entry to result,
     // as this information may introduce unexpected side-effect during the
     // the training. Inner segment information should only be fed from
@@ -1792,20 +1791,20 @@ std::vector<Result> UserHistoryPredictor::MakeResults(
                    std::back_inserter(result.inner_segment_boundary));
     }
     if (result_entry->attributes() & Attribute::SPELLING_CORRECTION) {
-      result.candidate_attributes |= converter::Attribute::SPELLING_CORRECTION;
+      result.attributes |= converter::Attribute::SPELLING_CORRECTION;
     }
     if (result_entry->attributes() & Attribute::WEAK_CANDIDATE) {
-      result.types |= prediction::WEAK_USER_HISTORY_PREDICTION;
+      result.attributes |= converter::Attribute::WEAK_USER_HISTORY_PREDICTION;
     }
     if (result_entry->attributes() & Attribute::BIGRAM_BOOST) {
-      result.types |= prediction::BIGRAM;
+      result.attributes |= converter::Attribute::BIGRAM;
     }
 
     absl::string_view description = result_entry->description();
     // If we have stored description, set it exactly.
     if (!description.empty()) {
       result.description = description;
-      result.candidate_attributes |= converter::Attribute::NO_EXTRA_DESCRIPTION;
+      result.attributes |= converter::Attribute::NO_EXTRA_DESCRIPTION;
     }
 
     MaybeRewritePrefixSpace(request, result);
@@ -2018,8 +2017,8 @@ void UserHistoryPredictor::Finish(const ConversionRequest& request,
 
   last_committed_entries_.store(nullptr);
 
-  if (results.empty() || results.front().candidate_attributes &
-                             converter::Attribute::NO_SUGGEST_LEARNING) {
+  if (results.empty() || (results.front().attributes &
+                          converter::Attribute::NO_SUGGEST_LEARNING)) {
     MOZC_VLOG(2) << "NO_SUGGEST_LEARNING";
     return;
   }
@@ -2531,10 +2530,12 @@ bool UserHistoryPredictor::IsProperNoun(const ConversionRequest& request,
   const Util::ScriptType stype = Util::GetScriptType(result.value);
   // Heuristically detect whether the prefix value is a proper noun.
   return (stype == Util::KATAKANA || stype == Util::NUMBER ||
-          stype == Util::ALPHABET ||                  // Unusual script type
-          result.types & prediction::SINGLE_KANJI ||  // Single kanji
-          result.types & prediction::NUMBER ||        // Number
-          pos_matcher.IsUniqueNoun(result.lid) ||     // proper noun POS
+          stype == Util::ALPHABET ||  // Unusual script type
+          // Single kanji
+          result.attributes & converter::Attribute::SINGLE_KANJI ||
+          // Number
+          result.attributes & converter::Attribute::NUMBER ||
+          pos_matcher.IsUniqueNoun(result.lid) ||  // proper noun POS
           pos_matcher.IsUniqueNoun(result.rid) ||
           (stype == Util::KANJI && is_proper_noun_key_in_dic(result.key)));
 }

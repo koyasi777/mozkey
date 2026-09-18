@@ -45,6 +45,7 @@
 #include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/converter_interface.h"
+#include "converter/converter_util.h"
 #include "converter/immutable_converter_interface.h"
 #include "converter/inner_segment.h"
 #include "converter/segments.h"
@@ -55,72 +56,10 @@
 namespace mozc::prediction {
 namespace {
 
+using ::mozc::converter::Attribute;
+
 static constexpr int kSuffixCacheSize = 256;
 
-// TODO(taku): Defines this function as a common utility function.
-Segments MakeSegments(const ConversionRequest& request) {
-  converter::Segments segments;
-  const prediction::Result& result = request.history_result();
-
-  auto add_history_segment = [&](absl::string_view key, absl::string_view value,
-                                 absl::string_view content_key,
-                                 absl::string_view content_value) {
-    converter::Segment* seg = segments.add_segment();
-    seg->set_key(key);
-    seg->set_segment_type(converter::Segment::HISTORY);
-    converter::Candidate* candidate = seg->add_candidate();
-    strings::Assign(candidate->key, key);
-    strings::Assign(candidate->value, value);
-    strings::Assign(candidate->content_key, content_key);
-    strings::Assign(candidate->content_value, content_value);
-  };
-
-  for (const auto& iter : result.inner_segments()) {
-    add_history_segment(iter.GetKey(), iter.GetValue(), iter.GetContentKey(),
-                        iter.GetContentValue());
-  }
-
-  const int history_size = segments.history_segments_size();
-  if (history_size > 0) {
-    converter::Candidate* candidate =
-        segments.mutable_history_segment(history_size - 1)
-            ->mutable_candidate(0);
-    candidate->cost = result.cost;
-    candidate->rid = result.rid;
-  }
-
-  segments.add_segment()->set_key(request.key());
-
-  return segments;
-}
-
-// TODO(taku): Defines this function as a common utility function.
-std::optional<Result> ConversionSegmentsToResult(const Segments& segments) {
-  Result result;
-
-  converter::InnerSegmentBoundaryBuilder builder;
-  for (const Segment& segment : segments.conversion_segments()) {
-    if (segment.candidates_size() == 0) return std::nullopt;
-    const converter::Candidate& candidate = segment.candidate(0);
-    absl::StrAppend(&result.value, candidate.value);
-    absl::StrAppend(&result.key, candidate.key);
-    result.wcost += candidate.wcost;
-    result.cost += candidate.cost;
-    result.candidate_attributes |= candidate.attributes;
-    result.candidate_attributes |=
-        (candidate.attributes &
-         converter::Attribute::USER_SEGMENT_HISTORY_REWRITER);
-    builder.Add(candidate.key.size(), candidate.value.size(),
-                candidate.content_key.size(), candidate.content_value.size());
-  }
-
-  result.inner_segment_boundary = builder.Build(result.key, result.value);
-
-  result.lid = segments.conversion_segments().front().candidate(0).lid;
-  result.rid = segments.conversion_segments().back().candidate(0).rid;
-
-  return result;
-}
 }  // namespace
 
 RealtimeDecoder::RealtimeDecoder() : suffix_cache_(kSuffixCacheSize) {}
@@ -148,7 +87,7 @@ bool RealtimeDecoder::PushBackTopConversionResult(
                                             .SetOptions(std::move(options))
                                             .Build();
 
-  Segments tmp_segments = MakeSegments(request);
+  Segments tmp_segments = converter::PrepareSegmentsFromRequest(request);
 
   DCHECK_EQ(tmp_segments.conversion_segments_size(), 1);
   DCHECK_EQ(tmp_segments.conversion_segment(0).key(), tmp_request.key());
@@ -157,7 +96,8 @@ bool RealtimeDecoder::PushBackTopConversionResult(
     return false;
   }
 
-  std::optional<Result> result_opt = ConversionSegmentsToResult(tmp_segments);
+  std::optional<Result> result_opt =
+      converter::ConversionSegmentsToResult(tmp_segments.conversion_segments());
   if (!result_opt.has_value()) {
     return false;
   }
@@ -165,7 +105,7 @@ bool RealtimeDecoder::PushBackTopConversionResult(
   Result& result = result_opt.value();
   result.SetTypesAndTokenAttributes(REALTIME | REALTIME_TOP,
                                     dictionary::Token::NONE);
-  result.candidate_attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
+  result.attributes |= Attribute::NO_VARIANTS_EXPANSION;
 
   results->emplace_back(std::move(result));
 
@@ -188,7 +128,7 @@ std::vector<Result> RealtimeDecoder::Decode(
   const ConversionRequest request_for_realtime =
       ConversionRequestBuilder().SetConversionRequestView(request).Build();
 
-  Segments tmp_segments = MakeSegments(request);
+  Segments tmp_segments = converter::PrepareSegmentsFromRequest(request);
   DCHECK_EQ(tmp_segments.conversion_segments_size(), 1);
   DCHECK_EQ(tmp_segments.conversion_segment(0).key(),
             request_for_realtime.key());
@@ -228,18 +168,16 @@ std::vector<Result> RealtimeDecoder::Decode(
     result.rid = candidate.rid;
     result.inner_segment_boundary = candidate.inner_segment_boundary;
     result.SetTypesAndTokenAttributes(REALTIME, dictionary::Token::NONE);
-    result.candidate_attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
+    result.attributes |= Attribute::NO_VARIANTS_EXPANSION;
     if (candidate.key.size() < segment.key().size()) {
-      result.candidate_attributes |=
-          converter::Attribute::PARTIALLY_KEY_CONSUMED;
+      result.attributes |= Attribute::PARTIALLY_KEY_CONSUMED;
       result.consumed_key_size = Util::CharsLen(candidate.key);
     }
     // Kana expansion happens inside the decoder.
-    if (candidate.attributes &
-        converter::Attribute::KEY_EXPANDED_IN_DICTIONARY) {
-      result.types |= prediction::KEY_EXPANDED_IN_DICTIONARY;
+    if (candidate.attributes & Attribute::KEY_EXPANDED_IN_DICTIONARY) {
+      result.attributes |= KEY_EXPANDED_IN_DICTIONARY;
     }
-    result.candidate_attributes |= candidate.attributes;
+    result.attributes |= candidate.attributes;
     results.emplace_back(std::move(result));
   }
 
@@ -248,7 +186,7 @@ std::vector<Result> RealtimeDecoder::Decode(
 
 std::vector<Result> RealtimeDecoder::ReverseDecode(
     const ConversionRequest& request) const {
-  Segments tmp_segments = MakeSegments(request);
+  Segments tmp_segments = converter::PrepareSegmentsFromRequest(request);
 
   const ConversionRequest request_for_reverse =
       ConversionRequestBuilder()
@@ -263,8 +201,8 @@ std::vector<Result> RealtimeDecoder::ReverseDecode(
     return {};
   }
 
-  if (std::optional<Result> result_opt =
-          ConversionSegmentsToResult(tmp_segments);
+  if (std::optional<Result> result_opt = converter::ConversionSegmentsToResult(
+          tmp_segments.conversion_segments());
       result_opt.has_value()) {
     return {result_opt.value()};
   }

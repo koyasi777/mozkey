@@ -75,6 +75,7 @@
 
 namespace mozc::prediction {
 
+using ::mozc::converter::Attribute;
 using ::mozc::dictionary::PosMatcher;
 using ::mozc::dictionary::Token;
 using ::testing::_;
@@ -333,9 +334,9 @@ TEST_F(DictionaryPredictorTest, RemoveMissSpelledCandidates) {
     EXPECT_TRUE(results[0].removed);
     EXPECT_FALSE(results[1].removed);
     EXPECT_TRUE(results[2].removed);
-    EXPECT_EQ(results[0].types, prediction::UNIGRAM);
-    EXPECT_EQ(results[1].types, prediction::UNIGRAM);
-    EXPECT_EQ(results[2].types, prediction::UNIGRAM);
+    EXPECT_EQ(results[0].GetPredictionTypesForTesting(), prediction::UNIGRAM);
+    EXPECT_EQ(results[1].GetPredictionTypesForTesting(), prediction::UNIGRAM);
+    EXPECT_EQ(results[2].GetPredictionTypesForTesting(), prediction::UNIGRAM);
   }
   {
     std::vector<Result> results = {
@@ -349,8 +350,8 @@ TEST_F(DictionaryPredictorTest, RemoveMissSpelledCandidates) {
     CHECK_EQ(2, results.size());
     EXPECT_FALSE(results[0].removed);
     EXPECT_FALSE(results[1].removed);
-    EXPECT_EQ(results[0].types, prediction::UNIGRAM);
-    EXPECT_EQ(results[1].types, prediction::UNIGRAM);
+    EXPECT_EQ(results[0].GetPredictionTypesForTesting(), prediction::UNIGRAM);
+    EXPECT_EQ(results[1].GetPredictionTypesForTesting(), prediction::UNIGRAM);
   }
   {
     std::vector<Result> results = {
@@ -377,8 +378,8 @@ TEST_F(DictionaryPredictorTest, RemoveMissSpelledCandidates) {
     CHECK_EQ(2, results.size());
     EXPECT_FALSE(results[0].removed);
     EXPECT_TRUE(results[1].removed);
-    EXPECT_EQ(results[0].types, prediction::UNIGRAM);
-    EXPECT_EQ(results[1].types, prediction::UNIGRAM);
+    EXPECT_EQ(results[0].GetPredictionTypesForTesting(), prediction::UNIGRAM);
+    EXPECT_EQ(results[1].GetPredictionTypesForTesting(), prediction::UNIGRAM);
   }
 }
 
@@ -396,10 +397,10 @@ TEST_F(DictionaryPredictorTest, GetLMCost) {
       result.lid = lid;
       const int c1 = connector.GetTransitionCost(rid, result.lid);
       const int c2 = connector.GetTransitionCost(0, result.lid);
-      result.types = prediction::SUFFIX;
+      result.attributes = prediction::SUFFIX;
       EXPECT_EQ(predictor_peer.GetLMCost(result, rid), c1 + result.wcost);
 
-      result.types = prediction::REALTIME;
+      result.attributes = prediction::REALTIME;
       EXPECT_EQ(predictor_peer.GetLMCost(result, rid),
                 std::min(c1, c2) + result.wcost);
     }
@@ -661,82 +662,76 @@ TEST_F(DictionaryPredictorTest, PropagateAttributes) {
   Result c;
   {
     // PREFIX: consumed_key_size
-    Result result =
-        CreateResult5("てす", "てす", 50, prediction::PREFIX, Token::NONE);
+    Result result = CreateResult5("てす", "てす", 50, PREFIX, Token::NONE);
     result.consumed_key_size = Util::CharsLen("てす");
 
-    EXPECT_TRUE(get_top_result(result, prediction::PREFIX, &c));
+    EXPECT_TRUE(get_top_result(result, PREFIX, &c));
     EXPECT_EQ(c.value, "てす");
-    EXPECT_EQ(c.candidate_attributes,
-              converter::Attribute::PARTIALLY_KEY_CONSUMED |
-                  converter::Attribute::AUTO_PARTIAL_SUGGESTION);
+    EXPECT_EQ(
+        c.GetBehavioralAttributes(),
+        Attribute::PARTIALLY_KEY_CONSUMED | Attribute::AUTO_PARTIAL_SUGGESTION);
     EXPECT_EQ(c.consumed_key_size, 2);
   }
   {
     // REALTIME_TOP
-    Result result = CreateResult5(
-        "てすと", "リアルタイムトップ", 100,
-        prediction::REALTIME_TOP | prediction::REALTIME, Token::NONE);
+    Result result = CreateResult5("てすと", "リアルタイムトップ", 100,
+                                  REALTIME_TOP | REALTIME, Token::NONE);
 
-    EXPECT_TRUE(get_top_result(result, prediction::REALTIME_TOP, &c));
+    EXPECT_TRUE(get_top_result(result, REALTIME_TOP, &c));
     EXPECT_EQ(c.value, "リアルタイムトップ");
-    EXPECT_EQ(c.candidate_attributes,
-              converter::Attribute::REALTIME_CONVERSION |
-                  converter::Attribute::NO_VARIANTS_EXPANSION);
+    EXPECT_EQ(
+        c.GetBehavioralAttributes(),
+        Attribute::REALTIME_CONVERSION | Attribute::NO_VARIANTS_EXPANSION);
   }
   {
     // REALTIME: inner_segment_boundary
-    Result result = CreateResult5("てすと", "リアルタイム", 100,
-                                  prediction::REALTIME, Token::NONE);
+    Result result =
+        CreateResult5("てすと", "リアルタイム", 100, REALTIME, Token::NONE);
     result.inner_segment_boundary = converter::BuildInnerSegmentBoundary(
         {{strlen("てす"), strlen("リアル"), strlen("て"), strlen("リア")},
          {strlen("と"), strlen("タイム"), strlen("と"), strlen("タイム")}},
         result.key, result.value);
-    EXPECT_TRUE(get_top_result(result, prediction::REALTIME, &c));
+    EXPECT_TRUE(get_top_result(result, REALTIME, &c));
     EXPECT_EQ(c.value, "リアルタイム");
-    EXPECT_EQ(c.candidate_attributes,
-              converter::Attribute::REALTIME_CONVERSION);
+    EXPECT_EQ(c.GetBehavioralAttributes(), Attribute::REALTIME_CONVERSION);
     EXPECT_EQ(c.inner_segment_boundary.size(), 2);
   }
   {
     // SPELLING_CORRECTION
-    Result result =
-        CreateResult5("てすと", "SPELLING_CORRECTION", 300, prediction::UNIGRAM,
-                      Token::SPELLING_CORRECTION);
+    Result result = CreateResult5("てすと", "SPELLING_CORRECTION", 300, UNIGRAM,
+                                  Token::SPELLING_CORRECTION);
 
-    EXPECT_TRUE(get_top_result(result, prediction::UNIGRAM, &c));
+    EXPECT_TRUE(get_top_result(result, UNIGRAM, &c));
     EXPECT_EQ(c.value, "SPELLING_CORRECTION");
-    EXPECT_EQ(c.candidate_attributes,
-              converter::Attribute::SPELLING_CORRECTION);
+    EXPECT_EQ(c.GetBehavioralAttributes(), Attribute::SPELLING_CORRECTION);
   }
   {
     // TYPING_CORRECTION
     Result result = CreateResult5("てすと", "TYPING_CORRECTION", 300,
-                                  prediction::TYPING_CORRECTION, Token::NONE);
+                                  TYPING_CORRECTION, Token::NONE);
 
-    EXPECT_TRUE(get_top_result(result, prediction::TYPING_CORRECTION, &c));
+    EXPECT_TRUE(get_top_result(result, TYPING_CORRECTION, &c));
     EXPECT_EQ(c.value, "TYPING_CORRECTION");
-    EXPECT_EQ(c.candidate_attributes, converter::Attribute::TYPING_CORRECTION);
+    EXPECT_EQ(c.GetBehavioralAttributes(), Attribute::TYPING_CORRECTION);
   }
   {
     // USER_DICTIONARY
-    Result result = CreateResult5("てすと", "ユーザー辞書", 300,
-                                  prediction::UNIGRAM, Token::USER_DICTIONARY);
+    Result result = CreateResult5("てすと", "ユーザー辞書", 300, UNIGRAM,
+                                  Token::USER_DICTIONARY);
 
-    EXPECT_TRUE(get_top_result(result, prediction::UNIGRAM, &c));
+    EXPECT_TRUE(get_top_result(result, UNIGRAM, &c));
     EXPECT_EQ(c.value, "ユーザー辞書");
-    EXPECT_EQ(c.candidate_attributes,
-              converter::Attribute::USER_DICTIONARY |
-                  converter::Attribute::NO_MODIFICATION |
-                  converter::Attribute::NO_VARIANTS_EXPANSION);
+    EXPECT_EQ(c.GetBehavioralAttributes(),
+              Attribute::USER_DICTIONARY | Attribute::NO_MODIFICATION |
+                  Attribute::NO_VARIANTS_EXPANSION);
   }
   {
     // removed
-    Result result = CreateResult5("てすと", "REMOVED", 300, prediction::BIGRAM,
-                                  Token::NONE);
+    Result result =
+        CreateResult5("てすと", "REMOVED", 300, BIGRAM, Token::NONE);
     result.removed = true;
 
-    EXPECT_FALSE(get_top_result(result, prediction::UNIGRAM, &c));
+    EXPECT_FALSE(get_top_result(result, UNIGRAM, &c));
   }
 }
 
@@ -1149,7 +1144,7 @@ TEST_F(DictionaryPredictorTest, SingleKanjiCost) {
     results.push_back(
         CreateResult5("さ", "佐", 1001, prediction::SINGLE_KANJI, Token::NONE));
     for (int i = 0; i < results.size(); ++i) {
-      if (results[i].types == prediction::SINGLE_KANJI) {
+      if (results[i].attributes == prediction::SINGLE_KANJI) {
         results[i].lid = data_and_predictor->pos_matcher().GetGeneralSymbolId();
         results[i].rid = data_and_predictor->pos_matcher().GetGeneralSymbolId();
       } else {
@@ -1209,7 +1204,7 @@ TEST_F(DictionaryPredictorTest, SingleKanjiFallbackOffsetCost) {
     results.push_back(
         CreateResult5("あ", "亞", 1001, prediction::SINGLE_KANJI, Token::NONE));
     for (int i = 0; i < results.size(); ++i) {
-      if (results[i].types == prediction::SINGLE_KANJI) {
+      if (results[i].attributes == prediction::SINGLE_KANJI) {
         results[i].lid = data_and_predictor->pos_matcher().GetGeneralSymbolId();
         results[i].rid = data_and_predictor->pos_matcher().GetGeneralSymbolId();
       } else {
@@ -1600,7 +1595,7 @@ TEST_F(DictionaryPredictorTest, MaybeGetPreviousTopResultTest) {
         pre_top, create_request("しがこう")));
 
     auto cur_top_prefix = cur_top;
-    cur_top_prefix.types |= PREFIX;
+    cur_top_prefix.attributes |= PREFIX;
     EXPECT_FALSE(predictor_peer.MaybeGetPreviousTopResult(
         cur_top_prefix, create_request("しがこうげ")));
   }
@@ -1663,7 +1658,7 @@ TEST_F(DictionaryPredictorTest, FilterNwpSuffixCandidates) {
       Result result;
       strings::Assign(result.key, "てすと");
       strings::Assign(result.value, "テスト");
-      result.types = prediction::SUFFIX;
+      result.attributes = prediction::SUFFIX;
       result.cost = 1000;
       result.lid = data_and_predictor->pos_matcher().GetGeneralNounId();
       result.rid = data_and_predictor->pos_matcher().GetGeneralNounId();

@@ -49,6 +49,8 @@
 
 namespace mozc::prediction {
 
+using ::mozc::converter::Attribute;
+
 namespace {
 
 bool UseSvs(const ConversionRequest& request) {
@@ -120,14 +122,13 @@ void SingleKanjiDecoder::AppendResults(absl::string_view kanji_key,
     Result result;
     // Set the wcost to keep the `kanji_list` order.
     result.wcost = offset + results->size();
-    result.types = SINGLE_KANJI;
+    result.attributes |= Attribute::SINGLE_KANJI;
     strings::Assign(result.key, kanji_key);
     result.value = kanji;
     result.lid = general_symbol_id_;
     result.rid = general_symbol_id_;
     if (kanji_key.size() < original_request_key.size()) {
-      result.candidate_attributes =
-          converter::Attribute::PARTIALLY_KEY_CONSUMED;
+      result.attributes |= Attribute::PARTIALLY_KEY_CONSUMED;
       result.consumed_key_size = Util::CharsLen(kanji_key);
     }
 

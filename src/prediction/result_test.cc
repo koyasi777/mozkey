@@ -29,11 +29,14 @@
 
 #include "prediction/result.h"
 
+#include "converter/attribute.h"
 #include "testing/gunit.h"
 
 namespace mozc {
 namespace prediction {
 namespace {
+
+using ::mozc::converter::Attribute;
 
 TEST(ResultTest, ResultCostLessTest) {
   ResultCostLess cost_less;
@@ -56,29 +59,30 @@ TEST(ResultTest, ResultCostLessTest) {
     EXPECT_FALSE(cost_less(r2, r1));
   }
 
-  // Same cost and value, but different types.
+  // Same cost and value, but different types (prediction-specific attributes).
   {
     Result r1, r2;
     r1.cost = 100;
     r2.cost = 100;
     r1.value = "value";
     r2.value = "value";
-    r1.types = 1;
-    r2.types = 2;
+    r1.attributes = Attribute::UNIGRAM;
+    r2.attributes = Attribute::BIGRAM;
     // Now distinguish them.
     EXPECT_TRUE(cost_less(r1, r2));
     EXPECT_FALSE(cost_less(r2, r1));
   }
 
-  // Same cost and value, but different candidate_attributes.
+  // Same cost and value, but different candidate_attributes (behavioral
+  // attributes).
   {
     Result r1, r2;
     r1.cost = 100;
     r2.cost = 100;
     r1.value = "value";
     r2.value = "value";
-    r1.candidate_attributes = 1;
-    r2.candidate_attributes = 2;
+    r1.attributes = Attribute::BEST_CANDIDATE;
+    r2.attributes = Attribute::RERANKED;
     EXPECT_TRUE(cost_less(r1, r2));
     EXPECT_FALSE(cost_less(r2, r1));
   }
@@ -90,41 +94,37 @@ TEST(ResultTest, ResultCostLessTest) {
     r2.cost = 100;
     r1.value = "value";
     r2.value = "value";
-    r1.candidate_attributes = 1;
-    r2.candidate_attributes = 0;
+    r1.attributes = Attribute::BEST_CANDIDATE;
+    r2.attributes = Attribute::DEFAULT_ATTRIBUTE;
     EXPECT_TRUE(cost_less(r1, r2));
     EXPECT_FALSE(cost_less(r2, r1));
   }
 
-  // Same cost, value, types, attributes, but different lid.
+  // Same cost, value, attributes, but different lid.
   {
     Result r1, r2;
     r1.cost = 100;
     r1.value = "v";
-    r1.types = 1;
-    r1.candidate_attributes = 1;
+    r1.attributes = Attribute::UNIGRAM | Attribute::BEST_CANDIDATE;
     r2.cost = 100;
     r2.value = "v";
-    r2.types = 1;
-    r2.candidate_attributes = 1;
+    r2.attributes = Attribute::UNIGRAM | Attribute::BEST_CANDIDATE;
     r1.lid = 10;
     r2.lid = 20;
     EXPECT_TRUE(cost_less(r1, r2));
     EXPECT_FALSE(cost_less(r2, r1));
   }
 
-  // Same cost, value, types, attributes, lid, but different rid.
+  // Same cost, value, attributes, lid, but different rid.
   {
     Result r1, r2;
     r1.cost = 100;
     r1.value = "v";
-    r1.types = 1;
-    r1.candidate_attributes = 1;
+    r1.attributes = Attribute::UNIGRAM | Attribute::BEST_CANDIDATE;
     r1.lid = 10;
     r2.cost = 100;
     r2.value = "v";
-    r2.types = 1;
-    r2.candidate_attributes = 1;
+    r2.attributes = Attribute::UNIGRAM | Attribute::BEST_CANDIDATE;
     r2.lid = 10;
     r1.rid = 10;
     r2.rid = 20;
@@ -137,12 +137,10 @@ TEST(ResultTest, ResultCostLessTest) {
     Result r1, r2;
     r1.cost = 100;
     r1.value = "v";
-    r1.types = 1;
-    r1.candidate_attributes = 1;
+    r1.attributes = Attribute::UNIGRAM | Attribute::BEST_CANDIDATE;
     r2.cost = 100;
     r2.value = "v";
-    r2.types = 1;
-    r2.candidate_attributes = 1;
+    r2.attributes = Attribute::UNIGRAM | Attribute::BEST_CANDIDATE;
     r1.description = "a";
     r2.description = "b";
     EXPECT_TRUE(cost_less(r1, r2));

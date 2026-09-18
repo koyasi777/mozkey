@@ -75,8 +75,11 @@
 namespace mozc::prediction {
 namespace {
 
+using ::mozc::converter::Attribute;
+
 using ::mozc::commands::Request;
 using ::mozc::composer::TypeCorrectedQuery;
+using ::mozc::converter::Attribute;
 using ::mozc::dictionary::DictionaryInterface;
 using ::mozc::dictionary::Token;
 
@@ -233,7 +236,7 @@ class PredictiveLookupCallback : public DictionaryInterface::Callback {
     Result result;
     result.InitializeByTokenAndTypes(token, types_);
     result.wcost += penalty_;
-    if (penalty_ > 0) result.types |= KEY_EXPANDED_IN_DICTIONARY;
+    if (penalty_ > 0) result.attributes |= KEY_EXPANDED_IN_DICTIONARY;
     RewriteResult(result);
     results_->emplace_back(std::move(result));
     return (results_->size() < limit_) ? TRAVERSE_CONTINUE : TRAVERSE_DONE;
@@ -784,12 +787,11 @@ void DictionaryPredictionAggregator::AggregateUnigramForHandwriting(
     Result asis_result = {
         .key = elm.composition_string(),
         .value = elm.composition_string(),
-        .types = UNIGRAM,
+        .attributes =
+            (Attribute::UNIGRAM | Attribute::NO_VARIANTS_EXPANSION |
+             Attribute::NO_EXTRA_DESCRIPTION | Attribute::NO_MODIFICATION),
         // Set small cost for the top recognition result.
         .wcost = (i == 0) ? 0 : kAsisCostOffset + recognition_cost,
-        .candidate_attributes = (converter::Attribute::NO_VARIANTS_EXPANSION |
-                                 converter::Attribute::NO_EXTRA_DESCRIPTION |
-                                 converter::Attribute::NO_MODIFICATION),
     };
 
     const std::optional<DictionaryPredictionAggregator::HandwritingQueryInfo>
@@ -990,12 +992,11 @@ void DictionaryPredictionAggregator::AggregatePrefix(
     Result result;
     result.InitializeByTokenAndTypes(token, PREFIX);
     if (key != actual_key) {
-      result.candidate_attributes |= converter::Attribute::TYPING_CORRECTION;
+      result.attributes |= Attribute::TYPING_CORRECTION;
     }
     const int key_len = Util::CharsLen(key);
     if (key_len < request_key_len) {
-      result.candidate_attributes |=
-          converter::Attribute::PARTIALLY_KEY_CONSUMED;
+      result.attributes |= Attribute::PARTIALLY_KEY_CONSUMED;
       result.consumed_key_size = key_len;
     }
     results->emplace_back(std::move(result));
