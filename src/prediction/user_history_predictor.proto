@@ -82,6 +82,9 @@ message UserHistory {
     // serialization.
     optional uint32 attributes = 26 [default = 0];
 
+    // Persistent context attributes learned at commit time.
+    optional uint32 entry_flags = 27 [default = 0];
+
     reserved 9;  // Deprecated entry_type
     reserved 20; // Deprecated bigram_boost
     reserved 21; // Deprecated spelling_correction

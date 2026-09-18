@@ -43,6 +43,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/random/random.h"
@@ -5145,6 +5146,81 @@ TEST_F(UserHistoryPredictorTest, RemoveRedundantCandidates) {
            {"東京", "東京駅", "大阪駅", "大阪"});
   run_test({"東京は", "東京", "大阪", "大阪駅"}, {"東京", "大阪", "大阪駅"});
   run_test({"東京", "東京は", "大阪駅", "大阪"}, {"東京", "大阪駅", "大阪"});
+}
+
+TEST_F(UserHistoryPredictorTest, NumberCounterSuffixPrecedingHistory) {
+  ScopedClockMock clock(absl::FromUnixSeconds(100));
+  UserHistoryPredictor* predictor = GetUserHistoryPredictorWithClearedHistory();
+  SegmentsProxy segments_proxy;
+
+  // Learn "階" after a number.
+  {
+    const ConversionRequest convreq =
+        SetUpInputForPredictionWithHistory("かい", "3", "3", &composer_,
+                                           &segments_proxy);
+    segments_proxy.AddCandidate(0, "階");
+    predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
+
+    UserHistoryPredictorTestPeer predictor_peer(*predictor);
+    auto entry = predictor_peer.storage_().Lookup("かい", "階");
+    ASSERT_TRUE(entry);
+    EXPECT_TRUE(entry->entry_flags() &
+                UserHistoryPredictor::ENTRY_FLAG_LEFT_NUMBER);
+  }
+
+  clock->Advance(absl::Seconds(1));
+
+  // Learn a more recent homophone without number context.
+  {
+    const ConversionRequest convreq =
+        SetUpInputForPrediction("かい", &composer_, &segments_proxy);
+    segments_proxy.AddCandidate(0, "会");
+    predictor->Finish(convreq, segments_proxy.MakeLearningResults(),
+                      kRevertId + 1);
+
+    UserHistoryPredictorTestPeer predictor_peer(*predictor);
+    auto entry = predictor_peer.storage_().Lookup("かい", "会");
+    ASSERT_TRUE(entry);
+    EXPECT_FALSE(entry->entry_flags() &
+                 UserHistoryPredictor::ENTRY_FLAG_LEFT_NUMBER);
+  }
+
+  // With numeric history, the learned counter should receive BIGRAM boost.
+  {
+    const ConversionRequest convreq = SetUpInputForPredictionWithHistory(
+        "かい", "5", "5", &composer_, &segments_proxy);
+    const std::vector<Result> results = predictor->Predict(convreq);
+    ASSERT_FALSE(results.empty());
+    EXPECT_EQ(results.front().value, "階");
+    EXPECT_TRUE(results.front().attributes & converter::Attribute::BIGRAM);
+  }
+
+  // Without numeric history, the left-number feature must not act as a bigram.
+  {
+    const ConversionRequest convreq = SetUpInputForPredictionWithHistory(
+        "かい", "とうきょう", "東京", &composer_, &segments_proxy);
+    const std::vector<Result> results = predictor->Predict(convreq);
+    ASSERT_FALSE(results.empty());
+    auto it = absl::c_find_if(
+        results, [](const Result& result) { return result.value == "階"; });
+    if (it != results.end()) {
+      EXPECT_FALSE(it->attributes & converter::Attribute::BIGRAM);
+    }
+  }
+
+  // Numeric context must also be enough for zero-query counter suggestion
+  // even when no matching previous history entry exists in storage.
+  {
+    request_.set_zero_query_suggestion(true);
+    request_.set_mixed_conversion(true);
+    const ConversionRequest convreq = SetUpInputForSuggestionWithHistory(
+        "", "5", "5", &composer_, &segments_proxy);
+    const std::vector<Result> results = predictor->Predict(convreq);
+    auto it = absl::c_find_if(
+        results, [](const Result& result) { return result.value == "階"; });
+    ASSERT_NE(it, results.end());
+    EXPECT_TRUE(it->attributes & converter::Attribute::BIGRAM);
+  }
 }
 
 TEST_F(UserHistoryPredictorTest, MultiSegmentWeakCandidateWithinFirstSegment) {

@@ -179,6 +179,12 @@ bool StartsWithValidLetter(absl::string_view value) {
          type == Util::KATAKANA || type == Util::ALPHABET;
 }
 
+// Returns true if the preceding converter history is a number.
+bool IsPrecedingNumber(const ConversionRequest& request) {
+  return Util::GetScriptType(request.converter_history_value(1)) ==
+         Util::NUMBER;
+}
+
 // Returns candidate description.
 // If candidate is spelling correction, typing correction
 // or auto partial suggestion,
@@ -607,11 +613,19 @@ std::optional<int> UserHistoryPredictor::GetBigramEntryLruOrder(
   return std::distance(next_fps.begin(), it);
 }
 
-// Returns true if prev_entry has a next_fp link to entry
+// Returns true if prev_entry has a next_fp link to entry,
+// or entry was learned after a number and the current context also ends
+// with a number.
 // static
-bool UserHistoryPredictor::HasBigramEntry(const Entry& entry,
-                                          const Entry& prev_entry) {
-  return GetBigramEntryLruOrder(entry, prev_entry).has_value();
+bool UserHistoryPredictor::HasBigramEntry(
+    const ConversionRequest& request, const Entry& entry,
+    const Entry* absl_nullable prev_entry) {
+  if (prev_entry != nullptr &&
+      GetBigramEntryLruOrder(entry, *prev_entry).has_value()) {
+    return true;
+  }
+  return (entry.entry_flags() & ENTRY_FLAG_LEFT_NUMBER) &&
+         IsPrecedingNumber(request);
 }
 
 // static
@@ -1168,7 +1182,7 @@ bool UserHistoryPredictor::LookupEntry(
       // zero-query-suggestion
       // if |request_key| is empty, the |prev_entry| and |entry| must
       // have bigram relation.
-      if (prev_entry != nullptr && HasBigramEntry(entry, *prev_entry)) {
+      if (HasBigramEntry(request, entry, prev_entry)) {
         result = AddEntry(entry, entry_queue);
         last_entry = &entry;
       }
@@ -1243,34 +1257,32 @@ bool UserHistoryPredictor::LookupEntry(
   // from |prev_entry| to |entry|.
   RemoveAttribute(*result, Attribute::BIGRAM_BOOST);
 
-  if (prev_entry != nullptr) {
-    if (mtype == MatchType::LEFT_EMPTY_MATCH) {
-      // When zero query suggestion, prev_entry and entry might not always typed
-      // at the same time. Instead of using the unigram timestamp of prev_entry
-      // and entry, we simply use the actual time of the bigram was generated.
-      // GetBigramEntryLruOrder returns a larger value if the connection from
-      // prev_entry to entry was made more recently.
-      // (prev_entry->last_access_time() + 10 *GetBigramEntryLruOrder()) purely
-      // prioritizes bigrams that were recently generated.
-      //
-      // Sets "prev_entry->last_access_time()" as the base time to compare
-      // the preference with the entry typed prev_entry+current_entry as one
-      // word. Suppose the case when there are two histories "東京駅"  and
-      // 東京|大学", and NWP for 東京. We want to compare the timestamp of
-      // "東京駅" and "東京大学" to decide the NWP, "駅" or "大学".
-      if (std::optional<int> order = GetBigramEntryLruOrder(entry, *prev_entry);
-          order.has_value()) {
-        constexpr uint32_t kBigramLinkAsTime = 10;
-        result->set_last_access_time(prev_entry->last_access_time() +
-                                     kBigramLinkAsTime * order.value());
-        SetAttribute(*result, Attribute::BIGRAM_BOOST);
-      }
-    } else {
-      // Sets bigram_boost flag so that this entry is boosted
-      // against LRU policy.
-      if (HasBigramEntry(entry, *prev_entry))
-        SetAttribute(*result, Attribute::BIGRAM_BOOST);
+  if (prev_entry != nullptr && mtype == MatchType::LEFT_EMPTY_MATCH) {
+    // When zero query suggestion, prev_entry and entry might not always typed
+    // at the same time. Instead of using the unigram timestamp of prev_entry
+    // and entry, we simply use the actual time of the bigram was generated.
+    // GetBigramEntryLruOrder returns a larger value if the connection from
+    // prev_entry to entry was made more recently.
+    // (prev_entry->last_access_time() + 10 *GetBigramEntryLruOrder()) purely
+    // prioritizes bigrams that were recently generated.
+    //
+    // Sets "prev_entry->last_access_time()" as the base time to compare
+    // the preference with the entry typed prev_entry+current_entry as one
+    // word. Suppose the case when there are two histories "東京駅" and
+    // "東京|大学", and NWP for 東京. We want to compare the timestamp of
+    // "東京駅" and "東京大学" to decide the NWP, "駅" or "大学".
+    if (std::optional<int> order = GetBigramEntryLruOrder(entry, *prev_entry);
+        order.has_value()) {
+      constexpr uint32_t kBigramLinkAsTime = 10;
+      result->set_last_access_time(prev_entry->last_access_time() +
+                                   kBigramLinkAsTime * order.value());
+      // Attribute::BIGRAM_BOOST is set by HasBigramEntry() below.
     }
+  }
+
+  // Sets bigram_boost flag so that this entry is boosted against LRU policy.
+  if (HasBigramEntry(request, entry, prev_entry)) {
+    SetAttribute(*result, Attribute::BIGRAM_BOOST);
   }
 
   // result with zero frequency is generated via revert operation.
@@ -1357,8 +1369,10 @@ std::vector<Result> UserHistoryPredictor::Predict(
   }
 
   ConstEntrySnapshot prev_entry = LookupPrevEntry(request);
-  if (is_empty_input && !prev_entry) {
-    MOZC_VLOG(1) << "If request_key_len is 0, prev_entry must be set";
+  const bool has_prev_context = prev_entry || IsPrecedingNumber(request);
+  if (is_empty_input && !has_prev_context) {
+    MOZC_VLOG(1) << "If request_key_len is 0, prev_entry or preceding number "
+                    "must be set";
     return {};
   }
 
@@ -1928,7 +1942,7 @@ void UserHistoryPredictor::Insert(
     converter::InnerSegmentBoundarySpan inner_segment_boundary,
     absl::Span<const uint64_t> next_fps, bool allow_partial_match,
     uint64_t last_access_time,
-    UserHistoryPredictor::RevertEntries& revert_entries) {
+    UserHistoryPredictor::RevertEntries& revert_entries, uint32_t entry_flags) {
   // b/279560433: Preprocess key value
   // (key|value)_begin don't change after StripTrailingAsciiWhitespace.
   key = absl::StripTrailingAsciiWhitespace(key);
@@ -1989,6 +2003,9 @@ void UserHistoryPredictor::Insert(
   entry->set_value(value);
   entry->set_removed(false);
   entry->clear_attributes();
+  if (entry_flags != ENTRY_FLAG_NONE) {
+    entry->set_entry_flags(entry->entry_flags() | entry_flags);
+  }
 
   if (allow_partial_match) entry->set_allow_partial_match(true);
 
@@ -2299,6 +2316,10 @@ void UserHistoryPredictor::InsertHistoryForConversionSegments(
 
   absl::flat_hash_set<std::vector<uint64_t>> seen;
   bool this_was_seen = false;
+  absl::string_view prev_value =
+      learning_segments.history_segments.empty()
+          ? absl::string_view()
+          : learning_segments.history_segments.back().value;
   for (size_t i = 0; i < learning_segments.conversion_segments.size(); ++i) {
     const SegmentForLearning& segment =
         learning_segments.conversion_segments[i];
@@ -2330,6 +2351,11 @@ void UserHistoryPredictor::InsertHistoryForConversionSegments(
     const bool has_content_kv = segment.content_key != segment.key &&
                                 segment.content_value != segment.value;
 
+    const uint32_t entry_flags =
+        (Util::GetScriptType(prev_value) == Util::NUMBER)
+            ? ENTRY_FLAG_LEFT_NUMBER
+            : ENTRY_FLAG_NONE;
+
     converter::InnerSegmentBoundary inner_segment_boundary;
     if (has_content_kv) {
       const bool allow_partial_match =
@@ -2340,7 +2366,8 @@ void UserHistoryPredictor::InsertHistoryForConversionSegments(
           segment.key, segment.value);
       Insert(request, segment.key_begin, segment.value_begin,
              segment.content_key, segment.content_value, segment.description,
-             {}, {}, allow_partial_match, last_access_time, revert_entries);
+             {}, {}, allow_partial_match, last_access_time, revert_entries,
+             entry_flags);
     }
 
     const bool allow_partial_match =
@@ -2348,7 +2375,9 @@ void UserHistoryPredictor::InsertHistoryForConversionSegments(
     Insert(request, segment.key_begin, segment.value_begin, segment.key,
            segment.value, segment.description, inner_segment_boundary,
            next_fps_to_set, allow_partial_match, last_access_time,
-           revert_entries);
+           revert_entries, entry_flags);
+
+    prev_value = segment.value;
   }
 }
 
