@@ -147,12 +147,14 @@ class UserSegmentHistoryRewriterTest : public testing::TestWithTempUserProfile {
       }
     }
     CharacterFormManager::GetCharacterFormManager()->ReloadConfig(*config_);
+    CharacterFormManager::GetCharacterFormManager()->ClearHistory();
 
     Clock::SetClockForUnitTest(nullptr);
   }
 
   void TearDown() override {
     CharacterFormManager::GetCharacterFormManager()->SetDefaultRule();
+    CharacterFormManager::GetCharacterFormManager()->ClearHistory();
     std::unique_ptr<UserSegmentHistoryRewriter> rewriter(
         CreateUserSegmentHistoryRewriter());
     rewriter->Clear();
@@ -1262,6 +1264,7 @@ TEST_F(UserSegmentHistoryRewriterTest, NumberSpecial) {
     segments.mutable_segment(0)->mutable_candidate(0)->attributes |=
         converter::Attribute::RERANKED;
     segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+    number_rewriter->Finish(convreq, segments);
     rewriter->Finish(convreq, segments);
   }
 
@@ -1310,6 +1313,7 @@ TEST_F(UserSegmentHistoryRewriterTest, NumberHalfWidth) {
     candidate->style =
         NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH;
     segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+    number_rewriter->Finish(convreq, segments);
     rewriter->Finish(convreq, segments);  // full-width for separated number
   }
 
@@ -1359,6 +1363,7 @@ TEST_F(UserSegmentHistoryRewriterTest, NumberFullWidth) {
     candidate->style =
         NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH;
     segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+    number_rewriter->Finish(convreq, segments);
     rewriter->Finish(convreq, segments);  // half-width for separated number
   }
 
@@ -1390,6 +1395,7 @@ class UserSegmentHistoryNumberTest
 INSTANTIATE_TEST_SUITE_P(
     NumberStyleLearningTestForRequest, UserSegmentHistoryNumberTest,
     ::testing::Values(
+        commands::Request(),
         []() {
           commands::Request request;
           request_test_util::FillMobileRequest(&request);
@@ -1477,6 +1483,7 @@ TEST_F(UserSegmentHistoryRewriterTest, NumberNoSeparated) {
     candidate->rid = pos_matcher().GetNumberId();
     candidate->style = NumberUtil::NumberString::NUMBER_KANJI;
     segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+    number_rewriter->Finish(convreq, segments);
     rewriter->Finish(convreq, segments);  // learn kanji
   }
   {
@@ -1494,6 +1501,7 @@ TEST_F(UserSegmentHistoryRewriterTest, NumberNoSeparated) {
     candidate->style =
         NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH;
     segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+    number_rewriter->Finish(convreq, segments);
     rewriter->Finish(convreq, segments);  // learn kanji
   }
 
