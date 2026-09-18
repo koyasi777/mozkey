@@ -57,6 +57,18 @@ class KeyInfoUtil {
   static std::vector<KeyInformation> ExtractSortedActiveModeImeOnKeys(
       const config::Config& config);
 
+  // Returns a sorted list of keys bound to IMEOff in active IME modes such as
+  // Precomposition, Composition, Conversion, etc. These are the keys that turn
+  // the IME off, e.g. a left Alt tap mapped to IMEOff.
+  static std::vector<KeyInformation> ExtractSortedActiveModeImeOffKeys(
+      const config::Config& config);
+
+  // Returns a sorted list of keys bound to IMEOn in Direct/DirectInput mode.
+  // These are the keys that turn the IME on, e.g. a right Alt tap mapped to
+  // IMEOn.
+  static std::vector<KeyInformation> ExtractSortedDirectModeImeOnKeys(
+      const config::Config& config);
+
   // Returns true if |sorted_keys| contains |key_event|. |sorted_keys| must be
   // sorted.
   static bool ContainsKey(absl::Span<const KeyInformation> sorted_keys,

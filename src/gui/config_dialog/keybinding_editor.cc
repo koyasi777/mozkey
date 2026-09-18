@@ -155,27 +155,46 @@ constexpr auto kWinVirtualKeyModifierNonRequiredTable = CreateFlatMap<
 constexpr quint32 kLeftShiftScanCode = 0x2A;
 constexpr quint32 kRightShiftScanCode = 0x36;
 
-QString GetCtrlKeyName(const QKeyEvent &key_event) {
+// Returns "Left..."/"Right..." for a modifier (Ctrl or Alt) whose left and
+// right variants share a base scan code and are distinguished by the extended
+// scan-code flag (0xE0 prefix). Returns an empty string if the event does not
+// match the modifier.
+QString GetLeftRightModifierName(const QKeyEvent &key_event, DWORD left_vk,
+                                 DWORD right_vk, quint32 base_scan_code,
+                                 const QString &left_name,
+                                 const QString &right_name) {
   const DWORD virtual_key = key_event.nativeVirtualKey();
-  if (virtual_key == VK_LCONTROL) {
-    return QStringLiteral("LeftCtrl");
+  if (virtual_key == left_vk) {
+    return left_name;
   }
-  if (virtual_key == VK_RCONTROL) {
-    return QStringLiteral("RightCtrl");
+  if (virtual_key == right_vk) {
+    return right_name;
   }
 
   const quint32 scan_code = key_event.nativeScanCode();
-
-  // Left Ctrl:  0x1D
-  // Right Ctrl: 0xE01D on Windows extended scan code paths.
-  if ((scan_code & 0xFF) == 0x1D) {
+  if ((scan_code & 0xFF) == base_scan_code) {
+    // The right variant uses the extended (0xE0..) scan code.
     if ((scan_code & 0xFF00) == 0xE000) {
-      return QStringLiteral("RightCtrl");
+      return right_name;
     }
-    return QStringLiteral("LeftCtrl");
+    return left_name;
   }
 
   return QString();
+}
+
+QString GetCtrlKeyName(const QKeyEvent &key_event) {
+  // Left Ctrl: scan 0x1D. Right Ctrl: extended scan 0xE01D.
+  return GetLeftRightModifierName(key_event, VK_LCONTROL, VK_RCONTROL, 0x1D,
+                                  QStringLiteral("LeftCtrl"),
+                                  QStringLiteral("RightCtrl"));
+}
+
+QString GetAltKeyName(const QKeyEvent &key_event) {
+  // Left Alt: scan 0x38. Right Alt: extended scan 0xE038.
+  return GetLeftRightModifierName(key_event, VK_LMENU, VK_RMENU, 0x38,
+                                  QStringLiteral("LeftAlt"),
+                                  QStringLiteral("RightAlt"));
 }
 
 QString GetShiftKeyName(const QKeyEvent &key_event) {
@@ -223,6 +242,7 @@ KeyBindingFilter::KeyBindingFilter(QLineEdit *line_edit, QPushButton *ok_button)
       alt_pressed_(false),
       shift_pressed_(false),
       ctrl_key_name_(),
+      alt_key_name_(),
       shift_key_name_(),
       line_edit_(line_edit),
       ok_button_(ok_button) {
@@ -235,6 +255,7 @@ void KeyBindingFilter::Reset() {
   shift_pressed_ = false;
   shift_key_name_.clear();
   ctrl_key_name_.clear();
+  alt_key_name_.clear();
   modifier_required_key_.clear();
   modifier_non_required_key_.clear();
   unknown_key_.clear();
@@ -280,10 +301,18 @@ KeyBindingFilter::KeyState KeyBindingFilter::Encode(QString *result) const {
   if (alt_pressed_) {
 #ifdef __APPLE__
     results << QStringLiteral("Option");
-#else   // __APPLE__
-    // Do not support and show keybindings with alt for Windows
+#elif defined(_WIN32)
+    // Generic "Alt" key is not implemented yet, but possible.
+
+    // Explicit LeftAlt / RightAlt single-key bindings are supported.
+    // It needs but use low-level keyboard handler
+    if (!alt_key_name_.isEmpty()) {
+      results << alt_key_name_;
+    }
+#else   // __APPLE__, _WIN32
+    // Do not support and show keybindings with alt for other platforms.
     // results << "Alt";
-#endif  // __APPLE__
+#endif  // __APPLE__, _WIN32
   }
 
   const bool has_modifier = !results.isEmpty();
@@ -326,10 +355,21 @@ KeyBindingFilter::KeyState KeyBindingFilter::Encode(QString *result) const {
       ctrl_pressed_ && !alt_pressed_ && !shift_pressed_ &&
       !has_non_modifier_key;
 
-  // Keep rejecting Alt-only, Ctrl+Shift-only, Ctrl+Alt-only, etc.
-  // Allow only explicit LeftCtrl/RightCtrl single-key bindings.
+  const bool is_explicit_left_or_right_alt =
+      (alt_key_name_ == QLatin1String("LeftAlt") ||
+       alt_key_name_ == QLatin1String("RightAlt"));
+
+  const bool alt_only =
+      alt_pressed_ && !ctrl_pressed_ && !shift_pressed_ &&
+      !has_non_modifier_key;
+
+  // Keep rejecting bare Alt-only, Ctrl+Shift-only, Ctrl+Alt-only, etc.
+  // Allow only explicit LeftCtrl/RightCtrl or LeftAlt/RightAlt single-key
+  // bindings.
   if (!has_non_modifier_key && (alt_pressed_ || ctrl_pressed_)) {
-    if (!(ctrl_only && is_explicit_left_or_right_ctrl)) {
+    const bool allowed = (ctrl_only && is_explicit_left_or_right_ctrl) ||
+                         (alt_only && is_explicit_left_or_right_alt);
+    if (!allowed) {
       result_state = KeyBindingFilter::DENY_KEY;
     }
   }
@@ -419,6 +459,11 @@ KeyBindingFilter::KeyState KeyBindingFilter::AddKey(const QKeyEvent &key_event,
       //    case Qt::Key_Meta:  // Windows key
     case Qt::Key_Alt:
       alt_pressed_ = true;
+#ifdef _WIN32
+      alt_key_name_ = GetAltKeyName(key_event);
+#else   // _WIN32
+      alt_key_name_.clear();
+#endif  // _WIN32
       return Encode(result);
 #endif  // __APPLE__
     case Qt::Key_Shift:

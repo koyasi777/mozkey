@@ -58,10 +58,25 @@ enum class ExtractKeyType {
   kDirectModeKey,
   kDirectModeImeOffKey,
   kActiveModeImeOnKey,
+  kActiveModeImeOffKey,
+  kDirectModeImeOnKey,
 };
 
 bool IsDirectModeStatus(absl::string_view status) {
   return status == "Direct" || status == "DirectInput";
+}
+
+// The keymap "command" field may be a command sequence such as "Commit|IMEOff".
+// The server splits these on '|' and runs each command, so mirror that here
+// when checking whether a binding contains a particular command.
+bool CommandSequenceContains(absl::string_view command,
+                             absl::string_view target) {
+  for (absl::string_view part : absl::StrSplit(command, '|')) {
+    if (part == target) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool ShouldExtractKey(absl::string_view status, absl::string_view command,
@@ -71,10 +86,20 @@ bool ShouldExtractKey(absl::string_view status, absl::string_view command,
       return IsDirectModeStatus(status);
 
     case ExtractKeyType::kDirectModeImeOffKey:
-      return IsDirectModeStatus(status) && command == "IMEOff";
+      return IsDirectModeStatus(status) &&
+             CommandSequenceContains(command, "IMEOff");
 
     case ExtractKeyType::kActiveModeImeOnKey:
-      return !IsDirectModeStatus(status) && command == "IMEOn";
+      return !IsDirectModeStatus(status) &&
+             CommandSequenceContains(command, "IMEOn");
+
+    case ExtractKeyType::kActiveModeImeOffKey:
+      return !IsDirectModeStatus(status) &&
+             CommandSequenceContains(command, "IMEOff");
+
+    case ExtractKeyType::kDirectModeImeOnKey:
+      return IsDirectModeStatus(status) &&
+             CommandSequenceContains(command, "IMEOn");
   }
   return false;
 }
@@ -172,6 +197,18 @@ std::vector<KeyInformation> KeyInfoUtil::ExtractSortedActiveModeImeOnKeys(
     const config::Config& config) {
   return ExtractSortedKeysFromConfig(config,
                                      ExtractKeyType::kActiveModeImeOnKey);
+}
+
+std::vector<KeyInformation> KeyInfoUtil::ExtractSortedActiveModeImeOffKeys(
+    const config::Config& config) {
+  return ExtractSortedKeysFromConfig(config,
+                                     ExtractKeyType::kActiveModeImeOffKey);
+}
+
+std::vector<KeyInformation> KeyInfoUtil::ExtractSortedDirectModeImeOnKeys(
+    const config::Config& config) {
+  return ExtractSortedKeysFromConfig(config,
+                                     ExtractKeyType::kDirectModeImeOnKey);
 }
 
 bool KeyInfoUtil::ContainsKey(absl::Span<const KeyInformation> sorted_keys,
