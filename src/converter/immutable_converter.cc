@@ -2845,7 +2845,7 @@ bool ImmutableConverter::MakeLattice(const ConversionOptions& options,
     // Apply only to normal conversion and only before the user explicitly
     // resizes segments.  Manual segment resizing is a stronger signal than
     // this automatic guard.
-    if (request.request_type() == ConversionRequest::CONVERSION &&
+    if (options.request_type == RequestType::CONVERSION &&
         !segments->resized()) {
       ApplyShortCompoundSplitGuard(history_key, lattice);
     }
