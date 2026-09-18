@@ -715,8 +715,6 @@ message DecoderExperimentParams {
   optional int32 disable_legacy_rewriter_in_all_conversion_mode = 155
       [default = 0];
 
-  // Use NextTopStates instead of NextStates in Predictor.
-  optional bool ngram_use_next_top_states = 149 [default = false];
 
   // Transition cost bonus for particle omission (e.g. "さかなくう" ->
   // "魚食う"). This is used for experiments to improve core LM conversion.
