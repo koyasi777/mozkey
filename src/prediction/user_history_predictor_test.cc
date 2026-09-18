@@ -6319,6 +6319,125 @@ TEST_F(UserHistoryPredictorTest, PartialMatchTest) {
   }
 }
 
+TEST_F(UserHistoryPredictorTest,
+       CompoundNounAndSentenceWithParticlesPartialMatchTest) {
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<engine::Modules> modules,
+      engine::ModulesPresetBuilder()
+          .PresetDictionary(std::make_unique<MockDictionary>())
+          .Build(std::make_unique<testing::MockDataManager>()));
+  auto realtime_decoder = std::make_unique<MockRealtimeDecoder>();
+  auto predictor =
+      std::make_unique<UserHistoryPredictor>(*modules, *realtime_decoder);
+  predictor->Wait();
+
+  request_.set_mixed_conversion(true);
+  request_.mutable_decoder_experiment_params()
+      ->set_user_history_enable_compound_noun_partial_match(true);
+
+  EXPECT_CALL(*realtime_decoder, DecodeSuffix(_, _, _))
+      .WillRepeatedly([&](const ConversionRequest& request, uint16_t prefix_rid,
+                          absl::string_view suffix) -> std::optional<Result> {
+        Result result;
+        if (suffix == "たなかしょうてんは") {
+          result.key = "たなかしょうてんは";
+          result.value = "田中商店は";
+          result.cost = 10000;
+          result.lid = modules->GetPosMatcher().GetFunctionalId();
+          result.inner_segment_boundary =
+              converter::InnerSegmentBoundaryBuilder()
+                  .Add(24, 12, 24, 12)
+                  .Add(3, 3, 0, 0)
+                  .Build(result.key, result.value);
+          return result;
+        }
+        if (suffix == "は") {
+          result.key = "は";
+          result.value = "は";
+          result.cost = 500;
+          result.lid = modules->GetPosMatcher().GetFunctionalId();
+          return result;
+        }
+        return std::nullopt;
+      });
+
+  SegmentsProxy segments_proxy;
+
+  // A segment-edited compound noun is learned once with partial matching
+  // enabled, so a RIGHT_PREFIX_MATCH can be suggested immediately.
+  {
+    const ConversionRequest convreq = SetUpInputForConversion(
+        "たなかしょうてん", &composer_, &segments_proxy);
+    segments_proxy.Clear();
+    segments_proxy.AddSegment("たなか");
+    segments_proxy.AddCandidate(0, "田中");
+    segments_proxy.MutableCandidate(0, 0)->rid =
+        modules->GetPosMatcher().GetGeneralNounId();
+
+    segments_proxy.AddSegment("しょうてん");
+    segments_proxy.AddCandidate(1, "商店");
+    segments_proxy.MutableCandidate(1, 0)->rid =
+        modules->GetPosMatcher().GetGeneralNounId();
+
+    predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
+
+    segments_proxy.Clear();
+    const ConversionRequest predict_suffix_req = SetUpInputForPrediction(
+        "たなかしょうてんは", &composer_, &segments_proxy);
+    const std::vector<Result> results = predictor->Predict(predict_suffix_req);
+
+    EXPECT_TRUE(absl::c_any_of(results, [](const Result& result) {
+      return result.key == "たなかしょうてんは" &&
+             result.value == "田中商店は";
+    }));
+
+    segments_proxy.Clear();
+    const ConversionRequest convert_suffix_req = SetUpInputForConversion(
+        "たなかしょうてんは", &composer_, &segments_proxy);
+    const std::vector<Result> convert_results =
+        predictor->Convert(convert_suffix_req);
+
+    EXPECT_TRUE(absl::c_any_of(convert_results, [](const Result& result) {
+      return result.key == "たなかしょうてんは" &&
+             result.value == "田中商店は";
+    }));
+  }
+
+  // A multi-segment sentence containing a particle must not be promoted as a
+  // compound-noun partial match.
+  {
+    const ConversionRequest convreq = SetUpInputForConversion(
+        "きのうはおつかれ", &composer_, &segments_proxy);
+    segments_proxy.Clear();
+    segments_proxy.AddSegment("きのうは");
+    segments_proxy.AddCandidate(0, "昨日は");
+    segments_proxy.MutableCandidate(0, 0)->inner_segment_boundary = {
+        converter::EncodeLengths(std::string("きのうは").size(),
+                                 std::string("昨日は").size(),
+                                 std::string("きのう").size(),
+                                 std::string("昨日").size())
+            .value()};
+    segments_proxy.MutableCandidate(0, 0)->rid =
+        modules->GetPosMatcher().GetFunctionalId();
+
+    segments_proxy.AddSegment("おつかれ");
+    segments_proxy.AddCandidate(1, "お疲れ");
+    segments_proxy.MutableCandidate(1, 0)->rid =
+        modules->GetPosMatcher().GetGeneralNounId();
+
+    predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
+
+    segments_proxy.Clear();
+    const ConversionRequest predict_suffix_req = SetUpInputForPrediction(
+        "きのうはおつかれさま", &composer_, &segments_proxy);
+    const std::vector<Result> results = predictor->Predict(predict_suffix_req);
+
+    EXPECT_FALSE(absl::c_any_of(results, [](const Result& result) {
+      return result.key == "きのうはおつかれさま";
+    }));
+  }
+}
+
 TEST_F(UserHistoryPredictorTest, EmptyInnerSegmentBoundaryAttributeTest) {
   ASSERT_OK_AND_ASSIGN(
       std::unique_ptr<engine::Modules> modules,
