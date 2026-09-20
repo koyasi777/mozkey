@@ -507,6 +507,7 @@ message Config {
     RENDERER_WINDOW_COLOR_DARK = 1;
     RENDERER_WINDOW_COLOR_CUSTOM = 2;
     RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE = 3;
+    RENDERER_WINDOW_COLOR_AUTO = 4;
   }
 
   message CandidateWindowColorPalette {

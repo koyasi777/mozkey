@@ -2566,6 +2566,9 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
               config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE));
     }
     combo->addItem(
+        tr("Auto (follow system theme)"),
+        static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_AUTO));
+    combo->addItem(
         tr("Default (Light)"),
         static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_LIGHT));
     combo->addItem(

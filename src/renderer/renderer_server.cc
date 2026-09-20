@@ -100,9 +100,41 @@ constexpr uint32_t kMinFontWeight = 100;
 constexpr uint32_t kMaxFontWeight = 900;
 constexpr uint32_t kFontWeightStep = 100;
 
+ColorTheme GetWindowsSystemColorTheme() {
+  // Same mechanism as renderer/win32/indicator_window.cc
+  // GetWindowsAppColorScheme(): Windows Settings ->
+  // Personalization -> Colors -> Choose your default app mode.
+  // AppsUseLightTheme: 0 = Dark, 1 = Light.
+  // If the value does not exist, fall back to Light as a safe default.
+#ifdef _WIN32
+  DWORD apps_use_light_theme = 1;
+  DWORD size = sizeof(apps_use_light_theme);
+  const LONG result = ::RegGetValueW(
+      HKEY_CURRENT_USER,
+      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+      L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &apps_use_light_theme,
+      &size);
+  if (result != ERROR_SUCCESS) {
+    return config::Config::RENDERER_WINDOW_COLOR_LIGHT;
+  }
+  return apps_use_light_theme == 0
+             ? config::Config::RENDERER_WINDOW_COLOR_DARK
+             : config::Config::RENDERER_WINDOW_COLOR_LIGHT;
+#else   // _WIN32
+  return config::Config::RENDERER_WINDOW_COLOR_LIGHT;
+#endif  // _WIN32
+}
+
+ColorTheme ResolveAutoColorTheme(ColorTheme theme) {
+  if (theme == config::Config::RENDERER_WINDOW_COLOR_AUTO) {
+    return GetWindowsSystemColorTheme();
+  }
+  return theme;
+}
+
 ColorTheme GetCandidateWindowColorTheme(const config::Config& config) {
   if (config.has_candidate_window_color_theme()) {
-    return config.candidate_window_color_theme();
+    return ResolveAutoColorTheme(config.candidate_window_color_theme());
   }
   return config.use_dark_mode_candidate_window()
              ? config::Config::RENDERER_WINDOW_COLOR_DARK
@@ -114,7 +146,7 @@ ColorTheme NormalizeDependentColorTheme(ColorTheme theme,
   if (theme == config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE) {
     return candidate_theme;
   }
-  return theme;
+  return ResolveAutoColorTheme(theme);
 }
 
 uint32_t ClampCornerRadius(uint32_t radius) {
@@ -188,6 +220,7 @@ void BuildCandidateLikeStyle(ColorTheme theme, const CandidatePalette& palette,
                              const std::string& font_name,
                              uint32_t font_weight, uint32_t size_percent,
                              RendererStyle* style) {
+  theme = ResolveAutoColorTheme(theme);
   RendererStyleHandler::GetDefaultRendererStyle(style);
   RendererStyleHandler::ApplyCandidateWindowTheme(
       theme == config::Config::RENDERER_WINDOW_COLOR_DARK, style);
@@ -239,6 +272,7 @@ RendererStyleHandler::RubyWindowStyle BuildRubyStyle(
     return RubyStyleFromCandidateStyle(candidate_style, corner_radius,
                                       clamped_size_percent);
   }
+  theme = ResolveAutoColorTheme(theme);
 
   if (theme == config::Config::RENDERER_WINDOW_COLOR_CUSTOM) {
     RendererStyleHandler::RubyWindowStyle ruby_style;
@@ -267,6 +301,9 @@ void UpdateRendererStyleFromConfig() {
       GetCandidateWindowColorTheme(*shared_config);
   const ColorTheme suggest_color_theme = NormalizeDependentColorTheme(
       shared_config->suggest_window_color_theme(), candidate_color_theme);
+  // Keep ruby theme raw so FOLLOW_CANDIDATE still derives colors from the
+  // resolved candidate style (including custom palettes). AUTO is resolved
+  // inside BuildRubyStyle.
   const ColorTheme ruby_color_theme =
       shared_config->ruby_window_color_theme();
 
