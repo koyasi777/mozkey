@@ -1669,6 +1669,224 @@ TEST_F(KeyEventHandlerTest, ProtocolAnomalyModiferKeyMayBeSentOnKeyUp) {
   }
 }
 
+TEST_F(KeyEventHandlerTest, LeftAltTapShouldBeSentToServerWithLeftAltModifier) {
+  // A tap (press then release without any intervening key) of the left Alt key
+  // should be sent to the server with the LEFT_ALT modifier so that it can be
+  // bound to commands such as IMEOff.
+  constexpr bool kKanaLocked = false;
+
+  Output mock_output;
+  mock_output.set_consumed(true);
+
+  MockState mock(mock_output);
+  KeyboardMock keyboard(kKanaLocked);
+
+  InputState next_state;
+  KeyEventHandlerResult result;
+
+  InputBehavior behavior;
+  behavior.prefer_kana_input = kKanaLocked;
+  behavior.disabled = false;
+  behavior.direct_mode_keys = GetDefaultDirectModeKeys();
+
+  Context context;
+
+  // Left Alt: scan code 0x38, not extended.
+  constexpr BYTE kAltScanCode = 0x38;
+
+  // Press LeftAlt
+  {
+    KeyboardStatus keyboard_status;
+    keyboard_status.SetState(VK_MENU, kPressed);
+    keyboard_status.SetState(VK_LMENU, kPressed);
+
+    constexpr VirtualKey kVirtualKey = VirtualKey::FromVirtualKey(VK_MENU);
+    const LParamKeyInfo lparam(CreateLParam(0x0001,        // repeat_count
+                                            kAltScanCode,  // scan_code
+                                            false,    // is_extended_key,
+                                            false,    // has_context_code,
+                                            false,    // is_previous_state_down,
+                                            false));  // is_in_transition_state
+
+    InputState initial_state;
+    initial_state.logical_conversion_mode =
+        IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN;
+    initial_state.visible_conversion_mode =
+        initial_state.logical_conversion_mode;
+    initial_state.open = true;
+
+    Output output;
+    result = TestableKeyEventHandler::ImeProcessKey(
+        kVirtualKey, lparam.GetScanCodeForMapVirtualKey(),
+        lparam.IsKeyDownInImeProcessKey(), keyboard_status, behavior,
+        initial_state, context, mock.mutable_client(), &keyboard, &next_state,
+        &output);
+
+    EXPECT_TRUE(result.succeeded);
+    EXPECT_FALSE(result.should_be_eaten);
+    EXPECT_FALSE(result.should_be_sent_to_server);
+    EXPECT_FALSE(mock.start_server_called());
+  }
+
+  // Release LeftAlt
+  {
+    KeyboardStatus keyboard_status;
+    keyboard_status.SetState(VK_MENU, kPressed);
+
+    constexpr VirtualKey kVirtualKey = VirtualKey::FromVirtualKey(VK_MENU);
+    const LParamKeyInfo lparam(CreateLParam(0x0001,        // repeat_count
+                                            kAltScanCode,  // scan_code
+                                            false,   // is_extended_key,
+                                            false,   // has_context_code,
+                                            false,   // is_previous_state_down,
+                                            true));  // is_in_transition_state
+
+    InputState initial_state;
+    initial_state.logical_conversion_mode =
+        IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN;
+    initial_state.visible_conversion_mode =
+        initial_state.logical_conversion_mode;
+    initial_state.open = true;
+    // The physical key recorded on key-down is the left Alt.
+    initial_state.last_down_key = VirtualKey::FromVirtualKey(VK_LMENU);
+
+    Output output;
+    result = TestableKeyEventHandler::ImeProcessKey(
+        kVirtualKey, lparam.GetScanCodeForMapVirtualKey(),
+        lparam.IsKeyDownInImeProcessKey(), keyboard_status, behavior,
+        initial_state, context, mock.mutable_client(), &keyboard, &next_state,
+        &output);
+
+    EXPECT_TRUE(result.succeeded);
+    EXPECT_TRUE(result.should_be_eaten);
+    EXPECT_TRUE(result.should_be_sent_to_server);
+  }
+
+  {
+    commands::Input actual_input;
+    EXPECT_TRUE(mock.GetGeneratedRequest(&actual_input));
+    EXPECT_EQ(actual_input.type(), commands::Input::TEST_SEND_KEY);
+    EXPECT_TRUE(actual_input.has_key());
+    EXPECT_FALSE(actual_input.key().has_key_code());
+    EXPECT_FALSE(actual_input.key().has_key_string());
+    EXPECT_EQ(actual_input.key().modifier_keys_size(), 2);
+    // ALT (=2) is sorted before LEFT_ALT (=64).
+    EXPECT_EQ(actual_input.key().modifier_keys(0), commands::KeyEvent::ALT);
+    EXPECT_EQ(actual_input.key().modifier_keys(1),
+              commands::KeyEvent::LEFT_ALT);
+    EXPECT_FALSE(actual_input.key().has_special_key());
+  }
+}
+
+TEST_F(KeyEventHandlerTest,
+       RightAltTapShouldBeSentToServerWithRightAltModifier) {
+  // A tap of the right Alt key should be sent to the server with the RIGHT_ALT
+  // modifier so that it can be bound to commands such as IMEOn.
+  constexpr bool kKanaLocked = false;
+
+  Output mock_output;
+  mock_output.set_consumed(true);
+
+  MockState mock(mock_output);
+  KeyboardMock keyboard(kKanaLocked);
+
+  InputState next_state;
+  KeyEventHandlerResult result;
+
+  InputBehavior behavior;
+  behavior.prefer_kana_input = kKanaLocked;
+  behavior.disabled = false;
+  behavior.direct_mode_keys = GetDefaultDirectModeKeys();
+
+  Context context;
+
+  // Right Alt: scan code 0x38, extended.
+  constexpr BYTE kAltScanCode = 0x38;
+
+  // Press RightAlt
+  {
+    KeyboardStatus keyboard_status;
+    keyboard_status.SetState(VK_MENU, kPressed);
+    keyboard_status.SetState(VK_RMENU, kPressed);
+
+    constexpr VirtualKey kVirtualKey = VirtualKey::FromVirtualKey(VK_MENU);
+    const LParamKeyInfo lparam(CreateLParam(0x0001,        // repeat_count
+                                            kAltScanCode,  // scan_code
+                                            true,     // is_extended_key,
+                                            false,    // has_context_code,
+                                            false,    // is_previous_state_down,
+                                            false));  // is_in_transition_state
+
+    InputState initial_state;
+    initial_state.logical_conversion_mode =
+        IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN;
+    initial_state.visible_conversion_mode =
+        initial_state.logical_conversion_mode;
+    initial_state.open = true;
+
+    Output output;
+    result = TestableKeyEventHandler::ImeProcessKey(
+        kVirtualKey, lparam.GetScanCodeForMapVirtualKey(),
+        lparam.IsKeyDownInImeProcessKey(), keyboard_status, behavior,
+        initial_state, context, mock.mutable_client(), &keyboard, &next_state,
+        &output);
+
+    EXPECT_TRUE(result.succeeded);
+    EXPECT_FALSE(result.should_be_eaten);
+    EXPECT_FALSE(result.should_be_sent_to_server);
+    EXPECT_FALSE(mock.start_server_called());
+  }
+
+  // Release RightAlt
+  {
+    KeyboardStatus keyboard_status;
+    keyboard_status.SetState(VK_MENU, kPressed);
+
+    constexpr VirtualKey kVirtualKey = VirtualKey::FromVirtualKey(VK_MENU);
+    const LParamKeyInfo lparam(CreateLParam(0x0001,        // repeat_count
+                                            kAltScanCode,  // scan_code
+                                            true,    // is_extended_key,
+                                            false,   // has_context_code,
+                                            false,   // is_previous_state_down,
+                                            true));  // is_in_transition_state
+
+    InputState initial_state;
+    initial_state.logical_conversion_mode =
+        IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN;
+    initial_state.visible_conversion_mode =
+        initial_state.logical_conversion_mode;
+    initial_state.open = true;
+    // The physical key recorded on key-down is the right Alt.
+    initial_state.last_down_key = VirtualKey::FromVirtualKey(VK_RMENU);
+
+    Output output;
+    result = TestableKeyEventHandler::ImeProcessKey(
+        kVirtualKey, lparam.GetScanCodeForMapVirtualKey(),
+        lparam.IsKeyDownInImeProcessKey(), keyboard_status, behavior,
+        initial_state, context, mock.mutable_client(), &keyboard, &next_state,
+        &output);
+
+    EXPECT_TRUE(result.succeeded);
+    EXPECT_TRUE(result.should_be_eaten);
+    EXPECT_TRUE(result.should_be_sent_to_server);
+  }
+
+  {
+    commands::Input actual_input;
+    EXPECT_TRUE(mock.GetGeneratedRequest(&actual_input));
+    EXPECT_EQ(actual_input.type(), commands::Input::TEST_SEND_KEY);
+    EXPECT_TRUE(actual_input.has_key());
+    EXPECT_FALSE(actual_input.key().has_key_code());
+    EXPECT_FALSE(actual_input.key().has_key_string());
+    EXPECT_EQ(actual_input.key().modifier_keys_size(), 2);
+    // ALT (=2) is sorted before RIGHT_ALT (=512).
+    EXPECT_EQ(actual_input.key().modifier_keys(0), commands::KeyEvent::ALT);
+    EXPECT_EQ(actual_input.key().modifier_keys(1),
+              commands::KeyEvent::RIGHT_ALT);
+    EXPECT_FALSE(actual_input.key().has_special_key());
+  }
+}
+
 TEST_F(KeyEventHandlerTest,
        ProtocolAnomalyModifierShiftShouldBeRemovedForPrintableChar) {
   // Currently, the Mozc server expects the client remove Shift modifier if

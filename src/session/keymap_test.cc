@@ -191,6 +191,39 @@ TEST_F(KeyMapTest, GetCommand) {
   }
 }
 
+TEST_F(KeyMapTest, GetCommandLeftRightAltAreDistinguished) {
+  // Verifies that single-key LeftAlt / RightAlt bindings (used for IME on/off)
+  // are matched via the exact-match path and that left and right are not
+  // confused with each other, just like LeftCtrl / RightCtrl.
+  KeyMap<PrecompositionState> keymap;
+
+  commands::KeyEvent left_alt_rule;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftAlt", &left_alt_rule));
+  EXPECT_TRUE(keymap.AddRule(left_alt_rule, PrecompositionState::IME_OFF));
+
+  commands::KeyEvent right_alt_rule;
+  ASSERT_TRUE(KeyParser::ParseKey("RightAlt", &right_alt_rule));
+  EXPECT_TRUE(keymap.AddRule(right_alt_rule, PrecompositionState::IME_ON));
+
+  PrecompositionState::Commands command;
+
+  // LeftAlt -> IMEOff
+  {
+    commands::KeyEvent key_event;
+    ASSERT_TRUE(KeyParser::ParseKey("LeftAlt", &key_event));
+    EXPECT_TRUE(keymap.GetCommand(key_event, &command));
+    EXPECT_EQ(command, PrecompositionState::IME_OFF);
+  }
+
+  // RightAlt -> IMEOn (must not be confused with LeftAlt)
+  {
+    commands::KeyEvent key_event;
+    ASSERT_TRUE(KeyParser::ParseKey("RightAlt", &key_event));
+    EXPECT_TRUE(keymap.GetCommand(key_event, &command));
+    EXPECT_EQ(command, PrecompositionState::IME_ON);
+  }
+}
+
 TEST_F(KeyMapTest, GetCommandSequence) {
   KeyMap<CompositionState> keymap;
 

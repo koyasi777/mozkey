@@ -65,6 +65,7 @@ class KeyBindingFilter : public QObject {
   bool alt_pressed_;
   bool shift_pressed_;
   QString ctrl_key_name_;
+  QString alt_key_name_;
   QString shift_key_name_;
   QString modifier_required_key_;
   QString modifier_non_required_key_;
