@@ -477,6 +477,25 @@ bool TryRepairProtectedSpan(const ProtectedConversionSpan& span,
   return false;
 }
 
+bool BaselineSegmentsMatchAdoptionInput(
+    const std::vector<ZenzBaselineSegment>& baseline_segments,
+    absl::string_view key, absl::string_view mozc_value) {
+  if (baseline_segments.empty()) {
+    return false;
+  }
+
+  std::string concatenated_key;
+  std::string concatenated_value;
+  for (const ZenzBaselineSegment& segment : baseline_segments) {
+    if (segment.key.empty() || segment.value.empty()) {
+      return false;
+    }
+    concatenated_key.append(segment.key);
+    concatenated_value.append(segment.value);
+  }
+  return concatenated_key == key && concatenated_value == mozc_value;
+}
+
 }  // namespace
 
 ZenzProtectedPromptResult ZenzAdoptionPolicy::ProtectPromptKey(
@@ -548,7 +567,7 @@ std::string ZenzAdoptionPolicy::RestorePlaceholders(
 ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
     const ZenzAdoptionInput& input) const {
   std::string adopted_value(input.zenz_value);
-  bool repaired = false;
+  bool protected_surface_repaired = false;
 
   for (const ProtectedConversionSpan& span : input.protected_spans) {
     if (span.value.empty()) {
@@ -562,13 +581,13 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
            required_occurrences) {
       if (TryRepairAttachedProtectedSpan(input.mozc_value, span,
                                          &adopted_value)) {
-        repaired = true;
+        protected_surface_repaired = true;
         continue;
       }
 
       if (CountOccurrences(adopted_value, span.value) < required_occurrences &&
           TryRepairProtectedSpan(span, &adopted_value)) {
-        repaired = true;
+        protected_surface_repaired = true;
         continue;
       }
 
@@ -583,12 +602,69 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
     }
   }
 
+  bool orthography_repaired = false;
+  const bool baseline_segments_match = BaselineSegmentsMatchAdoptionInput(
+      input.baseline_segments, input.key, input.mozc_value);
+  if (baseline_segments_match) {
+    const ZenzSegmentProjection projection = ProjectZenzValueToMozcSegments(
+        input.baseline_segments, input.key, adopted_value);
+
+    if (projection.success) {
+      std::string orthography_repaired_value;
+      for (const ZenzProjectedSegment& segment : projection.segments) {
+        if (!segment.changed) {
+          orthography_repaired_value.append(segment.zenz_value);
+          continue;
+        }
+
+        const ZenzOrthographyDecision decision = orthography_policy_.Evaluate(
+            segment.mozc_value, segment.zenz_value);
+        if (decision.allow) {
+          orthography_repaired_value.append(segment.zenz_value);
+          continue;
+        }
+
+        orthography_repaired_value.append(segment.mozc_value);
+        orthography_repaired = true;
+      }
+      adopted_value = std::move(orthography_repaired_value);
+    } else {
+      const ZenzOrthographyDecision decision =
+          orthography_policy_.Evaluate(input.mozc_value, adopted_value);
+      if (!decision.allow) {
+        ZenzAdoptionResult result;
+        result.action = ZenzAdoptionResult::Action::kReject;
+        result.value = std::string(input.mozc_value);
+        result.reason = "orthographic_transition_projection_failed";
+        return result;
+      }
+    }
+  } else {
+    const ZenzOrthographyDecision decision =
+        orthography_policy_.Evaluate(input.mozc_value, adopted_value);
+    if (!decision.allow) {
+      ZenzAdoptionResult result;
+      result.action = ZenzAdoptionResult::Action::kReject;
+      result.value = std::string(input.mozc_value);
+      result.reason = input.baseline_segments.empty()
+                          ? "orthographic_transition_missing_baseline_segments"
+                          : "orthographic_transition_stale_baseline_segments";
+      return result;
+    }
+  }
+
   ZenzAdoptionResult result;
+  const bool repaired = protected_surface_repaired || orthography_repaired;
   result.action = repaired ? ZenzAdoptionResult::Action::kAcceptWithRepair
                            : ZenzAdoptionResult::Action::kAcceptAsIs;
   result.value = std::move(adopted_value);
-  result.reason = repaired ? "protected_user_dictionary_surface_repaired"
-                           : "accepted";
+  if (orthography_repaired) {
+    result.reason = "orthographic_transition_repaired";
+  } else if (protected_surface_repaired) {
+    result.reason = "protected_user_dictionary_surface_repaired";
+  } else {
+    result.reason = "accepted";
+  }
   return result;
 }
 

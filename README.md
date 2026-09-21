@@ -132,6 +132,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - accepted Zenz 補正を直前の通常 Mozc ライブ変換文節へ安全に逆投影できる場合は、文節列全体を外部 multi-segment commit として Mozc history に学習。通常変換候補を再利用できる場合は candidate 構造も引き継ぎ、Zenz が実際に変更した文節だけを強い選択履歴として扱う
 - 通常 Mozc ライブ変換で現在の結果として現れているユーザー辞書由来候補や ASCII / mixed-script 表記を、Zenz live correction の採用時に保護
 - ASCII / mixed-script 表記は、読みを安全に特定できる場合に Zenz prompt 内で一時 placeholder 化し、応答後に元の表記へ復元。`もずきー -> Mozkey` のような表記が `モズキー` へ上書きされるのを避けつつ、前後の文は補正できるようにした
+- 通常 Mozc が選んだ表記を orthographic baseline として保持し、`東京 -> Tokyo`、`コンピュータ -> computer` のように Zenz だけが新しい英字表記を持ち込む場合は、文節へ安全に逆投影できる範囲で該当部分だけ通常 Mozc 表記へ戻す。`GitHub`、`iPhone`、`AI`、`C++`、`GPT-5` など、通常 Mozc がすでに選んでいる Latin / technical token は維持する
 - Zenz が `（ ）` / `( )`、`？` / `?`、`！` / `!`、`：` / `:` などの記号幅・記号スタイルを正規化して返した場合でも、元の未確定文字列または通常 Mozc ライブ変換結果でユーザーが使っていた表記へ復元
 - Zenz が左文脈などから `！` / `!`、`？` / `?`、`。`、`…`、`〜` などの文末・表現記号を、現在の未確定文字列または通常 Mozc ライブ変換結果の末尾にある数を超えて追加した場合は、余分な末尾記号だけを抑制し、漢字・語彙などの補正結果は保持
 - 日本語のみのユーザー辞書語は、自然な読みを Zenz prompt に残したまま、Zenz 応答後に表記の境界を検証し、余分なかな付着を安全に修復できる場合だけ採用するようにした
@@ -260,6 +261,8 @@ deferred 表示で Zenz の応答を待っている間に Space を押した場�
 Zenz 出力は表示前に検証されます。空出力、短すぎる入力、Mozc 結果と同一の出力、長すぎる出力、不正な文字列、安全でない可能性のある文字列は拒否されます。さらに、確定済み左文脈の長い末尾部分を Zenz 出力の先頭へ繰り返す context echo についても、現在の読み・Mozc 結果から見て不自然に長い反復だけを検出して拒否します。短い一致や、現在の読みそのものが同じ語句の反復を要求している場合は一律には拒否しません。拒否された場合は、その時点の通常 Mozc ライブ変換結果へフォールバックします。
 
 通常 Mozc ライブ変換で現在の結果として現れているユーザー辞書由来候補や ASCII / mixed-script 表記は、Zenz 採用時に保護されます。ASCII / mixed-script 表記は、読みを安全に特定できる場合に Zenz prompt 内で一時 placeholder 化し、Zenz 応答後に元の表記へ復元します。これにより、`もずきー -> Mozkey` のような表記が `モズキー` のように上書きされることを避けつつ、対象語の前後にある文の補正は採用できるようにしています。
+
+通常 Mozc が選んだ表記は、Zenz 採用時の orthographic baseline としても扱います。Zenz だけが `東京 -> Tokyo` や `コンピュータ -> computer` のような Latin 表記を新たに導入したり、通常 Mozc が選んだ Latin / technical token を削除・変形したりした場合、文節境界へ安全に逆投影できるときは問題のある文節だけを通常 Mozc の表記へ戻し、ほかの Zenz 補正は維持します。安全に逆投影できない場合や、保存していた baseline 文節が欠落・不整合な場合は、表記上安全でない遷移を含む Zenz 結果を採用しません。一方、通常 Mozc がすでに `GitHub`、`iPhone`、`AI`、`C++`、`GPT-5`、`UTF-8`、`HTTP/2`、`Windows11` などを選んでいる場合、それらは正当な baseline として維持します。
 
 また、Zenz が括弧、疑問符、感嘆符、一部の全角 ASCII 記号 などを正規化して返した場合でも、採用前にユーザー可視の記号スタイルを復元します。これは全角化ではなく、現在の未確定文字列または通常 Mozc ライブ変換結果に現れていた表記の保存です。たとえば `（テスト）` は `（ ）` のまま、`(test)` は `( )` のまま維持します。URL、path、ASCII token 風の文脈では、ASCII 記号を不用意に全角化しないよう保守的に扱います。
 
@@ -795,6 +798,7 @@ Main features added in this fork
 - When an accepted Zenz correction can be safely reverse-projected onto the previous normal Mozc live-conversion segments, learns the projected segment sequence as an external multi-segment commit. If Mozc can reproduce the same key/value candidate through normal conversion, the candidate structure is reused so user history receives evidence closer to a normal conversion commit. Only segments actually changed by Zenz are marked as strong user-selected history.
 - Protects user-dictionary candidates and ASCII / mixed-script surfaces that appear in the current normal Mozc live-conversion result before adopting Zenz live-correction output
 - For ASCII / mixed-script surfaces, temporarily replaces the reading with a placeholder in the Zenz prompt when it can be identified safely, then restores the selected surface after the response, so entries such as `もずきー -> Mozkey` are not silently overwritten as `モズキー` while surrounding text can still be corrected
+- Treats the surface selected by normal Mozc as an orthographic baseline. When Zenz alone introduces or mutates a Latin / technical spelling such as `東京 -> Tokyo` or `コンピュータ -> computer`, Mozkey restores the affected safely projectable segment to the Mozc surface; Latin / technical tokens already selected by Mozc, such as `GitHub`, `iPhone`, `AI`, `C++`, `GPT-5`, `UTF-8`, `HTTP/2`, and `Windows11`, remain valid
 - Preserves user-visible punctuation style when adopting Zenz live-correction output, so brackets and symbols such as `（ ）` / `( )`, `？` / `?`, and `！` / `!` stay in the style chosen by the current composition or Mozc live-conversion result
 - Suppresses only excess trailing sentence-final or expressive punctuation introduced by contextual Zenz output beyond what is already present at the end of the current composition or normal Mozc live-conversion result, while preserving the rest of the correction
 - For Japanese-only user-dictionary surfaces, keeps the natural reading in the Zenz prompt and validates the selected surface boundaries after the response, accepting the result only when any extra kana attachment can be repaired safely
@@ -917,6 +921,18 @@ replaced with a placeholder in the Zenz prompt and restored to the selected
 surface after the response. This prevents Zenz from silently overwriting the
 protected word as `モズキー` while still allowing correction of the surrounding
 sentence.
+
+The surface selected by normal Mozc is also treated as an orthographic baseline
+for Zenz adoption. If Zenz alone introduces a Latin spelling such as
+`東京 -> Tokyo` or `コンピュータ -> computer`, or removes or mutates a Latin /
+technical token already selected by Mozc, Mozkey restores only the affected
+segment when the result can be projected safely back onto the Mozc segment
+boundaries, preserving unrelated Zenz corrections. If safe projection is not
+possible, or if the saved baseline segments are missing or inconsistent, a Zenz
+result containing an unsafe orthographic transition is not adopted. Latin /
+technical tokens already selected by normal Mozc, including `GitHub`, `iPhone`,
+`AI`, `C++`, `GPT-5`, `UTF-8`, `HTTP/2`, and `Windows11`, remain valid baseline
+surfaces.
 
 Zenz output may also normalize visible punctuation style. Before adoption,
 Mozkey restores the symbol style from the current composition or normal Mozc

@@ -159,6 +159,7 @@ mozc_cc_library(
         "//protocol:config_cc_proto",
         "//request:conversion_request",
         "//session:zenz_feedback_store",
+        "//session:zenz_orthography_policy",
         "//session:zenz_output_validator",
         "@com_google_absl//absl/strings",
     ],

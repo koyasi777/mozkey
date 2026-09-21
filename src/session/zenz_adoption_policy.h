@@ -35,6 +35,8 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "session/zenz_orthography_policy.h"
+#include "session/zenz_segment_projection.h"
 
 namespace mozc::session {
 
@@ -89,6 +91,7 @@ struct ZenzAdoptionInput {
   absl::string_view mozc_value;
   absl::string_view zenz_value;
   std::vector<ProtectedConversionSpan> protected_spans;
+  std::vector<ZenzBaselineSegment> baseline_segments;
 };
 
 struct ZenzAdoptionResult {
@@ -113,6 +116,9 @@ class ZenzAdoptionPolicy {
       const std::vector<ProtectedConversionSpan>& protected_spans) const;
 
   ZenzAdoptionResult Decide(const ZenzAdoptionInput& input) const;
+
+ private:
+  ZenzOrthographyPolicy orthography_policy_;
 };
 
 }  // namespace mozc::session

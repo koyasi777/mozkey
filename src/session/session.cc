@@ -1563,6 +1563,43 @@ size_t CountSurfaceOccurrences(absl::string_view value,
   return count;
 }
 
+std::vector<ZenzBaselineSegment> BuildZenzBaselineSegmentsFromPreedit(
+    const commands::Preedit& preedit) {
+  std::vector<ZenzBaselineSegment> result;
+  result.reserve(preedit.segment_size());
+  for (int i = 0; i < preedit.segment_size(); ++i) {
+    const commands::Preedit::Segment& segment = preedit.segment(i);
+    if (segment.key().empty() || segment.value().empty()) {
+      return {};
+    }
+    result.push_back({segment.key(), segment.value()});
+  }
+  return result;
+}
+
+std::vector<ZenzBaselineSegment> BuildZenzAdoptionBaselineSegments(
+    const commands::Preedit& preedit, absl::string_view full_key,
+    absl::string_view full_value) {
+  std::vector<ZenzBaselineSegment> segments =
+      BuildZenzBaselineSegmentsFromPreedit(preedit);
+
+  std::string concatenated_key;
+  std::string concatenated_value;
+  for (const ZenzBaselineSegment& segment : segments) {
+    concatenated_key.append(segment.key);
+    concatenated_value.append(segment.value);
+  }
+  if (!segments.empty() && concatenated_key == full_key &&
+      concatenated_value == full_value) {
+    return segments;
+  }
+
+  if (full_key.empty() || full_value.empty()) {
+    return {};
+  }
+  return {{std::string(full_key), std::string(full_value)}};
+}
+
 struct ZenzReverseLearningProjection {
   std::vector<std::pair<std::string, std::string>> changed_segments;
   std::vector<ZenzProjectedLearningSegment> projected_segments;
@@ -1574,139 +1611,30 @@ ZenzReverseLearningProjection BuildZenzReverseLearningSegmentsFromPreedit(
     absl::string_view full_value) {
   constexpr int kMaxReverseLearningPairs = 4;
 
-  const int segment_size = preedit.segment_size();
-  if (segment_size <= 0 || full_key.empty() || full_value.empty()) {
-    return {};
-  }
-
-  std::string concatenated_key;
-  std::vector<std::string> keys;
-  std::vector<std::string> mozc_values;
-  keys.reserve(segment_size);
-  mozc_values.reserve(segment_size);
-
-  for (int i = 0; i < segment_size; ++i) {
-    const commands::Preedit::Segment& segment = preedit.segment(i);
-    if (segment.key().empty() || segment.value().empty()) {
-      return {};
-    }
-    keys.push_back(segment.key());
-    mozc_values.push_back(segment.value());
-    concatenated_key.append(segment.key());
-  }
-
-  // The snapshot must describe the same full Zenz request.  Otherwise it may
-  // belong to an older live-conversion generation and must not be used.
-  if (concatenated_key != full_key) {
-    return {};
-  }
-
-  struct Anchor {
-    int index;
-    size_t begin;
-    size_t end;
-  };
-
-  std::vector<Anchor> anchors;
-  anchors.reserve(segment_size);
-  for (int i = 0; i < segment_size; ++i) {
-    const std::string& value = mozc_values[i];
-    if (CountSurfaceOccurrences(full_value, value) != 1) {
-      continue;
-    }
-    const size_t begin = full_value.find(value);
-    if (begin == absl::string_view::npos) {
-      return {};
-    }
-    anchors.push_back(Anchor{i, begin, begin + value.size()});
-  }
-
-  size_t previous_anchor_end = 0;
-  for (const Anchor& anchor : anchors) {
-    if (anchor.begin < previous_anchor_end) {
-      return {};
-    }
-    previous_anchor_end = anchor.end;
-  }
-
-  std::vector<std::string> projected_values(segment_size);
-  int left_index = -1;
-  size_t left_value_end = 0;
-
-  auto assign_gap = [&](int first_index, int last_index,
-                        absl::string_view value) -> bool {
-    const int gap_size = last_index - first_index + 1;
-    if (gap_size <= 0) {
-      return value.empty();
-    }
-
-    if (gap_size == 1) {
-      if (value.empty()) {
-        return false;
-      }
-      projected_values[first_index] = std::string(value);
-      return true;
-    }
-
-    std::string original_gap_value;
-    for (int i = first_index; i <= last_index; ++i) {
-      original_gap_value.append(mozc_values[i]);
-    }
-    if (original_gap_value != value) {
-      return false;
-    }
-    for (int i = first_index; i <= last_index; ++i) {
-      projected_values[i] = mozc_values[i];
-    }
-    return true;
-  };
-
-  for (const Anchor& anchor : anchors) {
-    if (!assign_gap(left_index + 1, anchor.index - 1,
-                    full_value.substr(left_value_end,
-                                      anchor.begin - left_value_end))) {
-      return {};
-    }
-    projected_values[anchor.index] = mozc_values[anchor.index];
-    left_index = anchor.index;
-    left_value_end = anchor.end;
-  }
-
-  if (!assign_gap(left_index + 1, segment_size - 1,
-                  full_value.substr(left_value_end))) {
-    return {};
-  }
-
-  std::string reconstructed_value;
-  for (const std::string& value : projected_values) {
-    if (value.empty()) {
-      return {};
-    }
-    reconstructed_value.append(value);
-  }
-  if (reconstructed_value != full_value) {
+  const std::vector<ZenzBaselineSegment> baseline_segments =
+      BuildZenzBaselineSegmentsFromPreedit(preedit);
+  const ZenzSegmentProjection projection = ProjectZenzValueToMozcSegments(
+      baseline_segments, full_key, full_value);
+  if (!projection.success) {
     return {};
   }
 
   ZenzReverseLearningProjection result;
-  result.projected_segments.reserve(segment_size);
-  for (int i = 0; i < segment_size; ++i) {
+  result.projected_segments.reserve(projection.segments.size());
+  for (const ZenzProjectedSegment& segment : projection.segments) {
     result.projected_segments.push_back(
-        {keys[i], projected_values[i],
-         projected_values[i] != mozc_values[i]});
-  }
+        {segment.key, segment.zenz_value, segment.changed});
 
-  for (int i = 0; i < segment_size; ++i) {
     // Full-sequence learning already covers the whole accepted result.  The
     // reverse path records only segments that Zenz actually changed relative to
     // the visible Mozc live-conversion result.
-    if (projected_values[i] == mozc_values[i]) {
+    if (!segment.changed) {
       continue;
     }
-    if (keys[i] == full_key && projected_values[i] == full_value) {
+    if (segment.key == full_key && segment.zenz_value == full_value) {
       continue;
     }
-    result.changed_segments.push_back({keys[i], projected_values[i]});
+    result.changed_segments.push_back({segment.key, segment.zenz_value});
     if (result.changed_segments.size() > kMaxReverseLearningPairs) {
       return {};
     }
@@ -6289,6 +6217,9 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     adoption_input.mozc_value = live_conversion_value_;
     adoption_input.zenz_value = feedback_value;
     adoption_input.protected_spans = live_conversion_protected_spans_;
+    adoption_input.baseline_segments = BuildZenzAdoptionBaselineSegments(
+        live_conversion_preedit_output_, live_conversion_key_,
+        live_conversion_value_);
 
     const ZenzAdoptionResult adoption =
         zenz_adoption_policy_.Decide(adoption_input);
@@ -6441,6 +6372,9 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
                                        : live_conversion_preedit_;
   pending_zenz_live_.prompt = prompt;
   pending_zenz_live_.protected_spans = protected_prompt.protected_spans;
+  pending_zenz_live_.baseline_segments = BuildZenzAdoptionBaselineSegments(
+      live_conversion_preedit_output_, live_conversion_key_,
+      live_conversion_value_);
   pending_zenz_live_.issued_at = Clock::GetAbslTime();
   pending_zenz_live_.pending = true;
   pending_zenz_live_.submitted = false;
@@ -7043,6 +6977,7 @@ bool Session::ApplyZenzLiveCorrectionResult(
   adoption_input.mozc_value = pending_zenz_live_.mozc_value;
   adoption_input.zenz_value = zenz_value;
   adoption_input.protected_spans = pending_zenz_live_.protected_spans;
+  adoption_input.baseline_segments = pending_zenz_live_.baseline_segments;
 
   const ZenzAdoptionResult adoption =
       zenz_adoption_policy_.Decide(adoption_input);
