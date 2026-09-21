@@ -93,6 +93,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(IsFullWidthInsertSpace);
   PEER_METHOD(PushUndoContext);
   PEER_METHOD(MaybeApplyZenzFeedbackLiveCorrection);
+  PEER_METHOD(ApplyZenzLiveCorrectionResult);
   PEER_METHOD(SetPendingZenzFeedbackAccepted);
   PEER_METHOD(SetPendingZenzFeedbackRejected);
   PEER_METHOD(ObservePendingZenzFeedbackCommittedResult);
@@ -110,6 +111,8 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(Suggest);
   PEER_METHOD(MaybeStartLiveConversion);
   PEER_METHOD(OutputPendingLiveConversion);
+  PEER_METHOD(BuildStablePresentationSpans);
+  PEER_METHOD(MergeStablePresentationSpans);
   PEER_METHOD(AttachLiveConversionSuggestionCandidateWindow);
   PEER_METHOD(AttachCachedLiveConversionSuggestionCandidateWindow);
 
@@ -122,6 +125,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_VARIABLE(live_conversion_preedit_);
   PEER_VARIABLE(live_conversion_value_);
   PEER_VARIABLE(live_conversion_preedit_output_);
+  PEER_VARIABLE(pending_live_conversion_presentation_);
   PEER_VARIABLE(pending_live_conversion_suggestion_candidate_window_);
   PEER_VARIABLE(live_conversion_suggestion_candidate_window_);
   PEER_VARIABLE(zenz_live_visible_generation_);
@@ -129,6 +133,8 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_VARIABLE(zenz_live_value_);
   PEER_VARIABLE(zenz_live_mozc_value_);
   PEER_VARIABLE(zenz_live_context_class_);
+  PEER_VARIABLE(zenz_live_stable_spans_);
+  PEER_VARIABLE(pending_zenz_live_);
   PEER_VARIABLE(zenz_feedback_store_);
   PEER_VARIABLE(pending_zenz_feedback_);
   PEER_VARIABLE(pending_direct_commit_learning_);
@@ -3091,6 +3097,1356 @@ TEST_F(SessionTest,
   EXPECT_EQ(command.output().callback().delay_millisec(), 24);
 }
 
+TEST_F(SessionTest,
+       DeferredZenzPositiveDelayKeepsPreZenzPreeditVisible) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_TRUE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().live_conversion_pending());
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+
+  ASSERT_TRUE(command.output().has_callback());
+  EXPECT_EQ(command.output().callback().delay_millisec(), 1000);
+}
+
+TEST_F(SessionTest,
+       DeferredZenzZeroDelayKeepsPreZenzPreeditVisibleWhilePolling) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(0);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_zenz_live_correction_pipe_name("");
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+  ASSERT_TRUE(command.output().has_callback());
+  EXPECT_EQ(command.output().callback().delay_millisec(), 24);
+}
+
+TEST_F(SessionTest,
+       DeferredZenzSpaceRevealsFirstMozcResultWithoutAdvancingCandidate) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  AddCandidate("あい", "藍", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::SPACE, &session, &command));
+
+  EXPECT_PREEDIT("愛", command);
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_FALSE(session_peer.live_conversion_active_());
+  EXPECT_FALSE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzEnterCommitsOnlyVisiblePreeditAndUndoRestoresIt) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  session.set_client_capability(capability);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ENTER, &session, &command));
+  EXPECT_RESULT("あい", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+
+  command.Clear();
+  ASSERT_TRUE(session.Undo(&command));
+  EXPECT_PREEDIT("あい", command);
+}
+
+TEST_F(SessionTest,
+       DeferredZenzCommitAndImeOffCommitsVisiblePreeditThenTurnsImeOff) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  constexpr absl::string_view kCustomKeymapTable =
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Enter\tCommit|IMEOff\n";
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(std::string(kCustomKeymapTable));
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl Enter", &session, &command));
+  EXPECT_RESULT("あい", command);
+  EXPECT_EQ(session.context().state(), ImeContext::DIRECT);
+  EXPECT_EQ(command.output().mode(), commands::DIRECT);
+}
+
+TEST_F(SessionTest, DeferredZenzAcceptedResultReplacesVisiblePreeditOnce) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_PREEDIT("亜衣", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzVisibleResultContinuedUnresolvedRomajiKeepsVisiblePrefix) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(4);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("さすがで");
+  AddCandidate("さすがで", "流石で", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("さすがで", "abcd", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("さすがで", command);
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "さすがで";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  ASSERT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_PREEDIT("さすがで", command);
+
+  // Keep the next live conversion delayed so this assertion observes the
+  // pending presentation itself. The unresolved consonant must extend the
+  // visible Zenz surface, not the hidden Mozc surface ("流石で").
+  config.set_live_conversion_delay_msec(1000);
+  session.SetConfig(config);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  EXPECT_PREEDIT("さすがでｓ", command);
+  EXPECT_TRUE(command.output().live_conversion_pending());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+
+  // Enter during the pending interval must commit exactly the presentation the
+  // user saw, not the hidden Mozc prefix plus the unresolved romaji suffix.
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ENTER, &session, &command));
+  EXPECT_RESULT("さすがでｓ", command);
+}
+
+TEST_F(SessionTest,
+       DeferredZenzPendingUnresolvedRomajiResolvesWithoutMozcFlash) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(4);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  session.SetConfig(config);
+
+  Segments base_segments;
+  Segment* base = base_segments.add_segment();
+  base->set_key("さすがで");
+  AddCandidate("さすがで", "流石で", base);
+
+  Segments unresolved_segments;
+  Segment* unresolved = unresolved_segments.add_segment();
+  unresolved->set_key("さすがでs");
+  AddCandidate("さすがでs", "流石でｓ", unresolved);
+
+  Segments resolved_segments;
+  Segment* resolved = resolved_segments.add_segment();
+  resolved->set_key("さすがです");
+  AddCandidate("さすがです", "流石です", resolved);
+
+  {
+    ::testing::InSequence sequence;
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(base_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(unresolved_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(resolved_segments), Return(true)));
+  }
+
+  commands::Command command;
+  InsertCharacterString("さすがで", "abcd", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("さすがで", command);
+
+  ZenzLiveResponse base_response;
+  base_response.ok = true;
+  base_response.value = "さすがで";
+
+  command.Clear();
+  ASSERT_TRUE(
+      session_peer.ApplyZenzLiveCorrectionResult(base_response, &command));
+  ASSERT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_PREEDIT("さすがで", command);
+
+  // With zero live-conversion delay, the unresolved consonant immediately
+  // computes a hidden Mozc result and schedules Zenz. The visible surface must
+  // still be based on the adopted Zenz presentation.
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  EXPECT_PREEDIT("さすがでｓ", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+
+  // Before that Zenz request finishes, 'u' resolves the same romaji chunk from
+  // "s" to "す". This replacement must extend the original visible basis,
+  // never expose the hidden Mozc result "流石です".
+  command.Clear();
+  ASSERT_TRUE(SendKey("u", &session, &command));
+  EXPECT_PREEDIT("さすがです", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse resolved_response;
+  resolved_response.ok = true;
+  resolved_response.value = "さすがです";
+
+  command.Clear();
+  ASSERT_TRUE(
+      session_peer.ApplyZenzLiveCorrectionResult(resolved_response, &command));
+  EXPECT_PREEDIT("さすがです", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzAdoptedUnresolvedRomajiResolvesWithoutMozcFlash) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(4);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  session.SetConfig(config);
+
+  Segments base_segments;
+  Segment* base = base_segments.add_segment();
+  base->set_key("さすがで");
+  AddCandidate("さすがで", "流石で", base);
+
+  Segments unresolved_segments;
+  Segment* unresolved = unresolved_segments.add_segment();
+  unresolved->set_key("さすがでs");
+  AddCandidate("さすがでs", "流石でｓ", unresolved);
+
+  Segments resolved_segments;
+  Segment* resolved = resolved_segments.add_segment();
+  resolved->set_key("さすがです");
+  AddCandidate("さすがです", "流石です", resolved);
+
+  {
+    ::testing::InSequence sequence;
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(base_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(unresolved_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(resolved_segments), Return(true)));
+  }
+
+  commands::Command command;
+  InsertCharacterString("さすがで", "abcd", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse base_response;
+  base_response.ok = true;
+  base_response.value = "さすがで";
+  command.Clear();
+  ASSERT_TRUE(
+      session_peer.ApplyZenzLiveCorrectionResult(base_response, &command));
+  EXPECT_PREEDIT("さすがで", command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  EXPECT_PREEDIT("さすがでｓ", command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  // Exercise the faster-response variant too: even if Zenz is adopted while
+  // the trailing "s" is unresolved, that transient suffix must not become the
+  // stable continuation boundary.
+  ZenzLiveResponse unresolved_response;
+  unresolved_response.ok = true;
+  unresolved_response.value = "さすがでｓ";
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(
+      unresolved_response, &command));
+  EXPECT_PREEDIT("さすがでｓ", command);
+  ASSERT_TRUE(command.output().zenz_live_correction_applied());
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("u", &session, &command));
+  EXPECT_PREEDIT("さすがです", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzPendingDisplayKeepsSafeCommonMozcSegmentPrefix) {
+  MockEngine engine;
+  CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString("きょうはてんきがよく", "abcdefghij", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(),
+            "きょうはてんきがよく");
+  ASSERT_EQ(session.context().composer().GetStringForPreedit(),
+            "きょうはてんきがよく");
+
+  // The last Mozc segment differs from the visible Zenz surface, while the
+  // first two segments are identical.
+  session_peer.live_conversion_key_() = "きょうはてんきがいい";
+  session_peer.live_conversion_preedit_() = "きょうはてんきがいい";
+  session_peer.live_conversion_value_() = "今日は天気が良い";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("きょうは");
+  segment->set_value("今日は");
+  segment->set_value_length(Util::CharsLen("今日は"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("てんきが");
+  segment->set_value("天気が");
+  segment->set_value_length(Util::CharsLen("天気が"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("いい");
+  segment->set_value("良い");
+  segment->set_value_length(Util::CharsLen("良い"));
+
+  auto& visible = session_peer.pending_live_conversion_presentation_();
+  visible.emplace();
+  visible->key = "きょうはてんきがいい";
+  visible->raw_preedit = "きょうはてんきがいい";
+  visible->value = "今日は天気がいい";
+  commands::Preedit::Segment* visible_segment =
+      visible->preedit_output.add_segment();
+  visible_segment->set_key("きょうはてんきがいい");
+  visible_segment->set_value("今日は天気がいい");
+  visible_segment->set_value_length(Util::CharsLen("今日は天気がいい"));
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.OutputPendingLiveConversion(&command));
+
+  // Do not drop the entire composition to hiragana merely because the changed
+  // suffix invalidated the full Zenz snapshot. Keep the two complete converter
+  // segments that are provably shared by Mozc and Zenz, and expose only the
+  // changed suffix as composition text.
+  EXPECT_PREEDIT("今日は天気がよく", command);
+  ASSERT_TRUE(command.output().has_preedit());
+  ASSERT_EQ(command.output().preedit().segment_size(), 3);
+  EXPECT_EQ(command.output().preedit().segment(0).value(), "今日は");
+  EXPECT_EQ(command.output().preedit().segment(1).value(), "天気が");
+  EXPECT_EQ(command.output().preedit().segment(2).value(), "よく");
+  EXPECT_EQ(command.output().preedit().segment(2).annotation(),
+            commands::Preedit::Segment::UNDERLINE);
+}
+
+TEST_F(SessionTest,
+       DeferredZenzPendingDisplayNeverSplitsMozcSegmentForTextPrefix) {
+  MockEngine engine;
+  CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString("きょうも", "abcd", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+
+  session_peer.live_conversion_key_() = "きょうは";
+  session_peer.live_conversion_preedit_() = "きょうは";
+  session_peer.live_conversion_value_() = "今日は";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("きょうは");
+  segment->set_value("今日は");
+  segment->set_value_length(Util::CharsLen("今日は"));
+
+  auto& visible = session_peer.pending_live_conversion_presentation_();
+  visible.emplace();
+  visible->key = "きょうは";
+  visible->raw_preedit = "きょうは";
+  visible->value = "今日わ";
+  commands::Preedit::Segment* visible_segment =
+      visible->preedit_output.add_segment();
+  visible_segment->set_key("きょうは");
+  visible_segment->set_value("今日わ");
+  visible_segment->set_value_length(Util::CharsLen("今日わ"));
+
+  command.Clear();
+
+  // "今日" is a character-level common prefix, but the only Mozc segment is
+  // "今日は". Since that whole segment is not shared with Zenz, there is no
+  // safe reading/value boundary to preserve.
+  EXPECT_FALSE(session_peer.OutputPendingLiveConversion(&command));
+}
+
+TEST_F(SessionTest,
+       DeferredZenzRebuildsSafePrefixFromNewMozcAfterRomajiRewrite) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  // Build the rewritten composition without triggering live conversion yet.
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString("かれのいうこと", "abcdefg", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(),
+            "かれのいうこと");
+
+  // Model the state immediately before the final romaji rewrite:
+  //   visible Zenz: 彼の言う小ｔ
+  //   old hidden Mozc: a segment structure that cannot prove any safe prefix.
+  //
+  // The next key rewrites the trailing "t" chunk to "と", so the old visible
+  // key/raw strings are no longer textual prefixes of the current composition.
+  session_peer.live_conversion_key_() = "かれのいうこt";
+  session_peer.live_conversion_preedit_() = "かれのいうこt";
+  session_peer.live_conversion_value_() = "彼の云う小ｔ";
+
+  commands::Preedit& old_live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  old_live_preedit.Clear();
+  commands::Preedit::Segment* old_segment = old_live_preedit.add_segment();
+  old_segment->set_key("かれのいうこt");
+  old_segment->set_value("彼の云う小ｔ");
+  old_segment->set_value_length(Util::CharsLen("彼の云う小ｔ"));
+
+  auto& visible = session_peer.pending_live_conversion_presentation_();
+  visible.emplace();
+  visible->key = "かれのいうこt";
+  visible->raw_preedit = "かれのいうこt";
+  visible->value = "彼の言う小ｔ";
+  commands::Preedit::Segment* visible_segment =
+      visible->preedit_output.add_segment();
+  visible_segment->set_key("かれのいうこt");
+  visible_segment->set_value("彼の言う小ｔ");
+  visible_segment->set_value_length(Util::CharsLen("彼の言う小ｔ"));
+
+  // The *new* Mozc conversion after "t" -> "と" has safe leading segment
+  // boundaries shared with the visible Zenz surface. The deferred snapshot
+  // must be rebuilt from these new segments, not from the incompatible old
+  // hidden Mozc segment above.
+  Segments new_segments;
+  Segment* segment = new_segments.add_segment();
+  segment->set_key("かれの");
+  AddCandidate("かれの", "彼の", segment);
+
+  segment = new_segments.add_segment();
+  segment->set_key("いう");
+  AddCandidate("いう", "言う", segment);
+
+  segment = new_segments.add_segment();
+  segment->set_key("こと");
+  AddCandidate("こと", "事", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(new_segments), Return(true)));
+
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  // Preserve the last key input metadata, but discard its old output.
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+
+  // Before this fix, the deferred snapshot was chosen before StartConversion()
+  // and therefore fell back to raw "かれのいうこと". Now the new Mozc
+  // segmentation proves that "彼の言う" is safe, so only the rewritten suffix
+  // is shown as raw composition text.
+  EXPECT_PREEDIT("彼の言うこと", command);
+  ASSERT_TRUE(command.output().has_preedit());
+  ASSERT_EQ(command.output().preedit().segment_size(), 3);
+  EXPECT_EQ(command.output().preedit().segment(0).value(), "彼の");
+  EXPECT_EQ(command.output().preedit().segment(1).value(), "言う");
+  EXPECT_EQ(command.output().preedit().segment(2).value(), "こと");
+  EXPECT_EQ(command.output().preedit().segment(2).annotation(),
+            commands::Preedit::Segment::UNDERLINE);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzBuildsStablePresentationSpansFromVisibleMozcBoundaries) {
+  MockEngine engine;
+  CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  session_peer.live_conversion_key_() = "かれのいうこt";
+  session_peer.live_conversion_preedit_() = "かれのいうこt";
+  session_peer.live_conversion_value_() = "彼の言う小ｔ";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれの");
+  segment->set_value("彼の");
+  segment->set_value_length(Util::CharsLen("彼の"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("いう");
+  segment->set_value("言う");
+  segment->set_value_length(Util::CharsLen("言う"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("こt");
+  segment->set_value("小ｔ");
+  segment->set_value_length(Util::CharsLen("小ｔ"));
+
+  const auto spans =
+      session_peer.BuildStablePresentationSpans("彼の言う小ｔ");
+  ASSERT_EQ(spans.size(), 3);
+  EXPECT_EQ(spans[0].key, "かれの");
+  EXPECT_EQ(spans[0].value, "彼の");
+  EXPECT_EQ(spans[1].key, "いう");
+  EXPECT_EQ(spans[1].value, "言う");
+  EXPECT_EQ(spans[2].key, "こt");
+  EXPECT_EQ(spans[2].value, "小ｔ");
+}
+
+TEST_F(SessionTest,
+       DeferredZenzStableSpansSurviveLaterVisibleMozcCoarsening) {
+  MockEngine engine;
+  CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  // Earlier, finer Mozc segmentation already proved these two boundaries.
+  session_peer.live_conversion_key_() = "かれのいう";
+  session_peer.live_conversion_preedit_() = "かれのいう";
+  session_peer.live_conversion_value_() = "彼の言う";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれの");
+  segment->set_value("彼の");
+  segment->set_value_length(Util::CharsLen("彼の"));
+  segment = live_preedit.add_segment();
+  segment->set_key("いう");
+  segment->set_value("言う");
+  segment->set_value_length(Util::CharsLen("言う"));
+
+  const auto previous_spans =
+      session_peer.BuildStablePresentationSpans("彼の言う");
+  ASSERT_EQ(previous_spans.size(), 2);
+
+  // A later round coarsens the second Mozc segment to "いうこ".  The old
+  // [いう -> 言う] span is still valid in both the reading and the visible Zenz
+  // value, so it must survive rather than being replaced by the coarser segment.
+  session_peer.live_conversion_key_() = "かれのいうこ";
+  session_peer.live_conversion_preedit_() = "かれのいうこ";
+  session_peer.live_conversion_value_() = "彼の言う子";
+  live_preedit.Clear();
+  segment = live_preedit.add_segment();
+  segment->set_key("かれの");
+  segment->set_value("彼の");
+  segment->set_value_length(Util::CharsLen("彼の"));
+  segment = live_preedit.add_segment();
+  segment->set_key("いうこ");
+  segment->set_value("言う子");
+  segment->set_value_length(Util::CharsLen("言う子"));
+
+  const auto merged = session_peer.MergeStablePresentationSpans(
+      "彼の言う子", previous_spans);
+  ASSERT_EQ(merged.size(), 2);
+  EXPECT_EQ(merged[0].key, "かれの");
+  EXPECT_EQ(merged[0].value, "彼の");
+  EXPECT_EQ(merged[1].key, "いう");
+  EXPECT_EQ(merged[1].value, "言う");
+}
+
+TEST_F(SessionTest,
+       DeferredZenzStableSpanMayCrossLaterMozcBoundary) {
+  MockEngine engine;
+  CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  // The earlier Mozc result proved one coarse but useful stable span.
+  session_peer.live_conversion_key_() = "かれのいう";
+  session_peer.live_conversion_preedit_() = "かれのいう";
+  session_peer.live_conversion_value_() = "彼の言う";
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれのいう");
+  segment->set_value("彼の言う");
+  segment->set_value_length(Util::CharsLen("彼の言う"));
+
+  const auto previous_spans =
+      session_peer.BuildStablePresentationSpans("彼の言う");
+  ASSERT_EQ(previous_spans.size(), 1);
+  EXPECT_EQ(previous_spans[0].key, "かれのいう");
+  EXPECT_EQ(previous_spans[0].value, "彼の言う");
+
+  // A later Mozc result moves a segment boundary into that old span.  Stable
+  // presentation is based on the already-proven reading/value pair, not on the
+  // latest segmentation, so the old span remains valid as one indivisible unit.
+  session_peer.live_conversion_key_() = "かれのいうこと";
+  session_peer.live_conversion_preedit_() = "かれのいうこと";
+  session_peer.live_conversion_value_() = "彼の言う事";
+  live_preedit.Clear();
+  segment = live_preedit.add_segment();
+  segment->set_key("かれの");
+  segment->set_value("彼の");
+  segment->set_value_length(Util::CharsLen("彼の"));
+  segment = live_preedit.add_segment();
+  segment->set_key("いうこと");
+  segment->set_value("言う事");
+  segment->set_value_length(Util::CharsLen("言う事"));
+
+  const auto merged = session_peer.MergeStablePresentationSpans(
+      "彼の言うこと", previous_spans);
+  ASSERT_EQ(merged.size(), 1);
+  EXPECT_EQ(merged[0].key, "かれのいう");
+  EXPECT_EQ(merged[0].value, "彼の言う");
+}
+
+TEST_F(SessionTest,
+       DeferredZenzStableSpansInvalidateWhenNewZenzChangesPrefix) {
+  MockEngine engine;
+  CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  session_peer.live_conversion_key_() = "かれのいう";
+  session_peer.live_conversion_preedit_() = "かれのいう";
+  session_peer.live_conversion_value_() = "彼の言う";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれの");
+  segment->set_value("彼の");
+  segment->set_value_length(Util::CharsLen("彼の"));
+  segment = live_preedit.add_segment();
+  segment->set_key("いう");
+  segment->set_value("言う");
+  segment->set_value_length(Util::CharsLen("言う"));
+
+  const auto previous_spans =
+      session_peer.BuildStablePresentationSpans("彼の言う");
+  ASSERT_EQ(previous_spans.size(), 2);
+
+  // The next Zenz result changes the second visible value.  The old second span
+  // must be invalidated.  Current Mozc may establish a replacement only if its
+  // own boundary/value now proves the new visible text.
+  session_peer.live_conversion_value_() = "彼の云う";
+  live_preedit.mutable_segment(1)->set_value("云う");
+  live_preedit.mutable_segment(1)->set_value_length(Util::CharsLen("云う"));
+
+  const auto merged = session_peer.MergeStablePresentationSpans(
+      "彼の云う", previous_spans);
+  ASSERT_EQ(merged.size(), 2);
+  EXPECT_EQ(merged[0].key, "かれの");
+  EXPECT_EQ(merged[0].value, "彼の");
+  EXPECT_EQ(merged[1].key, "いう");
+  EXPECT_EQ(merged[1].value, "云う");
+}
+
+TEST_F(SessionTest,
+       DeferredZenzKeepsPreviouslyProvenSpansAcrossMozcResegmentation) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString("かれのいうこと", "abcdefg", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(),
+            "かれのいうこと");
+
+  // The previous hidden Mozc result proved these exact reading/value spans
+  // while the user was seeing the Zenz presentation "彼の言う小ｔ".
+  session_peer.live_conversion_key_() = "かれのいうこt";
+  session_peer.live_conversion_preedit_() = "かれのいうこt";
+  session_peer.live_conversion_value_() = "彼の言う小ｔ";
+
+  commands::Preedit& old_live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  old_live_preedit.Clear();
+
+  commands::Preedit::Segment* old_segment = old_live_preedit.add_segment();
+  old_segment->set_key("かれの");
+  old_segment->set_value("彼の");
+  old_segment->set_value_length(Util::CharsLen("彼の"));
+
+  old_segment = old_live_preedit.add_segment();
+  old_segment->set_key("いう");
+  old_segment->set_value("言う");
+  old_segment->set_value_length(Util::CharsLen("言う"));
+
+  old_segment = old_live_preedit.add_segment();
+  old_segment->set_key("こt");
+  old_segment->set_value("小ｔ");
+  old_segment->set_value_length(Util::CharsLen("小ｔ"));
+
+  auto& visible = session_peer.pending_live_conversion_presentation_();
+  visible.emplace();
+  visible->key = "かれのいうこt";
+  visible->raw_preedit = "かれのいうこt";
+  visible->value = "彼の言う小ｔ";
+  commands::Preedit::Segment* visible_segment =
+      visible->preedit_output.add_segment();
+  visible_segment->set_key("かれのいうこt");
+  visible_segment->set_value("彼の言う小ｔ");
+  visible_segment->set_value_length(Util::CharsLen("彼の言う小ｔ"));
+  visible->stable_spans =
+      session_peer.BuildStablePresentationSpans(visible->value);
+  ASSERT_EQ(visible->stable_spans.size(), 3);
+
+  // After the trailing romaji is rewritten, the *new* Mozc merges "いうこと"
+  // into one outer segment.  The post-Convert segment-only fallback can prove
+  // only "彼の" here.  The old spans must therefore carry "言う" across the
+  // re-segmentation without asking new Mozc to rediscover that boundary.
+  Segments new_segments;
+  Segment* segment = new_segments.add_segment();
+  segment->set_key("かれの");
+  AddCandidate("かれの", "彼の", segment);
+
+  segment = new_segments.add_segment();
+  segment->set_key("いうこと");
+  AddCandidate("いうこと", "言う事", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(new_segments), Return(true)));
+
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+
+  EXPECT_PREEDIT("彼の言うこと", command);
+  ASSERT_TRUE(command.output().has_preedit());
+  ASSERT_EQ(command.output().preedit().segment_size(), 3);
+  EXPECT_EQ(command.output().preedit().segment(0).value(), "彼の");
+  EXPECT_EQ(command.output().preedit().segment(1).value(), "言う");
+  EXPECT_EQ(command.output().preedit().segment(2).value(), "こと");
+  EXPECT_EQ(command.output().preedit().segment(2).annotation(),
+            commands::Preedit::Segment::UNDERLINE);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzNeverSplitsPreviouslyProvenSpanAfterRomajiRewrite) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString("かれのいうこと", "abcdefg", &session, &command);
+
+  session_peer.live_conversion_key_() = "かれのいうこt";
+  session_peer.live_conversion_preedit_() = "かれのいうこt";
+  session_peer.live_conversion_value_() = "彼の言う小ｔ";
+
+  commands::Preedit& old_live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  old_live_preedit.Clear();
+
+  commands::Preedit::Segment* old_segment = old_live_preedit.add_segment();
+  old_segment->set_key("かれの");
+  old_segment->set_value("彼の");
+  old_segment->set_value_length(Util::CharsLen("彼の"));
+
+  // This second old segment intentionally combines the part that would remain
+  // textually common ("いう") with the rewritten tail ("こt").  No safe
+  // boundary exists inside it, so the implementation must discard the whole
+  // span rather than preserving "言う" by character-prefix guessing.
+  old_segment = old_live_preedit.add_segment();
+  old_segment->set_key("いうこt");
+  old_segment->set_value("言う小ｔ");
+  old_segment->set_value_length(Util::CharsLen("言う小ｔ"));
+
+  auto& visible = session_peer.pending_live_conversion_presentation_();
+  visible.emplace();
+  visible->key = "かれのいうこt";
+  visible->raw_preedit = "かれのいうこt";
+  visible->value = "彼の言う小ｔ";
+  commands::Preedit::Segment* visible_segment =
+      visible->preedit_output.add_segment();
+  visible_segment->set_key("かれのいうこt");
+  visible_segment->set_value("彼の言う小ｔ");
+  visible_segment->set_value_length(Util::CharsLen("彼の言う小ｔ"));
+  visible->stable_spans =
+      session_peer.BuildStablePresentationSpans(visible->value);
+  ASSERT_EQ(visible->stable_spans.size(), 2);
+
+  // The new Mozc result deliberately disagrees at the second segment too, so
+  // the post-Convert fallback cannot manufacture a finer boundary either.
+  Segments new_segments;
+  Segment* segment = new_segments.add_segment();
+  segment->set_key("かれの");
+  AddCandidate("かれの", "彼の", segment);
+  segment = new_segments.add_segment();
+  segment->set_key("いうこと");
+  AddCandidate("いうこと", "云う事", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(new_segments), Return(true)));
+
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+
+  EXPECT_PREEDIT("彼のいうこと", command);
+  ASSERT_TRUE(command.output().has_preedit());
+  ASSERT_EQ(command.output().preedit().segment_size(), 2);
+  EXPECT_EQ(command.output().preedit().segment(0).value(), "彼の");
+  EXPECT_EQ(command.output().preedit().segment(1).value(), "いうこと");
+  EXPECT_EQ(command.output().preedit().segment(1).annotation(),
+            commands::Preedit::Segment::UNDERLINE);
+}
+
+TEST_F(SessionTest, DeferredZenzContextEchoFallsBackToMozcResult) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("おな");
+  AddCandidate("おな", "同じ", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("おな", "ab", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("おな", command);
+
+  // Reproduce the observed prompt boundary: the full left context is not
+  // returned, but a long suffix of it is echoed and then continued/repeated.
+  session_peer.pending_zenz_live_().left_context = "現状は同じ試験を";
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "同じ試験を同じ試験と同じ";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_PREEDIT("同じ", command);
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "left_context_echo");
+}
+
+TEST_F(SessionTest, DeferredZenzFailureFallsBackToMozcResult) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+
+  ZenzLiveResponse response;
+  response.ok = false;
+  response.debug = "test_failure";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_PREEDIT("愛", command);
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(), "test_failure");
+}
+
+TEST_F(SessionTest,
+       DeferredZenzContinuedInputDoesNotExposeHiddenMozcPrefix) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  session.SetConfig(config);
+
+  Segments first_segments;
+  Segment* first = first_segments.add_segment();
+  first->set_key("あい");
+  AddCandidate("あい", "愛", first);
+
+  Segments second_segments;
+  Segment* second = second_segments.add_segment();
+  second->set_key("あいう");
+  AddCandidate("あいう", "愛雨", second);
+
+  {
+    ::testing::InSequence sequence;
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(first_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(second_segments), Return(true)));
+  }
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  EXPECT_PREEDIT("あい", command);
+
+  InsertCharacterString("う", "u", &session, &command);
+  EXPECT_PREEDIT("あいう", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzBackspaceShowsMozcImmediatelyAndDefersZenzUntilTyping) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  session.SetConfig(config);
+
+  Segments short_segments;
+  Segment* short_segment = short_segments.add_segment();
+  short_segment->set_key("あい");
+  AddCandidate("あい", "愛", short_segment);
+
+  Segments long_segments;
+  Segment* long_segment = long_segments.add_segment();
+  long_segment->set_key("あいう");
+  AddCandidate("あいう", "愛雨", long_segment);
+
+  {
+    ::testing::InSequence sequence;
+    // live_conversion_delay_msec=0 means conversion starts as soon as the
+    // minimum key length is reached, so typing あいう converts at あい and
+    // again at あいう. Backspace converts the edited あい once more, and
+    // typing う again resumes normal deferred-Zenz conversion at あいう.
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(short_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(long_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(short_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(long_segments), Return(true)));
+  }
+
+  commands::Command command;
+  InsertCharacterString("あいう", "aiu", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あいう", command);
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::BACKSPACE, &session, &command));
+  EXPECT_PREEDIT("愛", command);
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_TRUE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+
+  // Ordinary character input resumes the deferred-Zenz policy. Until Zenz
+  // returns, extend the Mozc result that Backspace made visible.
+  InsertCharacterString("う", "u", &session, &command);
+  EXPECT_PREEDIT("愛う", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzSameAsMozcFallsBackToMozcSegmentStructure) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* first = segments.add_segment();
+  first->set_key("あ");
+  AddCandidate("あ", "亜", first);
+  Segment* second = segments.add_segment();
+  second->set_key("い");
+  AddCandidate("い", "衣", second);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_PREEDIT("亜衣", command);
+  ASSERT_TRUE(command.output().has_preedit());
+  EXPECT_EQ(command.output().preedit().segment_size(), 2);
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(), "same_as_mozc");
+}
+
 TEST_F(SessionTest, LiveConversionHonorsRaisedMinKeyLength) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -4201,6 +5557,218 @@ TEST_F(SessionTest,
   EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
 
   Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzShiftAsciiCommitsVisiblePresentationBeforeAsciiInput) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(4);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  session.SetConfig(config);
+
+  Segments base_segments;
+  Segment* base = base_segments.add_segment();
+  base->set_key("さすがで");
+  AddCandidate("さすがで", "流石で", base);
+
+  Segments unresolved_segments;
+  Segment* unresolved = unresolved_segments.add_segment();
+  unresolved->set_key("さすがでs");
+  AddCandidate("さすがでs", "流石でｓ", unresolved);
+
+  {
+    ::testing::InSequence sequence;
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(base_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(unresolved_segments), Return(true)));
+  }
+
+  commands::Command command;
+  InsertCharacterString("さすがで", "abcd", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("さすがで", command);
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "さすがで";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  ASSERT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_PREEDIT("さすがで", command);
+
+  // Start the next hidden Mozc conversion while preserving the Zenz surface.
+  // At this point the converter is genuinely in CONVERSION state: this is the
+  // production path that RestoreDeferredZenzLivePresentationForEditing() must
+  // cancel before committing the visible presentation.
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("さすがでｓ", command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("A", &session, &command));
+
+  EXPECT_RESULT("さすがでｓ", command);
+  EXPECT_PREEDIT("A", command);
+  EXPECT_EQ(command.output().mode(), commands::HALF_ASCII);
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+}
+
+TEST_F(SessionTest,
+       PendingPresentationEnterUndoRestoresVisiblePresentation) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  session.set_client_capability(capability);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(1000);
+  config.set_live_conversion_min_key_length(1);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_TRUE(session_peer.live_conversion_pending_());
+
+  // Model a Session-owned visible presentation on top of the real delayed
+  // live-conversion pending state.  The hidden Mozc baseline deliberately
+  // differs so losing pending_presentation across Undo is observable.
+  session_peer.live_conversion_key_() = "あい";
+  session_peer.live_conversion_preedit_() = "あい";
+  session_peer.live_conversion_value_() = "愛";
+  commands::Preedit& hidden_preedit =
+      session_peer.live_conversion_preedit_output_();
+  hidden_preedit.Clear();
+  commands::Preedit::Segment* segment = hidden_preedit.add_segment();
+  segment->set_key("あい");
+  segment->set_value("愛");
+  segment->set_value_length(Util::CharsLen("愛"));
+
+  auto& visible = session_peer.pending_live_conversion_presentation_();
+  visible.emplace();
+  visible->key = "あい";
+  visible->raw_preedit = "あい";
+  visible->value = "藍";
+  segment = visible->preedit_output.add_segment();
+  segment->set_key("あい");
+  segment->set_value("藍");
+  segment->set_value_length(Util::CharsLen("藍"));
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.OutputPendingLiveConversion(&command));
+  EXPECT_PREEDIT("藍", command);
+
+  EXPECT_CALL(*converter, StartConversion(_, _)).Times(0);
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ENTER, &session, &command));
+  EXPECT_RESULT("藍", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+
+  command.Clear();
+  ASSERT_TRUE(session.Undo(&command));
+  EXPECT_PREEDIT("藍", command);
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_TRUE(session_peer.live_conversion_pending_());
+}
+
+TEST_F(SessionTest,
+       DeferredPresentationEnterUndoRestoresVisiblePresentation) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  session.set_client_capability(capability);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(4);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  session.SetConfig(config);
+
+  Segments base_segments;
+  Segment* base = base_segments.add_segment();
+  base->set_key("さすがで");
+  AddCandidate("さすがで", "流石で", base);
+
+  Segments unresolved_segments;
+  Segment* unresolved = unresolved_segments.add_segment();
+  unresolved->set_key("さすがでs");
+  AddCandidate("さすがでs", "流石でｓ", unresolved);
+
+  {
+    ::testing::InSequence sequence;
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(base_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(unresolved_segments), Return(true)));
+  }
+
+  commands::Command command;
+  InsertCharacterString("さすがで", "abcd", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "さすがで";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  ASSERT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_PREEDIT("さすがで", command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("さすがでｓ", command);
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ENTER, &session, &command));
+  EXPECT_RESULT("さすがでｓ", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+
+  command.Clear();
+  ASSERT_TRUE(session.Undo(&command));
+  EXPECT_PREEDIT("さすがでｓ", command);
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_TRUE(session_peer.live_conversion_pending_());
 }
 
 TEST_F(SessionTest,

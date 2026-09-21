@@ -898,6 +898,16 @@ The current Windows default IME override will be saved so it can be restored lat
     </message>
     <message>
         <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</source>
+        <translation>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</source>
+        <translation>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
         <source>Zenz 条件フィールド</source>
         <translation>Zenz 条件フィールド</translation>
     </message>

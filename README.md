@@ -112,6 +112,9 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows 版では、Zenz 補正を `mozc_server` から named pipe 経由で `mozc_zenz_scorer.exe` に依頼し、`llama-server.exe` の localhost endpoint でローカル推論
 - Zenz 補正開始までの遅延時間を設定画面から変更可能。デフォルトは 1000 ms
 - Zenz 補正開始の最小文字数を設定画面から変更可能
+- 「Zenz 補正結果が返るまで通常のライブ変換結果を表示しない」opt-in 設定を追加。待機中は直前まで安定して表示されていた Zenz 補正部分を可能な範囲で維持し、未解決のローマ字 suffix はその表示へ追従。Zenz が採用されない場合は現在の Mozc ライブ変換結果へフォールバック
+- deferred 表示中の Enter / Shift による英字入力では、裏側の Mozc baseline ではなく、その時点でユーザーに見えている presentation を確定。Enter 確定後の Undo でも同じ presentation を復元
+- Zenz 出力が確定済み左文脈の長い suffix を現在入力の先頭へ反復する context echo を検出して拒否し、通常の Mozc ライブ変換結果へフォールバック
 - Zenz 補正結果のローカル feedback learning を追加。設定画面から ON/OFF 可能
 - Zenz 補正結果と異なる値で確定した回数が指定回数に達した場合、同じ読み全体・同じ文脈クラス・同じ補正結果の Zenz 補正を自動ブロックする opt-in 設定を追加。自動ブロックは TSV に hard reject を固定保存せず、現在の ON/OFF と拒否回数しきい値から既存データを動的に再評価します。
 - 同じ読み全体・同じ文脈クラス・同じ補正結果で通常却下回数が採用回数を上回る場合は、auto-block 無効時でも Zenz feedback による優先候補・保存済み feedback による即時補正としては使わず、「却下数優勢」の中立状態として扱います。これは hard block ではなく、Zenz が新しく同じ補正を返すことや通常 Mozc 候補を削除することはありません。
@@ -242,7 +245,9 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 ### Zenz ライブ補正
 
-ライブ変換と Zenz ライブ補正の両方を有効にすると、まず通常の Mozc ライブ変換結果を表示し、その後でローカルの Zenz runtime に非同期で補正を依頼します。
+ライブ変換と Zenz ライブ補正の両方を有効にすると、通常は Mozc のライブ変換結果を表示したうえで、ローカルの Zenz runtime に非同期で補正を依頼します。
+
+設定画面の「Zenz 補正結果が返るまで通常のライブ変換結果を表示しない」を有効にすると、Zenz 補正を実行する入力では、新しい Mozc ライブ変換結果を応答待ちの間は先に表示しません。すでに安定して表示できている Zenz 補正部分がある場合は、その表示を可能な範囲で維持し、入力途中の未解決ローマ字 suffix はその後ろへ追従表示します。Mozc 側の再文節化だけを理由に、一度安定した Zenz 表示を不用意に細分化・巻き戻ししないように扱います。Zenz が失敗、タイムアウト、検証拒否、または Mozc と同一の結果になって採用されなかった場合は、その時点の通常 Mozc ライブ変換結果へフォールバックします。
 
 Windows 版では、Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
@@ -250,7 +255,9 @@ Zenz に渡す surrounding context は、通常 Mozc の generic context とは�
 
 Zenz 補正は設定可能なデバウンス時間の後に実行されます。デフォルトは 1000 ms です。また、Zenz 補正を開始する最小文字数も設定画面から変更できます。Zenz 結果が返る前に入力内容が変わった場合、古い結果は generation / key の検査により破棄されます。
 
-Zenz 出力は表示前に検証されます。空出力、短すぎる入力、Mozc 結果と同一の出力、長すぎる出力、不正な文字列、安全でない可能性のある文字列は拒否されます。拒否された場合は、通常の Mozc ライブ変換結果をそのまま表示します。
+deferred 表示で Zenz の応答を待っている間に Space を押した場合は、候補を次へ進めず、まずその時点の Mozc 通常変換結果を表示します。Enter はその瞬間に見えている presentation をそのまま確定し、Undo では同じ presentation を未確定状態として復元します。Shift による英字入力へ移る場合も、表示中の presentation を先に確定してから英字入力を開始します。Backspace では削除後の Mozc 結果を即時に反映し、そのキー操作だけで新しい Zenz 補正を直ちに走らせず、続く実テキスト入力から通常の deferred Zenz scheduling を再開します。
+
+Zenz 出力は表示前に検証されます。空出力、短すぎる入力、Mozc 結果と同一の出力、長すぎる出力、不正な文字列、安全でない可能性のある文字列は拒否されます。さらに、確定済み左文脈の長い末尾部分を Zenz 出力の先頭へ繰り返す context echo についても、現在の読み・Mozc 結果から見て不自然に長い反復だけを検出して拒否します。短い一致や、現在の読みそのものが同じ語句の反復を要求している場合は一律には拒否しません。拒否された場合は、その時点の通常 Mozc ライブ変換結果へフォールバックします。
 
 通常 Mozc ライブ変換で現在の結果として現れているユーザー辞書由来候補や ASCII / mixed-script 表記は、Zenz 採用時に保護されます。ASCII / mixed-script 表記は、読みを安全に特定できる場合に Zenz prompt 内で一時 placeholder 化し、Zenz 応答後に元の表記へ復元します。これにより、`もずきー -> Mozkey` のような表記が `モズキー` のように上書きされることを避けつつ、対象語の前後にある文の補正は採用できるようにしています。
 
@@ -272,7 +279,7 @@ Zenz feedback learning は任意機能です。有効な場合でも、Zenz 補�
 
 Zenz feedback TSV は、完全な読み key、完全な補正 value、粗い非可逆 context class からなる full-sequence 単位に限定します。segment-local や lexical-unit の feedback は保存しません。accepted Zenz 補正は条件を満たす場合に Mozc user history へ外部変換結果として学習されますが、それは Zenz feedback store の追加 record ではなく、別の Mozc-history 経路です。さらに、accepted Zenz 補正を直前の通常 Mozc ライブ変換文節へ安全に逆投影できる場合は、逆投影後の文節列全体を外部 multi-segment commit として Mozc history に学習します。このとき、通常 Mozc 変換で同じ key/value の候補を再取得できる場合は、その candidate 構造を再利用し、通常変換確定に近い形で user history に渡します。Zenz が実際に変更した文節だけを強い選択履歴として扱い、変更されていない文節は文脈として保持します。逆投影できない場合や privacy / password gate に該当する場合は、full-sequence 学習だけに戻ります。
 
-特に Space は、Zenz 補正を単にキャンセルしてライブ変換中の入力列へ戻すキーではなく、通常変換候補へ戻る候補変更操作として扱います。Zenz 補正表示中に Space を押すと、補正前の Mozc 変換結果を通常変換状態として表示し、候補ウィンドウはまだ開きません。そのまま次の文字を入力した場合は、戻した Mozc 変換結果を確定してから新しい入力を開始します。さらに Space を押した場合は、従来どおり通常変換の候補ウィンドウを開いて次候補へ進みます。
+特に Space は、Zenz 補正を単にキャンセルしてライブ変換中の入力列へ戻すキーではなく、通常変換候補へ戻る候補変更操作として扱います。deferred 表示でまだ Zenz の応答待ちの場合は、最初の Space でその時点の Mozc 通常変換結果を表示しますが、候補は次へ進めません。すでに Zenz 補正が表示されている場合も、Space を押すと補正前の Mozc 変換結果を通常変換状態として表示し、候補ウィンドウはまだ開きません。そのまま次の文字を入力した場合は、戻した Mozc 変換結果を確定してから新しい入力を開始します。さらに Space を押した場合は、従来どおり通常変換の候補ウィンドウを開いて次候補へ進みます。
 
 Zenz feedback の再利用方法は、単文節と複数文節で異なります。
 
@@ -768,6 +775,9 @@ Main features added in this fork
 - On Windows, sends Zenz correction requests from `mozc_server` to `mozc_zenz_scorer.exe` through a named pipe and performs local inference through the localhost endpoint of `llama-server.exe`
 - Allows configuring the Zenz correction debounce delay from the config dialog. The default is 1000 ms
 - Allows configuring the minimum number of characters to start Zenz correction
+- Adds an opt-in `Do not show the normal live-conversion result until Zenz correction returns` mode. While waiting, Mozkey preserves the previously stable Zenz-corrected presentation when possible and appends unresolved raw-romaji suffixes to that visible presentation; if Zenz is not adopted, it falls back to the current Mozc live-conversion result
+- Commits the presentation that is actually visible to the user, rather than a hidden Mozc baseline, when Enter or Shift-based ASCII input ends a deferred presentation; Undo after Enter restores the same visible presentation
+- Detects and rejects likely context echo where Zenz repeats a long suffix of already committed left context at the beginning of the current output, then falls back to the normal Mozc live-conversion result
 - Adds optional local feedback learning for Zenz correction results
 - Adds an opt-in auto-block setting for Zenz corrections repeatedly committed as a different value. Auto-blocking does not persist irreversible hard-reject rows; it dynamically re-evaluates existing feedback data from the current ON/OFF state and rejection-count threshold.
 - Stops reusing a Zenz feedback entry as a preferred candidate or live-correction fast path when ordinary rejected observations outnumber accepted observations for the same full reading, context class, and correction value. This is a neutral reject-count-dominant state, not a hard block, so it does not delete ordinary Mozc candidates or prevent newly produced Zenz corrections by itself.
@@ -848,9 +858,19 @@ The live conversion feature can be enabled or disabled from the config dialog. T
 
 ### Zenz live correction
 
-When both live conversion and Zenz live correction are enabled, this fork first
-shows the normal Mozc live conversion result and then asynchronously asks a local
+When both live conversion and Zenz live correction are enabled, this fork
+normally shows the Mozc live-conversion result and asynchronously asks a local
 Zenz runtime to refine the visible preedit.
+
+When the config option `Do not show the normal live-conversion result until
+Zenz correction returns` is enabled, inputs that are eligible for Zenz do not
+show a newly computed Mozc live-conversion result while the Zenz request is
+pending. If a stable Zenz-corrected prefix is already visible, Mozkey preserves
+that presentation when possible and appends unresolved raw-romaji suffixes to
+it. Mozc resegmentation alone does not cause a previously stable Zenz
+presentation to be split or rolled back. If Zenz fails, times out, is rejected
+by validation, or produces the same value as Mozc and is therefore not adopted,
+Mozkey falls back to the current normal Mozc live-conversion result.
 
 On Windows, the Zenz request is sent from `mozc_server` to
 `mozc_zenz_scorer.exe` through a Windows named pipe. The scorer then calls the
@@ -871,10 +891,23 @@ delay is 1000 ms. The minimum number of characters required to start Zenz
 correction can also be configured. If the current composition changes before
 the Zenz result arrives, the old result is discarded by generation/key checks.
 
+While a deferred presentation is waiting for Zenz, pressing Space first reveals
+the current normal Mozc conversion result without advancing to the next
+candidate. Enter commits exactly the presentation that is visible at that
+moment, and Undo restores that same presentation as preedit. Shift-based ASCII
+input likewise commits the visible presentation before starting ASCII input.
+Backspace immediately reflects the post-deletion Mozc result; that Backspace
+does not itself start a fresh Zenz correction, and normal deferred Zenz
+scheduling resumes with subsequent real text input.
+
 Zenz output is validated before display. Outputs that are empty, too short,
 identical to the Mozc result, too long, malformed, or likely to contain unsafe
-text are rejected. If validation fails, the normal Mozc live conversion result
-remains visible.
+text are rejected. Mozkey also rejects likely context echo in which the output
+starts by repeating an unusually long suffix of already committed left context
+relative to the current reading/Mozc result. Short overlaps are not rejected
+unconditionally, and legitimate repetition supported by the current reading is
+still allowed. If validation fails, Mozkey falls back to the current normal
+Mozc live-conversion result.
 
 User-dictionary candidates and ASCII / mixed-script surfaces that appear in the
 current normal Mozc live-conversion result are protected before Zenz output is
@@ -952,12 +985,15 @@ reverse projection fails, or if the privacy / password gates reject the text,
 Mozkey falls back to full-sequence learning only.
 
 Space is treated specifically as a candidate-change operation, not as a plain
-cancel back into the live-conversion composition. When Space is pressed while a
-Zenz correction is visible, Mozkey restores the underlying Mozc conversion as an
-ordinary conversion result without opening the candidate window yet. If the user
-then types more text, the restored Mozc conversion is committed first and the
-new text starts a fresh composition. Pressing Space again follows the ordinary
-conversion path and opens the candidate window for the next candidate.
+cancel back into the live-conversion composition. If deferred presentation is
+still waiting for Zenz, the first Space reveals the current normal Mozc
+conversion result without advancing to the next candidate. When Space is pressed
+while a Zenz correction is already visible, Mozkey restores the underlying Mozc
+conversion as an ordinary conversion result without opening the candidate window
+yet. If the user then types more text, the restored Mozc conversion is committed
+first and the new text starts a fresh composition. Pressing Space again follows
+the ordinary conversion path and opens the candidate window for the next
+candidate.
 
 Zenz feedback is reused differently for single-segment and multi-segment
 conversions.

@@ -425,6 +425,69 @@ std::string SuppressUnrequestedTrailingSymbols(
   return repaired;
 }
 
+size_t LongestLeftContextSuffixPrefixChars(
+    absl::string_view left_context, absl::string_view zenz_value) {
+  if (left_context.empty() || zenz_value.empty()) {
+    return 0;
+  }
+
+  const std::vector<Utf8CharForSymbolRestore> context_chars =
+      SplitUtf8ForSymbolRestore(left_context);
+  const std::vector<Utf8CharForSymbolRestore> value_chars =
+      SplitUtf8ForSymbolRestore(zenz_value);
+  if (context_chars.empty() || value_chars.empty()) {
+    return 0;
+  }
+
+  const size_t max_overlap = std::min(context_chars.size(), value_chars.size());
+  for (size_t overlap = max_overlap; overlap > 0; --overlap) {
+    const size_t context_begin = context_chars.size() - overlap;
+    bool matches = true;
+    for (size_t i = 0; i < overlap; ++i) {
+      if (context_chars[context_begin + i].bytes != value_chars[i].bytes) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return overlap;
+    }
+  }
+
+  return 0;
+}
+
+bool LooksLikeLeftContextEcho(const ZenzValidationInput& input,
+                              size_t key_len,
+                              size_t value_len) {
+  // A short overlap such as a particle or a common two-character word is not
+  // strong enough evidence of context copying.  Four Japanese characters are
+  // long enough to make accidental suffix/prefix overlap much less likely,
+  // while still catching observed phrases such as "同じ試験を".
+  constexpr size_t kMinContextEchoChars = 4;
+
+  const size_t echo_len = LongestLeftContextSuffixPrefixChars(
+      input.left_context, input.zenz_value);
+  if (echo_len < kMinContextEchoChars) {
+    return false;
+  }
+
+  const size_t baseline_len = std::max<size_t>(
+      1, std::max(key_len, Util::CharsLen(input.mozc_value)));
+
+  // A context prefix that is already much larger than the current composition
+  // is itself strong echo evidence, even if the model returns only that copied
+  // suffix.  Otherwise require the returned value to contain the context-sized
+  // prefix plus at least one current-composition-sized payload.  These two
+  // conditions target continuation/echo output while preserving legitimate
+  // repeated words and short abbreviations whose output happens to equal a
+  // context suffix.
+  if (echo_len >= baseline_len * 2 + 1) {
+    return true;
+  }
+  return value_len >= echo_len + baseline_len;
+}
+
 }  // namespace
 
 std::string ZenzOutputValidator::RepairUserControlledSymbols(
@@ -578,6 +641,10 @@ ZenzValidationResult ZenzOutputValidator::Validate(
 
   if (value_len == 0) {
     return Reject("zero_value_len");
+  }
+
+  if (LooksLikeLeftContextEcho(input, key_len, value_len)) {
+    return Reject("left_context_echo");
   }
 
   // Conservative length guard. Japanese conversion can shrink/expand, but not
