@@ -160,5 +160,79 @@ TEST(ZenzOutputValidatorTest,
             "そうなんだ");
 }
 
+TEST(ZenzOutputValidatorTest, RejectsObservedLeftContextEcho) {
+  ZenzValidationInput input;
+  input.key = "おな";
+  input.mozc_value = "同じ";
+  input.zenz_value = "同じ試験を同じ試験と同じ";
+  input.left_context = "現状は同じ試験を";
+  input.min_key_length = 2;
+  input.allow_synthetic_candidate = true;
+
+  const ZenzValidationResult result = ZenzOutputValidator().Validate(input);
+  EXPECT_FALSE(result.accept);
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "left_context_echo");
+}
+
+TEST(ZenzOutputValidatorTest, RejectsPureLongContextSuffixEcho) {
+  ZenzValidationInput input;
+  input.key = "おな";
+  input.mozc_value = "同じ";
+  input.zenz_value = "同じ試験を";
+  input.left_context = "現状は同じ試験を";
+  input.min_key_length = 2;
+  input.allow_synthetic_candidate = true;
+
+  const ZenzValidationResult result = ZenzOutputValidator().Validate(input);
+  EXPECT_FALSE(result.accept);
+  EXPECT_EQ(result.reason, "left_context_echo");
+}
+
+TEST(ZenzOutputValidatorTest, RejectsContextSuffixPlusCurrentConversion) {
+  ZenzValidationInput input;
+  input.key = "おな";
+  input.mozc_value = "同じ";
+  input.zenz_value = "同じ試験を同じ";
+  input.left_context = "現状は同じ試験を";
+  input.min_key_length = 2;
+  input.allow_synthetic_candidate = true;
+
+  const ZenzValidationResult result = ZenzOutputValidator().Validate(input);
+  EXPECT_FALSE(result.accept);
+  EXPECT_EQ(result.reason, "left_context_echo");
+}
+
+TEST(ZenzOutputValidatorTest,
+     AllowsRepeatedPhraseWhenCurrentReadingSupportsWholePhrase) {
+  ZenzValidationInput input;
+  input.key = "おなじしけんを";
+  input.mozc_value = "同じ試験";
+  input.zenz_value = "同じ試験を";
+  input.left_context = "現状は同じ試験を";
+  input.min_key_length = 2;
+  input.allow_synthetic_candidate = true;
+
+  const ZenzValidationResult result = ZenzOutputValidator().Validate(input);
+  EXPECT_TRUE(result.accept);
+  EXPECT_TRUE(result.synthetic);
+  EXPECT_EQ(result.reason, "accepted_synthetic");
+}
+
+TEST(ZenzOutputValidatorTest, AllowsShortReadingAbbreviationMatchingContext) {
+  ZenzValidationInput input;
+  input.key = "かぶ";
+  input.mozc_value = "株";
+  input.zenz_value = "株式会社";
+  input.left_context = "前回は株式会社";
+  input.min_key_length = 2;
+  input.allow_synthetic_candidate = true;
+
+  const ZenzValidationResult result = ZenzOutputValidator().Validate(input);
+  EXPECT_TRUE(result.accept);
+  EXPECT_TRUE(result.synthetic);
+  EXPECT_EQ(result.reason, "accepted_synthetic");
+}
+
 }  // namespace
 }  // namespace mozc::session

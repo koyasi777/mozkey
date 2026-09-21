@@ -345,10 +345,69 @@ class Session {
   // to avoid display-attribute flicker.
   commands::Preedit live_conversion_preedit_output_;
 
+  // A presentation-only basis used while ordinary character input continues
+  // from a visible Zenz/deferred result.  The live_conversion_* fields remain
+  // the Mozc baseline for Zenz validation/fallback; this state exists only so
+  // pending preedit output and pending direct commit extend what the user
+  // actually saw rather than leaking the hidden Mozc surface.
+  struct StablePresentationSpan {
+    std::string key;
+    std::string raw_preedit;
+    std::string value;
+    commands::Preedit::Segment preedit_segment;
+  };
+
+  struct PendingLiveConversionPresentation {
+    std::string key;
+    std::string raw_preedit;
+    std::string value;
+    commands::Preedit preedit_output;
+
+    // Leading reading/value spans whose correspondence was already proven by
+    // the Mozc result that existed when this presentation was visible.  These
+    // spans may survive a later converter re-segmentation as long as their
+    // reading still matches the current composition at the same position.
+    std::vector<StablePresentationSpan> stable_spans;
+  };
+  std::optional<PendingLiveConversionPresentation>
+      pending_live_conversion_presentation_;
+
   // User-dictionary surfaces selected by the latest normal live conversion.
   // Zenz live correction may improve the surrounding sentence, but these
   // surfaces must be preserved or safely repaired before adoption.
   std::vector<ProtectedConversionSpan> live_conversion_protected_spans_;
+
+  // Presentation snapshot used when normal live conversion is computed as the
+  // first stage for Zenz, but its result is intentionally kept hidden until
+  // Zenz finishes. The previous visible basis is captured before Convert(), and
+  // any previously proven reading/value spans are kept independent of the next
+  // Mozc segmentation. The converter and live_conversion_* fields continue to
+  // represent the newly computed Mozc result.
+  struct DeferredZenzLivePresentation {
+    std::string visible_key;
+    std::string visible_value;
+    std::string visible_raw_preedit;
+    commands::Preedit visible_preedit;
+
+    // Stable live-conversion state from before the hidden Mozc conversion.
+    // Restore this state when the user edits the still-visible preedit so the
+    // hidden Mozc result never leaks into the next pending display.
+    std::string previous_live_key;
+    std::string previous_live_preedit;
+    std::string previous_live_value;
+    commands::Preedit previous_live_preedit_output;
+    commands::CandidateWindow previous_live_suggestion_candidate_window;
+
+    // Stable presentation basis from before any transient unresolved-romaji
+    // suffix.  Keep this basis across hidden Mozc/Zenz rounds so a sequence
+    // such as "s" -> "su" can rewrite the suffix to "す" without exposing
+    // the hidden Mozc surface.
+    std::optional<PendingLiveConversionPresentation>
+        continued_input_presentation;
+  };
+
+  std::optional<DeferredZenzLivePresentation>
+      deferred_zenz_live_presentation_;
 
   // Set only after an explicit conversion Cancel command, such as Esc or Ctrl+Z
   // in the default keymap.  If the user commits the unchanged hiragana preedit
@@ -437,6 +496,13 @@ class Session {
   std::string zenz_live_left_context_;
   commands::Preedit zenz_live_preedit_output_;
 
+  // Reading/value spans that were proven by an earlier Mozc presentation and
+  // are still valid for the currently visible Zenz result.  Unlike the latest
+  // Mozc segmentation, these spans are intentionally persistent: a later
+  // conversion may merge or split segments without invalidating an unchanged
+  // leading reading/value correspondence.
+  std::vector<StablePresentationSpan> zenz_live_stable_spans_;
+
   ZenzContextAssembler zenz_context_assembler_;
   ZenzContextSanitizer zenz_context_sanitizer_;
   ZenzOutputValidator zenz_output_validator_;
@@ -447,6 +513,7 @@ class Session {
   struct PendingLiveConversionUndoState {
     std::string pending_key;
     commands::Input pending_input;
+    std::optional<PendingLiveConversionPresentation> pending_presentation;
     commands::CandidateWindow pending_suggestion_candidate_window;
     commands::CandidateWindow live_suggestion_candidate_window;
     std::string live_key;
@@ -561,6 +628,10 @@ class Session {
 
   // Live conversion.
   bool MaybeStartLiveConversion(mozc::commands::Command* command);
+  bool MaybeStartLiveConversionInternal(mozc::commands::Command* command,
+                                        bool allow_zenz_live_correction);
+  bool MaybeStartLiveConversionAfterEditing(
+      mozc::commands::Command* command);
   bool MaybeScheduleLiveConversion(mozc::commands::Command* command);
   bool ApplyDelayedLiveConversion(mozc::commands::Command* command);
   bool IgnoreStaleDelayedLiveConversion(mozc::commands::Command* command);
@@ -589,8 +660,32 @@ class Session {
   bool CommitPendingLiveConversionDisplayForSubmit(
       mozc::commands::Command* command);
   bool OutputPendingLiveConversion(mozc::commands::Command* command) const;
+  bool OutputPendingLiveConversionWithPresentation(
+      mozc::commands::Command* command,
+      const PendingLiveConversionPresentation* presentation,
+      PendingLiveConversionPresentation* stable_presentation) const;
+  std::vector<StablePresentationSpan> BuildStablePresentationSpans(
+      absl::string_view visible_value) const;
+  std::vector<StablePresentationSpan> MergeStablePresentationSpans(
+      absl::string_view visible_value,
+      const std::vector<StablePresentationSpan>& previous_spans) const;
+  std::optional<PendingLiveConversionPresentation>
+  CapturePendingLiveConversionPresentationForContinuedInput() const;
   void AttachDelayedLiveConversionCallback(
       mozc::commands::Command* command) const;
+
+  // Deferred Zenz presentation keeps the pre-Zenz display visible while the
+  // normal Mozc result remains available internally as the Zenz baseline and
+  // fallback.
+  bool HasDeferredZenzLivePresentation() const;
+  void ClearDeferredZenzLivePresentation();
+  void OverrideOutputWithDeferredZenzLivePresentation(
+      mozc::commands::Command* command) const;
+  void RestoreDeferredZenzLivePresentationForEditing();
+  bool CommitDeferredZenzLivePresentationForSubmit(
+      mozc::commands::Command* command);
+  bool RevealDeferredZenzLiveConversion(
+      mozc::commands::Command* command);
 
   // zenz live correction.
   bool MaybeApplyZenzFeedbackLiveCorrection(

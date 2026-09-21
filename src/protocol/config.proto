@@ -343,8 +343,17 @@ message Config {
   optional bool use_zenz_live_correction = 1003 [default = false];
 
   // Debounce in milliseconds before submitting a zenz live correction request
-  // after normal live conversion has become visible.
+  // after normal live conversion has been computed. Normally the Mozc result is
+  // already visible during this delay; deferred presentation can keep the
+  // previous preedit visible instead.
   optional uint32 zenz_live_correction_delay_msec = 1004 [default = 1000];
+
+  // Keep the pre-Zenz preedit visible while Zenz live correction is pending.
+  // Mozc conversion still runs first and remains the validation baseline and
+  // fallback. If Zenz is not scheduled or its result is not adopted, the Mozc
+  // result is shown.
+  optional bool defer_live_conversion_display_until_zenz_result = 1026
+      [default = false];
 
   // Timeout in milliseconds for one zenz live correction request.
   optional uint32 zenz_live_correction_timeout_msec = 1005 [default = 180];
