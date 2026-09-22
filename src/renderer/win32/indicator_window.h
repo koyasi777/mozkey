@@ -30,6 +30,8 @@
 #ifndef MOZC_RENDERER_WIN32_INDICATOR_WINDOW_H_
 #define MOZC_RENDERER_WIN32_INDICATOR_WINDOW_H_
 
+#include <windows.h>
+
 #include <memory>
 
 #include "base/coordinates.h"
@@ -47,7 +49,7 @@ class IndicatorWindow {
   IndicatorWindow& operator=(const IndicatorWindow&) = delete;
   ~IndicatorWindow();
 
-  void Initialize();
+  void Initialize(HWND owner_window = nullptr);
   void Destroy();
   void OnUpdate(const commands::RendererCommand& command,
                 LayoutManager* layout_manager);

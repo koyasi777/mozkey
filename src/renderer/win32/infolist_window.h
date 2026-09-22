@@ -109,6 +109,9 @@ class InfolistWindow : public ATL::CWindowImpl<InfolistWindow, ATL::CWindow,
   void SetShadowZOrderAnchor(HWND hwnd) { shadow_z_order_anchor_ = hwnd; }
   void SetSendCommandInterface(
       client::SendCommandInterface* send_command_interface);
+  void set_post_quit_message_on_destroy(bool enabled) {
+    post_quit_message_on_destroy_ = enabled;
+  }
 
   // Layout information for the WindowManager class.
   Size GetLayoutSize();
@@ -174,6 +177,7 @@ class InfolistWindow : public ATL::CWindowImpl<InfolistWindow, ATL::CWindow,
   LayoutMode layout_mode_;
   bool metrics_changed_;
   bool visible_;
+  bool post_quit_message_on_destroy_;
   wil::unique_hbitmap cached_bitmap_;
   Size cached_bitmap_size_;
   bool cached_bitmap_valid_ = false;

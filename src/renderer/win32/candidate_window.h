@@ -79,6 +79,7 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
   MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
   MESSAGE_HANDLER(WM_GETMINMAXINFO, OnGetMinMaxInfo)
+  MESSAGE_HANDLER(WM_MOUSEACTIVATE, OnMouseActivate)
   MESSAGE_HANDLER(WM_LBUTTONDOWN, OnLButtonDown)
   MESSAGE_HANDLER(WM_LBUTTONUP, OnLButtonUp)
   MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
@@ -96,6 +97,9 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   void OnDestroy();
   BOOL OnEraseBkgnd(HDC dc);
   void OnGetMinMaxInfo(MINMAXINFO* min_max_info);
+  LRESULT OnMouseActivate(UINT, WPARAM, LPARAM, BOOL&) {
+    return MA_NOACTIVATE;
+  }
   void OnLButtonDown(UINT nFlags, CPoint point);
   void OnLButtonUp(UINT nFlags, CPoint point);
   void OnMouseMove(UINT nFlags, CPoint point);
@@ -134,6 +138,9 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   void HideWithEffects();
   void SetSendCommandInterface(
       client::SendCommandInterface* send_command_interface);
+  void set_post_quit_message_on_destroy(bool enabled) {
+    post_quit_message_on_destroy_ = enabled;
+  }
 
   // Layout information for the WindowManager class.
   Size GetLayoutSize() const;
@@ -250,6 +257,7 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   int indicator_width_;
   bool metrics_changed_;
   bool mouse_moving_;
+  bool post_quit_message_on_destroy_;
   HWND shadow_z_order_anchor_ = nullptr;
   RendererShadowWindow shadow_window_;
 };

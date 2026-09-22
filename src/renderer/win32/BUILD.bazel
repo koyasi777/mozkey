@@ -327,6 +327,7 @@ mozc_cc_library(
     srcs = ["window_manager.cc"],
     hdrs = ["window_manager.h"],
     tags = MOZC_TAGS.WIN_ONLY,
+    visibility = ["//win32/tip:__subpackages__"],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":candidate_window",

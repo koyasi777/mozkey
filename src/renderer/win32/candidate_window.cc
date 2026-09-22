@@ -336,7 +336,8 @@ CandidateWindow::CandidateWindow()
       text_renderer_(TextRenderer::Create(dpi_)),
       indicator_width_(0),
       metrics_changed_(false),
-      mouse_moving_(true) {
+      mouse_moving_(true),
+      post_quit_message_on_destroy_(true) {
   UpdateDpiDependentResources();
 }
 
@@ -406,10 +407,12 @@ void CandidateWindow::EnableOrDisableWindowForWorkaround() {
 void CandidateWindow::OnDestroy() {
   ClearBitmapCache();
   shadow_window_.Destroy();
-  // PostQuitMessage may stop the message loop even though other
-  // windows are not closed. WindowManager should close these windows
-  // before process termination.
-  ::PostQuitMessage(0);
+  // Standalone mozc_renderer.exe uses window destruction to terminate its
+  // message loop. Embedded/in-process rendering manages shutdown explicitly,
+  // so destroying an individual renderer window must not post WM_QUIT.
+  if (post_quit_message_on_destroy_) {
+    ::PostQuitMessage(0);
+  }
 }
 
 BOOL CandidateWindow::OnEraseBkgnd(HDC dc) {
