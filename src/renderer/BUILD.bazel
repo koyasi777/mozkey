@@ -105,6 +105,23 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "renderer_style_config",
+    srcs = ["renderer_style_config.cc"],
+    hdrs = ["renderer_style_config.h"],
+    visibility = [
+        "//renderer:__subpackages__",
+        "//win32/tip:__subpackages__",
+    ],
+    deps = [
+        ":renderer_style_handler",
+        ":window_effect_util",
+        "//config:config_handler",
+        "//protocol:config_cc_proto",
+        "//protocol:renderer_cc_proto",
+    ],
+)
+
+mozc_cc_library(
     name = "renderer_server",
     srcs = ["renderer_server.cc"],
     hdrs = ["renderer_server.h"],
@@ -113,8 +130,7 @@ mozc_cc_library(
     visibility = ["//renderer:__subpackages__"],
     deps = [
         ":renderer_interface",
-        ":renderer_style_handler",
-        ":window_effect_util",
+        ":renderer_style_config",
         "//base:const",
         "//base:random",
         "//base:system_util",

@@ -2563,6 +2563,79 @@ TEST_F(SessionTest, LiveConversionAttachesPassiveSuggestionCandidateWindow) {
 }
 
 TEST_F(SessionTest,
+       LiveConversionPassiveSuggestionSubmitUsesDisplayedSuggestionContext) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  AddCandidate("あ", "阿", live_segment);
+
+  Segments suggestion_segments;
+  Segment* suggestion_segment = suggestion_segments.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+  AddCandidate("あ", "ありがたい", suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(session_peer.live_conversion_active_());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  ASSERT_FALSE(command.output().candidate_window().has_focused_index());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 2);
+  ASSERT_TRUE(command.output().candidate_window().candidate(1).has_id());
+  EXPECT_EQ(command.output().candidate_window().candidate(1).value(),
+            "ありがたい");
+
+  const int suggestion_id =
+      command.output().candidate_window().candidate(1).id();
+
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  Segments empty_segments;
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(empty_segments));
+
+  command.Clear();
+  SetSendCommandCommand(commands::SessionCommand::SUBMIT_CANDIDATE, &command);
+  command.mutable_input()->mutable_command()->set_id(suggestion_id);
+
+  EXPECT_TRUE(session.SendCommand(&command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("ありがたい", command);
+  EXPECT_FALSE(command.output().has_preedit());
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  EXPECT_FALSE(session_peer.live_conversion_active_());
+}
+
+TEST_F(SessionTest,
        ShiftedAsciiRevertSuppressesPassiveSuggestionWhenDictionarySuggestOff) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

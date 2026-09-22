@@ -145,19 +145,27 @@ WindowManager::WindowManager()
 
 WindowManager::~WindowManager() {}
 
-void WindowManager::Initialize() {
+void WindowManager::Initialize(HWND owner_window,
+                               bool post_quit_message_on_window_destroy) {
   DCHECK(!main_window_->IsWindow());
   DCHECK(!cascading_window_->IsWindow());
   DCHECK(!infolist_window_->IsWindow());
 
-  main_window_->Create(nullptr);
+  main_window_->set_post_quit_message_on_destroy(
+      post_quit_message_on_window_destroy);
+  cascading_window_->set_post_quit_message_on_destroy(
+      post_quit_message_on_window_destroy);
+  infolist_window_->set_post_quit_message_on_destroy(
+      post_quit_message_on_window_destroy);
+
+  main_window_->Create(owner_window);
   main_window_->HideWithEffects();
-  cascading_window_->Create(nullptr);
+  cascading_window_->Create(owner_window);
   cascading_window_->HideWithEffects();
-  indicator_window_->Initialize();
-  infolist_window_->Create(nullptr);
+  indicator_window_->Initialize(owner_window);
+  infolist_window_->Create(owner_window);
   infolist_window_->ShowWindow(SW_HIDE);
-  ruby_window_->Initialize();
+  ruby_window_->Initialize(owner_window);
 }
 
 void WindowManager::AsyncHideAllWindows() {

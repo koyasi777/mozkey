@@ -852,7 +852,8 @@ bool TipEditSession::OnRendererCallbackAsync(TipTextService* text_service,
   const CommandType type = static_cast<CommandType>(wparam);
   switch (type) {
     case SessionCommand::HIGHLIGHT_CANDIDATE:
-    case SessionCommand::SELECT_CANDIDATE: {
+    case SessionCommand::SELECT_CANDIDATE:
+    case SessionCommand::SUBMIT_CANDIDATE: {
       const int32_t candidate_id = static_cast<int32_t>(lparam);
       TipPrivateContext* private_context =
           text_service->GetPrivateContext(context);

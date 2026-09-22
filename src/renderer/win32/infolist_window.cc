@@ -91,7 +91,8 @@ InfolistWindow::InfolistWindow()
       style_(new RendererStyle),
       layout_mode_(LayoutMode::kHorizontal),
       metrics_changed_(false),
-      visible_(false) {
+      visible_(false),
+      post_quit_message_on_destroy_(true) {
   GetScaledRendererStyleForWindowType(
       RendererStyleHandler::RendererStyleType::kCandidate, style_.get(), dpi_);
 }
@@ -112,10 +113,12 @@ void InfolistWindow::UpdateDpi(uint32_t dpi) {
 void InfolistWindow::OnDestroy() {
   ClearBitmapCache();
   shadow_window_.Destroy();
-  // PostQuitMessage may stop the message loop even though other
-  // windows are not closed. WindowManager should close these windows
-  // before process termination.
-  ::PostQuitMessage(0);
+  // Standalone mozc_renderer.exe uses window destruction to terminate its
+  // message loop. Embedded/in-process rendering manages shutdown explicitly,
+  // so destroying an individual renderer window must not post WM_QUIT.
+  if (post_quit_message_on_destroy_) {
+    ::PostQuitMessage(0);
+  }
 }
 
 BOOL InfolistWindow::OnEraseBkgnd(HDC dc) {

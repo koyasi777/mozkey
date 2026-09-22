@@ -214,9 +214,9 @@ RubyWindow::~RubyWindow() {
   ResetFont();
 }
 
-void RubyWindow::Initialize() {
+void RubyWindow::Initialize(HWND owner_window) {
   if (!IsWindow()) {
-    Create(nullptr);
+    Create(owner_window);
   }
   if (text_renderer_ == nullptr) {
     text_renderer_ = TextRenderer::Create(dpi_);

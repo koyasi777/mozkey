@@ -53,7 +53,13 @@ class WindowManager {
   WindowManager(const WindowManager&) = delete;
   WindowManager& operator=(const WindowManager&) = delete;
   ~WindowManager();
-  void Initialize();
+  // |owner_window| is used only at window creation time. Passing an
+  // immersive host HWND lets Windows place renderer popups with the host while
+  // preserving the existing ownerless behavior when nullptr is passed.
+  // |post_quit_message_on_window_destroy| preserves the standalone renderer's
+  // message-loop shutdown behavior. Embedded hosts must pass false.
+  void Initialize(HWND owner_window = nullptr,
+                  bool post_quit_message_on_window_destroy = true);
   void AsyncHideAllWindows();
   void AsyncQuitAllWindows();
   void DestroyAllWindows();

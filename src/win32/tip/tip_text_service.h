@@ -62,6 +62,10 @@ class TipTextService : public IUnknown {
   // Returns the associated thread context.
   virtual TipThreadContext* GetThreadContext() = 0;
 
+  // Returns true when TSF activated this TIP for an immersive host. The
+  // default keeps existing test/mocking implementations source-compatible.
+  virtual bool IsImmersiveMode() const { return false; }
+
   // Sends UI update message to the renderer.
   virtual void PostUIUpdateMessage() = 0;
 

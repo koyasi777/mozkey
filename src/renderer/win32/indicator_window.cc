@@ -487,8 +487,8 @@ IndicatorWindow::IndicatorWindow() : impl_(new WindowImpl) {}
 
 IndicatorWindow::~IndicatorWindow() { impl_->DestroyWindow(); }
 
-void IndicatorWindow::Initialize() {
-  impl_->Create(nullptr);
+void IndicatorWindow::Initialize(HWND owner_window) {
+  impl_->Create(owner_window);
   impl_->ShowWindow(SW_HIDE);
 }
 

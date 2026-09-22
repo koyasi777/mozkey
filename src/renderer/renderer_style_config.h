@@ -27,41 +27,15 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MOZC_RENDERER_WIN32_INDICATOR_WINDOW_H_
-#define MOZC_RENDERER_WIN32_INDICATOR_WINDOW_H_
-
-#include <windows.h>
-
-#include <memory>
-
-#include "base/coordinates.h"
-#include "protocol/renderer_command.pb.h"
-#include "renderer/win32/win32_renderer_util.h"
+#ifndef MOZC_RENDERER_RENDERER_STYLE_CONFIG_H_
+#define MOZC_RENDERER_RENDERER_STYLE_CONFIG_H_
 
 namespace mozc {
 namespace renderer {
-namespace win32 {
 
-class IndicatorWindow {
- public:
-  IndicatorWindow();
-  IndicatorWindow(const IndicatorWindow&) = delete;
-  IndicatorWindow& operator=(const IndicatorWindow&) = delete;
-  ~IndicatorWindow();
+void UpdateRendererStyleFromConfig();
 
-  void Initialize(HWND owner_window = nullptr);
-  void Destroy();
-  void OnUpdate(const commands::RendererCommand& command,
-                LayoutManager* layout_manager);
-  void Hide();
-
- private:
-  class WindowImpl;
-  std::unique_ptr<WindowImpl> impl_;
-};
-
-}  // namespace win32
 }  // namespace renderer
 }  // namespace mozc
 
-#endif  // MOZC_RENDERER_WIN32_INDICATOR_WINDOW_H_
+#endif  // MOZC_RENDERER_RENDERER_STYLE_CONFIG_H_

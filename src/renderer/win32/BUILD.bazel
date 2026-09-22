@@ -328,6 +328,7 @@ mozc_cc_library(
     hdrs = ["window_manager.h"],
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//win32/tip:__subpackages__"],
     deps = [
         ":candidate_window",
         ":cascading_window_layout",

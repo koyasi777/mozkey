@@ -40,7 +40,7 @@ class RubyWindow
     MESSAGE_HANDLER(WM_PAINT, OnPaint)
   END_MSG_MAP()
 
-  void Initialize();
+  void Initialize(HWND owner_window = nullptr);
   void Destroy();
   void Hide();
   // Reassert the ruby body at the top of the topmost band without moving or

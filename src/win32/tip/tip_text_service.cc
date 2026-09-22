@@ -113,6 +113,14 @@ volatile DWORD g_tls_index = TLS_OUT_OF_INDEXES;
 constexpr UINT kUpdateUIMessage = WM_USER;
 constexpr UINT_PTR kDelayedSessionCommandTimerId = 1;
 
+// This flag is available in Windows SDK 8.0 and later. Keep the fallback
+// value used by upstream Mozc so older SDK headers can still build the TIP.
+#ifndef TF_TMF_IMMERSIVEMODE
+constexpr DWORD kTfTmfImmersiveMode = 0x40000000;
+#else
+constexpr DWORD kTfTmfImmersiveMode = TF_TMF_IMMERSIVEMODE;
+#endif
+
 bool NeedsRendererUpdateOnLayoutChange(TipTextService* text_service,
                                        ITfContext* context) {
   if (text_service == nullptr || context == nullptr) {
@@ -984,6 +992,9 @@ class TipTextServiceImpl
   // TipTextService
   TfClientId GetClientID() const override { return client_id_; }
   ITfThreadMgr* GetThreadManager() const override { return thread_mgr_.get(); }
+  bool IsImmersiveMode() const override {
+    return (activate_flags_ & kTfTmfImmersiveMode) != 0;
+  }
   TfGuidAtom input_attribute() const override { return input_attribute_; }
   TfGuidAtom converted_attribute() const override {
     return converted_attribute_;
@@ -1492,7 +1503,12 @@ class TipTextServiceImpl
     static UINT renderer_callback_message =
         ::RegisterWindowMessage(mozc::kMessageReceiverMessageName);
 
-    if (!WindowUtil::ChangeMessageFilter(renderer_callback_window_handle_,
+    // In immersive mode the renderer runs in-process inside the host.
+    // The callback is therefore posted from another thread in the same
+    // process, so no UIPI exception for lower-integrity senders is needed.
+    // Keep the existing message-filter requirement for the external renderer.
+    if ((activate_flags_ & kTfTmfImmersiveMode) == 0 &&
+        !WindowUtil::ChangeMessageFilter(renderer_callback_window_handle_,
                                          renderer_callback_message)) {
       ::DestroyWindow(renderer_callback_window_handle_);
       renderer_callback_window_handle_ = nullptr;
