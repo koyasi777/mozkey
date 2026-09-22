@@ -772,8 +772,8 @@ mozc_cc_library(
     deps = [
         ":tip_composition_util",
         ":tip_dll_module",
-        ":tip_input_mode_manager",
         ":tip_inprocess_renderer",
+        ":tip_input_mode_manager",
         ":tip_private_context_h",
         ":tip_range_util",
         ":tip_status",
