@@ -86,6 +86,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows 版で IMEOn / IMEOff に割り当てたキーを押した場合、すでに同じ状態でも IME モードインジケータを表示
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
 - Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（黒）/ モノクロ（白）から選択可能
+- Windows Search などの immersive TSF ホストでは、候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビをホストプロセス内の renderer 経路で表示し、前面表示とマウス操作を安定化。未選択のサジェストは mouse-down だけで通常変換へ移行せず、mouse-up で実際に押したサジェストを確定
 - Windows 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、ライト / ダーク / カスタム配色、サイズ、角丸、透明度、影を設定画面から個別に調整可能
 - Windows 版のルビ表示は、表示先モニターの DPI に合わせて位置・サイズを補正し、左右の余白、上下の余白、入力文字との距離を設定可能
 - サジェストウィンドウとルビ表示は、候補ウィンドウの配色に追従するか、個別のテーマ・カスタム配色を使うかを選択可能
@@ -462,6 +463,18 @@ Windows 版では、設定画面から Mozkey の IME アイコンを切り替�
 
 適用時には、管理者権限の確認が表示される場合があります。また、Windows 側のアイコン cache や入力方式一覧の更新タイミングにより、タスクバーや IME 一覧のアイコンがすぐに更新されない場合があります。その場合は Windows を再起動してください。
 
+### Windows Search / immersive TSF 対応
+
+Windows 版では、Windows Search の検索 UI のような immersive TSF 環境で、候補ウィンドウ、サジェストウィンドウ、ライブ変換中のルビ表示がホスト側の表示階層の背面へ隠れないように、TSF ホストプロセス内の専用 renderer UI thread で Win32 renderer を動かす経路を使用します。候補・サジェスト・ルビの各ウィンドウはホスト側の top-level window を owner として作成し、入力先のフォーカスを奪わない形で表示します。
+
+通常の変換候補では、従来どおり mouse-down で候補をハイライトし、mouse-up でその候補を選択します。
+
+一方、まだ候補がフォーカスされていない passive なサジェストでは、mouse-down だけでは候補のハイライトや通常変換状態への移行を行いません。押されたサジェストの candidate ID をその mouse gesture 中だけ保持し、mouse-up 時に `SUBMIT_CANDIDATE` として確定します。
+
+ライブ変換中の passive Suggestion は、画面に表示する候補を通常の live-conversion context とは別の cloned `ImeContext` で生成します。そのため、表示された Suggestion と通常変換候補で同じ数値の candidate ID が別の候補を指す場合があります。Mozkey は表示した Suggestion を生成した cloned context も保持し、mouse-up 時の candidate ID をその同じ converter state で解決することで、画面上で押した Suggestion とは別の通常変換候補が確定されることを防ぎます。
+
+サジェストを押したまま候補外へ移動して mouse-up した場合は確定せず、通常候補のクリック操作は従来の挙動を維持します。
+
 ### Windows 候補ウィンドウ・サジェストウィンドウ・ルビ表示・IME インジケータの外観設定
 
 Windows 版では、設定画面から候補ウィンドウ、サジェストウィンドウ、ライブ変換中のルビ表示の外観を調整できます。
@@ -752,6 +765,7 @@ Main features added in this fork
 - Shows the IME mode indicator even when a key assigned to IMEOn or IMEOff is pressed while Mozc is already in that state
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Black), and Monochrome (White) in the config dialog
+- Supports candidate, suggestion, and live-conversion ruby rendering in immersive TSF hosts such as Windows Search through an in-process renderer path, keeping the UI above the host presentation layer and preserving correct mouse selection; an unfocused passive suggestion does not enter normal conversion on mouse-down, and mouse-up commits the suggestion that was actually clicked
 - Allows configuring light/dark/custom color themes, size, corner radius, opacity, and shadow separately for the Windows candidate window, suggestion window, and live-conversion ruby display from the config dialog
 - Makes the Windows ruby display use target-monitor DPI-aware positioning and scaling, and allows configuring its horizontal padding, vertical padding, and distance from the input text
 - Allows the suggestion window and ruby display to either follow the candidate window color theme or use their own theme/custom colors
@@ -1230,6 +1244,35 @@ The available styles are:
 This setting updates the `IconFile` / `IconIndex` values registered in the Windows TSF language profile for Mozkey, and applies to the IME icon shown in the taskbar and IME list.
 
 Administrator approval may be required when applying this setting. Depending on the Windows icon cache or input-method list refresh timing, the taskbar or IME-list icon may not update immediately. If it does not update, restart Windows.
+
+### Windows Search / immersive TSF support
+
+On Windows, Mozkey uses an in-process Win32 renderer path for immersive TSF
+hosts such as the Windows Search UI so that candidate, suggestion, and
+live-conversion ruby windows are not hidden behind the host presentation layer.
+The renderer runs on a dedicated UI thread inside the TSF host process, and the
+renderer windows are created with the host top-level window as their owner while
+avoiding focus activation.
+
+Ordinary conversion candidates keep the existing mouse behavior: mouse-down
+highlights the candidate and mouse-up selects it.
+
+For an unfocused passive suggestion list, mouse-down does not highlight a
+candidate or move the session into ordinary conversion. Mozkey keeps the
+candidate ID pressed during that mouse gesture and submits it with
+`SUBMIT_CANDIDATE` on mouse-up.
+
+A passive Suggestion shown during live conversion is generated from a cloned
+`ImeContext`, separately from the converter state used by the active live
+conversion. The same numeric candidate ID can therefore refer to different
+values in the visible Suggestion list and the normal conversion list. Mozkey
+keeps the cloned context that produced the visible Suggestion and resolves the
+mouse-up candidate ID against that same converter state, preventing an unrelated
+normal-conversion candidate from being committed instead of the suggestion that
+was actually clicked.
+
+Dragging outside the suggestion list before releasing the mouse does not commit
+a suggestion, while ordinary candidate clicking keeps its previous behavior.
 
 ### Windows candidate window, suggestion window, ruby display, and IME indicator appearance
 
