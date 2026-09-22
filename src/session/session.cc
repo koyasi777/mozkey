@@ -2560,6 +2560,10 @@ void Session::PushUndoContext() {
         pending_live_conversion_suggestion_candidate_window_;
     state.live_suggestion_candidate_window =
         live_conversion_suggestion_candidate_window_;
+    if (live_conversion_suggestion_context_ != nullptr) {
+      state.live_suggestion_context =
+          std::make_unique<ImeContext>(*live_conversion_suggestion_context_);
+    }
     state.live_key = live_conversion_key_;
     state.live_preedit = live_conversion_preedit_;
     state.live_value = live_conversion_value_;
@@ -2616,6 +2620,8 @@ void Session::PopUndoContext() {
       std::move(state.pending_suggestion_candidate_window);
   live_conversion_suggestion_candidate_window_ =
       std::move(state.live_suggestion_candidate_window);
+  live_conversion_suggestion_context_ =
+      std::move(state.live_suggestion_context);
   live_conversion_key_ = std::move(state.live_key);
   live_conversion_preedit_ = std::move(state.live_preedit);
   live_conversion_value_ = std::move(state.live_value);
@@ -4227,13 +4233,104 @@ bool Session::CommitCandidate(commands::Command* command) {
     LOG(WARNING) << "input.command or input.command.id did not exist.";
     return false;
   }
-  if (!context_->converter().IsActive()) {
+
+  // Live conversion deliberately keeps the real converter in CONVERSION while
+  // rendering a passive SUGGESTION list generated from a cloned ImeContext.
+  // Therefore an ID from the visible suggestion window must never be resolved
+  // against the real converter: the same integer can identify an unrelated
+  // normal-conversion candidate.
+  const commands::CandidateWindow* passive_suggestion_window = nullptr;
+  if ((live_conversion_active_ || live_conversion_pending_) &&
+      live_conversion_suggestion_candidate_window_.has_category() &&
+      live_conversion_suggestion_candidate_window_.category() ==
+          commands::SUGGESTION &&
+      !live_conversion_suggestion_candidate_window_.has_focused_index()) {
+    passive_suggestion_window = &live_conversion_suggestion_candidate_window_;
+  } else if (
+      live_conversion_pending_ &&
+      pending_live_conversion_suggestion_candidate_window_.has_category() &&
+      pending_live_conversion_suggestion_candidate_window_.category() ==
+          commands::SUGGESTION &&
+      !pending_live_conversion_suggestion_candidate_window_
+           .has_focused_index()) {
+    passive_suggestion_window =
+        &pending_live_conversion_suggestion_candidate_window_;
+  }
+
+  const commands::CandidateWindow::Candidate* passive_suggestion = nullptr;
+  if (passive_suggestion_window != nullptr) {
+    for (const auto& candidate : passive_suggestion_window->candidate()) {
+      if (candidate.has_id() && candidate.id() == input.command().id()) {
+        passive_suggestion = &candidate;
+        break;
+      }
+    }
+  }
+
+  bool submit_passive_live_suggestion = false;
+  if (passive_suggestion != nullptr) {
+    if (live_conversion_suggestion_context_ == nullptr) {
+      LOG(ERROR) << "passive suggestion context is missing";
+      return DoNothing(command);
+    }
+
+    // Verify that the stored semantic context still owns exactly the candidate
+    // the renderer displayed.  If it does not, failing closed is safer than
+    // aliasing the ID into the real CONVERSION list.
+    commands::Output suggestion_snapshot;
+    live_conversion_suggestion_context_->converter().FillOutput(
+        live_conversion_suggestion_context_->composer(),
+        &suggestion_snapshot);
+
+    const commands::CandidateWindow::Candidate* snapshot_candidate = nullptr;
+    if (suggestion_snapshot.has_candidate_window() &&
+        suggestion_snapshot.candidate_window().category() ==
+            commands::SUGGESTION &&
+        !suggestion_snapshot.candidate_window().has_focused_index()) {
+      for (const auto& candidate :
+           suggestion_snapshot.candidate_window().candidate()) {
+        if (candidate.has_id() && candidate.id() == input.command().id()) {
+          snapshot_candidate = &candidate;
+          break;
+        }
+      }
+    }
+
+    if (snapshot_candidate == nullptr ||
+        snapshot_candidate->value() != passive_suggestion->value() ||
+        live_conversion_suggestion_context_->composer()
+                .GetQueryForConversion() !=
+            context_->composer().GetQueryForConversion()) {
+      LOG(ERROR) << "passive suggestion semantic snapshot mismatch";
+      return DoNothing(command);
+    }
+
+    submit_passive_live_suggestion = true;
+  }
+
+  if (!submit_passive_live_suggestion &&
+      !context_->converter().IsActive()) {
     LOG(WARNING) << "converter is not active. (no candidates)";
     return false;
   }
   command->mutable_output()->set_consumed(true);
 
   PushUndoContext();
+
+  if (submit_passive_live_suggestion) {
+    // Clicking a passive suggestion is an explicit override of the speculative
+    // live-conversion/Zenz presentation.  Switch to the exact cloned suggestion
+    // context that produced the displayed ID, then reuse the ordinary
+    // CommitSuggestionById path below.
+    if (HasVisibleZenzLiveCorrection()) {
+      SetPendingZenzFeedbackRejected("suggestion_click_after_zenz");
+    }
+
+    std::unique_ptr<ImeContext> suggestion_context =
+        std::move(live_conversion_suggestion_context_);
+    ClearLiveConversionState();
+    context_ = std::move(suggestion_context);
+  }
 
   if (context_->state() & ImeContext::CONVERSION) {
     // There is a focused candidate so just select a candidate based on
@@ -4331,6 +4428,7 @@ void Session::ClearLiveConversionState() {
   pending_live_conversion_input_.Clear();
   pending_live_conversion_suggestion_candidate_window_.Clear();
   live_conversion_suggestion_candidate_window_.Clear();
+  live_conversion_suggestion_context_.reset();
 
   live_conversion_key_.clear();
   live_conversion_preedit_.clear();
@@ -4550,6 +4648,7 @@ bool Session::MaybeStartLiveConversionInternal(
   if (should_suppress_shifted_ascii_suggestion) {
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
+    live_conversion_suggestion_context_.reset();
     command->mutable_output()->clear_candidate_window();
   } else if (
       !AttachLiveConversionSuggestionCandidateWindow(
@@ -8304,6 +8403,7 @@ bool Session::Suggest(const commands::Input& input) {
                                                context_->composer())) {
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
+    live_conversion_suggestion_context_.reset();
     return false;
   }
 
@@ -8350,6 +8450,7 @@ bool Session::AttachLiveConversionSuggestionCandidateWindow(
                                                context_->composer())) {
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
+    live_conversion_suggestion_context_.reset();
     return false;
   }
 
@@ -8361,25 +8462,25 @@ bool Session::AttachLiveConversionSuggestionCandidateWindow(
   // copy only candidate_window to the live-conversion output.  The real
   // converter state, live_conversion_active_, selected segment, and Zenz state
   // are left untouched.
-  ImeContext suggestion_context(*context_);
-  if (suggestion_context.converter().IsActive()) {
-    suggestion_context.mutable_converter()->Cancel();
+  auto suggestion_context = std::make_unique<ImeContext>(*context_);
+  if (suggestion_context->converter().IsActive()) {
+    suggestion_context->mutable_converter()->Cancel();
   }
-  suggestion_context.set_state(ImeContext::COMPOSITION);
+  suggestion_context->set_state(ImeContext::COMPOSITION);
 
   bool has_suggestion = false;
   if (input.has_request_suggestion() &&
       input.type() == commands::Input::SEND_KEY) {
     ConversionPreferences conversion_preferences =
-        suggestion_context.converter().conversion_preferences();
+        suggestion_context->converter().conversion_preferences();
     conversion_preferences.request_suggestion = input.request_suggestion();
     has_suggestion =
-        suggestion_context.mutable_converter()->SuggestWithPreferences(
-            suggestion_context.composer(), input.context(),
+        suggestion_context->mutable_converter()->SuggestWithPreferences(
+            suggestion_context->composer(), input.context(),
             conversion_preferences);
   } else {
-    has_suggestion = suggestion_context.mutable_converter()->Suggest(
-        suggestion_context.composer(), input.context());
+    has_suggestion = suggestion_context->mutable_converter()->Suggest(
+        suggestion_context->composer(), input.context());
   }
 
   if (!has_suggestion) {
@@ -8387,8 +8488,8 @@ bool Session::AttachLiveConversionSuggestionCandidateWindow(
   }
 
   commands::Output suggestion_output;
-  suggestion_context.mutable_converter()->PopOutput(
-      suggestion_context.composer(), &suggestion_output);
+  suggestion_context->mutable_converter()->PopOutput(
+      suggestion_context->composer(), &suggestion_output);
 
   if (!suggestion_output.has_candidate_window() ||
       suggestion_output.candidate_window().candidate_size() == 0) {
@@ -8397,6 +8498,7 @@ bool Session::AttachLiveConversionSuggestionCandidateWindow(
 
   live_conversion_suggestion_candidate_window_ =
       suggestion_output.candidate_window();
+  live_conversion_suggestion_context_ = std::move(suggestion_context);
   *output->mutable_candidate_window() =
       live_conversion_suggestion_candidate_window_;
   return true;
@@ -8412,6 +8514,7 @@ bool Session::AttachCachedLiveConversionSuggestionCandidateWindow(
                                                context_->composer())) {
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
+    live_conversion_suggestion_context_.reset();
     return false;
   }
 

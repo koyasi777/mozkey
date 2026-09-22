@@ -585,40 +585,87 @@ bool CandidateWindow::TryUpdateVerticalLayout() {
   return true;
 }
 
-void CandidateWindow::HandleMouseEvent(UINT nFlags, const CPoint& point,
-                                       bool close_candidatewindow) {
-  if (send_command_interface_ == nullptr) {
-    LOG(ERROR) << "send_command_interface_ is nullptr";
-    return;
-  }
-
+std::optional<int32_t> CandidateWindow::GetCandidateIdAtPoint(
+    const CPoint& point) const {
   (void)GetFocusedArrayIndex(*candidate_window_);
 
   for (size_t i = 0; i < candidate_window_->candidate_size(); ++i) {
     const commands::CandidateWindow::Candidate& candidate =
         candidate_window_->candidate(i);
-
     const CRect rect = ToCRect(GetCandidateRect(i));
     if (rect.PtInRect(point)) {
-      commands::SessionCommand command;
-      if (close_candidatewindow) {
-        command.set_type(commands::SessionCommand::SELECT_CANDIDATE);
-      } else {
-        command.set_type(commands::SessionCommand::HIGHLIGHT_CANDIDATE);
-      }
-      command.set_id(candidate.id());
-      commands::Output output;
-      send_command_interface_->SendCommand(command, &output);
-      return;
+      return candidate.id();
     }
   }
+  return std::nullopt;
+}
+
+void CandidateWindow::SendCandidateCommand(
+    commands::SessionCommand::CommandType type, int32_t candidate_id) {
+  if (send_command_interface_ == nullptr) {
+    LOG(ERROR) << "send_command_interface_ is nullptr";
+    return;
+  }
+
+  commands::SessionCommand command;
+  command.set_type(type);
+  command.set_id(candidate_id);
+  commands::Output output;
+  send_command_interface_->SendCommand(command, &output);
+}
+
+void CandidateWindow::HandleMouseEvent(UINT nFlags, const CPoint& point,
+                                       bool close_candidatewindow) {
+  const std::optional<int32_t> candidate_id = GetCandidateIdAtPoint(point);
+  if (!candidate_id.has_value()) {
+    return;
+  }
+
+  SendCandidateCommand(
+      close_candidatewindow ? commands::SessionCommand::SELECT_CANDIDATE
+                            : commands::SessionCommand::HIGHLIGHT_CANDIDATE,
+      *candidate_id);
 }
 
 void CandidateWindow::OnLButtonDown(UINT nFlags, CPoint point) {
+  // Suggestion is a sub-mode of COMPOSITION with no focused candidate.
+  // HIGHLIGHT_CANDIDATE calls Session::SelectCandidateInternal(), which
+  // switches the session to CONVERSION.  With the in-process renderer that
+  // round-trip can complete before WM_LBUTTONUP and replace candidate_window_,
+  // causing mouse-up to hit-test an unrelated conversion candidate.
+  //
+  // Do not mutate the session on suggestion mouse-down.  Latch the ID that
+  // the user actually pressed and submit that same logical suggestion on
+  // mouse-up.
+  if (candidate_window_->category() == commands::SUGGESTION &&
+      !candidate_window_->has_focused_index()) {
+    suggestion_mouse_gesture_active_ = true;
+    pressed_suggestion_candidate_id_ = GetCandidateIdAtPoint(point);
+    return;
+  }
+
+  suggestion_mouse_gesture_active_ = false;
+  pressed_suggestion_candidate_id_.reset();
   HandleMouseEvent(nFlags, point, false);
 }
 
 void CandidateWindow::OnLButtonUp(UINT nFlags, CPoint point) {
+  if (suggestion_mouse_gesture_active_) {
+    suggestion_mouse_gesture_active_ = false;
+    const std::optional<int32_t> candidate_id =
+        pressed_suggestion_candidate_id_;
+    pressed_suggestion_candidate_id_.reset();
+
+    if (candidate_id.has_value()) {
+      // Suggestion has no focused candidate.  SUBMIT_CANDIDATE is the
+      // protocol command that commits that exact suggestion ID without first
+      // promoting the session to CONVERSION.
+      SendCandidateCommand(commands::SessionCommand::SUBMIT_CANDIDATE,
+                           *candidate_id);
+    }
+    return;
+  }
+
   HandleMouseEvent(nFlags, point, true);
 }
 
@@ -634,6 +681,24 @@ void CandidateWindow::OnMouseMove(UINT nFlags, CPoint point) {
     return;
   }
   if ((nFlags & MK_LBUTTON) != MK_LBUTTON) {
+    return;
+  }
+
+  // Keep suggestion clicks side-effect free until mouse-up.  If the pointer
+  // moves within the still-visible suggestion list, update the latched ID so
+  // drag-and-release continues to select the candidate under the pointer.
+  if (suggestion_mouse_gesture_active_) {
+    if (candidate_window_->category() == commands::SUGGESTION &&
+        !candidate_window_->has_focused_index()) {
+      // Preserve ordinary drag-and-release semantics.  Moving outside all
+      // candidates clears the pending selection instead of retaining the ID
+      // from the original mouse-down location.
+      pressed_suggestion_candidate_id_ = GetCandidateIdAtPoint(point);
+    } else {
+      // If an unrelated asynchronous update changes the renderer state during
+      // the gesture, never fall through to a hit-test against that new list.
+      pressed_suggestion_candidate_id_.reset();
+    }
     return;
   }
 

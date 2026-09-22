@@ -329,6 +329,11 @@ class Session {
   // suggestions; this cache keeps the passive suggestion window stable there.
   commands::CandidateWindow live_conversion_suggestion_candidate_window_;
 
+  // Exact cloned context that produced the passive suggestion window above.
+  // Candidate IDs in that window belong to this converter state, not to the
+  // real live-conversion converter which intentionally remains in CONVERSION.
+  std::unique_ptr<ImeContext> live_conversion_suggestion_context_;
+
   // The reading used for the latest successful live conversion.
   std::string live_conversion_key_;
 
@@ -518,6 +523,7 @@ class Session {
     std::optional<PendingLiveConversionPresentation> pending_presentation;
     commands::CandidateWindow pending_suggestion_candidate_window;
     commands::CandidateWindow live_suggestion_candidate_window;
+    std::unique_ptr<ImeContext> live_suggestion_context;
     std::string live_key;
     std::string live_preedit;
     std::string live_value;

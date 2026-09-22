@@ -32,7 +32,8 @@ class InProcessRendererSendCommand final
   bool SendCommand(const commands::SessionCommand& command,
                    commands::Output* output) override {
     if (command.type() != commands::SessionCommand::SELECT_CANDIDATE &&
-        command.type() != commands::SessionCommand::HIGHLIGHT_CANDIDATE) {
+        command.type() != commands::SessionCommand::HIGHLIGHT_CANDIDATE &&
+        command.type() != commands::SessionCommand::SUBMIT_CANDIDATE) {
       return false;
     }
 

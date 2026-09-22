@@ -39,6 +39,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include "base/const.h"
 #include "base/coordinates.h"
@@ -174,9 +175,23 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   // width) for the current |dpi_|.
   void UpdateDpiDependentResources();
 
-  // Handles candidate selection by mouse.
+  // Returns the candidate ID under |point| in the currently rendered list.
+  std::optional<int32_t> GetCandidateIdAtPoint(const CPoint& point) const;
+
+  // Sends a candidate mouse command without re-reading the rendered list.
+  void SendCandidateCommand(commands::SessionCommand::CommandType type,
+                            int32_t candidate_id);
+
+  // Handles ordinary conversion/prediction candidate selection by mouse.
   void HandleMouseEvent(UINT nFlags, const CPoint& point,
                         bool close_candidatewindow);
+
+  // A suggestion has no focused candidate yet.  Sending
+  // HIGHLIGHT_CANDIDATE on mouse-down promotes the session to CONVERSION and
+  // can replace the rendered list before WM_LBUTTONUP.  Keep the suggestion
+  // mouse gesture local until mouse-up instead.
+  bool suggestion_mouse_gesture_active_ = false;
+  std::optional<int32_t> pressed_suggestion_candidate_id_;
 
   // Even though the candidate window supports limited mouse operations, we
   // accept them when and only when SPI_GETACTIVEWINDOWTRACKING is disabled

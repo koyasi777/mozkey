@@ -98,7 +98,8 @@ class RendererServerSendCommand : public client::SendCommandInterface {
                    mozc::commands::Output* output) override {
 #ifdef _WIN32
     if ((command.type() != commands::SessionCommand::SELECT_CANDIDATE) &&
-        (command.type() != commands::SessionCommand::HIGHLIGHT_CANDIDATE)) {
+        (command.type() != commands::SessionCommand::HIGHLIGHT_CANDIDATE) &&
+        (command.type() != commands::SessionCommand::SUBMIT_CANDIDATE)) {
       // Unsupported command.
       return false;
     }
