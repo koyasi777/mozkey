@@ -485,6 +485,22 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "tip_inprocess_renderer",
+    srcs = ["tip_inprocess_renderer.cc"],
+    hdrs = ["tip_inprocess_renderer.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//base:const",
+        "//client:client_interface",
+        "//protocol:commands_cc_proto",
+        "//protocol:renderer_cc_proto",
+        "//renderer:renderer_style_config",
+        "//renderer/win32:window_manager",
+    ],
+)
+
+mozc_cc_library(
     name = "tip_ui_element_manager",
     srcs = ["tip_ui_element_manager.cc"],
     hdrs = ["tip_ui_element_manager.h"],
@@ -757,6 +773,7 @@ mozc_cc_library(
         ":tip_composition_util",
         ":tip_dll_module",
         ":tip_input_mode_manager",
+        ":tip_inprocess_renderer",
         ":tip_private_context_h",
         ":tip_range_util",
         ":tip_status",

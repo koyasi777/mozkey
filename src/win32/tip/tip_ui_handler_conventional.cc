@@ -49,6 +49,7 @@
 #include "win32/tip/tip_composition_util.h"
 #include "win32/tip/tip_dll_module.h"
 #include "win32/tip/tip_input_mode_manager.h"
+#include "win32/tip/tip_inprocess_renderer.h"
 #include "win32/tip/tip_private_context.h"
 #include "win32/tip/tip_range_util.h"
 #include "win32/tip/tip_text_service.h"
@@ -69,6 +70,46 @@ using Annotation = ::mozc::commands::Preedit_Segment::Annotation;
 using IndicatorInfo = ::mozc::commands::RendererCommand_IndicatorInfo;
 using RendererCommand = ::mozc::commands::RendererCommand;
 using ApplicationInfo = ::mozc::commands::RendererCommand::ApplicationInfo;
+
+HWND GetInProcessRendererHostWindow(const RendererCommand& command) {
+  if (!command.has_application_info() ||
+      !command.application_info().has_target_window_handle() ||
+      command.application_info().target_window_handle() == 0) {
+    return nullptr;
+  }
+
+  HWND target_window = WinUtil::DecodeWindowHandle(
+      command.application_info().target_window_handle());
+  if (target_window == nullptr || !::IsWindow(target_window)) {
+    return nullptr;
+  }
+
+  DWORD target_process_id = 0;
+  if (::GetWindowThreadProcessId(target_window, &target_process_id) == 0 ||
+      target_process_id != ::GetCurrentProcessId()) {
+    return nullptr;
+  }
+
+  HWND root_window = ::GetAncestor(target_window, GA_ROOT);
+  if (root_window != nullptr && ::IsWindow(root_window)) {
+    DWORD root_process_id = 0;
+    if (::GetWindowThreadProcessId(root_window, &root_process_id) != 0 &&
+        root_process_id == ::GetCurrentProcessId()) {
+      return root_window;
+    }
+  }
+  return target_window;
+}
+
+void DispatchRendererUpdate(TipTextService* text_service,
+                            const RendererCommand& command) {
+  if (text_service != nullptr && text_service->IsImmersiveMode()) {
+    TipInProcessRenderer::OnUpdated(command,
+                                    GetInProcessRendererHostWindow(command));
+    return;
+  }
+  Win32RendererClient::OnUpdated(command);
+}
 
 bool FillRubyPreeditRectangleFromGuiCaret(HWND target_window,
                                           const RECT& text_rect,
@@ -593,7 +634,7 @@ class UpdateUiEditSessionImpl final : public TipComImplements<ITfEditSession> {
     UpdateCommand(text_service_.get(), context_.get(), edit_cookie, &command,
                   &no_layout);
     if (!no_layout || !command.visible()) {
-      Win32RendererClient::OnUpdated(command);
+      DispatchRendererUpdate(text_service_.get(), command);
     }
     return S_OK;
   }
@@ -633,6 +674,7 @@ void TipUiHandlerConventional::OnActivate(TipTextService* text_service) {
 }
 
 void TipUiHandlerConventional::OnDeactivate() {
+  TipInProcessRenderer::OnUIThreadUninitialized();
   Win32RendererClient::OnUIThreadUninitialized();
 }
 
@@ -643,7 +685,7 @@ void TipUiHandlerConventional::OnFocusChange(
     RendererCommand command;
     command.set_type(RendererCommand::UPDATE);
     command.set_visible(false);
-    Win32RendererClient::OnUpdated(command);
+    DispatchRendererUpdate(text_service, command);
     return;
   }
 
@@ -664,7 +706,7 @@ bool TipUiHandlerConventional::Update(TipTextService* text_service,
   bool no_layout = false;
   UpdateCommand(text_service, context, read_cookie, &command, &no_layout);
   if (!no_layout || !command.visible()) {
-    Win32RendererClient::OnUpdated(command);
+    DispatchRendererUpdate(text_service, command);
   }
   return true;
 }
