@@ -56,6 +56,7 @@
 #include "session/zenz_feedback_store.h"
 #include "session/zenz_live_corrector.h"
 #include "session/zenz_output_validator.h"
+#include "session/zenz_segment_projection.h"
 #include "transliteration/transliteration.h"
 
 namespace mozc {
@@ -428,6 +429,7 @@ class Session {
     std::string symbol_style_source;
     std::string prompt;
     std::vector<ProtectedConversionSpan> protected_spans;
+    std::vector<ZenzBaselineSegment> baseline_segments;
     absl::Time issued_at;
     bool pending = false;
     bool submitted = false;

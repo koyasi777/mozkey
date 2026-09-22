@@ -126,7 +126,6 @@ TEST(ZenzAdoptionPolicyTest, UserPreferredJapaneseSurfaceIsGuardedOnOutputSide) 
   EXPECT_EQ(result.value, "彼は辞書語の天敵です");
 }
 
-
 TEST(ZenzAdoptionPolicyTest, ProtectPromptKeyHandlesRepeatedSurface) {
   ZenzAdoptionPolicy policy;
   ZenzProtectedPromptInput input;
@@ -180,7 +179,6 @@ TEST(ZenzAdoptionPolicyTest, RepairsIdentityCriticalKanaSurface) {
   EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptWithRepair);
   EXPECT_EQ(result.value, "Mozkeyを使用しています");
 }
-
 
 TEST(ZenzAdoptionPolicyTest, AcceptsJapaneseUserDictionarySurfaceWithParticle) {
   ZenzAdoptionPolicy policy;
@@ -322,6 +320,115 @@ TEST(ZenzAdoptionPolicyTest, DoesNotRepairShortAsciiSurface) {
 
   const ZenzAdoptionResult result = policy.Decide(input);
   EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+}
+
+TEST(ZenzAdoptionPolicyTest, RejectsUnsafeTransitionWithoutBaselineSegments) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "とうきょう";
+  input.mozc_value = "東京";
+  input.zenz_value = "Tokyo";
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.value, "東京");
+  EXPECT_EQ(result.reason,
+            "orthographic_transition_missing_baseline_segments");
+}
+
+TEST(ZenzAdoptionPolicyTest, RejectsUnsafeTransitionWithStaleBaselineSegments) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "とうきょう";
+  input.mozc_value = "東京";
+  input.zenz_value = "Tokyo";
+  input.baseline_segments = {{"とうきょう", "大阪"}};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.value, "東京");
+  EXPECT_EQ(result.reason,
+            "orthographic_transition_stale_baseline_segments");
+}
+
+TEST(ZenzAdoptionPolicyTest, AllowsJapaneseRewriteWithoutBaselineSegments) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "てんてき";
+  input.mozc_value = "点滴";
+  input.zenz_value = "天敵";
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "天敵");
+}
+
+TEST(ZenzAdoptionPolicyTest, RepairsNewAlphabeticSurfacePerSegment) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "とうきょうにてんてき";
+  input.mozc_value = "東京に点滴";
+  input.zenz_value = "Tokyoに天敵";
+  input.baseline_segments = {
+      {"とうきょう", "東京"}, {"に", "に"}, {"てんてき", "点滴"}};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptWithRepair);
+  EXPECT_EQ(result.value, "東京に天敵");
+  EXPECT_EQ(result.reason, "orthographic_transition_repaired");
+}
+
+TEST(ZenzAdoptionPolicyTest, PreservesExistingLatinSurface) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "ぎっとはぶをつかう";
+  input.mozc_value = "GitHubを使う";
+  input.zenz_value = "GitHubを使用する";
+  input.baseline_segments = {{"ぎっとはぶをつかう", "GitHubを使う"}};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "GitHubを使用する");
+}
+
+TEST(ZenzAdoptionPolicyTest, PreservesMozcSelectedLatinBaseline) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "とうきょうにいく";
+  input.mozc_value = "Tokyoにいく";
+  input.zenz_value = "Tokyoに行く";
+  input.baseline_segments = {{"とうきょうにいく", "Tokyoにいく"}};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "Tokyoに行く");
+}
+
+TEST(ZenzAdoptionPolicyTest, RejectsUnprojectableNewAlphabeticSurface) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "とうきょうおおさか";
+  input.mozc_value = "東京大阪";
+  input.zenz_value = "TokyoOsaka";
+  input.baseline_segments = {{"とうきょう", "東京"}, {"おおさか", "大阪"}};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.value, "東京大阪");
+  EXPECT_EQ(result.reason, "orthographic_transition_projection_failed");
+}
+
+TEST(ZenzAdoptionPolicyTest, AllowsUnprojectableJapaneseOnlyRewrite) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "とうきょうおおさか";
+  input.mozc_value = "東京大阪";
+  input.zenz_value = "首都関西";
+  input.baseline_segments = {{"とうきょう", "東京"}, {"おおさか", "大阪"}};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "首都関西");
 }
 
 }  // namespace

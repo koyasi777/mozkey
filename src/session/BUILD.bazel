@@ -82,10 +82,34 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "zenz_segment_projection",
+    srcs = ["zenz_segment_projection.cc"],
+    hdrs = ["zenz_segment_projection.h"],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_orthography_policy",
+    srcs = ["zenz_orthography_policy.cc"],
+    hdrs = ["zenz_orthography_policy.h"],
+    visibility = [
+        "//rewriter:__pkg__",
+    ],
+    deps = [
+        "//base:util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
     name = "zenz_adoption_policy",
     srcs = ["zenz_adoption_policy.cc"],
     hdrs = ["zenz_adoption_policy.h"],
     deps = [
+        ":zenz_orthography_policy",
+        ":zenz_segment_projection",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -192,6 +216,7 @@ mozc_cc_library(
         ":zenz_feedback_store",
         ":zenz_output_validator",
         ":zenz_prompt_builder",
+        ":zenz_segment_projection",
         ":zenz_text_privacy_analyzer",
         "//base:clock",
         "//base:util",
@@ -238,6 +263,26 @@ mozc_cc_test(
         "//testing:gunit_main",
         "//zenz:wire_protocol",
         "@com_google_absl//absl/time",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_segment_projection_test",
+    size = "small",
+    srcs = ["zenz_segment_projection_test.cc"],
+    deps = [
+        ":zenz_segment_projection",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_orthography_policy_test",
+    size = "small",
+    srcs = ["zenz_orthography_policy_test.cc"],
+    deps = [
+        ":zenz_orthography_policy",
+        "//testing:gunit_main",
     ],
 )
 

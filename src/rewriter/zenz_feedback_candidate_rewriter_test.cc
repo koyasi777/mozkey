@@ -615,6 +615,54 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   EXPECT_EQ(segment.candidate(0).value, "するな");
 }
 
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotReintroduceMutatedTechnicalTokenFeedback) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("しーぷらすぷらす", "empty", "C#");
+
+  Segments segments;
+  AddSegment("しーぷらすぷらす", "C++", &segments);
+
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+
+  ASSERT_EQ(segments.conversion_segments_size(), 1);
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_EQ(segment.candidates_size(), 1);
+  EXPECT_EQ(segment.candidate(0).value, "C++");
+  EXPECT_TRUE(segment.candidate(0).attributes &
+              converter::Attribute::BEST_CANDIDATE);
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotReintroduceUnlicensedAlphabeticFeedback) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("とうきょう", "empty", "Tokyo");
+
+  Segments segments;
+  AddSegment("とうきょう", "東京", &segments);
+
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+
+  ASSERT_EQ(segments.conversion_segments_size(), 1);
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_EQ(segment.candidates_size(), 1);
+  EXPECT_EQ(segment.candidate(0).value, "東京");
+  EXPECT_TRUE(segment.candidate(0).attributes &
+              converter::Attribute::BEST_CANDIDATE);
+}
+
 #else  // defined(_WIN32)
 
 TEST(ZenzFeedbackCandidateRewriterTest, SkippedOnNonWindows) {
