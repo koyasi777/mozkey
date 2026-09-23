@@ -42,6 +42,8 @@ constexpr int kPredictAfterZenzRejectWeight = 200;
 constexpr int kExplicitConversionRejectWeight = 400;
 constexpr int kLegacyRejectWeight = 400;
 constexpr int kHardRejectWeight = 2000;
+constexpr absl::string_view kReadingPreservedAcceptedReason =
+    "reading_preserved";
 
 #if defined(_WIN32)
 
@@ -507,6 +509,7 @@ struct Counts {
   int auto_block_rejected = 0;
   int positive_score = 0;
   int negative_score = 0;
+  int reading_preserved_accepted = 0;
   bool hard_rejected = false;
 };
 
@@ -537,9 +540,12 @@ int RejectWeightForReason(absl::string_view reason) {
   return kLegacyRejectWeight;
 }
 
-void AddAccepted(Counts* c) {
+void AddAccepted(absl::string_view reason, Counts* c) {
   ++c->accepted;
   c->positive_score += kAcceptedFeedbackWeight;
+  if (reason == kReadingPreservedAcceptedReason) {
+    ++c->reading_preserved_accepted;
+  }
 }
 
 void AddRejected(absl::string_view reason, Counts* c) {
@@ -557,6 +563,7 @@ void MergeCounts(const Counts& src, Counts* dest) {
   dest->auto_block_rejected += src.auto_block_rejected;
   dest->positive_score += src.positive_score;
   dest->negative_score += src.negative_score;
+  dest->reading_preserved_accepted += src.reading_preserved_accepted;
   dest->hard_rejected |= src.hard_rejected;
 }
 
@@ -900,7 +907,7 @@ std::map<FeedbackKey, Counts> LoadCounts() {
         record.key, record.context_class, record.value)];
 
     if (record.action == "accepted") {
-      AddAccepted(&c);
+      AddAccepted(record.reason, &c);
     } else if (record.action == "rejected") {
       AddRejected(record.reason, &c);
     }
@@ -1204,6 +1211,7 @@ std::vector<ZenzFeedbackCandidate> ZenzFeedbackStore::GetRankedCandidates(
     candidate.auto_block_reject_count = exact_counts.auto_block_rejected;
     candidate.hard_rejected = c.hard_rejected;
     candidate.auto_blocked = false;
+    candidate.reading_preserved = c.reading_preserved_accepted > 0;
     candidate.reason = "feedback_preferred";
     candidates.push_back(std::move(candidate));
   }
@@ -1319,6 +1327,19 @@ bool ZenzFeedbackStore::ImportFromFile(
     return false;
   }
 
+  // Import files are user-controlled and carry no provenance.  Do not trust a
+  // persisted reading-preservation marker from an imported file to authorize
+  // creation of a synthetic normal-conversion candidate.  Imported feedback
+  // can still rerank an existing Mozc candidate and can still be replayed
+  // through the session-level path, where reading preservation is validated
+  // again before display.
+  for (ParsedFeedbackRecord& record : imported_records) {
+    if (record.action == "accepted" &&
+        record.reason == kReadingPreservedAcceptedReason) {
+      record.reason.clear();
+    }
+  }
+
   std::vector<ParsedFeedbackRecord> new_records;
   if (mode == ZenzFeedbackImportMode::kAppend) {
     new_records = LoadFeedbackRecords();
@@ -1371,7 +1392,8 @@ void ZenzFeedbackStore::RecordAccepted(
     absl::string_view value) {
   // The caller is responsible for passing the complete Zenz reading/correction
   // pair.  This store must not synthesize or persist segment-local derivatives.
-  AppendRecord("accepted", key, context_class, value, "");
+  AppendRecord("accepted", key, context_class, value,
+               kReadingPreservedAcceptedReason);
 }
 
 void ZenzFeedbackStore::RecordRejected(

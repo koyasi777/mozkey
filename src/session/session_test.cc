@@ -789,6 +789,20 @@ class SessionTest : public testing::TestWithTempUserProfile {
     return mock_converter;
   }
 
+  void ExpectReverseReading(MockConverter* converter,
+                            absl::string_view surface,
+                            absl::string_view reading) {
+    Segments reverse_segments;
+    Segment* segment = reverse_segments.add_segment();
+    segment->set_key(surface);
+    converter::Candidate* candidate = segment->add_candidate();
+    candidate->key = std::string(surface);
+    candidate->value = std::string(reading);
+
+    EXPECT_CALL(*converter, StartReverseConversion(_, surface))
+        .WillOnce(DoAll(SetArgPointee<0>(reverse_segments), Return(true)));
+  }
+
   void EnableZenzFeedbackLearning(Session* session) {
     config::Config config;
     config::ConfigHandler::GetDefaultConfig(&config);
@@ -1184,6 +1198,9 @@ TEST_F(SessionTest, KeymapCommandSequenceCommitZenzLiveCorrectionAndImeOff) {
   segment->set_key("てんてきです");
   segment->set_value("点滴です");
   segment->set_value_length(Util::CharsLen("点滴です"));
+
+  ExpectReverseReading(converter.get(), "彼は天敵です",
+                       "かれはてんてきです");
 
   commands::Command command;
   ASSERT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
@@ -1842,6 +1859,9 @@ TEST_F(SessionTest,
   segment->set_value("点滴です");
   segment->set_value_length(Util::CharsLen("点滴です"));
 
+  ExpectReverseReading(converter.get(), "彼は天敵です",
+                       "かれはてんてきです");
+
   commands::Command command;
   EXPECT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
 
@@ -1858,6 +1878,68 @@ TEST_F(SessionTest,
   EXPECT_EQ(session_peer.zenz_live_value_(), "彼は天敵です");
   EXPECT_EQ(session_peer.zenz_live_mozc_value_(), "彼は点滴です");
   EXPECT_EQ(session_peer.zenz_live_context_class_(), "empty");
+}
+
+TEST_F(SessionTest,
+       ZenzFeedbackFastPathCachesReadingAnchorsAcrossCandidates) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzLiveCorrectionWithFeedbackLearning(&session);
+
+  // Rank the reading-mismatched candidate first so that the fast path has to
+  // evaluate a second candidate for the same request.  The typed key and Mozc
+  // baseline reading anchors must be reverse-converted only once and reused.
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "100えんではかえない", "empty", "100円では買えない余計");
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "100えんではかえない", "empty", "100円では買えない余計");
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "100えんではかえない", "empty", "100円では買えない");
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "100えんではかえない";
+  session_peer.live_conversion_preedit_() = "100えんではかえない";
+  session_peer.live_conversion_value_() = "100円では変えない";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("100えんでは");
+  segment->set_value("100円では");
+  segment->set_value_length(Util::CharsLen("100円では"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("かえない");
+  segment->set_value("変えない");
+  segment->set_value_length(Util::CharsLen("変えない"));
+
+  ExpectReverseReading(converter.get(), "100円では買えない余計",
+                       "ひゃくえんではかえないよけい");
+  ExpectReverseReading(converter.get(), "100えんではかえない",
+                       "ひゃくえんではかえない");
+  ExpectReverseReading(converter.get(), "100円では変えない",
+                       "ひゃくえんではかえない");
+  ExpectReverseReading(converter.get(), "100円では買えない",
+                       "ひゃくえんではかえない");
+
+  commands::Command command;
+  ASSERT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
+
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_SINGLE_SEGMENT_AND_KEY("100円では買えない",
+                                "100えんではかえない",
+                                command);
+  EXPECT_EQ(session_peer.zenz_live_value_(), "100円では買えない");
 }
 
 TEST_F(SessionTest,
@@ -1899,6 +1981,8 @@ TEST_F(SessionTest,
   segment->set_key("あめ");
   segment->set_value("飴");
   segment->set_value_length(Util::CharsLen("飴"));
+
+  ExpectReverseReading(converter.get(), "明日は雨", "あしたはあめ");
 
   commands::Command command;
   ASSERT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
@@ -2072,6 +2156,9 @@ TEST_F(SessionTest,
   segment->set_value("点滴です");
   segment->set_value_length(Util::CharsLen("点滴です"));
 
+  ExpectReverseReading(converter.get(), "彼は天敵です",
+                       "かれはてんてきです");
+
   commands::Command command;
   ASSERT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
   ASSERT_TRUE(command.output().zenz_live_correction_applied());
@@ -2154,6 +2241,9 @@ TEST_F(SessionTest,
   session_peer.live_conversion_preedit_() = "かれはてんてきです";
   session_peer.live_conversion_value_() = "彼は点滴です";
   session_peer.live_conversion_preedit_output_() = command.output().preedit();
+
+  ExpectReverseReading(converter.get(), "彼は天敵です",
+                       "かれはてんてきです");
 
   command.Clear();
   ASSERT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
@@ -3474,6 +3564,8 @@ TEST_F(SessionTest, DeferredZenzAcceptedResultReplacesVisiblePreeditOnce) {
   response.ok = true;
   response.value = "亜衣";
 
+  ExpectReverseReading(converter.get(), "亜衣", "あい");
+
   command.Clear();
   ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
   EXPECT_PREEDIT("亜衣", command);
@@ -3701,6 +3793,7 @@ TEST_F(SessionTest,
   ZenzLiveResponse unresolved_response;
   unresolved_response.ok = true;
   unresolved_response.value = "さすがでｓ";
+  ExpectReverseReading(converter.get(), "さすがでｓ", "さすがでs");
   command.Clear();
   ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(
       unresolved_response, &command));
@@ -4366,6 +4459,171 @@ TEST_F(SessionTest, DeferredZenzContextEchoFallsBackToMozcResult) {
   EXPECT_FALSE(command.output().zenz_live_correction_applied());
   EXPECT_EQ(command.output().zenz_live_correction_debug(),
             "left_context_echo");
+}
+
+TEST_F(SessionTest,
+       DeferredZenzPrematureCompletionFallsBackToMozcResult) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("どうがをだうんろ");
+  AddCandidate("どうがをだうんろ", "動画をダウンロ", segment);
+
+  commands::Command command;
+  InsertCharacterString("どうがをだうんろ", "abcdefgh", &session, &command);
+  session.SetConfig(config);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "動画をダウンロード";
+
+  ExpectReverseReading(converter.get(), "動画をダウンロード",
+                       "どうがをだうんろーど");
+  ExpectReverseReading(converter.get(), "どうがをだうんろ",
+                       "どうがをだうんろ");
+  ExpectReverseReading(converter.get(), "動画をダウンロ",
+                       "どうがをだうんろ");
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_PREEDIT("動画をダウンロ", command);
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "reading_mismatch");
+}
+
+TEST_F(SessionTest,
+       DeferredZenzSameSurfaceLengthPredictionFallsBackToMozcResult) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("かぶしき");
+  AddCandidate("かぶしき", "株式", segment);
+
+  commands::Command command;
+  InsertCharacterString("かぶしき", "abcd", &session, &command);
+  session.SetConfig(config);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "株式会社";
+
+  ExpectReverseReading(converter.get(), "株式会社", "かぶしきがいしゃ");
+  ExpectReverseReading(converter.get(), "かぶしき", "かぶしき");
+  ExpectReverseReading(converter.get(), "株式", "かぶしき");
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_PREEDIT("株式", command);
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "reading_mismatch");
+}
+
+TEST_F(SessionTest,
+       DeferredZenzNumericLiteralUsesNormalizedTypedReading) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("100えんではかえない");
+  AddCandidate("100えんではかえない", "100円では変えない", segment);
+
+  commands::Command command;
+  InsertCharacterString("100えんではかえない", "abcdefghijk", &session,
+                        &command);
+  session.SetConfig(config);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "100円では買えない";
+
+  ExpectReverseReading(converter.get(), "100円では買えない",
+                       "ひゃくえんではかえない");
+  ExpectReverseReading(converter.get(), "100えんではかえない",
+                       "ひゃくえんではかえない");
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_PREEDIT("100円では買えない", command);
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
 }
 
 TEST_F(SessionTest, DeferredZenzFailureFallsBackToMozcResult) {

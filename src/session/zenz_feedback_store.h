@@ -49,6 +49,13 @@ struct ZenzFeedbackCandidate {
   int auto_block_reject_count = 0;
   bool hard_rejected = false;
   bool auto_blocked = false;
+
+  // True when this key/value pair has at least one post-validation accepted
+  // observation recorded after reading-preservation checks.  Legacy accepted
+  // rows remain useful for reranking an existing Mozc candidate, but must not
+  // authorize creation of a new synthetic candidate by themselves.
+  bool reading_preserved = false;
+
   std::string reason = "feedback_neutral";
 };
 

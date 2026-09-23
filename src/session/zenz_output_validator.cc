@@ -610,6 +610,38 @@ bool ZenzOutputValidator::LooksLikeSecret(absl::string_view text) {
          absl::StrContains(text, "apikey");
 }
 
+ZenzValidationResult ZenzOutputValidator::ValidateReadingPreservation(
+    absl::string_view key,
+    absl::string_view normalized_key_reading,
+    absl::string_view mozc_reading,
+    absl::string_view zenz_reading) {
+  if (key.empty() || zenz_reading.empty()) {
+    return Reject("reading_unavailable");
+  }
+  if (zenz_reading == key) {
+    return Accept(false, "reading_preserved");
+  }
+
+  bool has_reference_reading = false;
+  if (!normalized_key_reading.empty()) {
+    has_reference_reading = true;
+    if (zenz_reading == normalized_key_reading) {
+      return Accept(false, "reading_preserved");
+    }
+  }
+  if (!mozc_reading.empty()) {
+    has_reference_reading = true;
+    if (zenz_reading == mozc_reading) {
+      return Accept(false, "reading_preserved");
+    }
+  }
+
+  if (!has_reference_reading) {
+    return Reject("reading_unavailable");
+  }
+  return Reject("reading_mismatch");
+}
+
 ZenzValidationResult ZenzOutputValidator::Validate(
     const ZenzValidationInput& input) const {
   if (input.key.empty()) {

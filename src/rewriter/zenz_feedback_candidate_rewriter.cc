@@ -295,6 +295,13 @@ bool ZenzFeedbackCandidateRewriter::Rewrite(
       return true;
     }
 
+    // Legacy feedback rows predate reading-preservation validation. They may
+    // still rerank a value already produced by Mozc for this key, but they must
+    // not authorize a new synthetic surface that Mozc itself did not produce.
+    if (!feedback_candidate.reading_preserved) {
+      continue;
+    }
+
     const converter::Candidate base_candidate = segment->candidate(0);
     converter::Candidate synthetic_candidate;
     FillSyntheticCandidate(base_candidate, full_key, zenz_value,
