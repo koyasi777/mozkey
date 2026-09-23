@@ -1742,7 +1742,9 @@ void AddOrUpdateProtectedSpan(
     if (existing->key.empty() && !key.empty()) {
       existing->key = std::string(key);
     }
-    if (tier == ProtectedConversionSpan::Tier::kIdentityCritical) {
+    if (tier == ProtectedConversionSpan::Tier::kIdentityCritical ||
+        (tier == ProtectedConversionSpan::Tier::kNumericLiteral &&
+         existing->tier == ProtectedConversionSpan::Tier::kUserPreferred)) {
       existing->tier = tier;
     }
     if (!existing->repairable && repairable && !key.empty()) {
@@ -1776,9 +1778,13 @@ void AddPreeditIdentityProtectedSpans(
     for (const std::string& surface : identity_surfaces) {
       const std::string surface_key = InferProtectedKeyForEmbeddedSurface(
           segment_key, segment.value(), surface);
+      const ProtectedConversionSpan::Tier tier =
+          ClassifyProtectedAsciiSurface(surface);
       AddOrUpdateProtectedSpan(
-          surface_key, surface, ProtectedConversionSpan::Tier::kIdentityCritical,
-          !surface_key.empty(), mozc_value, protected_spans);
+          surface_key, surface, tier,
+          tier == ProtectedConversionSpan::Tier::kIdentityCritical &&
+              !surface_key.empty(),
+          mozc_value, protected_spans);
     }
   }
 }
@@ -1904,9 +1910,13 @@ std::vector<ProtectedConversionSpan> BuildZenzProtectedConversionSpans(
         for (const std::string& surface : identity_surfaces) {
           const std::string surface_key = InferProtectedKeyForEmbeddedSurface(
               protected_key, candidate.value(), surface);
+          const ProtectedConversionSpan::Tier tier =
+              ClassifyProtectedAsciiSurface(surface);
           AddOrUpdateProtectedSpan(
-              surface_key, surface, ProtectedConversionSpan::Tier::kIdentityCritical,
-              !surface_key.empty(), mozc_value, &protected_spans);
+              surface_key, surface, tier,
+              tier == ProtectedConversionSpan::Tier::kIdentityCritical &&
+                  !surface_key.empty(),
+              mozc_value, &protected_spans);
         }
         continue;
       }

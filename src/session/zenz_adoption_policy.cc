@@ -217,6 +217,113 @@ bool IsJapaneseParticleBoundary(char32_t c) {
   }
 }
 
+bool GetLeftNeighbor(absl::string_view value, size_t pos, bool* present,
+                     char32_t* neighbor) {
+  if (present == nullptr || neighbor == nullptr || pos > value.size()) {
+    return false;
+  }
+  if (pos == 0) {
+    *present = false;
+    *neighbor = 0;
+    return true;
+  }
+
+  size_t begin = 0;
+  size_t length = 0;
+  if (!DecodePreviousUtf8Char(value, pos, neighbor, &begin, &length)) {
+    return false;
+  }
+  *present = true;
+  return true;
+}
+
+bool GetRightNeighbor(absl::string_view value, size_t pos, bool* present,
+                      char32_t* neighbor) {
+  if (present == nullptr || neighbor == nullptr || pos > value.size()) {
+    return false;
+  }
+  if (pos == value.size()) {
+    *present = false;
+    *neighbor = 0;
+    return true;
+  }
+
+  size_t length = 0;
+  if (!DecodeUtf8CharAt(value, pos, neighbor, &length)) {
+    return false;
+  }
+  *present = true;
+  return true;
+}
+
+bool NumericNeighborMatches(bool baseline_present, char32_t baseline,
+                            bool candidate_present, char32_t candidate) {
+  if (baseline_present != candidate_present) {
+    return false;
+  }
+  if (!baseline_present) {
+    return true;
+  }
+
+  // Japanese text next to a number is semantic content that Zenz is allowed to
+  // improve (1代 -> 1台, 100円では変えない -> 100円では買えない).
+  // Non-Japanese separators and symbols are user-visible formatting and must be
+  // preserved exactly (100% must not become 100$, HTTP/2 must keep '/').
+  if (IsJapaneseLetterLike(baseline)) {
+    return IsJapaneseLetterLike(candidate);
+  }
+  return baseline == candidate;
+}
+
+bool NumericLiteralContextsMatch(absl::string_view baseline,
+                                 absl::string_view candidate,
+                                 absl::string_view surface) {
+  if (surface.empty()) {
+    return false;
+  }
+
+  size_t baseline_pos = 0;
+  size_t candidate_pos = 0;
+  while (true) {
+    baseline_pos = baseline.find(surface, baseline_pos);
+    candidate_pos = candidate.find(surface, candidate_pos);
+    if (baseline_pos == absl::string_view::npos ||
+        candidate_pos == absl::string_view::npos) {
+      return baseline_pos == candidate_pos;
+    }
+
+    bool baseline_left_present = false;
+    bool candidate_left_present = false;
+    bool baseline_right_present = false;
+    bool candidate_right_present = false;
+    char32_t baseline_left = 0;
+    char32_t candidate_left = 0;
+    char32_t baseline_right = 0;
+    char32_t candidate_right = 0;
+
+    if (!GetLeftNeighbor(baseline, baseline_pos, &baseline_left_present,
+                         &baseline_left) ||
+        !GetLeftNeighbor(candidate, candidate_pos, &candidate_left_present,
+                         &candidate_left) ||
+        !GetRightNeighbor(baseline, baseline_pos + surface.size(),
+                          &baseline_right_present, &baseline_right) ||
+        !GetRightNeighbor(candidate, candidate_pos + surface.size(),
+                          &candidate_right_present, &candidate_right)) {
+      return false;
+    }
+
+    if (!NumericNeighborMatches(baseline_left_present, baseline_left,
+                                candidate_left_present, candidate_left) ||
+        !NumericNeighborMatches(baseline_right_present, baseline_right,
+                                candidate_right_present, candidate_right)) {
+      return false;
+    }
+
+    baseline_pos += surface.size();
+    candidate_pos += surface.size();
+  }
+}
+
 bool IsPunctuationOrSpaceBoundary(char32_t c) {
   if (c <= 0x20) {
     return true;
@@ -498,6 +605,45 @@ bool BaselineSegmentsMatchAdoptionInput(
 
 }  // namespace
 
+ProtectedConversionSpan::Tier ClassifyProtectedAsciiSurface(
+    absl::string_view surface) {
+  if (surface.empty()) {
+    return ProtectedConversionSpan::Tier::kIdentityCritical;
+  }
+
+  size_t pos = 0;
+  if (surface[pos] == '+' || surface[pos] == '-') {
+    ++pos;
+  }
+
+  const size_t integer_begin = pos;
+  while (pos < surface.size() && '0' <= surface[pos] &&
+         surface[pos] <= '9') {
+    ++pos;
+  }
+  if (pos == integer_begin) {
+    return ProtectedConversionSpan::Tier::kIdentityCritical;
+  }
+  if (pos == surface.size()) {
+    return ProtectedConversionSpan::Tier::kNumericLiteral;
+  }
+
+  if (surface[pos] != '.') {
+    return ProtectedConversionSpan::Tier::kIdentityCritical;
+  }
+  ++pos;
+
+  const size_t fraction_begin = pos;
+  while (pos < surface.size() && '0' <= surface[pos] &&
+         surface[pos] <= '9') {
+    ++pos;
+  }
+  if (pos == surface.size() && pos > fraction_begin) {
+    return ProtectedConversionSpan::Tier::kNumericLiteral;
+  }
+  return ProtectedConversionSpan::Tier::kIdentityCritical;
+}
+
 ZenzProtectedPromptResult ZenzAdoptionPolicy::ProtectPromptKey(
     const ZenzProtectedPromptInput& input) const {
   ZenzProtectedPromptResult result;
@@ -576,6 +722,30 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
 
     const size_t required_occurrences =
         span.required_occurrences == 0 ? 1 : span.required_occurrences;
+
+    if (span.tier == ProtectedConversionSpan::Tier::kNumericLiteral) {
+      const size_t baseline_occurrences =
+          CountOccurrences(input.mozc_value, span.value);
+      const size_t adopted_occurrences =
+          CountOccurrences(adopted_value, span.value);
+      if (baseline_occurrences < required_occurrences ||
+          adopted_occurrences != baseline_occurrences) {
+        ZenzAdoptionResult result;
+        result.action = ZenzAdoptionResult::Action::kReject;
+        result.value = std::string(input.mozc_value);
+        result.reason = "protected_numeric_literal_not_preserved";
+        return result;
+      }
+      if (!NumericLiteralContextsMatch(input.mozc_value, adopted_value,
+                                       span.value)) {
+        ZenzAdoptionResult result;
+        result.action = ZenzAdoptionResult::Action::kReject;
+        result.value = std::string(input.mozc_value);
+        result.reason = "protected_numeric_literal_context_changed";
+        return result;
+      }
+      continue;
+    }
 
     while (CountBoundaryPreservedOccurrences(adopted_value, span.value) <
            required_occurrences) {
