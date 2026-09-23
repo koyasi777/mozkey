@@ -1204,6 +1204,57 @@ TEST_F(SessionTest, KeymapCommandSequenceCommitZenzLiveCorrectionAndImeOff) {
   EXPECT_TRUE(session_peer.zenz_live_context_class_().empty());
 }
 
+
+TEST_F(SessionTest, KeymapImeOffCommitsVisibleZenzLiveCorrection) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Enter\tIMEOff\n",
+      &session);
+
+  // Enter a real converter-side CONVERSION state first.  This is important:
+  // Session::IMEOff() eventually falls back to CommitInternal() on the buggy
+  // path, so the EngineConverter must also be in CONVERSION state.
+  InitSessionToConversionWithAiueo(&session, converter.get());
+
+  SessionTestPeer session_peer(session);
+
+  // Overlay a visible Zenz presentation on the existing Mozc conversion.
+  // The underlying Mozc converter still holds "あいうえお", while the user-
+  // visible result is "愛上尾".
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "あいうえお";
+  session_peer.live_conversion_preedit_() = "あいうえお";
+  session_peer.live_conversion_value_() = "あいうえお";
+
+  session_peer.zenz_live_visible_generation_() = 1;
+  session_peer.zenz_live_key_() = "あいうえお";
+  session_peer.zenz_live_value_() = "愛上尾";
+  session_peer.zenz_live_mozc_value_() = "あいうえお";
+  session_peer.zenz_live_context_class_() = "empty";
+
+  commands::Command command;
+  EXPECT_TRUE(SendKey("Ctrl Enter", &session, &command));
+
+  EXPECT_TRUE(command.output().consumed());
+
+  // User-visible Zenz text must be committed before the IME transitions to
+  // DIRECT.  Current buggy code clears the Zenz state first and therefore
+  // commits the underlying Mozc conversion ("あいうえお") instead.
+  EXPECT_RESULT_AND_KEY("愛上尾", "あいうえお", command);
+
+  EXPECT_EQ(session.context().state(), ImeContext::DIRECT);
+  EXPECT_EQ(command.output().mode(), commands::DIRECT);
+  EXPECT_FALSE(session_peer.live_conversion_active_());
+  EXPECT_TRUE(session_peer.zenz_live_key_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_value_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_mozc_value_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_context_class_().empty());
+}
+
 #endif  // defined(_WIN32)
 
 TEST_F(SessionTest, PendingZenzFeedbackIsConfirmedByNextTextInput) {

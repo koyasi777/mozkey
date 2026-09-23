@@ -3725,13 +3725,13 @@ bool Session::SendKeyConversionState(commands::Command* command) {
       return RevertZenzLiveCorrectionToNormalConversion(command);
     }
 
-    // IME-off commits the current composition.  A hidden Mozc result must not
-    // become the committed text simply because the keymap entered the generic
-    // conversion-command path first.  Execute IMEOff while the deferred
-    // presentation is still intact; Commit() will commit only the visible
-    // preedit.
+    // IME-off commits the current user-visible presentation before switching
+    // to direct input.  Do not let the generic conversion-command path clear a
+    // deferred or visible Zenz presentation first; Commit() already knows how
+    // to commit either presentation correctly.
     if (key_command == keymap::ConversionState::IME_OFF &&
-        HasDeferredZenzLivePresentation()) {
+        (HasDeferredZenzLivePresentation() ||
+         HasVisibleZenzLiveCorrection())) {
       return ExecuteCommandSequence(command_sequence, command);
     }
 
