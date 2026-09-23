@@ -54,9 +54,14 @@ class TipEditSession {
   // that sync edit session is guaranteed to be capable only in key event
   // handler and ITfFnReconversion::QueryRange. In other cases, you should use
   // OnOutputReceivedAsync instead.
-  static bool OnOutputReceivedSync(TipTextService* text_service,
-                                   ITfContext* context,
-                                   commands::Output new_output);
+  //
+  // If |should_consume_key_event| is non-null, it is set to true only when a
+  // RECONVERT_SELECTION_OR_INSERT_SPACE callback handles the operation and the
+  // originating physical key must not be forwarded to the application.
+  static bool OnOutputReceivedSync(
+      TipTextService* text_service, ITfContext* context,
+      commands::Output new_output,
+      bool* should_consume_key_event = nullptr);
 
   // Begins an async edit session with |new_output| to update the context.
   static bool OnOutputReceivedAsync(TipTextService* text_service,

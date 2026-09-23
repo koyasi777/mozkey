@@ -106,8 +106,15 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
       }
 
       // For reconversion, the active selection end should be moved to the
-      // front character.
-      if (move_anchor_) {
+      // front character.  Do not call SetSelection for an empty selection.
+      // Some TSF hosts (notably Gecko) treat even a no-op SetSelection during
+      // key handling as evidence that the IME processed the physical key.
+      // That would prevent the half-width Space fallback from reaching the
+      // application when there is no text to reconvert.
+      const bool should_move_anchor =
+          TipSurroundingTextUtil::ShouldMoveAnchorForReconversion(
+              move_anchor_, retrieve_selected_text_, result_);
+      if (should_move_anchor) {
         result = TipRangeUtil::SetSelection(context_.get(), edit_cookie,
                                             selected_range.get(), TF_AE_START);
         if (FAILED(result)) {
@@ -438,6 +445,25 @@ bool TipSurroundingText::DeletePrecedingText(
     return false;
   }
   return true;
+}
+
+bool TipSurroundingTextUtil::ContainsEmbeddedObject(
+    const std::wstring_view text) {
+  return text.find(static_cast<wchar_t>(TS_CHAR_EMBEDDED)) !=
+         std::wstring_view::npos;
+}
+
+bool TipSurroundingTextUtil::ShouldMoveAnchorForReconversion(
+    const bool move_anchor, const bool retrieve_selected_text,
+    const TipSurroundingTextInfo& info) {
+  if (!move_anchor) {
+    return false;
+  }
+  if (!retrieve_selected_text) {
+    return true;
+  }
+  return info.has_selected_text && !info.selected_text.empty() &&
+         !ContainsEmbeddedObject(info.selected_text);
 }
 
 bool TipSurroundingTextUtil::ContainsPasswordInputScope(
