@@ -11541,6 +11541,46 @@ TEST_F(SessionTest, InsertSpaceWithCustomKeyBinding) {
   EXPECT_TRUE(TryUndoAndAssertDoNothing(&session));
 }
 
+TEST_F(SessionTest,
+       ReconvertSelectionOrInsertSpaceKeepsHalfWidthPassThroughFallback) {
+  config::Config config;
+  constexpr absl::string_view kCustomKeymapTable =
+      "status\tkey\tcommand\n"
+      "Precomposition\tSpace\tReconvertSelectionOrInsertSpace\n";
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(kCustomKeymapTable);
+  config.set_space_character_form(config::Config::FUNDAMENTAL_HALF_WIDTH);
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  auto key_map_manager = std::make_shared<keymap::KeyMapManager>(config);
+  session.SetConfig(config);
+  session.SetKeyMapManager(key_map_manager);
+  InitSessionToPrecomposition(&session);
+
+  commands::Command command;
+
+  // TestSendKey must reserve the physical Space for the TSF client so it can
+  // inspect the application selection.
+  EXPECT_TRUE(TestSendKey("Space", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_FALSE(command.output().has_callback());
+
+  // SendKey deliberately keeps the normal half-width Space fallback as a
+  // pass-through.  The TSF client consumes the physical key only if its
+  // reconversion callback actually handles selected application text.
+  EXPECT_TRUE(SendKey("Space", &session, &command));
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  EXPECT_EQ(command.output().callback().session_command().type(),
+            commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE);
+}
+
 TEST_F(SessionTest, InsertAlternateSpaceWithCustomKeyBinding) {
   // This is a unittest against http://b/5872031
   config::Config config;

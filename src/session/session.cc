@@ -2912,10 +2912,15 @@ bool Session::TestSendKey(commands::Command* command) {
     // the inconsistency between TestSendKey and SendKey.
     switch (key_command) {
       case keymap::PrecompositionState::INSERT_SPACE:
-      case keymap::PrecompositionState::RECONVERT_SELECTION_OR_INSERT_SPACE:
         if (!IsFullWidthInsertSpace(command->input()) && IsPureSpaceKey(key)) {
           return EchoBackAndClearUndoContext(command);
         }
+        return DoNothing(command);
+      case keymap::PrecompositionState::RECONVERT_SELECTION_OR_INSERT_SPACE:
+        // TestSendKey must route this command to the client even when the
+        // fallback space is half-width.  SendKey still keeps the normal
+        // InsertSpace pass-through semantics so an unselected half-width Space
+        // can ultimately be forwarded to the application.
         return DoNothing(command);
       case keymap::PrecompositionState::INSERT_ALTERNATE_SPACE:
         if (IsFullWidthInsertSpace(command->input()) && IsPureSpaceKey(key)) {

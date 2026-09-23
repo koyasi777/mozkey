@@ -115,6 +115,17 @@ class TipSurroundingText {
 
 class TipSurroundingTextUtil {
  public:
+  // Returns true when |text| contains a TSF embedded-object marker.
+  static bool ContainsEmbeddedObject(std::wstring_view text);
+
+  // Returns whether reconversion preparation should move the active end of
+  // the current selection to its start.  When selected text was explicitly
+  // retrieved, an empty, unavailable, or embedded-object selection must not
+  // be mutated.
+  static bool ShouldMoveAnchorForReconversion(
+      bool move_anchor, bool retrieve_selected_text,
+      const TipSurroundingTextInfo& info);
+
   // Returns true when the scope list explicitly contains IS_PASSWORD.
   static bool ContainsPasswordInputScope(
       const std::vector<InputScope>& input_scopes);

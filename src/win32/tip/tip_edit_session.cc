@@ -392,6 +392,12 @@ bool TurnOnImeAndTryToReconvertFromIme(TipTextService* text_service,
     return TurnOnImeForReconversionFallback(text_service, context);
   }
 
+  // Match the normal TSF reconversion path: embedded objects cannot be
+  // restored safely after reverse conversion.
+  if (TipSurroundingTextUtil::ContainsEmbeddedObject(info.selected_text)) {
+    return false;
+  }
+
   TipPrivateContext* private_context = text_service->GetPrivateContext(context);
   if (!private_context) {
     // This is an unmanaged context. It's OK. Nothing to do.
@@ -423,11 +429,17 @@ bool TurnOnImeAndTryToReconvertFromIme(TipTextService* text_service,
   }
 }
 
-bool ReconvertSelectionOrKeepFallbackOutput(TipTextService* text_service,
-                                            ITfContext* context,
-                                            Output* fallback_output) {
+enum class ReconvertSelectionResult {
+  kUseFallback,
+  kHandledSuccessfully,
+  kHandledWithError,
+};
+
+ReconvertSelectionResult ReconvertSelectionOrKeepFallbackOutput(
+    TipTextService* text_service, ITfContext* context,
+    Output* fallback_output) {
   if (context == nullptr || fallback_output == nullptr) {
-    return false;
+    return ReconvertSelectionResult::kHandledWithError;
   }
 
   TipSurroundingTextInfo info;
@@ -438,13 +450,13 @@ bool ReconvertSelectionOrKeepFallbackOutput(TipTextService* text_service,
     // In that case, reconversion is unavailable, so keep the server-generated
     // fallback InsertSpace output instead of consuming Space and doing nothing.
     fallback_output->clear_callback();
-    return false;
+    return ReconvertSelectionResult::kUseFallback;
   }
 
   if (info.in_composition) {
     // This command is only intended for the precomposition state.  Be
     // conservative if a composition is unexpectedly found.
-    return true;
+    return ReconvertSelectionResult::kHandledSuccessfully;
   }
 
   const std::string text_utf8 = WideToUtf8(info.selected_text);
@@ -452,14 +464,20 @@ bool ReconvertSelectionOrKeepFallbackOutput(TipTextService* text_service,
     // No selected application text.  Keep and apply the fallback InsertSpace
     // output that the server already generated.
     fallback_output->clear_callback();
-    return false;
+    return ReconvertSelectionResult::kUseFallback;
+  }
+
+  if (TipSurroundingTextUtil::ContainsEmbeddedObject(info.selected_text)) {
+    // A selection exists, so do not fall back to Space.  Embedded objects are
+    // intentionally not reconverted because they cannot be restored safely.
+    return ReconvertSelectionResult::kHandledSuccessfully;
   }
 
   TipPrivateContext* private_context = text_service->GetPrivateContext(context);
   if (!private_context) {
     // This is an unmanaged context.  Consume the key rather than applying the
     // fallback and potentially replacing selected application text.
-    return true;
+    return ReconvertSelectionResult::kHandledSuccessfully;
   }
 
   Output output;
@@ -468,22 +486,24 @@ bool ReconvertSelectionOrKeepFallbackOutput(TipTextService* text_service,
     command.set_type(SessionCommand::CONVERT_REVERSE);
     command.set_text(text_utf8);
     if (!private_context->GetClient()->SendCommand(command, &output)) {
-      return true;
+      return ReconvertSelectionResult::kHandledWithError;
     }
   }
 
   if (output.has_callback() && output.callback().has_session_command() &&
       output.callback().session_command().has_type()) {
     // Do not allow recursive callbacks.
-    return true;
+    return ReconvertSelectionResult::kHandledWithError;
   }
 
-  if (need_async_edit_session) {
-    return TipEditSession::OnOutputReceivedAsync(text_service, context,
+  const bool applied =
+      need_async_edit_session
+          ? TipEditSession::OnOutputReceivedAsync(text_service, context,
+                                                  std::move(output))
+          : TipEditSession::OnOutputReceivedSync(text_service, context,
                                                  std::move(output));
-  }
-  return TipEditSession::OnOutputReceivedSync(text_service, context,
-                                              std::move(output));
+  return applied ? ReconvertSelectionResult::kHandledSuccessfully
+                 : ReconvertSelectionResult::kHandledWithError;
 }
 
 bool UndoCommint(TipTextService* text_service, ITfContext* context) {
@@ -602,7 +622,11 @@ enum EditSessionMode {
 bool OnOutputReceivedImpl(TipTextService* text_service,
                           ITfContext* context,
                           Output new_output,
-                          EditSessionMode mode) {
+                          EditSessionMode mode,
+                          bool* should_consume_key_event) {
+  if (should_consume_key_event != nullptr) {
+    *should_consume_key_event = false;
+  }
   if (new_output.has_callback() &&
       new_output.callback().has_session_command() &&
       new_output.callback().session_command().has_type()) {
@@ -621,12 +645,18 @@ bool OnOutputReceivedImpl(TipTextService* text_service,
       switch (type) {
         case SessionCommand::CONVERT_REVERSE:
           return TurnOnImeAndTryToReconvertFromIme(text_service, context);
-        case SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE:
-          if (ReconvertSelectionOrKeepFallbackOutput(text_service, context,
-                                                     &new_output)) {
-            return true;
+        case SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE: {
+          const ReconvertSelectionResult result =
+              ReconvertSelectionOrKeepFallbackOutput(text_service, context,
+                                                      &new_output);
+          if (result == ReconvertSelectionResult::kUseFallback) {
+            break;
           }
-          break;
+          if (should_consume_key_event != nullptr) {
+            *should_consume_key_event = true;
+          }
+          return result == ReconvertSelectionResult::kHandledSuccessfully;
+        }
         case SessionCommand::UNDO:
           return UndoCommint(text_service, context);
         default:
@@ -749,18 +779,18 @@ class AsyncSetTextEditSessionImpl final
 
 }  // namespace
 
-bool TipEditSession::OnOutputReceivedSync(TipTextService* text_service,
-                                          ITfContext* context,
-                                          Output new_output) {
+bool TipEditSession::OnOutputReceivedSync(
+    TipTextService* text_service, ITfContext* context, Output new_output,
+    bool* should_consume_key_event) {
   return OnOutputReceivedImpl(text_service, context, std::move(new_output),
-                              kSync);
+                              kSync, should_consume_key_event);
 }
 
 bool TipEditSession::OnOutputReceivedAsync(TipTextService* text_service,
                                            ITfContext* context,
                                            Output new_output) {
   return OnOutputReceivedImpl(text_service, context, std::move(new_output),
-                              kAsync);
+                              kAsync, nullptr);
 }
 
 bool TipEditSession::OnLayoutChangedAsync(TipTextService* text_service,
