@@ -1035,7 +1035,7 @@
                   </layout>
                  </widget>
                 </item>
-                <item row="20" column="0" colspan="8">
+                <item row="21" column="0" colspan="8">
                  <widget class="QWidget" name="zenzConditionFieldsSectionWidget">
                   <layout class="QHBoxLayout" name="horizontalLayout_zenzConditionFieldsSection">
                    <property name="spacing">
@@ -1076,7 +1076,7 @@
                   </layout>
                  </widget>
                 </item>
-                <item row="27" column="0" colspan="8">
+                <item row="28" column="0" colspan="8">
                  <widget class="QWidget" name="zenzFeedbackLearningSectionWidget">
                   <layout class="QHBoxLayout" name="horizontalLayout_zenzFeedbackLearningSection">
                    <property name="spacing">
@@ -1580,7 +1580,39 @@
                   </property>
                  </widget>
                 </item>
-                <item row="21" column="0" colspan="3">
+                <item row="20" column="0" colspan="3">
+                 <widget class="QLabel" name="zenzDeferredPresentationTimeoutLabel">
+                  <property name="toolTip">
+                   <string>「通常のライブ変換結果を表示しない」が有効な場合、Zenz 補正要求の送信後、この時間以内に結果が返らなければ、その回の Zenz 補正を中止して通常の Mozc ライブ変換結果を表示します。</string>
+                  </property>
+                  <property name="text">
+                   <string>Zenz 補正開始後の最大待機時間</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="20" column="3" colspan="5">
+                 <widget class="QSpinBox" name="zenzDeferredPresentationTimeoutSpinBox">
+                  <property name="toolTip">
+                   <string>「通常のライブ変換結果を表示しない」が有効な場合、Zenz 補正要求の送信後、この時間以内に結果が返らなければ、その回の Zenz 補正を中止して通常の Mozc ライブ変換結果を表示します。</string>
+                  </property>
+                  <property name="minimum">
+                   <number>50</number>
+                  </property>
+                  <property name="maximum">
+                   <number>3000</number>
+                  </property>
+                  <property name="singleStep">
+                   <number>50</number>
+                  </property>
+                  <property name="value">
+                   <number>300</number>
+                  </property>
+                  <property name="suffix">
+                   <string> ms</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="22" column="0" colspan="3">
                  <widget class="QLabel" name="zenzLiveCorrectionProfileLabel">
                   <property name="toolTip">
                    <string>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</string>
@@ -1590,7 +1622,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="21" column="3" colspan="5">
+                <item row="22" column="3" colspan="5">
                  <widget class="QLineEdit" name="zenzLiveCorrectionProfileLineEdit">
                   <property name="toolTip">
                    <string>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</string>
@@ -1603,7 +1635,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="22" column="0" colspan="3">
+                <item row="23" column="0" colspan="3">
                  <widget class="QLabel" name="zenzLiveCorrectionTopicLabel">
                   <property name="toolTip">
                    <string>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</string>
@@ -1613,7 +1645,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="22" column="3" colspan="5">
+                <item row="23" column="3" colspan="5">
                  <widget class="QLineEdit" name="zenzLiveCorrectionTopicLineEdit">
                   <property name="toolTip">
                    <string>例: Mozc、Rust、会計、法律。空欄なら送信しません。</string>
@@ -1626,7 +1658,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="23" column="0" colspan="3">
+                <item row="24" column="0" colspan="3">
                  <widget class="QLabel" name="zenzLiveCorrectionStyleLabel">
                   <property name="toolTip">
                    <string>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</string>
@@ -1636,7 +1668,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="23" column="3" colspan="5">
+                <item row="24" column="3" colspan="5">
                  <widget class="QLineEdit" name="zenzLiveCorrectionStyleLineEdit">
                   <property name="toolTip">
                    <string>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</string>
@@ -1649,7 +1681,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="24" column="0" colspan="3">
+                <item row="25" column="0" colspan="3">
                  <widget class="QLabel" name="zenzLiveCorrectionSettingsLabel">
                   <property name="toolTip">
                    <string>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</string>
@@ -1659,7 +1691,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="24" column="3" colspan="5">
+                <item row="25" column="3" colspan="5">
                  <widget class="QLineEdit" name="zenzLiveCorrectionSettingsLineEdit">
                   <property name="toolTip">
                    <string>例: 専門用語を優先。空欄なら送信しません。</string>
@@ -1672,7 +1704,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="25" column="0" colspan="8">
+                <item row="26" column="0" colspan="8">
                  <widget class="QCheckBox" name="zenzLiveCorrectionRightContextCheckBox">
                   <property name="toolTip">
                    <string>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</string>
@@ -1682,7 +1714,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="26" column="0" colspan="3">
+                <item row="27" column="0" colspan="3">
                  <widget class="QLabel" name="zenzLiveCorrectionRightContextLengthLabel">
                   <property name="toolTip">
                    <string>Zenz 右文脈として使う最大文字数です。</string>
@@ -1692,7 +1724,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="26" column="3" colspan="5">
+                <item row="27" column="3" colspan="5">
                  <widget class="QSpinBox" name="zenzLiveCorrectionRightContextLengthSpinBox">
                   <property name="toolTip">
                    <string>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</string>
@@ -1717,7 +1749,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="28" column="0" colspan="8">
+                <item row="29" column="0" colspan="8">
                  <widget class="QCheckBox" name="zenzFeedbackLearningCheckBox">
                   <property name="toolTip">
                    <string>Zenz 補正結果の採用/却下をローカルに保存し、次回以降の補正や候補順位に反映します。確定した内容は、通常の変換履歴にも反映される場合があります。</string>
@@ -1727,7 +1759,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="29" column="0" colspan="8">
+                <item row="30" column="0" colspan="8">
                  <widget class="QCheckBox" name="zenzFeedbackAutoBlockCheckBox">
                   <property name="toolTip">
                    <string>同じ読み・同じ文脈クラス・同じ Zenz 補正について、拒否回数と拒否割合の両方が設定値以上になった場合に表示を抑制します。自動ブロック中も Zenz の内部生成と最終確定との比較を続け、一致が増えて拒否割合が下がれば自動解除します。通常の Mozc 候補から削除する機能ではありません。</string>
@@ -1737,7 +1769,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="30" column="0" colspan="3">
+                <item row="31" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackAutoBlockRejectThresholdLabel">
                   <property name="toolTip">
                    <string>自動ブロック判定に必要な最低拒否回数です。拒否割合の条件も同時に満たした場合だけ自動ブロックします。設定変更は既存の Zenz 学習データにも動的に反映されます。</string>
@@ -1747,7 +1779,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="30" column="3" colspan="5">
+                <item row="31" column="3" colspan="5">
                  <widget class="QSpinBox" name="zenzFeedbackAutoBlockRejectThresholdSpinBox">
                   <property name="toolTip">
                    <string>自動ブロック判定に必要な最低拒否回数です。</string>
@@ -1769,7 +1801,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="31" column="0" colspan="3">
+                <item row="32" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackAutoBlockMinimumRejectPercentageLabel">
                   <property name="toolTip">
                    <string>採用回数と通常拒否回数の合計に占める拒否の最低割合です。最低拒否回数の条件も同時に満たした場合だけ自動ブロックします。</string>
@@ -1779,7 +1811,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="31" column="3" colspan="5">
+                <item row="32" column="3" colspan="5">
                  <widget class="QSpinBox" name="zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox">
                   <property name="toolTip">
                    <string>自動ブロック判定に必要な最低拒否割合です。拒否割合は「通常拒否 ÷ (採用 + 通常拒否)」で計算します。</string>
@@ -1801,14 +1833,14 @@
                   </property>
                  </widget>
                 </item>
-                <item row="32" column="0" colspan="3">
+                <item row="33" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackDataLabel">
                   <property name="text">
                    <string>Zenz 学習データ</string>
                   </property>
                  </widget>
                 </item>
-                <item row="32" column="3" colspan="5">
+                <item row="33" column="3" colspan="5">
                  <widget class="QPushButton" name="editZenzFeedbackButton">
                   <property name="toolTip">
                    <string>保存された Zenz 学習データを確認、検索、インポート、エクスポート、削除します。通常の変換履歴に反映済みの学習は、この画面の削除対象には含まれません。</string>
@@ -3365,6 +3397,7 @@
   <tabstop>zenzLiveCorrectionDelaySpinBox</tabstop>
   <tabstop>zenzLiveCorrectionMinKeyLengthSpinBox</tabstop>
   <tabstop>zenzDeferLiveConversionDisplayCheckBox</tabstop>
+  <tabstop>zenzDeferredPresentationTimeoutSpinBox</tabstop>
   <tabstop>zenzLiveCorrectionProfileLineEdit</tabstop>
   <tabstop>zenzLiveCorrectionTopicLineEdit</tabstop>
   <tabstop>zenzLiveCorrectionStyleLineEdit</tabstop>

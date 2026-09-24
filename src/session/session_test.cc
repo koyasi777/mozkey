@@ -45,6 +45,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "base/strings/assign.h"
 #include "base/strings/unicode.h"
@@ -3281,6 +3282,9 @@ TEST_F(SessionTest,
   config.set_use_zenz_live_correction(true);
   config.set_defer_live_conversion_display_until_zenz_result(true);
   config.set_zenz_live_correction_delay_msec(1000);
+  // This deadline starts only after the Zenz request is actually submitted.
+  // A longer debounce delay must remain intact.
+  config.set_zenz_deferred_presentation_timeout_msec(50);
   config.set_zenz_live_correction_min_key_length(2);
   session.SetConfig(config);
 
@@ -3343,6 +3347,65 @@ TEST_F(SessionTest,
   EXPECT_PREEDIT("あい", command);
   ASSERT_TRUE(command.output().has_callback());
   EXPECT_EQ(command.output().callback().delay_millisec(), 24);
+}
+
+TEST_F(SessionTest,
+       DeferredZenzPresentationTimeoutFallsBackAfterRequestSubmission) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(0);
+  config.set_zenz_deferred_presentation_timeout_msec(300);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_zenz_live_correction_pipe_name("");
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("あい", command);
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  const commands::SessionCommand poll_command =
+      command.output().callback().session_command();
+
+  ASSERT_TRUE(session_peer.pending_zenz_live_().pending);
+  ASSERT_TRUE(session_peer.pending_zenz_live_().submitted);
+  session_peer.pending_zenz_live_().issued_at -= absl::Milliseconds(301);
+
+  command.Clear();
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *command.mutable_input()->mutable_command() = poll_command;
+
+  ASSERT_TRUE(session.SendCommand(&command));
+
+  EXPECT_TRUE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT("愛", command);
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "zenz_deferred_presentation_timeout");
+  EXPECT_FALSE(session_peer.pending_zenz_live_().pending);
 }
 
 TEST_F(SessionTest,

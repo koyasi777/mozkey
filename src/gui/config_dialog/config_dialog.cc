@@ -369,6 +369,11 @@ ConfigDialog::ConfigDialog()
   zenzLiveCorrectionDelaySpinBox->setSuffix(QString::fromUtf8(" ms"));
   zenzLiveCorrectionDelaySpinBox->setSpecialValueText(QString::fromUtf8("即時"));
 
+  zenzDeferredPresentationTimeoutSpinBox->setRange(0, 3000);
+  zenzDeferredPresentationTimeoutSpinBox->setSingleStep(50);
+  zenzDeferredPresentationTimeoutSpinBox->setSuffix(
+      QString::fromUtf8(" ms"));
+
   zenzLiveCorrectionMinKeyLengthSpinBox->setRange(2, 20);
   zenzLiveCorrectionMinKeyLengthSpinBox->setSingleStep(1);
   zenzLiveCorrectionMinKeyLengthSpinBox->setSuffix(QString::fromUtf8(" 文字"));
@@ -510,6 +515,9 @@ ConfigDialog::ConfigDialog()
                    SLOT(SelectLiveConversionSetting(int)));
   QObject::connect(zenzLiveCorrectionCheckBox, SIGNAL(stateChanged(int)), this,
                    SLOT(SelectZenzLiveCorrectionSetting(int)));
+  QObject::connect(zenzDeferLiveConversionDisplayCheckBox,
+                   SIGNAL(stateChanged(int)), this,
+                   SLOT(SelectZenzDeferredPresentationSetting(int)));
   QObject::connect(zenzLiveCorrectionRightContextCheckBox,
                    SIGNAL(stateChanged(int)), this,
                    SLOT(SelectZenzRightContextSetting(int)));
@@ -734,6 +742,15 @@ bool RefreshTsfProfileIcon();
 #endif  // _WIN32
 
 bool ConfigDialog::Update() {
+  if (zenzDeferredPresentationTimeoutSpinBox->value() < 50) {
+    QMessageBox::warning(
+        this, windowTitle(),
+        tr("Zenz correction maximum wait must be at least 50 ms."));
+    zenzDeferredPresentationTimeoutSpinBox->setFocus();
+    zenzDeferredPresentationTimeoutSpinBox->selectAll();
+    return false;
+  }
+
   config::Config config;
   ConvertToProto(&config);
 
@@ -923,6 +940,9 @@ constexpr uint32_t kMinLiveConversionMinKeyLength = 1;
 constexpr uint32_t kMaxLiveConversionMinKeyLength = 20;
 constexpr uint32_t kDefaultZenzLiveCorrectionDelayMsec = 1000;
 constexpr uint32_t kMaxZenzLiveCorrectionDelayMsec = 5000;
+constexpr uint32_t kDefaultZenzDeferredPresentationTimeoutMsec = 300;
+constexpr uint32_t kMinZenzDeferredPresentationTimeoutMsec = 50;
+constexpr uint32_t kMaxZenzDeferredPresentationTimeoutMsec = 3000;
 constexpr uint32_t kDefaultZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kMinZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kMaxZenzLiveCorrectionMinKeyLength = 20;
@@ -3031,6 +3051,16 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
                      0u,
                      kMaxZenzLiveCorrectionDelayMsec)));
 
+  const uint32_t zenz_deferred_presentation_timeout_msec =
+      config.has_zenz_deferred_presentation_timeout_msec()
+          ? config.zenz_deferred_presentation_timeout_msec()
+          : kDefaultZenzDeferredPresentationTimeoutMsec;
+  zenzDeferredPresentationTimeoutSpinBox->setValue(
+      static_cast<int>(
+          std::clamp(zenz_deferred_presentation_timeout_msec,
+                     kMinZenzDeferredPresentationTimeoutMsec,
+                     kMaxZenzDeferredPresentationTimeoutMsec)));
+
   const uint32_t zenz_live_correction_min_key_length =
       config.has_zenz_live_correction_min_key_length()
           ? config.zenz_live_correction_min_key_length()
@@ -3267,6 +3297,9 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
                defer_live_conversion_display_until_zenz_result);
   config->set_zenz_live_correction_delay_msec(
       static_cast<uint32_t>(zenzLiveCorrectionDelaySpinBox->value()));
+  config->set_zenz_deferred_presentation_timeout_msec(
+      static_cast<uint32_t>(
+          zenzDeferredPresentationTimeoutSpinBox->value()));
   config->set_zenz_live_correction_min_key_length(
       static_cast<uint32_t>(
           zenzLiveCorrectionMinKeyLengthSpinBox->value()));
@@ -4138,6 +4171,10 @@ void ConfigDialog::SelectZenzLiveCorrectionSetting(int state) {
   zenzLiveCorrectionDelayLabel->setEnabled(enabled);
   zenzLiveCorrectionDelaySpinBox->setEnabled(enabled);
   zenzDeferLiveConversionDisplayCheckBox->setEnabled(enabled);
+  SelectZenzDeferredPresentationSetting(
+      enabled ? static_cast<int>(
+                    zenzDeferLiveConversionDisplayCheckBox->isChecked())
+              : 0);
   zenzLiveCorrectionMinKeyLengthLabel->setEnabled(enabled);
   zenzLiveCorrectionMinKeyLengthSpinBox->setEnabled(enabled);
   zenzLiveCorrectionProfileLabel->setEnabled(enabled);
@@ -4156,6 +4193,16 @@ void ConfigDialog::SelectZenzLiveCorrectionSetting(int state) {
   zenzFeedbackLearningCheckBox->setEnabled(enabled);
   SelectZenzFeedbackLearningSetting(
       enabled ? static_cast<int>(zenzFeedbackLearningCheckBox->isChecked()) : 0);
+}
+
+void ConfigDialog::SelectZenzDeferredPresentationSetting(int state) {
+  const bool enabled =
+      liveConversionCheckBox->isChecked() &&
+      zenzLiveCorrectionCheckBox->isChecked() &&
+      static_cast<bool>(state);
+
+  zenzDeferredPresentationTimeoutLabel->setEnabled(enabled);
+  zenzDeferredPresentationTimeoutSpinBox->setEnabled(enabled);
 }
 
 void ConfigDialog::SelectZenzFeedbackLearningSetting(int state) {

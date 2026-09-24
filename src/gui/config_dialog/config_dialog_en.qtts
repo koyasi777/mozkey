@@ -482,6 +482,16 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正開始後の最大待機時間</source>
+        <translation>Maximum wait after Zenz correction starts</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>「通常のライブ変換結果を表示しない」が有効な場合、Zenz 補正要求の送信後、この時間以内に結果が返らなければ、その回の Zenz 補正を中止して通常の Mozc ライブ変換結果を表示します。</source>
+        <translation>When deferred presentation is enabled, if no Zenz result is available within this time after the correction request is submitted, cancel Zenz for that input and show the normal Mozc live-conversion result.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
         <source>Zenz 条件フィールド</source>
         <translation>Zenz condition fields</translation>
     </message>
@@ -1371,6 +1381,12 @@ The current Windows default IME override will be saved so it can be restored lat
         <location filename="config_dialog.cc" line="0"/>
         <source> % 以上</source>
         <translation> % or more</translation>
+    </message>
+
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Zenz correction maximum wait must be at least 50 ms.</source>
+        <translation>Zenz correction maximum wait must be at least 50 ms.</translation>
     </message>
 </context>
 <context>
