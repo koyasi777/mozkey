@@ -429,6 +429,7 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
   config.set_use_zenz_auto_block_rejected_correction(true);
   config.set_zenz_auto_block_reject_threshold(2);
+  config.set_zenz_auto_block_minimum_reject_percentage(40);
 
   ConversionRequest::Options options;
   options.request_type = ConversionRequest::CONVERSION;

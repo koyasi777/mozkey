@@ -388,7 +388,12 @@ ConfigDialog::ConfigDialog()
   zenzFeedbackAutoBlockRejectThresholdSpinBox->setRange(1, 999);
   zenzFeedbackAutoBlockRejectThresholdSpinBox->setSingleStep(1);
   zenzFeedbackAutoBlockRejectThresholdSpinBox->setSuffix(
-      QString::fromUtf8(" 回"));
+      tr(" 回"));
+
+  zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox->setRange(1, 100);
+  zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox->setSingleStep(1);
+  zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox->setSuffix(
+      tr(" % 以上"));
 
   punctuationsSettingComboBox->addItem(QString::fromUtf8("、。"));
   punctuationsSettingComboBox->addItem(QString::fromUtf8("，．"));
@@ -513,7 +518,7 @@ ConfigDialog::ConfigDialog()
                    SLOT(SelectZenzFeedbackLearningSetting(int)));
   QObject::connect(zenzFeedbackAutoBlockCheckBox,
                    SIGNAL(stateChanged(int)), this,
-                   SLOT(SelectZenzFeedbackLearningSetting(int)));
+                   SLOT(SelectZenzFeedbackAutoBlockSetting(int)));
   QObject::connect(useAutoConversion, SIGNAL(stateChanged(int)), this,
                    SLOT(SelectAutoConversionSetting(int)));
   QObject::connect(useDirectCommit, SIGNAL(stateChanged(int)), this,
@@ -922,9 +927,12 @@ constexpr uint32_t kDefaultZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kMinZenzLiveCorrectionMinKeyLength = 2;
 constexpr uint32_t kMaxZenzLiveCorrectionMinKeyLength = 20;
 constexpr uint32_t kMaxZenzLiveCorrectionRightContextLength = 128;
-constexpr uint32_t kDefaultZenzAutoBlockRejectThreshold = 3;
-constexpr uint32_t kMinZenzAutoBlockRejectThreshold = 1;
-constexpr uint32_t kMaxZenzAutoBlockRejectThreshold = 999;
+constexpr uint32_t kDefaultZenzAutoBlockMinimumRejectCount = 1;
+constexpr uint32_t kMinZenzAutoBlockMinimumRejectCount = 1;
+constexpr uint32_t kMaxZenzAutoBlockMinimumRejectCount = 999;
+constexpr uint32_t kDefaultZenzAutoBlockMinimumRejectPercentage = 50;
+constexpr uint32_t kMinZenzAutoBlockMinimumRejectPercentage = 1;
+constexpr uint32_t kMaxZenzAutoBlockMinimumRejectPercentage = 100;
 
 constexpr uint32_t kDefaultInputPreeditTextColor = 0xff5000;
 constexpr uint32_t kDefaultInputPreeditBackgroundColor = 0xffffcc;
@@ -1438,8 +1446,10 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
   session::ZenzFeedbackAutoBlockPolicy auto_block_policy;
   auto_block_policy.enabled =
       current_config.use_zenz_auto_block_rejected_correction();
-  auto_block_policy.reject_threshold =
+  auto_block_policy.minimum_reject_count =
       static_cast<int>(current_config.zenz_auto_block_reject_threshold());
+  auto_block_policy.minimum_reject_percentage = static_cast<int>(
+      current_config.zenz_auto_block_minimum_reject_percentage());
 
   QVBoxLayout* root_layout = new QVBoxLayout(&dialog);
 
@@ -1472,10 +1482,10 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                          &dialog, dialog.windowTitle(),
                          QString::fromUtf8(
                              "【この画面で扱うデータ】\n"
-                             "この画面で扱うのは、Zenz 補正が実際に表示・反映されたときの"
+                             "この画面で扱うのは、Zenz が検証・採用ポリシーを通過した"
                              "読み全体、補正後の候補、文脈クラス、採用/却下の記録です。"
-                             "通常変換だけを操作した履歴は、この Zenz 学習データの"
-                             "採用数・却下数・スコアには入りません。\n\n"
+                             "表示された Zenz 補正だけでなく、自動ブロック中に内部で"
+                             "生成された同じ補正も、最終確定との比較対象になります。\n\n"
                              "Zenz 学習データは full-sequence 単位です。"
                              "単語や文節ごとの学習ではなく、同じ読み全体、同じ文脈クラス、"
                              "同じ補正結果の組み合わせごとに集計します。"
@@ -1489,17 +1499,25 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                              "その後、次の実テキスト入力までに Backspace / Escape / "
                              "Revert / Undo などで取り消されなかった場合だけ、"
                              "採用として保存されます。"
-                             "Zenz 補正が表示されただけでは保存されません。\n\n"
+                             "また、表示された Zenz 補正を通常変換へ戻した後、または"
+                             "自動ブロック中の hidden Zenz 補正に対して、同じ読み全体を"
+                             "最終的に同じ値で確定した場合も採用として記録されます。"
+                             "hidden match は Zenz feedback の統計だけを更新し、通常 Mozc "
+                             "履歴への追加学習は行いません。\n\n"
                              "【いつ却下として記録されるか】\n"
                              "Zenz 補正が表示された後に Space や候補移動などで"
                              "通常変換へ戻り、最終的に Zenz 補正とは異なる値で"
                              "確定された場合、その Zenz 補正は却下として保存されます。"
+                             "自動ブロック中も、hidden Zenz 補正と同じ読み全体を"
+                             "異なる値で確定した場合は却下として記録されます。"
                              "これは通常候補を削除する命令ではなく、次回以降の"
-                             "候補順位や保存済み Zenz feedback による即時補正を調整するための"
+                             "候補順位や自動ブロック判定を調整するための"
                              "弱いマイナス信号です。\n\n"
                              "【記録されない操作】\n"
-                             "Zenz 補正が走っていないときの通常変換、通常候補の選択、"
-                             "通常変換の確定は、この画面の Zenz 学習スコアには影響しません。"
+                             "対応する visible / hidden Zenz 観測がない通常変換、通常候補の"
+                             "選択、通常変換の確定は、この画面の Zenz 学習スコアには"
+                             "影響しません。hidden Zenz の読みより入力が伸びた場合も、"
+                             "別の full-sequence として扱い、その古い観測は数えません。"
                              "また、Zenz が通常 Mozc と同じ値を返した場合、"
                              "出力検証や採用ポリシーで不採用になった場合、"
                              "password / privacy gate で止められた場合も、"
@@ -1516,10 +1534,12 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                              "優先候補や保存済み feedback による即時補正としては使いません。"
                              "ただし hard block ではないため、Zenz が新しく同じ補正を"
                              "返すこと自体や、通常 Mozc 候補を消すことはありません。\n"
-                             "自動ブロック中: auto-block が ON で、通常却下回数が"
-                             "設定したしきい値に達しています。TSV に hard reject を"
-                             "固定保存するのではなく、現在の ON/OFF としきい値から"
-                             "動的に判定します。\n"
+                             "自動ブロック中: auto-block が ON で、同じ exact 文脈クラスの"
+                             "通常却下回数が最低拒否回数以上、かつ拒否割合が最低拒否割合以上"
+                             "です。拒否割合は 通常却下 / (採用 + 通常却下) で計算します。"
+                             "TSV に hard reject を固定保存するのではなく、現在の設定と"
+                             "観測履歴から動的に判定し、hidden match が増えて割合が下がれば"
+                             "自動解除されます。\n"
                              "手動ブロック中: この画面で明示的にブロックされた状態です。"
                              "解除したい場合は、該当エントリを削除して必要に応じて"
                              "再学習してください。\n"
@@ -1546,13 +1566,14 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
   root_layout->addLayout(search_layout);
 
   QTableWidget* table = new QTableWidget(&dialog);
-  table->setColumnCount(6);
+  table->setColumnCount(7);
   table->setHorizontalHeaderLabels(QStringList()
                                    << QString::fromUtf8("読み")
                                    << QString::fromUtf8("候補")
                                    << QString::fromUtf8("文脈クラス")
                                    << QString::fromUtf8("採用")
                                    << QString::fromUtf8("却下")
+                                   << QString::fromUtf8("拒否割合")
                                    << QString::fromUtf8("状態"));
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
   table->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -1598,7 +1619,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
     if (row < 0) {
       return false;
     }
-    QTableWidgetItem* reason_item = table->item(row, 5);
+    QTableWidgetItem* reason_item = table->item(row, 6);
     if (reason_item == nullptr) {
       return false;
     }
@@ -1661,12 +1682,18 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
       SetTableItem(table, row, 2, context_class);
       SetTableItem(table, row, 3, QString::number(entry.accepted_count));
       SetTableItem(table, row, 4, QString::number(entry.rejected_count));
-      SetTableItem(table, row, 5, FeedbackReasonLabel(entry.reason));
+      SetTableItem(
+          table, row, 5,
+          entry.hard_rejected
+              ? QString::fromUtf8("-")
+              : QString::fromUtf8("%1 %")
+                    .arg(entry.auto_block_reject_percentage));
+      SetTableItem(table, row, 6, FeedbackReasonLabel(entry.reason));
 
       table->item(row, 0)->setData(Qt::UserRole, key);
       table->item(row, 1)->setData(Qt::UserRole, value);
       table->item(row, 2)->setData(Qt::UserRole, context_class);
-      table->item(row, 5)->setData(Qt::UserRole, ToQString(entry.reason));
+      table->item(row, 6)->setData(Qt::UserRole, ToQString(entry.reason));
 
       ++visible_count;
     }
@@ -1675,8 +1702,10 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
 
     const QString auto_block_status =
         auto_block_policy.enabled
-            ? QString::fromUtf8(" / 自動ブロックしきい値 %1 回")
-                  .arg(auto_block_policy.reject_threshold)
+            ? QString::fromUtf8(
+                  " / 自動ブロック条件 最低拒否 %1 回 / %2 %")
+                  .arg(auto_block_policy.minimum_reject_count)
+                  .arg(auto_block_policy.minimum_reject_percentage)
             : QString::fromUtf8(" / 自動ブロック OFF");
     status_label->setText(
         QString::fromUtf8("表示 %1 件 / 全 %2 件%3")
@@ -3038,15 +3067,24 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
 
   SET_CHECKBOX(zenzFeedbackAutoBlockCheckBox,
                use_zenz_auto_block_rejected_correction);
-  const uint32_t zenz_auto_block_reject_threshold =
+  const uint32_t zenz_auto_block_minimum_reject_count =
       config.has_zenz_auto_block_reject_threshold()
           ? config.zenz_auto_block_reject_threshold()
-          : kDefaultZenzAutoBlockRejectThreshold;
+          : kDefaultZenzAutoBlockMinimumRejectCount;
   zenzFeedbackAutoBlockRejectThresholdSpinBox->setValue(
       static_cast<int>(
-          std::clamp(zenz_auto_block_reject_threshold,
-                     kMinZenzAutoBlockRejectThreshold,
-                     kMaxZenzAutoBlockRejectThreshold)));
+          std::clamp(zenz_auto_block_minimum_reject_count,
+                     kMinZenzAutoBlockMinimumRejectCount,
+                     kMaxZenzAutoBlockMinimumRejectCount)));
+  const uint32_t zenz_auto_block_minimum_reject_percentage =
+      config.has_zenz_auto_block_minimum_reject_percentage()
+          ? config.zenz_auto_block_minimum_reject_percentage()
+          : kDefaultZenzAutoBlockMinimumRejectPercentage;
+  zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox->setValue(
+      static_cast<int>(
+          std::clamp(zenz_auto_block_minimum_reject_percentage,
+                     kMinZenzAutoBlockMinimumRejectPercentage,
+                     kMaxZenzAutoBlockMinimumRejectPercentage)));
   SelectZenzFeedbackLearningSetting(
       static_cast<int>(zenzFeedbackLearningCheckBox->isChecked()));
 
@@ -3252,6 +3290,9 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   config->set_zenz_auto_block_reject_threshold(
       static_cast<uint32_t>(
           zenzFeedbackAutoBlockRejectThresholdSpinBox->value()));
+  config->set_zenz_auto_block_minimum_reject_percentage(
+      static_cast<uint32_t>(
+          zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox->value()));
 
   GET_CHECKBOX(useAutoConversion, use_auto_conversion);
   GET_CHECKBOX(useDirectCommit, use_direct_commit);
@@ -4125,10 +4166,23 @@ void ConfigDialog::SelectZenzFeedbackLearningSetting(int state) {
 
   zenzFeedbackAutoBlockCheckBox->setEnabled(enabled);
 
-  const bool auto_block_enabled =
-      enabled && zenzFeedbackAutoBlockCheckBox->isChecked();
-  zenzFeedbackAutoBlockRejectThresholdLabel->setEnabled(auto_block_enabled);
-  zenzFeedbackAutoBlockRejectThresholdSpinBox->setEnabled(auto_block_enabled);
+  SelectZenzFeedbackAutoBlockSetting(
+      enabled ? static_cast<int>(
+                    zenzFeedbackAutoBlockCheckBox->isChecked())
+              : 0);
+}
+
+void ConfigDialog::SelectZenzFeedbackAutoBlockSetting(int state) {
+  const bool enabled =
+      liveConversionCheckBox->isChecked() &&
+      zenzLiveCorrectionCheckBox->isChecked() &&
+      zenzFeedbackLearningCheckBox->isChecked() &&
+      static_cast<bool>(state);
+
+  zenzFeedbackAutoBlockRejectThresholdLabel->setEnabled(enabled);
+  zenzFeedbackAutoBlockRejectThresholdSpinBox->setEnabled(enabled);
+  zenzFeedbackAutoBlockMinimumRejectPercentageLabel->setEnabled(enabled);
+  zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox->setEnabled(enabled);
 }
 
 void ConfigDialog::SelectZenzRightContextSetting(int state) {

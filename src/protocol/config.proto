@@ -385,14 +385,22 @@ message Config {
 
   // When enabled, repeated divergent commits of the same full-sequence Zenz
   // correction dynamically suppress that correction as an effective block.
-  // This does not write an irreversible hard-reject record; changing this
-  // setting or the threshold re-evaluates existing feedback data.
+  // This does not write an irreversible hard-reject record; changing the
+  // settings re-evaluates existing feedback data.
   optional bool use_zenz_auto_block_rejected_correction = 1018
       [default = false];
 
-  // Number of ordinary rejected observations required before the auto-block
-  // policy suppresses the same key/context/value correction.
-  optional uint32 zenz_auto_block_reject_threshold = 1019 [default = 3];
+  // Minimum number of ordinary rejected observations required before the
+  // auto-block policy may suppress the same key/context/value correction.
+  // The field name is retained for config compatibility; this is a minimum
+  // reject count, not the complete auto-block condition.
+  optional uint32 zenz_auto_block_reject_threshold = 1019 [default = 1];
+
+  // Minimum percentage of ordinary rejects among accepted + ordinary rejected
+  // observations required for auto-block. The ratio is evaluated only within
+  // the exact key/context/value bucket used by the auto-block policy.
+  optional uint32 zenz_auto_block_minimum_reject_percentage = 1027
+      [default = 50];
 
   // Zenzai v3/v3.2 condition fields. Empty values are omitted from the prompt.
   // These are not chat prompts; they are mapped to zenz special-token fields:

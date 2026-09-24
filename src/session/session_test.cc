@@ -95,6 +95,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(MaybeApplyZenzFeedbackLiveCorrection);
   PEER_METHOD(ApplyZenzLiveCorrectionResult);
   PEER_METHOD(SetPendingZenzFeedbackAccepted);
+  PEER_METHOD(SetPendingZenzFeedbackComparison);
   PEER_METHOD(SetPendingZenzFeedbackRejected);
   PEER_METHOD(ObservePendingZenzFeedbackCommittedResult);
   PEER_METHOD(ConfirmPendingZenzFeedback);
@@ -1727,7 +1728,7 @@ TEST_F(SessionTest, PendingRejectedZenzFeedbackIsNeutralWithoutFinalCommit) {
 #endif
 }
 
-TEST_F(SessionTest, PendingRejectedZenzFeedbackIsNeutralWhenFinalCommitMatches) {
+TEST_F(SessionTest, PendingRejectedZenzFeedbackIsAcceptedWhenFinalCommitMatches) {
 #if defined(_WIN32)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -1757,7 +1758,14 @@ TEST_F(SessionTest, PendingRejectedZenzFeedbackIsNeutralWhenFinalCommitMatches) 
   session_peer.ConfirmPendingZenzFeedback();
 
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
-  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].key, "かれはてんてきです");
+  EXPECT_EQ(entries[0].context_class, "empty");
+  EXPECT_EQ(entries[0].value, "彼は天敵です");
+  EXPECT_EQ(entries[0].accepted_count, 1);
+  EXPECT_EQ(entries[0].rejected_count, 0);
 #else
   GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
 #endif
@@ -1797,6 +1805,40 @@ TEST_F(SessionTest, PendingRejectedZenzFeedbackIsRecordedWhenFinalCommitDiffers)
   EXPECT_EQ(entries[0].value, "彼は天敵です");
   EXPECT_EQ(entries[0].accepted_count, 0);
   EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest, PendingShadowZenzFeedbackIgnoresDifferentFinalReading) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackComparison(
+      "あい", "empty", "亜衣", "auto_block_shadow_compare", true);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  session_peer.context_()->set_state(ImeContext::PRECOMPOSITION);
+  commands::Command command;
+  command.mutable_output()->mutable_result()->set_type(
+      commands::Result::STRING);
+  command.mutable_output()->mutable_result()->set_key("あいう");
+  command.mutable_output()->mutable_result()->set_value("亜衣");
+
+  session_peer.ObservePendingZenzFeedbackCommittedResult(command, "test");
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
 #else
   GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
 #endif
@@ -1929,6 +1971,7 @@ TEST_F(SessionTest, ZenzFeedbackFastPathSkipsAutoBlockedCandidate) {
   config.set_zenz_live_correction_min_key_length(2);
   config.set_use_zenz_auto_block_rejected_correction(true);
   config.set_zenz_auto_block_reject_threshold(2);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
   session.SetConfig(config);
 
   session_peer.zenz_feedback_store_().RecordAccepted(
@@ -1991,6 +2034,7 @@ TEST_F(SessionTest, ZenzFeedbackFastPathSkipsRejectDominantCandidate) {
   config.set_zenz_live_correction_min_key_length(2);
   config.set_use_zenz_auto_block_rejected_correction(false);
   config.set_zenz_auto_block_reject_threshold(2);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
   session.SetConfig(config);
 
   session_peer.zenz_feedback_store_().RecordAccepted(
@@ -3481,6 +3525,229 @@ TEST_F(SessionTest, DeferredZenzAcceptedResultReplacesVisiblePreeditOnce) {
   EXPECT_FALSE(command.output().zenz_live_correction_pending());
 }
 
+TEST_F(SessionTest, AutoBlockedZenzResultRecordsMatchingShadowCommitAsAccepted) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_auto_block_rejected_correction(true);
+  config.set_zenz_auto_block_reject_threshold(1);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
+  session.SetConfig(config);
+
+  session_peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "space_revert_zenz_to_mozc");
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "feedback_auto_blocked");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().key, "あい");
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().value, "亜衣");
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_()
+                  .require_final_committed_key_match);
+
+  // Model the user's eventual normal-candidate commit. Matching the hidden,
+  // auto-blocked Zenz value is positive evidence, but must not invoke the
+  // explicit-Zenz Mozc-history learning path.
+  session_peer.context_()->set_state(ImeContext::PRECOMPOSITION);
+  command.Clear();
+  command.mutable_output()->mutable_result()->set_type(
+      commands::Result::STRING);
+  command.mutable_output()->mutable_result()->set_key("あい");
+  command.mutable_output()->mutable_result()->set_value("亜衣");
+  session_peer.ObservePendingZenzFeedbackCommittedResult(command, "test");
+  session_peer.ConfirmPendingZenzFeedback();
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].accepted_count, 1);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       AutoBlockedZenzResultRecordsMismatchingShadowCommitAsRejected) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_auto_block_rejected_correction(true);
+  config.set_zenz_auto_block_reject_threshold(1);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
+  session.SetConfig(config);
+
+  session_peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "space_revert_zenz_to_mozc");
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "feedback_auto_blocked");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_()
+                  .require_final_committed_key_match);
+
+  // The reading still matches the hidden observation, but the user's final
+  // value differs. This is another ordinary rejection of that exact
+  // full-sequence Zenz correction.
+  session_peer.context_()->set_state(ImeContext::PRECOMPOSITION);
+  command.Clear();
+  command.mutable_output()->mutable_result()->set_type(
+      commands::Result::STRING);
+  command.mutable_output()->mutable_result()->set_key("あい");
+  command.mutable_output()->mutable_result()->set_value("愛");
+  session_peer.ObservePendingZenzFeedbackCommittedResult(command, "test");
+  session_peer.ConfirmPendingZenzFeedback();
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 2);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest, HardRejectedZenzResultDoesNotCreateShadowFeedback) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_auto_block_rejected_correction(true);
+  config.set_zenz_auto_block_reject_threshold(1);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
+  session.SetConfig(config);
+
+  session_peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "hard_reject");
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "feedback_hard_rejected");
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+  EXPECT_TRUE(entries[0].hard_rejected);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
 TEST_F(SessionTest,
        DeferredZenzVisibleResultContinuedUnresolvedRomajiKeepsVisiblePrefix) {
   MockEngine engine;

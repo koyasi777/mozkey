@@ -460,6 +460,221 @@
         <source>IME icon setting has been saved, but it could not be applied to Windows. If you canceled administrator approval, click Apply again.</source>
         <translation>IME icon setting has been saved, but it could not be applied to Windows. If you canceled administrator approval, click Apply again.</translation>
     </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>ライブ変換</source>
+        <translation>Live conversion</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz ライブ補正</source>
+        <translation>Zenz live correction</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</source>
+        <translation>Hide the normal live-conversion result until Zenz correction finishes</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</source>
+        <translation>When Zenz correction runs, keep the previous preedit visible until the correction finishes. If Zenz is not adopted, show the Mozc result.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 条件フィールド</source>
+        <translation>Zenz condition fields</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 学習</source>
+        <translation>Zenz feedback learning</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</source>
+        <translation>Passes this as U+EE03 profile to the Zenzai v3/v3.2 prompt.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz profile</source>
+        <translation>Zenz profile</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</source>
+        <translation>Example: Japanese user writing technical documents. Empty values are not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書を書く日本語ユーザー</source>
+        <translation>Example: Japanese user writing technical documents</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>Passes this as U+EE04 topic to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz topic</source>
+        <translation>Zenz topic</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: Mozc、Rust、会計、法律。空欄なら送信しません。</source>
+        <translation>Example: Mozc, Rust, accounting, law. Empty values are not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: Mozc</source>
+        <translation>Example: Mozc</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>Passes this as U+EE05 style to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz style</source>
+        <translation>Zenz style</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</source>
+        <translation>Example: technical writing, business, colloquial, plain style. Empty values are not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書</source>
+        <translation>Example: technical writing</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>Passes this as U+EE06 settings to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz settings</source>
+        <translation>Zenz settings</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 専門用語を優先。空欄なら送信しません。</source>
+        <translation>Example: prioritize technical terms. Empty values are not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 専門用語を優先</source>
+        <translation>Example: prioritize technical terms</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</source>
+        <translation>When the client supplies text on the right side of the caret, include it as U+EE07 right context in the Zenzai v3.2 prompt.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈を使用する</source>
+        <translation>Use Zenz right context</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈として使う最大文字数です。</source>
+        <translation>Maximum number of characters to use as Zenz right context.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈長</source>
+        <translation>Zenz right context length</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</source>
+        <translation>Used only when text on the right side of the caret is available. 0 characters means it is not sent.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>使わない</source>
+        <translation>Do not use</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正結果の採用/却下をローカルに保存し、次回以降の補正や候補順位に反映します。確定した内容は、通常の変換履歴にも反映される場合があります。</source>
+        <translation>Store accepted/rejected Zenz correction outcomes locally and use them to adjust future corrections and candidate ranking. Confirmed text may also be reflected in normal conversion history.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正結果をローカル学習する</source>
+        <translation>Learn from Zenz correction outcomes locally</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>同じ読み・同じ文脈クラス・同じ Zenz 補正について、拒否回数と拒否割合の両方が設定値以上になった場合に表示を抑制します。自動ブロック中も Zenz の内部生成と最終確定との比較を続け、一致が増えて拒否割合が下がれば自動解除します。通常の Mozc 候補から削除する機能ではありません。</source>
+        <translation>For the same reading, context class, and Zenz correction, suppress display when both the reject count and reject percentage meet or exceed the configured thresholds. While auto-blocked, Zenz continues generating corrections internally and compares them with the final committed text; if matching observations increase and the reject percentage falls, the block is removed automatically. This does not remove candidates from normal Mozc conversion.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正と異なる結果で確定した場合、その補正を自動ブロックする</source>
+        <translation>Automatically block a Zenz correction when a different result is committed</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロック判定に必要な最低拒否回数です。拒否割合の条件も同時に満たした場合だけ自動ブロックします。設定変更は既存の Zenz 学習データにも動的に反映されます。</source>
+        <translation>Minimum number of rejects required for auto-blocking. Auto-blocking occurs only when the reject-percentage condition is also met. Changes apply dynamically to existing Zenz feedback data.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロックの最低拒否回数</source>
+        <translation>Minimum rejects for auto-blocking</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロック判定に必要な最低拒否回数です。</source>
+        <translation>Minimum number of rejects required for auto-blocking.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source> 回</source>
+        <translation> or more</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>採用回数と通常拒否回数の合計に占める拒否の最低割合です。最低拒否回数の条件も同時に満たした場合だけ自動ブロックします。</source>
+        <translation>Minimum share of rejects among accepted observations and ordinary rejects. Auto-blocking occurs only when the minimum reject-count condition is also met.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロックの最低拒否割合</source>
+        <translation>Minimum reject percentage for auto-blocking</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロック判定に必要な最低拒否割合です。拒否割合は「通常拒否 ÷ (採用 + 通常拒否)」で計算します。</source>
+        <translation>Minimum reject percentage required for auto-blocking. The reject percentage is calculated as ordinary rejects ÷ (accepted + ordinary rejects).</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source> % 以上</source>
+        <translation> % or more</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 学習データ</source>
+        <translation>Zenz feedback data</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>保存された Zenz 学習データを確認、検索、インポート、エクスポート、削除します。通常の変換履歴に反映済みの学習は、この画面の削除対象には含まれません。</source>
+        <translation>Review, search, import, export, and delete saved Zenz feedback data. Learning already reflected in normal conversion history is not deleted from this screen.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>管理...</source>
+        <translation>Manage...</translation>
+    </message>
 </context>
 <context>
     <name>GenericTableEditorDialog</name>
@@ -848,146 +1063,6 @@ The current Windows default IME override will be saved so it can be restored lat
     </message>
 
     <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>ライブ変換</source>
-        <translation>Live conversion</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz ライブ補正</source>
-        <translation>Zenz live correction</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</source>
-        <translation>Hide the normal live-conversion result until Zenz correction finishes</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</source>
-        <translation>When Zenz correction runs, keep the previous preedit visible until the correction finishes. If Zenz is not adopted, show the Mozc result.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 条件フィールド</source>
-        <translation>Zenz condition fields</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 学習</source>
-        <translation>Zenz feedback learning</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</source>
-        <translation>Passes this as U+EE03 profile to the Zenzai v3/v3.2 prompt.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz profile</source>
-        <translation>Zenz profile</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</source>
-        <translation>Example: Japanese user writing technical documents. Empty values are not sent.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 技術文書を書く日本語ユーザー</source>
-        <translation>Example: Japanese user writing technical documents</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
-        <translation>Passes this as U+EE04 topic to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz topic</source>
-        <translation>Zenz topic</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: Mozc、Rust、会計、法律。空欄なら送信しません。</source>
-        <translation>Example: Mozc, Rust, accounting, law. Empty values are not sent.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: Mozc</source>
-        <translation>Example: Mozc</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
-        <translation>Passes this as U+EE05 style to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz style</source>
-        <translation>Zenz style</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</source>
-        <translation>Example: technical writing, business, colloquial, plain style. Empty values are not sent.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 技術文書</source>
-        <translation>Example: technical writing</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
-        <translation>Passes this as U+EE06 settings to the Zenzai v3/v3.2 prompt. This is experimental.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz settings</source>
-        <translation>Zenz settings</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 専門用語を優先。空欄なら送信しません。</source>
-        <translation>Example: prioritize technical terms. Empty values are not sent.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 専門用語を優先</source>
-        <translation>Example: prioritize technical terms</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</source>
-        <translation>When the client supplies text on the right side of the caret, include it as U+EE07 right context in the Zenzai v3.2 prompt.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 右文脈を使用する</source>
-        <translation>Use Zenz right context</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 右文脈として使う最大文字数です。</source>
-        <translation>Maximum number of characters to use as Zenz right context.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 右文脈長</source>
-        <translation>Zenz right context length</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</source>
-        <translation>Used only when text on the right side of the caret is available. 0 characters means it is not sent.</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>使わない</source>
-        <translation>Do not use</translation>
-    </message>
-    <message>
         <location filename="config_dialog.cc" line="1650"/>
         <source>Candidate, suggestion, and ruby window appearance</source>
         <translation>Candidate, suggestion, and ruby window appearance</translation>
@@ -1286,6 +1361,16 @@ The current Windows default IME override will be saved so it can be restored lat
         <location filename="config_dialog.cc" line="2564"/>
         <source>Distance between the ruby window and the text being composed.</source>
         <translation>Distance between the ruby window and the text being composed.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source> 回</source>
+        <translation> or more</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source> % 以上</source>
+        <translation> % or more</translation>
     </message>
 </context>
 <context>

@@ -525,7 +525,8 @@ int RejectWeightForReason(absl::string_view reason) {
   if (IsHardRejectReason(reason)) {
     return kHardRejectWeight;
   }
-  if (reason == "space_revert_zenz_to_mozc") {
+  if (reason == "space_revert_zenz_to_mozc" ||
+      reason == "auto_block_shadow_compare") {
     return kSpaceRevertRejectWeight;
   }
   if (reason == "predict_after_zenz") {
@@ -562,10 +563,23 @@ void MergeCounts(const Counts& src, Counts* dest) {
 
 ZenzFeedbackAutoBlockPolicy NormalizeAutoBlockPolicy(
     ZenzFeedbackAutoBlockPolicy policy) {
-  if (!policy.enabled || policy.reject_threshold <= 0) {
+  if (!policy.enabled || policy.minimum_reject_count <= 0 ||
+      policy.minimum_reject_percentage <= 0) {
     return ZenzFeedbackAutoBlockPolicy();
   }
+  policy.minimum_reject_percentage =
+      std::min(policy.minimum_reject_percentage, 100);
   return policy;
+}
+
+int AutoBlockRejectPercentage(const Counts& c) {
+  const int64_t accepted = c.accepted;
+  const int64_t rejected = c.auto_block_rejected;
+  const int64_t observations = accepted + rejected;
+  if (observations <= 0) {
+    return 0;
+  }
+  return static_cast<int>((rejected * 100) / observations);
 }
 
 bool IsAutoBlockedByPolicy(
@@ -573,8 +587,18 @@ bool IsAutoBlockedByPolicy(
     const ZenzFeedbackAutoBlockPolicy& auto_block_policy) {
   const ZenzFeedbackAutoBlockPolicy policy =
       NormalizeAutoBlockPolicy(auto_block_policy);
-  return policy.enabled &&
-         c.auto_block_rejected >= policy.reject_threshold;
+  if (!policy.enabled ||
+      c.auto_block_rejected < policy.minimum_reject_count) {
+    return false;
+  }
+
+  const int64_t accepted = c.accepted;
+  const int64_t rejected = c.auto_block_rejected;
+  const int64_t observations = accepted + rejected;
+  return observations > 0 &&
+         rejected * 100 >=
+             static_cast<int64_t>(policy.minimum_reject_percentage) *
+                 observations;
 }
 
 bool IsRejectCountDominant(const Counts& c) {
@@ -1264,6 +1288,7 @@ std::vector<ZenzFeedbackEntry> ZenzFeedbackStore::ListEntries(
     entry.accepted_count = c.accepted;
     entry.rejected_count = c.rejected;
     entry.auto_block_reject_count = c.auto_block_rejected;
+    entry.auto_block_reject_percentage = AutoBlockRejectPercentage(c);
     entry.hard_rejected = decision.hard_rejected;
     entry.auto_blocked = decision.auto_blocked;
     entry.reason = decision.reason;

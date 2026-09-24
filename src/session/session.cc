@@ -2005,16 +2005,11 @@ ZenzFeedbackAutoBlockPolicy GetZenzFeedbackAutoBlockPolicy(
     const config::Config& config) {
   ZenzFeedbackAutoBlockPolicy policy;
   policy.enabled = config.use_zenz_auto_block_rejected_correction();
-  policy.reject_threshold =
+  policy.minimum_reject_count =
       static_cast<int>(config.zenz_auto_block_reject_threshold());
+  policy.minimum_reject_percentage = static_cast<int>(
+      config.zenz_auto_block_minimum_reject_percentage());
   return policy;
-}
-
-bool IsExplicitZenzHardRejectReason(absl::string_view reason) {
-  return reason == "hard_reject" ||
-         reason == "user_hard_reject" ||
-         reason == "manual_hard_reject" ||
-         reason == "explicit_hard_reject";
 }
 
 bool StartsWithString(absl::string_view text, absl::string_view prefix) {
@@ -5620,6 +5615,8 @@ void Session::SetPendingZenzFeedbackAccepted(
   pending_zenz_feedback_.reason.clear();
   pending_zenz_feedback_.has_final_committed_value = false;
   pending_zenz_feedback_.final_committed_value.clear();
+  pending_zenz_feedback_.require_final_committed_key_match = false;
+  pending_zenz_feedback_.final_committed_key.clear();
   const ZenzReverseLearningProjection reverse_learning_projection =
       BuildZenzReverseLearningSegmentsFromPreedit(
           live_conversion_preedit_output_, key, value);
@@ -5635,67 +5632,89 @@ void Session::SetPendingZenzFeedbackAccepted(
       " context_class=", pending_zenz_feedback_.context_class));
 }
 
-void Session::SetPendingZenzFeedbackRejected(absl::string_view reason) {
+void Session::SetPendingZenzFeedbackComparison(
+    absl::string_view key,
+    absl::string_view context_class,
+    absl::string_view value,
+    absl::string_view reason,
+    bool require_final_committed_key_match) {
   if (!UseZenzFeedbackLearning(context_->GetConfig())) {
     return;
   }
 
-  if (!HasVisibleZenzLiveCorrection()) {
+  if (key.empty() || value.empty()) {
     return;
   }
 
-  const ZenzTextPrivacyDecision key_privacy =
-      EvaluateZenzLiveKeyPrivacy(zenz_live_key_);
+  const ZenzTextPrivacyDecision key_privacy = EvaluateZenzLiveKeyPrivacy(key);
   if (!key_privacy.allow) {
     ZenzDebugOutput(absl::StrCat(
-        "[zenz-feedback] skip pending rejected key_privacy reason=",
+        "[zenz-feedback] skip pending comparison key_privacy reason=",
         key_privacy.reason,
         " ",
-        ZenzRedactedTextStats("key", zenz_live_key_)));
+        ZenzRedactedTextStats("key", key)));
     return;
   }
 
   const ZenzTextPrivacyDecision value_privacy =
-      EvaluateZenzLiveValuePrivacy(zenz_live_value_);
+      EvaluateZenzLiveValuePrivacy(value);
   if (!value_privacy.allow) {
     ZenzDebugOutput(absl::StrCat(
-        "[zenz-feedback] skip pending rejected value_privacy reason=",
+        "[zenz-feedback] skip pending comparison value_privacy reason=",
         value_privacy.reason,
         " ",
-        ZenzRedactedTextStats("value", zenz_live_value_)));
+        ZenzRedactedTextStats("value", value)));
     return;
   }
 
   pending_zenz_feedback_.pending = true;
-  pending_zenz_feedback_.action = PendingZenzFeedback::Action::kRejected;
-  pending_zenz_feedback_.key = zenz_live_key_;
+  pending_zenz_feedback_.action =
+      PendingZenzFeedback::Action::kCompareFinalCommit;
+  pending_zenz_feedback_.key = std::string(key);
   pending_zenz_feedback_.context_class =
-      zenz_live_context_class_.empty() ? "empty" : zenz_live_context_class_;
-  pending_zenz_feedback_.value = zenz_live_value_;
+      context_class.empty() ? "empty" : std::string(context_class);
+  pending_zenz_feedback_.value = std::string(value);
   pending_zenz_feedback_.reason = std::string(reason);
   pending_zenz_feedback_.has_final_committed_value = false;
   pending_zenz_feedback_.final_committed_value.clear();
+  pending_zenz_feedback_.require_final_committed_key_match =
+      require_final_committed_key_match;
+  pending_zenz_feedback_.final_committed_key.clear();
   pending_zenz_feedback_.reverse_learning_segments.clear();
   pending_zenz_feedback_.reverse_projected_learning_segments.clear();
 
   ZenzDebugOutput(absl::StrCat(
-      "[zenz-feedback] pending rejected ",
+      "[zenz-feedback] pending final comparison ",
       ZenzRedactedTextStats("key", pending_zenz_feedback_.key),
       " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
       " context_class=", pending_zenz_feedback_.context_class,
-      " reason=", pending_zenz_feedback_.reason));
+      " reason=", pending_zenz_feedback_.reason,
+      " require_key_match=",
+      ZenzBool(pending_zenz_feedback_.require_final_committed_key_match)));
+}
+
+void Session::SetPendingZenzFeedbackRejected(absl::string_view reason) {
+  if (!HasVisibleZenzLiveCorrection()) {
+    return;
+  }
+
+  SetPendingZenzFeedbackComparison(
+      zenz_live_key_,
+      zenz_live_context_class_.empty() ? "empty" : zenz_live_context_class_,
+      zenz_live_value_, reason, false);
 }
 
 void Session::ObservePendingZenzFeedbackCommittedResult(
     const commands::Command& command,
     absl::string_view reason) {
   if (!pending_zenz_feedback_.pending ||
-      pending_zenz_feedback_.action != PendingZenzFeedback::Action::kRejected) {
+      pending_zenz_feedback_.action !=
+          PendingZenzFeedback::Action::kCompareFinalCommit) {
     return;
   }
 
-  // Only a fully committed conversion/direct commit should resolve pending
-  // rejected feedback. Partial segment commits stay in CONVERSION and must not
+  // Only a fully committed conversion/direct commit should resolve a pending
+  // final comparison. Partial segment commits stay in CONVERSION and must not
   // be interpreted as the user's final full-sequence decision.
   if (context_->state() != ImeContext::PRECOMPOSITION) {
     return;
@@ -5709,6 +5728,7 @@ void Session::ObservePendingZenzFeedbackCommittedResult(
   pending_zenz_feedback_.has_final_committed_value = true;
   pending_zenz_feedback_.final_committed_value =
       command.output().result().value();
+  pending_zenz_feedback_.final_committed_key = command.output().result().key();
 
   ZenzDebugOutput(absl::StrCat(
       "[zenz-feedback] observed final committed value reason=", reason,
@@ -5716,6 +5736,8 @@ void Session::ObservePendingZenzFeedbackCommittedResult(
       " ", ZenzRedactedTextStats("zenz_value", pending_zenz_feedback_.value),
       " ", ZenzRedactedTextStats("final_value",
                                   pending_zenz_feedback_.final_committed_value),
+      " ", ZenzRedactedTextStats("final_key",
+                                  pending_zenz_feedback_.final_committed_key),
       " context_class=", pending_zenz_feedback_.context_class,
       " pending_reason=", pending_zenz_feedback_.reason));
 }
@@ -5778,34 +5800,50 @@ void Session::ConfirmPendingZenzFeedback() {
         reverse_segment_learning_count,
         " context_class=", pending_zenz_feedback_.context_class));
   } else if (pending_zenz_feedback_.action ==
-             PendingZenzFeedback::Action::kRejected) {
-    if (!IsExplicitZenzHardRejectReason(pending_zenz_feedback_.reason) &&
-        !pending_zenz_feedback_.has_final_committed_value) {
+             PendingZenzFeedback::Action::kCompareFinalCommit) {
+    if (!pending_zenz_feedback_.has_final_committed_value) {
       ZenzDebugOutput(absl::StrCat(
-          "[zenz-feedback] neutralize pending rejected without final commit ",
+          "[zenz-feedback] neutralize pending comparison without final commit ",
           ZenzRedactedTextStats("key", pending_zenz_feedback_.key),
           " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
           " context_class=", pending_zenz_feedback_.context_class,
           " reason=", pending_zenz_feedback_.reason));
-    } else if (!IsExplicitZenzHardRejectReason(pending_zenz_feedback_.reason) &&
-               pending_zenz_feedback_.final_committed_value ==
-                   pending_zenz_feedback_.value) {
+    } else if (pending_zenz_feedback_.require_final_committed_key_match &&
+               pending_zenz_feedback_.final_committed_key !=
+                   pending_zenz_feedback_.key) {
       ZenzDebugOutput(absl::StrCat(
-          "[zenz-feedback] neutralize pending rejected same final value ",
+          "[zenz-feedback] neutralize shadow comparison key mismatch ",
           ZenzRedactedTextStats("key", pending_zenz_feedback_.key),
-          " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
-          " context_class=", pending_zenz_feedback_.context_class,
-          " reason=", pending_zenz_feedback_.reason));
-    } else {
+          " ", ZenzRedactedTextStats(
+                   "final_key", pending_zenz_feedback_.final_committed_key),
+          " context_class=", pending_zenz_feedback_.context_class));
+    } else if (pending_zenz_feedback_.final_committed_value ==
+               pending_zenz_feedback_.value) {
       ZenzDebugOutput(absl::StrCat(
-          "[zenz-feedback] confirm pending rejected ",
+          "[zenz-feedback] confirm final comparison accepted ",
           ZenzRedactedTextStats("key", pending_zenz_feedback_.key),
           " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
           " context_class=", pending_zenz_feedback_.context_class,
           " reason=", pending_zenz_feedback_.reason));
 
-      // Rejected feedback is full-sequence scoped too.  A final mismatch after
-      // Space revert should not create segment-local negative evidence.
+      // A matching normal commit is positive evidence for the Zenz correction,
+      // but it is not an explicit Zenz commit. The normal conversion path has
+      // already handled Mozc history learning, so update only the Zenz feedback
+      // full-sequence observation here.
+      zenz_feedback_store_.RecordAccepted(
+          pending_zenz_feedback_.key,
+          pending_zenz_feedback_.context_class,
+          pending_zenz_feedback_.value);
+    } else {
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] confirm final comparison rejected ",
+          ZenzRedactedTextStats("key", pending_zenz_feedback_.key),
+          " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
+          " context_class=", pending_zenz_feedback_.context_class,
+          " reason=", pending_zenz_feedback_.reason));
+
+      // Mismatching feedback remains full-sequence scoped and must not create
+      // segment-local negative evidence.
       zenz_feedback_store_.RecordRejected(
           pending_zenz_feedback_.key,
           pending_zenz_feedback_.context_class,
@@ -7160,6 +7198,16 @@ bool Session::ApplyZenzLiveCorrectionResult(
           " context_class=", context_class,
           " accepted_count=", feedback_decision.accepted_count,
           " rejected_count=", feedback_decision.rejected_count));
+
+      // Auto-block suppresses presentation, not inference. Keep the validated,
+      // adopted full-sequence result as a shadow observation and compare it
+      // with the user's eventual normal commit. Manual hard rejects remain
+      // absolute and do not self-recover through shadow feedback.
+      if (feedback_decision.auto_blocked) {
+        SetPendingZenzFeedbackComparison(
+            pending_zenz_live_.key, context_class, zenz_value,
+            "auto_block_shadow_compare", true);
+      }
 
       CancelPendingZenzLiveCorrection();
       Output(command);

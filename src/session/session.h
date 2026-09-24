@@ -448,7 +448,7 @@ class Session {
     enum class Action {
       kNone,
       kAccepted,
-      kRejected,
+      kCompareFinalCommit,
     };
 
     bool pending = false;
@@ -458,11 +458,17 @@ class Session {
     std::string value;
     std::string reason;
 
-    // Set when a rejected Zenz candidate is followed by a real commit.
-    // This lets ambiguous operations such as Space revert become neutral when
-    // the final committed text is identical to the Zenz value.
+    // Set when a Zenz candidate is compared with a later real commit. Visible
+    // overrides and auto-blocked shadow candidates share this final-observation
+    // path so one user decision contributes at most one accepted/rejected event.
     bool has_final_committed_value = false;
     std::string final_committed_value;
+
+    // Auto-block shadow observations are speculative prefixes until the same
+    // full reading is actually committed. Require an exact committed key match
+    // for those observations so continued typing is never miscounted as a reject.
+    bool require_final_committed_key_match = false;
+    std::string final_committed_key;
 
     // Snapshot of reverse-projected segment-local learning pairs derived from
     // the Mozc live-conversion segments that were visible when the Zenz result
@@ -759,6 +765,12 @@ class Session {
       absl::string_view key,
       absl::string_view context_class,
       absl::string_view value);
+  void SetPendingZenzFeedbackComparison(
+      absl::string_view key,
+      absl::string_view context_class,
+      absl::string_view value,
+      absl::string_view reason,
+      bool require_final_committed_key_match);
   void SetPendingZenzFeedbackRejected(absl::string_view reason);
   void ObservePendingZenzFeedbackCommittedResult(
       const mozc::commands::Command& command,

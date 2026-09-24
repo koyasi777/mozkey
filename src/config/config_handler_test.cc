@@ -85,6 +85,7 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_direct_commit_key(kExpectedMozkeyDirectCommitKey);
   config->set_use_zenz_live_correction(true);
   config->set_use_zenz_feedback_learning(true);
+  config->set_use_zenz_auto_block_rejected_correction(true);
   config->set_use_zenz_live_correction_right_context(true);
   config->set_use_realtime_conversion(false);
 }
@@ -106,8 +107,9 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.zenz_live_correction_left_context_length(), 24);
   EXPECT_TRUE(config.use_zenz_synthetic_candidate());
   EXPECT_TRUE(config.use_zenz_feedback_learning());
-  EXPECT_FALSE(config.use_zenz_auto_block_rejected_correction());
-  EXPECT_EQ(config.zenz_auto_block_reject_threshold(), 3);
+  EXPECT_TRUE(config.use_zenz_auto_block_rejected_correction());
+  EXPECT_EQ(config.zenz_auto_block_reject_threshold(), 1);
+  EXPECT_EQ(config.zenz_auto_block_minimum_reject_percentage(), 50);
   EXPECT_TRUE(config.use_zenz_live_correction_right_context());
   EXPECT_EQ(config.zenz_live_correction_right_context_length(), 24);
 
@@ -192,6 +194,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   input.set_direct_commit_key(0);
   input.set_use_zenz_live_correction(false);
   input.set_use_zenz_feedback_learning(false);
+  input.set_use_zenz_auto_block_rejected_correction(false);
   input.set_use_zenz_live_correction_right_context(false);
   input.set_use_realtime_conversion(true);
 
@@ -204,6 +207,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_EQ(output.direct_commit_key(), 0);
   EXPECT_FALSE(output.use_zenz_live_correction());
   EXPECT_FALSE(output.use_zenz_feedback_learning());
+  EXPECT_FALSE(output.use_zenz_auto_block_rejected_correction());
   EXPECT_FALSE(output.use_zenz_live_correction_right_context());
   EXPECT_TRUE(output.use_realtime_conversion());
 }
