@@ -102,6 +102,7 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_TRUE(config.use_zenz_live_correction());
   EXPECT_FALSE(config.defer_live_conversion_display_until_zenz_result());
   EXPECT_EQ(config.zenz_live_correction_delay_msec(), 1000);
+  EXPECT_EQ(config.zenz_deferred_presentation_timeout_msec(), 300);
   EXPECT_EQ(config.zenz_live_correction_timeout_msec(), 180);
   EXPECT_EQ(config.zenz_live_correction_min_key_length(), 2);
   EXPECT_EQ(config.zenz_live_correction_left_context_length(), 24);

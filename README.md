@@ -114,6 +114,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Zenz 補正開始までの遅延時間を設定画面から変更可能。デフォルトは 1000 ms
 - Zenz 補正開始の最小文字数を設定画面から変更可能
 - 「Zenz 補正結果が返るまで通常のライブ変換結果を表示しない」opt-in 設定を追加。待機中は直前まで安定して表示されていた Zenz 補正部分を可能な範囲で維持し、未解決のローマ字 suffix はその表示へ追従。Zenz が採用されない場合は現在の Mozc ライブ変換結果へフォールバック
+- deferred 表示専用の最大待機時間を設定画面から変更可能。既定は Zenz 補正要求の送信後 300 ms で、期限を超えた generation は破棄して、すでに計算済みの Mozc ライブ変換結果へフォールバック
 - deferred 表示中の Enter / Shift による英字入力では、裏側の Mozc baseline ではなく、その時点でユーザーに見えている presentation を確定。Enter 確定後の Undo でも同じ presentation を復元
 - Zenz 出力が確定済み左文脈の長い suffix を現在入力の先頭へ反復する context echo を検出して拒否し、通常の Mozc ライブ変換結果へフォールバック
 - Zenz 補正結果のローカル feedback learning を追加。設定画面から ON/OFF 可能
@@ -252,6 +253,8 @@ Windows 版では、追加のオフライン防御層として、インストー
 ライブ変換と Zenz ライブ補正の両方を有効にすると、通常は Mozc のライブ変換結果を表示したうえで、ローカルの Zenz runtime に非同期で補正を依頼します。
 
 設定画面の「Zenz 補正結果が返るまで通常のライブ変換結果を表示しない」を有効にすると、Zenz 補正を実行する入力では、新しい Mozc ライブ変換結果を応答待ちの間は先に表示しません。すでに安定して表示できている Zenz 補正部分がある場合は、その表示を可能な範囲で維持し、入力途中の未解決ローマ字 suffix はその後ろへ追従表示します。Mozc 側の再文節化だけを理由に、一度安定した Zenz 表示を不用意に細分化・巻き戻ししないように扱います。Zenz が失敗、タイムアウト、検証拒否、または Mozc と同一の結果になって採用されなかった場合は、その時点の通常 Mozc ライブ変換結果へフォールバックします。
+
+この deferred 表示には、Zenz 補正要求を実際に送信してからの最大待機時間を設定できます。既定は 300 ms です。この期限までに結果が得られなければ、その generation の Zenz 補正を中止して、すでに計算済みの Mozc ライブ変換結果を表示します。遅れて返った同じ generation の Zenz 結果は採用しません。Zenz 補正開始前のデバウンス時間はこの 300 ms には含まれません。
 
 Windows 版では、Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
@@ -801,6 +804,7 @@ Main features added in this fork
 - Allows configuring the Zenz correction debounce delay from the config dialog. The default is 1000 ms
 - Allows configuring the minimum number of characters to start Zenz correction
 - Adds an opt-in `Do not show the normal live-conversion result until Zenz correction returns` mode. While waiting, Mozkey preserves the previously stable Zenz-corrected presentation when possible and appends unresolved raw-romaji suffixes to that visible presentation; if Zenz is not adopted, it falls back to the current Mozc live-conversion result
+- Adds a configurable deferred-presentation wait limit. The default is 300 ms after the Zenz correction request is submitted; when the deadline expires, that generation is discarded and Mozkey reveals the already-computed normal Mozc live-conversion result
 - Commits the presentation that is actually visible to the user, rather than a hidden Mozc baseline, when Enter or Shift-based ASCII input ends a deferred presentation; Undo after Enter restores the same visible presentation
 - Detects and rejects likely context echo where Zenz repeats a long suffix of already committed left context at the beginning of the current output, then falls back to the normal Mozc live-conversion result
 - Adds optional local feedback learning for Zenz correction results
@@ -899,6 +903,14 @@ it. Mozc resegmentation alone does not cause a previously stable Zenz
 presentation to be split or rolled back. If Zenz fails, times out, is rejected
 by validation, or produces the same value as Mozc and is therefore not adopted,
 Mozkey falls back to the current normal Mozc live-conversion result.
+
+Deferred presentation has a separate configurable wait limit measured from the
+moment the Zenz correction request is actually submitted. The default is 300
+ms. If the result is still unavailable at that deadline, Mozkey abandons that
+generation and reveals the normal Mozc live-conversion result that was already
+computed as the Zenz baseline. A late result from that generation is not
+adopted. The debounce interval before the Zenz request is submitted is not
+counted toward this 300 ms budget.
 
 On Windows, the Zenz request is sent from `mozc_server` to
 `mozc_zenz_scorer.exe` through a Windows named pipe. The scorer then calls the

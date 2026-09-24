@@ -355,6 +355,13 @@ message Config {
   optional bool defer_live_conversion_display_until_zenz_result = 1026
       [default = false];
 
+  // Maximum time to keep the normal Mozc live-conversion result hidden after a
+  // Zenz request has actually been submitted. This is used only by deferred
+  // presentation. If the deadline expires, the pending Zenz generation is
+  // abandoned and the already-computed Mozc result is revealed.
+  optional uint32 zenz_deferred_presentation_timeout_msec = 1028
+      [default = 300];
+
   // Timeout in milliseconds for one zenz live correction request.
   optional uint32 zenz_live_correction_timeout_msec = 1005 [default = 180];
 

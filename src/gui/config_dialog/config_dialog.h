@@ -75,6 +75,7 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   virtual void SelectInputModeSetting(int index);
   virtual void SelectLiveConversionSetting(int state);
   virtual void SelectZenzLiveCorrectionSetting(int state);
+  virtual void SelectZenzDeferredPresentationSetting(int state);
   virtual void SelectZenzRightContextSetting(int state);
   virtual void SelectZenzFeedbackLearningSetting(int state);
   virtual void SelectZenzFeedbackAutoBlockSetting(int state);

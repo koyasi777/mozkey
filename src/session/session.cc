@@ -203,6 +203,9 @@ constexpr uint32_t kDefaultZenzLiveCorrectionDelayMsec = 1000;
 constexpr uint32_t kDefaultZenzLiveCorrectionTimeoutMsec = 180;
 constexpr uint32_t kDefaultZenzLiveCorrectionPollMsec = 24;
 constexpr uint32_t kDefaultZenzLiveCorrectionMinKeyLength = 2;
+constexpr uint32_t kDefaultZenzDeferredPresentationTimeoutMsec = 300;
+constexpr uint32_t kMinZenzDeferredPresentationTimeoutMsec = 50;
+constexpr uint32_t kMaxZenzDeferredPresentationTimeoutMsec = 3000;
 constexpr uint32_t kMaxZenzLiveCorrectionRightContextLength = 128;
 constexpr uint32_t kMaxZenzLiveCorrectionDelayMsec = 5000;
 constexpr uint32_t kMaxZenzLiveCorrectionTimeoutMsec = 1000;
@@ -1971,6 +1974,17 @@ uint32_t GetZenzLiveCorrectionTimeoutMsec(const config::Config& config) {
   }
   return std::min(config.zenz_live_correction_timeout_msec(),
                   kMaxZenzLiveCorrectionTimeoutMsec);
+}
+
+uint32_t GetZenzDeferredPresentationTimeoutMsec(
+    const config::Config& config) {
+  const uint32_t value =
+      config.has_zenz_deferred_presentation_timeout_msec()
+          ? config.zenz_deferred_presentation_timeout_msec()
+          : kDefaultZenzDeferredPresentationTimeoutMsec;
+  return std::clamp(value,
+                    kMinZenzDeferredPresentationTimeoutMsec,
+                    kMaxZenzDeferredPresentationTimeoutMsec);
 }
 
 uint32_t GetZenzLiveCorrectionMinKeyLength(const config::Config& config) {
@@ -6822,6 +6836,8 @@ bool Session::AdvancePendingZenzLiveCorrection(
   const config::Config& config = context_->GetConfig();
   const absl::Time now = Clock::GetAbslTime();
   const uint32_t timeout_msec = GetZenzLiveCorrectionTimeoutMsec(config);
+  const uint32_t deferred_presentation_timeout_msec =
+      GetZenzDeferredPresentationTimeoutMsec(config);
 
   if (!pending_zenz_live_.submitted) {
     pending_zenz_live_.issued_at = now;
@@ -6877,6 +6893,24 @@ bool Session::AdvancePendingZenzLiveCorrection(
     CancelPendingZenzLiveCorrection();
     return OutputCurrentLiveConversionAfterZenzStop(
         command, "zenz_async_corrector_missing");
+  }
+
+  if (config.defer_live_conversion_display_until_zenz_result() &&
+      now - pending_zenz_live_.issued_at >=
+          absl::Milliseconds(deferred_presentation_timeout_msec)) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz] deferred presentation timeout generation=",
+        pending_zenz_live_.generation,
+        " presentation_timeout_msec=",
+        deferred_presentation_timeout_msec,
+        " ", ZenzRedactedTextStats("key", pending_zenz_live_.key),
+        " ", ZenzRedactedTextStats("mozc_value",
+                                    pending_zenz_live_.mozc_value),
+        " context_class=", pending_zenz_live_.context_class));
+
+    CancelPendingZenzLiveCorrection();
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, "zenz_deferred_presentation_timeout");
   }
 
   std::optional<ZenzLiveResponse> response =
