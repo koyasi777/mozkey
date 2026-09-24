@@ -460,6 +460,221 @@
         <source>IME icon setting has been saved, but it could not be applied to Windows. If you canceled administrator approval, click Apply again.</source>
         <translation>IME アイコン設定は保存されましたが、Windows への反映を開始できませんでした。管理者権限の確認をキャンセルした場合は、もう一度［適用］をクリックしてください。</translation>
     </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>ライブ変換</source>
+        <translation>ライブ変換</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz ライブ補正</source>
+        <translation>Zenz ライブ補正</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</source>
+        <translation>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</source>
+        <translation>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 条件フィールド</source>
+        <translation>Zenz 条件フィールド</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 学習</source>
+        <translation>Zenz 学習</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</source>
+        <translation>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz profile</source>
+        <translation>Zenz プロファイル</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</source>
+        <translation>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書を書く日本語ユーザー</source>
+        <translation>例: 技術文書を書く日本語ユーザー</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz topic</source>
+        <translation>Zenz トピック</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: Mozc、Rust、会計、法律。空欄なら送信しません。</source>
+        <translation>例: Mozc、Rust、会計、法律。空欄なら送信しません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: Mozc</source>
+        <translation>例: Mozc</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz style</source>
+        <translation>Zenz スタイル</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</source>
+        <translation>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 技術文書</source>
+        <translation>例: 技術文書</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
+        <translation>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz settings</source>
+        <translation>Zenz 設定</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 専門用語を優先。空欄なら送信しません。</source>
+        <translation>例: 専門用語を優先。空欄なら送信しません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>例: 専門用語を優先</source>
+        <translation>例: 専門用語を優先</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</source>
+        <translation>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈を使用する</source>
+        <translation>Zenz 右文脈を使用する</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈として使う最大文字数です。</source>
+        <translation>Zenz 右文脈として使う最大文字数です。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 右文脈長</source>
+        <translation>Zenz 右文脈長</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</source>
+        <translation>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>使わない</source>
+        <translation>使わない</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正結果の採用/却下をローカルに保存し、次回以降の補正や候補順位に反映します。確定した内容は、通常の変換履歴にも反映される場合があります。</source>
+        <translation>Zenz 補正結果の採用/却下をローカルに保存し、次回以降の補正や候補順位に反映します。確定した内容は、通常の変換履歴にも反映される場合があります。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正結果をローカル学習する</source>
+        <translation>Zenz 補正結果をローカル学習する</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>同じ読み・同じ文脈クラス・同じ Zenz 補正について、拒否回数と拒否割合の両方が設定値以上になった場合に表示を抑制します。自動ブロック中も Zenz の内部生成と最終確定との比較を続け、一致が増えて拒否割合が下がれば自動解除します。通常の Mozc 候補から削除する機能ではありません。</source>
+        <translation>同じ読み・同じ文脈クラス・同じ Zenz 補正について、拒否回数と拒否割合の両方が設定値以上になった場合に表示を抑制します。自動ブロック中も Zenz の内部生成と最終確定との比較を続け、一致が増えて拒否割合が下がれば自動解除します。通常の Mozc 候補から削除する機能ではありません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 補正と異なる結果で確定した場合、その補正を自動ブロックする</source>
+        <translation>Zenz 補正と異なる結果で確定した場合、その補正を自動ブロックする</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロック判定に必要な最低拒否回数です。拒否割合の条件も同時に満たした場合だけ自動ブロックします。設定変更は既存の Zenz 学習データにも動的に反映されます。</source>
+        <translation>自動ブロック判定に必要な最低拒否回数です。拒否割合の条件も同時に満たした場合だけ自動ブロックします。設定変更は既存の Zenz 学習データにも動的に反映されます。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロックの最低拒否回数</source>
+        <translation>自動ブロックの最低拒否回数</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロック判定に必要な最低拒否回数です。</source>
+        <translation>自動ブロック判定に必要な最低拒否回数です。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source> 回</source>
+        <translation> 回</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>採用回数と通常拒否回数の合計に占める拒否の最低割合です。最低拒否回数の条件も同時に満たした場合だけ自動ブロックします。</source>
+        <translation>採用回数と通常拒否回数の合計に占める拒否の最低割合です。最低拒否回数の条件も同時に満たした場合だけ自動ブロックします。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロックの最低拒否割合</source>
+        <translation>自動ブロックの最低拒否割合</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>自動ブロック判定に必要な最低拒否割合です。拒否割合は「通常拒否 ÷ (採用 + 通常拒否)」で計算します。</source>
+        <translation>自動ブロック判定に必要な最低拒否割合です。拒否割合は「通常拒否 ÷ (採用 + 通常拒否)」で計算します。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source> % 以上</source>
+        <translation> % 以上</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz 学習データ</source>
+        <translation>Zenz 学習データ</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>保存された Zenz 学習データを確認、検索、インポート、エクスポート、削除します。通常の変換履歴に反映済みの学習は、この画面の削除対象には含まれません。</source>
+        <translation>保存された Zenz 学習データを確認、検索、インポート、エクスポート、削除します。通常の変換履歴に反映済みの学習は、この画面の削除対象には含まれません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>管理...</source>
+        <translation>管理...</translation>
+    </message>
 </context>
 <context>
     <name>GenericTableEditorDialog</name>
@@ -887,146 +1102,6 @@ The current Windows default IME override will be saved so it can be restored lat
     </message>
 
     <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>ライブ変換</source>
-        <translation>ライブ変換</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz ライブ補正</source>
-        <translation>Zenz ライブ補正</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</source>
-        <translation>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</source>
-        <translation>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 条件フィールド</source>
-        <translation>Zenz 条件フィールド</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 学習</source>
-        <translation>Zenz 学習</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</source>
-        <translation>U+EE03 profile として Zenzai v3/v3.2 のプロンプトに渡します。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz profile</source>
-        <translation>Zenz プロファイル</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</source>
-        <translation>例: 技術文書を書く日本語ユーザー。空欄なら送信しません。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 技術文書を書く日本語ユーザー</source>
-        <translation>例: 技術文書を書く日本語ユーザー</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
-        <translation>U+EE04 topic として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz topic</source>
-        <translation>Zenz トピック</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: Mozc、Rust、会計、法律。空欄なら送信しません。</source>
-        <translation>例: Mozc、Rust、会計、法律。空欄なら送信しません。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: Mozc</source>
-        <translation>例: Mozc</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
-        <translation>U+EE05 style として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz style</source>
-        <translation>Zenz スタイル</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</source>
-        <translation>例: 技術文書、ビジネス、口語、常体。空欄なら送信しません。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 技術文書</source>
-        <translation>例: 技術文書</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</source>
-        <translation>U+EE06 settings として Zenzai v3/v3.2 のプロンプトに渡します。experimental です。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz settings</source>
-        <translation>Zenz 設定</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 専門用語を優先。空欄なら送信しません。</source>
-        <translation>例: 専門用語を優先。空欄なら送信しません。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>例: 専門用語を優先</source>
-        <translation>例: 専門用語を優先</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</source>
-        <translation>クライアントからカーソル右側テキストが渡された場合、U+EE07 right context として Zenzai v3.2 のプロンプトに含めます。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 右文脈を使用する</source>
-        <translation>Zenz 右文脈を使用する</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 右文脈として使う最大文字数です。</source>
-        <translation>Zenz 右文脈として使う最大文字数です。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 右文脈長</source>
-        <translation>Zenz 右文脈長</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</source>
-        <translation>カーソル右側テキストが取得できる場合だけ使われます。0 文字なら送信しません。</translation>
-    </message>
-    <message>
-        <location filename="config_dialog.ui" line="0"/>
-        <source>使わない</source>
-        <translation>使わない</translation>
-    </message>
-    <message>
         <location filename="config_dialog.cc" line="1650"/>
         <source>Candidate, suggestion, and ruby window appearance</source>
         <translation>候補・サジェスト・ルビウィンドウの外観</translation>
@@ -1325,6 +1400,16 @@ The current Windows default IME override will be saved so it can be restored lat
         <location filename="config_dialog.cc" line="2564"/>
         <source>Distance between the ruby window and the text being composed.</source>
         <translation>ルビウィンドウと入力中の文字列との距離です。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source> 回</source>
+        <translation> 回</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source> % 以上</source>
+        <translation> % 以上</translation>
     </message>
 </context>
 <context>

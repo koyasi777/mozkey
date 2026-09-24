@@ -23,7 +23,8 @@ enum class ZenzFeedbackImportMode {
 
 struct ZenzFeedbackAutoBlockPolicy {
   bool enabled = false;
-  int reject_threshold = 0;
+  int minimum_reject_count = 0;
+  int minimum_reject_percentage = 0;
 };
 
 struct ZenzFeedbackDecision {
@@ -59,6 +60,7 @@ struct ZenzFeedbackEntry {
   int accepted_count = 0;
   int rejected_count = 0;
   int auto_block_reject_count = 0;
+  int auto_block_reject_percentage = 0;
   bool hard_rejected = false;
   bool auto_blocked = false;
   std::string reason = "feedback_neutral";
@@ -68,7 +70,7 @@ struct ZenzFeedbackEntry {
 //
 // Scope is intentionally full-sequence only:
 //   key   = the complete reading submitted to Zenz
-//   value = the complete Zenz correction shown to or accepted by the user
+//   value = the complete validated Zenz correction observed for that request
 //
 // This store does not own segment-local or lexical-unit learning.  If an
 // accepted full-sequence correction is later decomposed into safe local units,

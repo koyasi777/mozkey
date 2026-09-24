@@ -1730,7 +1730,7 @@
                 <item row="29" column="0" colspan="8">
                  <widget class="QCheckBox" name="zenzFeedbackAutoBlockCheckBox">
                   <property name="toolTip">
-                   <string>Zenz 補正を通常変換などで別の文字列に確定した回数が指定回数に達した場合、同じ読み・同じ文脈クラス・同じ補正結果を次回以降の Zenz 補正として表示しないようにします。通常の Mozc 候補から削除する機能ではありません。</string>
+                   <string>同じ読み・同じ文脈クラス・同じ Zenz 補正について、拒否回数と拒否割合の両方が設定値以上になった場合に表示を抑制します。自動ブロック中も Zenz の内部生成と最終確定との比較を続け、一致が増えて拒否割合が下がれば自動解除します。通常の Mozc 候補から削除する機能ではありません。</string>
                   </property>
                   <property name="text">
                    <string>Zenz 補正と異なる結果で確定した場合、その補正を自動ブロックする</string>
@@ -1740,17 +1740,17 @@
                 <item row="30" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackAutoBlockRejectThresholdLabel">
                   <property name="toolTip">
-                   <string>同じ Zenz 補正を何回異なる結果で確定したら自動ブロックするかを指定します。設定変更は既存の Zenz 学習データにも動的に反映されます。</string>
+                   <string>自動ブロック判定に必要な最低拒否回数です。拒否割合の条件も同時に満たした場合だけ自動ブロックします。設定変更は既存の Zenz 学習データにも動的に反映されます。</string>
                   </property>
                   <property name="text">
-                   <string>自動ブロックまでの拒否回数</string>
+                   <string>自動ブロックの最低拒否回数</string>
                   </property>
                  </widget>
                 </item>
                 <item row="30" column="3" colspan="5">
                  <widget class="QSpinBox" name="zenzFeedbackAutoBlockRejectThresholdSpinBox">
                   <property name="toolTip">
-                   <string>同じ Zenz 補正を何回異なる結果で確定したら自動ブロックするかを指定します。</string>
+                   <string>自動ブロック判定に必要な最低拒否回数です。</string>
                   </property>
                   <property name="minimum">
                    <number>1</number>
@@ -1762,7 +1762,7 @@
                    <number>1</number>
                   </property>
                   <property name="value">
-                   <number>3</number>
+                   <number>1</number>
                   </property>
                   <property name="suffix">
                    <string> 回</string>
@@ -1770,13 +1770,45 @@
                  </widget>
                 </item>
                 <item row="31" column="0" colspan="3">
+                 <widget class="QLabel" name="zenzFeedbackAutoBlockMinimumRejectPercentageLabel">
+                  <property name="toolTip">
+                   <string>採用回数と通常拒否回数の合計に占める拒否の最低割合です。最低拒否回数の条件も同時に満たした場合だけ自動ブロックします。</string>
+                  </property>
+                  <property name="text">
+                   <string>自動ブロックの最低拒否割合</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="31" column="3" colspan="5">
+                 <widget class="QSpinBox" name="zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox">
+                  <property name="toolTip">
+                   <string>自動ブロック判定に必要な最低拒否割合です。拒否割合は「通常拒否 ÷ (採用 + 通常拒否)」で計算します。</string>
+                  </property>
+                  <property name="minimum">
+                   <number>1</number>
+                  </property>
+                  <property name="maximum">
+                   <number>100</number>
+                  </property>
+                  <property name="singleStep">
+                   <number>1</number>
+                  </property>
+                  <property name="value">
+                   <number>50</number>
+                  </property>
+                  <property name="suffix">
+                   <string> % 以上</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="32" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackDataLabel">
                   <property name="text">
                    <string>Zenz 学習データ</string>
                   </property>
                  </widget>
                 </item>
-                <item row="31" column="3" colspan="5">
+                <item row="32" column="3" colspan="5">
                  <widget class="QPushButton" name="editZenzFeedbackButton">
                   <property name="toolTip">
                    <string>保存された Zenz 学習データを確認、検索、インポート、エクスポート、削除します。通常の変換履歴に反映済みの学習は、この画面の削除対象には含まれません。</string>

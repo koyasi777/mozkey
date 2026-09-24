@@ -198,7 +198,7 @@ TEST(ZenzFeedbackStoreTest, DecideTreatsOrdinaryRejectedAsSoftSignal) {
 }
 
 TEST(ZenzFeedbackStoreTest,
-     DecideAutoBlockPolicySuppressesAfterThresholdDynamically) {
+     DecideAutoBlockPolicyUsesMinimumRejectCountAndPercentageDynamically) {
   ScopedUserProfileForZenzFeedbackStoreTest profile;
   ASSERT_TRUE(profile.ok());
 
@@ -211,29 +211,63 @@ TEST(ZenzFeedbackStoreTest,
 
   ZenzFeedbackAutoBlockPolicy policy;
   policy.enabled = true;
-  policy.reject_threshold = 2;
+  policy.minimum_reject_count = 2;
+  policy.minimum_reject_percentage = 50;
 
+  // 2 / (3 + 2) = 40%, so the count is sufficient but the percentage is not.
   ZenzFeedbackDecision decision = store.Decide("k", "empty", "v", policy);
-  EXPECT_EQ(decision.action, ZenzFeedbackAction::kReject);
-  EXPECT_EQ(decision.reason, "feedback_auto_blocked");
-  EXPECT_TRUE(decision.auto_blocked);
-  EXPECT_FALSE(decision.hard_rejected);
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.reason, "feedback_preferred");
+  EXPECT_FALSE(decision.auto_blocked);
   EXPECT_EQ(decision.accepted_count, 3);
   EXPECT_EQ(decision.rejected_count, 2);
   EXPECT_EQ(decision.auto_block_reject_count, 2);
 
-  policy.reject_threshold = 3;
+  policy.minimum_reject_percentage = 40;
+  decision = store.Decide("k", "empty", "v", policy);
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kReject);
+  EXPECT_EQ(decision.reason, "feedback_auto_blocked");
+  EXPECT_TRUE(decision.auto_blocked);
+
+  policy.minimum_reject_count = 3;
   decision = store.Decide("k", "empty", "v", policy);
   EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
-  EXPECT_EQ(decision.reason, "feedback_preferred");
   EXPECT_FALSE(decision.auto_blocked);
 
   policy.enabled = false;
-  policy.reject_threshold = 1;
+  policy.minimum_reject_count = 1;
+  policy.minimum_reject_percentage = 1;
   decision = store.Decide("k", "empty", "v", policy);
   EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
-  EXPECT_EQ(decision.reason, "feedback_preferred");
   EXPECT_FALSE(decision.auto_blocked);
+}
+
+TEST(ZenzFeedbackStoreTest, AutoBlockDefaultShapeSelfRecoversAfterMajorityMatches) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  ZenzFeedbackStore store;
+  ZenzFeedbackAutoBlockPolicy policy;
+  policy.enabled = true;
+  policy.minimum_reject_count = 1;
+  policy.minimum_reject_percentage = 50;
+
+  store.RecordRejected("k", "empty", "v", "space_revert_zenz_to_mozc");
+  ZenzFeedbackDecision decision = store.Decide("k", "empty", "v", policy);
+  EXPECT_TRUE(decision.auto_blocked);
+
+  store.RecordAccepted("k", "empty", "v");
+  decision = store.Decide("k", "empty", "v", policy);
+  EXPECT_TRUE(decision.auto_blocked);  // 1 / 2 == 50%.
+
+  store.RecordAccepted("k", "empty", "v");
+  decision = store.Decide("k", "empty", "v", policy);
+  EXPECT_FALSE(decision.auto_blocked);  // 1 / 3 < 50%.
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+
+  const std::vector<ZenzFeedbackEntry> entries = store.ListEntries(policy);
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].auto_block_reject_percentage, 33);
 }
 
 TEST(ZenzFeedbackStoreTest,
@@ -276,7 +310,8 @@ TEST(ZenzFeedbackStoreTest, AutoBlockPolicyUsesExactContextClass) {
 
   ZenzFeedbackAutoBlockPolicy policy;
   policy.enabled = true;
-  policy.reject_threshold = 2;
+  policy.minimum_reject_count = 2;
+  policy.minimum_reject_percentage = 50;
 
   ZenzFeedbackDecision decision = store.Decide("k", "empty", "v", policy);
   EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
@@ -357,7 +392,8 @@ TEST(ZenzFeedbackStoreTest,
 
   ZenzFeedbackAutoBlockPolicy policy;
   policy.enabled = true;
-  policy.reject_threshold = 2;
+  policy.minimum_reject_count = 2;
+  policy.minimum_reject_percentage = 40;
 
   std::vector<ZenzFeedbackCandidate> candidates =
       store.GetRankedCandidates("k", "empty", policy);
@@ -388,7 +424,8 @@ TEST(ZenzFeedbackStoreTest,
 
   ZenzFeedbackAutoBlockPolicy policy;
   policy.enabled = false;
-  policy.reject_threshold = 1;
+  policy.minimum_reject_count = 1;
+  policy.minimum_reject_percentage = 50;
 
   const std::vector<ZenzFeedbackCandidate> candidates =
       store.GetRankedCandidates("k", "empty", policy);

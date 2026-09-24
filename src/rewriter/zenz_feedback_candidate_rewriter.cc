@@ -179,8 +179,10 @@ session::ZenzFeedbackAutoBlockPolicy GetZenzFeedbackAutoBlockPolicy(
     const config::Config& config) {
   session::ZenzFeedbackAutoBlockPolicy policy;
   policy.enabled = config.use_zenz_auto_block_rejected_correction();
-  policy.reject_threshold =
+  policy.minimum_reject_count =
       static_cast<int>(config.zenz_auto_block_reject_threshold());
+  policy.minimum_reject_percentage = static_cast<int>(
+      config.zenz_auto_block_minimum_reject_percentage());
   return policy;
 }
 

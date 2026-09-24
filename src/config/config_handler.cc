@@ -98,6 +98,9 @@ void ApplyMozkeyProductDefaults(Config* config) {
   if (!config->has_use_zenz_feedback_learning()) {
     config->set_use_zenz_feedback_learning(true);
   }
+  if (!config->has_use_zenz_auto_block_rejected_correction()) {
+    config->set_use_zenz_auto_block_rejected_correction(true);
+  }
   if (!config->has_use_zenz_live_correction_right_context()) {
     config->set_use_zenz_live_correction_right_context(true);
   }
