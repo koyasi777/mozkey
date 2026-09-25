@@ -119,6 +119,7 @@
         <source>Show input mode indicator near the cursor</source>
         <translation></translation>
     </message>
+
     <message>
         <location filename="config_dialog.ui" line="817"/>
         <source>Use dark mode for candidate and ruby windows</source>
@@ -1072,6 +1073,71 @@ The current Windows default IME override will be saved so it can be restored lat
         <translation></translation>
     </message>
 
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Input mode indicator</source>
+        <translation>Input mode indicator</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Theme</source>
+        <translation>Theme</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>System theme</source>
+        <translation>System theme</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Custom design</source>
+        <translation>Custom design</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Hiragana</source>
+        <translation>Hiragana</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Width</source>
+        <translation>Width</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Height</source>
+        <translation>Height</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Text size</source>
+        <translation>Text size</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Border thickness</source>
+        <translation>Border thickness</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Shadow</source>
+        <translation>Shadow</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Shadow blur</source>
+        <translation>Shadow blur</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Shadow X offset</source>
+        <translation>Shadow X offset</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Shadow Y offset</source>
+        <translation>Shadow Y offset</translation>
+    </message>
     <message>
         <location filename="config_dialog.cc" line="1650"/>
         <source>Candidate, suggestion, and ruby window appearance</source>

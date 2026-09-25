@@ -235,6 +235,110 @@ TEST_F(WindowUtilTest, VerticalMainWindowWithoutWorkingAreaKeepsLeftPreference) 
   EXPECT_EQ(result.Top(), 52);
 }
 
+TEST_F(WindowUtilTest, IndicatorKeepsLegacyPlacementWhenItFits) {
+  const Rect target_rect(50, 40, 1, 20);
+  const Size indicator_size(40, 30);
+  const Point top_anchor_offset(20, 5);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetIndicatorWindowRect(
+      target_rect, indicator_size, top_anchor_offset, 18, 7, working_area);
+
+  EXPECT_EQ(result.Left(), 30);
+  EXPECT_EQ(result.Top(), 55);
+  EXPECT_LE(result.Bottom() + 7, working_area.Bottom());
+}
+
+TEST_F(WindowUtilTest, IndicatorFlipsAboveBeforeFadeCrossesBottomEdge) {
+  const Rect target_rect(50, 40, 1, 29);
+  const Size indicator_size(40, 30);
+  const Point top_anchor_offset(20, 5);
+  const int body_height = 18;
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetIndicatorWindowRect(
+      target_rect, indicator_size, top_anchor_offset, body_height, 7,
+      working_area);
+
+  // Legacy placement starts at y=64: the opaque bitmap still ends at 94, but
+  // the final 7 px fade slide would cross the 100 px working-area bottom.
+  // The bitmap has 7 px below its visible body. Ignore that trailing margin
+  // for visual alignment while still reserving the 7 px fade travel.
+  EXPECT_EQ(result.Left(), 30);
+  EXPECT_EQ(result.Top(), 10);
+  EXPECT_EQ(result.Top() + top_anchor_offset.y + body_height + 7,
+            target_rect.Top());
+}
+
+TEST_F(WindowUtilTest, IndicatorClampsHorizontalEdges) {
+  const Size indicator_size(40, 30);
+  const Point top_anchor_offset(20, 5);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect left_result = WindowUtil::GetIndicatorWindowRect(
+      Rect(5, 40, 1, 20), indicator_size, top_anchor_offset, 18, 7,
+      working_area);
+  EXPECT_EQ(left_result.Left(), 0);
+
+  const Rect right_result = WindowUtil::GetIndicatorWindowRect(
+      Rect(195, 40, 1, 20), indicator_size, top_anchor_offset, 18, 7,
+      working_area);
+  EXPECT_EQ(right_result.Left(), 160);
+}
+
+TEST_F(WindowUtilTest, IndicatorSupportsNegativeMonitorCoordinates) {
+  const Rect target_rect(-5, 40, 1, 20);
+  const Size indicator_size(40, 30);
+  const Point top_anchor_offset(20, 5);
+  const Rect working_area(-200, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetIndicatorWindowRect(
+      target_rect, indicator_size, top_anchor_offset, 18, 7, working_area);
+
+  EXPECT_EQ(result.Left(), -40);
+  EXPECT_EQ(result.Top(), 55);
+}
+
+TEST_F(WindowUtilTest, IndicatorWithoutWorkingAreaPreservesLegacyCoordinates) {
+  const Rect target_rect(50, 90, 1, 20);
+  const Size indicator_size(40, 30);
+  const Point top_anchor_offset(20, 5);
+  const Rect unknown_working_area(0, 0, 0, 0);
+
+  const Rect result = WindowUtil::GetIndicatorWindowRect(
+      target_rect, indicator_size, top_anchor_offset, 18, 7,
+      unknown_working_area);
+
+  EXPECT_EQ(result.Left(), 30);
+  EXPECT_EQ(result.Top(), 105);
+}
+
+TEST_F(WindowUtilTest, IndicatorFallsBackToWorkingAreaWhenNeitherSideFits) {
+  const Rect target_rect(50, 45, 1, 10);
+  const Size indicator_size(40, 90);
+  const Point top_anchor_offset(20, 5);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetIndicatorWindowRect(
+      target_rect, indicator_size, top_anchor_offset, 40, 7, working_area);
+
+  EXPECT_EQ(result.Left(), 30);
+  EXPECT_EQ(result.Top(), 0);
+  EXPECT_LE(result.Bottom() + 7, working_area.Bottom());
+}
+
+TEST_F(WindowUtilTest, IndicatorInvalidBodyHeightUsesConservativeBitmapEdge) {
+  const Rect target_rect(50, 40, 1, 29);
+  const Size indicator_size(40, 30);
+  const Point top_anchor_offset(20, 5);
+  const Rect working_area(0, 0, 200, 100);
+
+  const Rect result = WindowUtil::GetIndicatorWindowRect(
+      target_rect, indicator_size, top_anchor_offset, 0, 7, working_area);
+
+  EXPECT_EQ(result.Top(), 3);
+}
+
 TEST_F(WindowUtilTest, VerticalCandidatePlacementKeepsWideHostLine) {
   const Rect preedit_rect(100, 200, 72, 1);
 

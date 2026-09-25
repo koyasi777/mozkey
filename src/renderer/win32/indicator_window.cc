@@ -38,14 +38,18 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "absl/log/check.h"
 #include "base/const.h"
 #include "base/win32/wide_char.h"
+#include "config/config_handler.h"
 #include "protocol/commands.pb.h"
+#include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_color_theme.h"
+#include "renderer/window_util.h"
 #include "renderer/win32/win32_font_util.h"
 #include "renderer/win32/win32_image_util.h"
 #include "renderer/win32/win32_renderer_util.h"
@@ -79,6 +83,7 @@ typedef CWinTraits<WS_POPUP | WS_DISABLED, WS_EX_LAYERED | WS_EX_TOOLWINDOW |
 struct Sprite {
   wil::unique_hbitmap bitmap;
   CPoint offset;
+  int body_height = 0;
 };
 
 // Timer event IDs
@@ -88,6 +93,8 @@ const UINT_PTR kTimerEventFading = 1;
 constexpr DWORD kStartFadingOutDelay = 850;  // msec
 constexpr DWORD kFadingOutInterval = 16;     // msec
 constexpr int kFadingOutAlphaDelta = 24;
+constexpr int kFadingOutSlideDivisor = 32;
+constexpr int kMaxFadingOutOffset = 255 / kFadingOutSlideDivisor;
 
 double GetDPIScaling() {
   wil::unique_hdc desktop_dc(::GetDC(nullptr));
@@ -98,6 +105,27 @@ double GetDPIScaling() {
 bool IsImmersiveColorSetChange(LPCTSTR section) {
   return section != nullptr &&
          ::lstrcmpi(section, TEXT("ImmersiveColorSet")) == 0;
+}
+
+using ModeIndicatorTheme = config::Config::WindowsModeIndicatorTheme;
+
+ModeIndicatorTheme GetModeIndicatorThemePreference() {
+  return config::ConfigHandler::GetSharedConfig()
+      ->windows_mode_indicator_theme();
+}
+
+SystemColorTheme ResolveModeIndicatorColorTheme(ModeIndicatorTheme theme) {
+  const SystemColorTheme system_theme =
+      theme == config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM
+          ? GetSystemColorTheme()
+          : SystemColorTheme::kLight;
+  return ResolveWindowsModeIndicatorTheme(theme, system_theme);
+}
+
+RGBColor RgbColorFromHex(uint32_t rgb) {
+  return RGBColor(static_cast<uint8_t>((rgb >> 16) & 0xff),
+                  static_cast<uint8_t>((rgb >> 8) & 0xff),
+                  static_cast<uint8_t>(rgb & 0xff));
 }
 
 constexpr int kIndicatorModes[] = {
@@ -187,6 +215,39 @@ IndicatorColors GetIndicatorColors(int mode, SystemColorTheme color_scheme) {
   }
 }
 
+IndicatorColors GetCustomIndicatorColors(
+    int mode, const WindowsModeIndicatorStyle& style) {
+  switch (mode) {
+    case commands::HIRAGANA:
+      return {
+          RgbColorFromHex(style.hiragana_background_color),
+          RgbColorFromHex(style.hiragana_border_color),
+          RgbColorFromHex(style.hiragana_shadow_color),
+          RgbColorFromHex(style.hiragana_text_color),
+      };
+
+    case commands::FULL_KATAKANA:
+    case commands::HALF_KATAKANA:
+      return {
+          RgbColorFromHex(style.katakana_background_color),
+          RgbColorFromHex(style.katakana_border_color),
+          RgbColorFromHex(style.katakana_shadow_color),
+          RgbColorFromHex(style.katakana_text_color),
+      };
+
+    case commands::DIRECT:
+    case commands::HALF_ASCII:
+    case commands::FULL_ASCII:
+    default:
+      return {
+          RgbColorFromHex(style.ascii_background_color),
+          RgbColorFromHex(style.ascii_border_color),
+          RgbColorFromHex(style.ascii_shadow_color),
+          RgbColorFromHex(style.ascii_text_color),
+      };
+  }
+}
+
 const char* GetIndicatorLabel(int mode) {
   switch (mode) {
     case commands::DIRECT:
@@ -217,7 +278,10 @@ class IndicatorWindow::WindowImpl
       : current_image_(nullptr),
         alpha_(255),
         dpi_scaling_(GetDPIScaling()),
-        color_scheme_(GetSystemColorTheme()) {
+        configured_theme_(GetModeIndicatorThemePreference()),
+        color_scheme_(ResolveModeIndicatorColorTheme(configured_theme_)),
+        custom_style_(GetWindowsModeIndicatorStyle(
+            *config::ConfigHandler::GetSharedConfig())) {
     sprites_.resize(commands::NUM_OF_COMPOSITIONS);
   }
   WindowImpl(const WindowImpl&) = delete;
@@ -234,6 +298,7 @@ class IndicatorWindow::WindowImpl
                 LayoutManager* layout_manager) {
     KillTimer(kTimerEventFading);
     KillTimer(kTimerEventFadeStart);
+    ReloadSpritesIfConfiguredAppearanceChanged();
 
     bool visible = false;
     IndicatorWindowLayout indicator_layout;
@@ -257,9 +322,11 @@ class IndicatorWindow::WindowImpl
     alpha_ = 255;
     current_image_ = sprites_[commands::DIRECT].bitmap.get();
     CPoint offset = sprites_[commands::DIRECT].offset;
+    int body_height = sprites_[commands::DIRECT].body_height;
     if (!status.has_activated() || !status.has_mode() || !status.activated()) {
       current_image_ = sprites_[commands::DIRECT].bitmap.get();
       offset = sprites_[commands::DIRECT].offset;
+      body_height = sprites_[commands::DIRECT].body_height;
     } else {
       const int mode = status.mode();
       switch (mode) {
@@ -270,6 +337,7 @@ class IndicatorWindow::WindowImpl
         case commands::HALF_KATAKANA:
           current_image_ = sprites_[mode].bitmap.get();
           offset = sprites_[mode].offset;
+          body_height = sprites_[mode].body_height;
           break;
       }
     }
@@ -277,8 +345,28 @@ class IndicatorWindow::WindowImpl
       HideIndicator();
       return;
     }
-    top_left_ = CPoint(indicator_layout.window_rect.left - offset.x,
-                       indicator_layout.window_rect.bottom - offset.y);
+    BITMAP bm = {};
+    if (::GetObject(current_image_, sizeof(bm), &bm) == 0 ||
+        bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+      HideIndicator();
+      return;
+    }
+
+    const CRect& target = indicator_layout.window_rect;
+    Rect working_area;
+    CRect native_working_area;
+    if (GetWorkingAreaFromPoint(CPoint(target.left, target.bottom),
+                                &native_working_area)) {
+      working_area =
+          Rect(native_working_area.left, native_working_area.top,
+               native_working_area.Width(), native_working_area.Height());
+    }
+
+    const Rect indicator_rect = WindowUtil::GetIndicatorWindowRect(
+        Rect(target.left, target.top, target.Width(), target.Height()),
+        Size(bm.bmWidth, bm.bmHeight), Point(offset.x, offset.y), body_height,
+        kMaxFadingOutOffset, working_area);
+    top_left_ = CPoint(indicator_rect.Left(), indicator_rect.Top());
     UpdateWindow();
 
     // Start fading out.
@@ -301,7 +389,7 @@ class IndicatorWindow::WindowImpl
 
     // Fading out animation.
     CPoint top_left = top_left_;
-    top_left.y += (255 - alpha_) / 32;
+    top_left.y += (255 - alpha_) / kFadingOutSlideDivisor;
 
     CPoint src_left_top(0, 0);
     BLENDFUNCTION func = {AC_SRC_OVER, 0, alpha_, AC_SRC_ALPHA};
@@ -321,6 +409,7 @@ class IndicatorWindow::WindowImpl
     for (Sprite& sprite : sprites_) {
       sprite.bitmap.reset();
       sprite.offset = CPoint(0, 0);
+      sprite.body_height = 0;
     }
 
     for (size_t i = 0; i < std::size(kIndicatorModes); ++i) {
@@ -328,8 +417,8 @@ class IndicatorWindow::WindowImpl
     }
   }
 
-  void ReloadSpritesIfColorSchemeChanged() {
-    const SystemColorTheme new_color_scheme = GetSystemColorTheme();
+  void ReloadSpritesIfColorSchemeChanged(
+      SystemColorTheme new_color_scheme) {
     if (new_color_scheme == color_scheme_) {
       return;
     }
@@ -340,6 +429,48 @@ class IndicatorWindow::WindowImpl
     // Hide the window before destroying and recreating sprite bitmaps.
     HideIndicator();
     ReloadSprites();
+  }
+
+  void ReloadSpritesIfConfiguredAppearanceChanged() {
+    const auto shared_config = config::ConfigHandler::GetSharedConfig();
+    const ModeIndicatorTheme new_configured_theme =
+        shared_config->windows_mode_indicator_theme();
+
+    SystemColorTheme new_color_scheme = color_scheme_;
+    if (new_configured_theme != configured_theme_) {
+      new_color_scheme =
+          ResolveModeIndicatorColorTheme(new_configured_theme);
+    }
+
+    WindowsModeIndicatorStyle new_custom_style = custom_style_;
+    if (new_configured_theme ==
+        config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM) {
+      new_custom_style = GetWindowsModeIndicatorStyle(*shared_config);
+    }
+
+    const bool appearance_changed =
+        new_configured_theme != configured_theme_ ||
+        new_color_scheme != color_scheme_ ||
+        (new_configured_theme ==
+             config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM &&
+         new_custom_style != custom_style_);
+    if (!appearance_changed) {
+      return;
+    }
+
+    configured_theme_ = new_configured_theme;
+    color_scheme_ = new_color_scheme;
+    custom_style_ = new_custom_style;
+    HideIndicator();
+    ReloadSprites();
+  }
+
+  void ReloadSpritesIfSystemColorSchemeChanged() {
+    if (configured_theme_ !=
+        config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM) {
+      return;
+    }
+    ReloadSpritesIfColorSchemeChanged(GetSystemColorTheme());
   }
 
   LRESULT OnCreate(LPCREATESTRUCT create_struct) {
@@ -370,12 +501,12 @@ class IndicatorWindow::WindowImpl
     }
 
     if (IsImmersiveColorSetChange(lpszSection)) {
-      ReloadSpritesIfColorSchemeChanged();
+      ReloadSpritesIfSystemColorSchemeChanged();
     }
   }
 
   void OnThemeChanged() {
-    ReloadSpritesIfColorSchemeChanged();
+    ReloadSpritesIfSystemColorSchemeChanged();
   }
 
   void EnableOrDisableWindowForWorkaround() {
@@ -395,19 +526,42 @@ class IndicatorWindow::WindowImpl
     LOGFONT logfont = GetMessageBoxLogFont(::GetDpiForSystem());
     info.label_font = mozc::win32::WideToUtf8(logfont.lfFaceName);
 
-    info.rect_width = ceil(dpi_scaling_ * 36.0);
-    info.rect_height = ceil(dpi_scaling_ * 28.0);
-    info.corner_radius = dpi_scaling_ * 8.0;
+    const bool custom =
+        configured_theme_ ==
+        config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM;
+    if (custom) {
+      info.rect_width = ceil(dpi_scaling_ * custom_style_.width);
+      info.rect_height = ceil(dpi_scaling_ * custom_style_.height);
+      info.corner_radius = dpi_scaling_ * custom_style_.corner_radius;
+      info.blur_sigma = dpi_scaling_ * custom_style_.shadow_blur;
+      info.blur_alpha =
+          static_cast<double>(custom_style_.shadow_opacity_percent) / 100.0;
+      info.frame_thickness =
+          dpi_scaling_ * custom_style_.border_thickness;
+      info.label_size = static_cast<int>(custom_style_.label_size);
+      info.blur_offset_x = static_cast<int>(
+          std::lround(dpi_scaling_ * custom_style_.shadow_offset_x));
+      info.blur_offset_y = static_cast<int>(
+          std::lround(dpi_scaling_ * custom_style_.shadow_offset_y));
+    } else {
+      info.rect_width = ceil(dpi_scaling_ * 36.0);
+      info.rect_height = ceil(dpi_scaling_ * 28.0);
+      info.corner_radius = dpi_scaling_ * 8.0;
+      info.blur_sigma = dpi_scaling_ * 4.0;
+      info.blur_alpha =
+          color_scheme_ == SystemColorTheme::kDark ? 0.25 : 0.22;
+      info.frame_thickness = dpi_scaling_ * 1.0;
+      info.label_size = 12;
+      info.blur_offset_x = 0;
+      info.blur_offset_y =
+          static_cast<int>(ceil(dpi_scaling_ * 1.0));
+    }
     info.tail_height = 0.0;
     info.tail_width = 0.0;
-    info.blur_sigma = dpi_scaling_ * 4.0;
-    info.blur_alpha = color_scheme_ == SystemColorTheme::kDark ? 0.25 : 0.22;
-    info.frame_thickness = dpi_scaling_ * 1.0;
-    info.label_size = 12.0;
-    info.blur_offset_x = 0;
-    info.blur_offset_y = static_cast<int>(ceil(dpi_scaling_ * 1.0));
 
-    const IndicatorColors colors = GetIndicatorColors(mode, color_scheme_);
+    const IndicatorColors colors =
+        custom ? GetCustomIndicatorColors(mode, custom_style_)
+               : GetIndicatorColors(mode, color_scheme_);
     info.inside_color = colors.inside;
     info.frame_color = colors.frame;
     info.blur_color = colors.blur;
@@ -415,6 +569,8 @@ class IndicatorWindow::WindowImpl
     info.label = GetIndicatorLabel(mode);
 
     if (!info.label.empty()) {
+      sprites_[mode].body_height =
+          static_cast<int>(std::ceil(std::max(info.rect_height, 0.0)));
       sprites_[mode].bitmap.reset(
           BalloonImage::Create(info, &sprites_[mode].offset));
     }
@@ -447,7 +603,9 @@ class IndicatorWindow::WindowImpl
   CPoint top_left_;
   BYTE alpha_;
   double dpi_scaling_;
+  ModeIndicatorTheme configured_theme_;
   SystemColorTheme color_scheme_;
+  WindowsModeIndicatorStyle custom_style_;
   std::vector<Sprite> sprites_;
 };
 

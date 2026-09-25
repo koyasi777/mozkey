@@ -184,6 +184,56 @@ Rect WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
       target_point, preedit_rect, window_size, zero_point_offset, working_area);
 }
 
+Rect WindowUtil::GetIndicatorWindowRect(
+    const Rect& target_rect, const Size& window_size,
+    const Point& top_anchor_offset, int body_height,
+    int downward_animation_offset, const Rect& working_area) {
+  Rect window_rect(
+      Point(target_rect.Left() - top_anchor_offset.x,
+            target_rect.Bottom() - top_anchor_offset.y),
+      window_size);
+
+  // Preserve the legacy position when the monitor working area is unavailable.
+  if (working_area.Width() <= 0 || working_area.Height() <= 0) {
+    return window_rect;
+  }
+
+  const int animation_offset = std::max(0, downward_animation_offset);
+
+  // The preferred placement is below the composition. Reserve the complete
+  // downward fade travel as well; otherwise the last fade frames can cross the
+  // taskbar/monitor edge even when the fully opaque frame still fits.
+  if (window_rect.Bottom() + animation_offset > working_area.Bottom()) {
+    const int normalized_body_height =
+        std::clamp(body_height, 0, window_size.height);
+    const int body_bottom_offset =
+        normalized_body_height > 0
+            ? std::clamp(top_anchor_offset.y + normalized_body_height, 0,
+                         window_size.height)
+            : window_size.height;
+
+    // Align the visible body's bottom edge with the target's top edge at the
+    // end of the downward fade. The bitmap can include transparent/blur shadow
+    // pixels below the body, so using the full bitmap height here would leave
+    // an unnecessarily large visible gap.
+    window_rect.origin.y =
+        target_rect.Top() - body_bottom_offset - animation_offset;
+  }
+
+  const int max_left =
+      std::max(working_area.Left(), working_area.Right() - window_size.width);
+  window_rect.origin.x =
+      std::clamp(window_rect.Left(), working_area.Left(), max_left);
+
+  const int max_top = std::max(
+      working_area.Top(),
+      working_area.Bottom() - window_size.height - animation_offset);
+  window_rect.origin.y =
+      std::clamp(window_rect.Top(), working_area.Top(), max_top);
+
+  return window_rect;
+}
+
 Rect WindowUtil::GetVerticalCandidatePlacementPreeditRect(
     const Rect& preedit_rect, int minimum_half_width) {
   if (minimum_half_width <= 0 || preedit_rect.Width() <= 0) {
