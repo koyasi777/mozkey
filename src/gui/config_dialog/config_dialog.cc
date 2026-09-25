@@ -3769,13 +3769,13 @@ void ConfigDialog::ConvertRendererAppearanceToProto(
 void ConfigDialog::ResetRendererAppearanceControls() {
   SetComboCurrentData(FindComboBox(this, "candidateWindowColorThemeComboBox"),
                       static_cast<int>(
-                          config::Config::RENDERER_WINDOW_COLOR_LIGHT));
+                          config::Config::RENDERER_WINDOW_COLOR_AUTO));
   SetComboCurrentData(FindComboBox(this, "suggestWindowColorThemeComboBox"),
-                      static_cast<int>(config::Config::
-                                           RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE));
+                      static_cast<int>(
+                          config::Config::RENDERER_WINDOW_COLOR_AUTO));
   SetComboCurrentData(FindComboBox(this, "rubyWindowColorThemeComboBox"),
-                      static_cast<int>(config::Config::
-                                           RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE));
+                      static_cast<int>(
+                          config::Config::RENDERER_WINDOW_COLOR_AUTO));
 
   SetCandidatePaletteButtons(this, QStringLiteral("candidateWindow"),
                              kLightCandidatePalette);
