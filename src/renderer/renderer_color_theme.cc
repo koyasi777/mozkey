@@ -29,6 +29,9 @@
 
 #include "renderer/renderer_color_theme.h"
 
+#include <algorithm>
+#include <cstdint>
+
 #ifdef _WIN32
 #include <windows.h>
 #endif  // _WIN32
@@ -65,6 +68,95 @@ SystemColorTheme GetSystemColorTheme() {
 #else
   return SystemColorTheme::kLight;
 #endif
+}
+
+SystemColorTheme ResolveWindowsModeIndicatorTheme(
+    config::Config::WindowsModeIndicatorTheme theme,
+    SystemColorTheme system_theme) {
+  switch (theme) {
+    case config::Config::WINDOWS_MODE_INDICATOR_THEME_DARK:
+      return SystemColorTheme::kDark;
+    case config::Config::WINDOWS_MODE_INDICATOR_THEME_LIGHT:
+      return SystemColorTheme::kLight;
+    case config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM:
+    case config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM:
+    default:
+      return system_theme;
+  }
+}
+
+namespace {
+
+// BalloonImage applies a direct 2-D Gaussian convolution. Keep the user-facing
+// upper bound close to the default (4 px) so a custom style cannot create an
+// unexpectedly large convolution kernel, especially on high-DPI displays.
+constexpr uint32_t kMaxWindowsModeIndicatorShadowBlur = 6;
+
+}  // namespace
+
+bool WindowsModeIndicatorStyle::operator==(
+    const WindowsModeIndicatorStyle& other) const {
+  return ascii_background_color == other.ascii_background_color &&
+         ascii_border_color == other.ascii_border_color &&
+         ascii_text_color == other.ascii_text_color &&
+         ascii_shadow_color == other.ascii_shadow_color &&
+         hiragana_background_color == other.hiragana_background_color &&
+         hiragana_border_color == other.hiragana_border_color &&
+         hiragana_text_color == other.hiragana_text_color &&
+         hiragana_shadow_color == other.hiragana_shadow_color &&
+         katakana_background_color == other.katakana_background_color &&
+         katakana_border_color == other.katakana_border_color &&
+         katakana_text_color == other.katakana_text_color &&
+         katakana_shadow_color == other.katakana_shadow_color &&
+         width == other.width && height == other.height &&
+         corner_radius == other.corner_radius &&
+         label_size == other.label_size &&
+         border_thickness == other.border_thickness &&
+         shadow_blur == other.shadow_blur &&
+         shadow_opacity_percent == other.shadow_opacity_percent &&
+         shadow_offset_x == other.shadow_offset_x &&
+         shadow_offset_y == other.shadow_offset_y;
+}
+
+bool WindowsModeIndicatorStyle::operator!=(
+    const WindowsModeIndicatorStyle& other) const {
+  return !(*this == other);
+}
+
+WindowsModeIndicatorStyle GetWindowsModeIndicatorStyle(
+    const config::Config& config) {
+  const auto& style = config.windows_mode_indicator_custom_style();
+  const auto color = [](uint32_t value) { return value & 0x00ffffffu; };
+  const uint32_t width = std::clamp<uint32_t>(style.width(), 20, 96);
+  const uint32_t height = std::clamp<uint32_t>(style.height(), 20, 96);
+  const uint32_t corner_radius =
+      std::min(std::clamp<uint32_t>(style.corner_radius(), 0, 32),
+               std::min(width, height) / 2);
+
+  return {
+      color(style.ascii_background_color()),
+      color(style.ascii_border_color()),
+      color(style.ascii_text_color()),
+      color(style.ascii_shadow_color()),
+      color(style.hiragana_background_color()),
+      color(style.hiragana_border_color()),
+      color(style.hiragana_text_color()),
+      color(style.hiragana_shadow_color()),
+      color(style.katakana_background_color()),
+      color(style.katakana_border_color()),
+      color(style.katakana_text_color()),
+      color(style.katakana_shadow_color()),
+      width,
+      height,
+      corner_radius,
+      std::clamp<uint32_t>(style.label_size(), 8, 32),
+      std::clamp<uint32_t>(style.border_thickness(), 0, 6),
+      std::clamp<uint32_t>(style.shadow_blur(), 0,
+                           kMaxWindowsModeIndicatorShadowBlur),
+      std::clamp<uint32_t>(style.shadow_opacity_percent(), 0, 100),
+      std::clamp<int32_t>(style.shadow_offset_x(), -24, 24),
+      std::clamp<int32_t>(style.shadow_offset_y(), -24, 24),
+  };
 }
 
 config::Config::RendererWindowColorTheme ResolveRendererWindowColorTheme(

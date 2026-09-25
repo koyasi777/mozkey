@@ -456,6 +456,23 @@ ConfigDialog::ConfigDialog()
   yenSignComboBox->addItem(tr("Yen Sign ¥"));
   yenSignComboBox->addItem(tr("Backslash \\"));
 
+#ifdef _WIN32
+  modeIndicatorThemeComboBox->clear();
+  modeIndicatorThemeComboBox->addItem(
+      tr("System theme"),
+      static_cast<int>(
+          config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM));
+  modeIndicatorThemeComboBox->addItem(
+      tr("Dark"),
+      static_cast<int>(config::Config::WINDOWS_MODE_INDICATOR_THEME_DARK));
+  modeIndicatorThemeComboBox->addItem(
+      tr("Light"),
+      static_cast<int>(config::Config::WINDOWS_MODE_INDICATOR_THEME_LIGHT));
+  modeIndicatorThemeComboBox->addItem(
+      tr("Custom"),
+      static_cast<int>(config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM));
+#endif  // _WIN32
+
 #ifndef __APPLE__
   // On Windows/Linux, yenSignCombBox can be hidden.
   yenSignLabel->hide();
@@ -470,6 +487,7 @@ ConfigDialog::ConfigDialog()
 #ifndef _WIN32
   // Mode indicator is available only on Windows.
   useModeIndicator->hide();
+  modeIndicatorThemeComboBox->hide();
 
   // Preedit display color customization is available only on Windows TSF.
   preeditDisplayColorGroupBox->hide();
@@ -531,6 +549,8 @@ ConfigDialog::ConfigDialog()
                    SLOT(SelectAutoConversionSetting(int)));
   QObject::connect(useDirectCommit, SIGNAL(stateChanged(int)), this,
                    SLOT(SelectDirectCommitSetting(int)));
+  QObject::connect(useModeIndicator, SIGNAL(toggled(bool)),
+                   modeIndicatorThemeComboBox, SLOT(setEnabled(bool)));
   QObject::connect(historySuggestCheckBox, SIGNAL(stateChanged(int)), this,
                    SLOT(SelectSuggestionSetting(int)));
   QObject::connect(dictionarySuggestCheckBox, SIGNAL(stateChanged(int)), this,
@@ -961,6 +981,17 @@ constexpr uint32_t kDefaultInputPreeditUnderlineColor = 0xff0000;
 constexpr uint32_t kDefaultTargetPreeditTextColor = 0x000000;
 constexpr uint32_t kDefaultTargetPreeditBackgroundColor = 0xddeeff;
 constexpr uint32_t kDefaultTargetPreeditUnderlineColor = 0x0066ff;
+
+const config::Config::WindowsModeIndicatorCustomStyle&
+GetDefaultModeIndicatorCustomStyle() {
+  static const config::Config::WindowsModeIndicatorCustomStyle style;
+  return style;
+}
+
+// BalloonImage uses a direct 2-D Gaussian convolution. Keep the custom
+// indicator blur range close to its 4 px default to avoid disproportionate
+// redraw cost, especially on high-DPI displays.
+constexpr int kMaxModeIndicatorShadowBlur = 6;
 
 constexpr int kDefaultRendererFontWeight = 400;
 constexpr int kMinRendererFontWeight = 100;
@@ -2511,6 +2542,303 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   candidateRubyFontLabel->hide();
   candidateRubyFontComboBox->hide();
 
+#ifdef _WIN32
+  // Keep the input-mode indicator controls together with renderer appearance.
+  // The checkbox and theme combo are defined in the .ui file for config
+  // serialization compatibility, then reparented here.
+  QWidget* mode_indicator_group =
+      new QWidget(inputSupportScrollAreaWidgetContents);
+  mode_indicator_group->setObjectName(
+      QStringLiteral("modeIndicatorAppearanceGroupBox"));
+  mode_indicator_group->setSizePolicy(QSizePolicy::Preferred,
+                                      QSizePolicy::Fixed);
+
+  QVBoxLayout* mode_indicator_root_layout =
+      new QVBoxLayout(mode_indicator_group);
+  mode_indicator_root_layout->setContentsMargins(0, 0, 0, 0);
+  mode_indicator_root_layout->setSpacing(0);
+
+  QWidget* mode_indicator_section = new QWidget(mode_indicator_group);
+  QHBoxLayout* mode_indicator_section_layout =
+      new QHBoxLayout(mode_indicator_section);
+  mode_indicator_section_layout->setContentsMargins(9, 9, 9, 9);
+  QLabel* mode_indicator_section_label =
+      new QLabel(tr("Input mode indicator"), mode_indicator_section);
+  QPushButton* mode_indicator_reset_button =
+      new QPushButton(tr("Reset"), mode_indicator_section);
+  mode_indicator_reset_button->setObjectName(
+      QStringLiteral("modeIndicatorAppearanceResetButton"));
+  mode_indicator_reset_button->setFixedWidth(64);
+  mode_indicator_reset_button->setMinimumHeight(24);
+  QFrame* mode_indicator_section_line = new QFrame(mode_indicator_section);
+  mode_indicator_section_line->setFrameShape(QFrame::HLine);
+  mode_indicator_section_line->setFrameShadow(QFrame::Sunken);
+  mode_indicator_section_label->setSizePolicy(QSizePolicy::Maximum,
+                                               QSizePolicy::Preferred);
+  mode_indicator_reset_button->setSizePolicy(QSizePolicy::Fixed,
+                                              QSizePolicy::Fixed);
+  mode_indicator_section_line->setSizePolicy(QSizePolicy::Expanding,
+                                              QSizePolicy::Fixed);
+  mode_indicator_section_layout->setSpacing(0);
+  mode_indicator_section_layout->addWidget(mode_indicator_section_label, 0,
+                                           Qt::AlignVCenter);
+  mode_indicator_section_layout->addSpacing(8);
+  mode_indicator_section_layout->addWidget(mode_indicator_reset_button, 0,
+                                           Qt::AlignVCenter);
+  mode_indicator_section_layout->addSpacing(8);
+  mode_indicator_section_layout->addWidget(mode_indicator_section_line, 1,
+                                           Qt::AlignVCenter);
+  mode_indicator_root_layout->addWidget(mode_indicator_section);
+
+  QWidget* mode_indicator_body = new QWidget(mode_indicator_group);
+  mode_indicator_body->setSizePolicy(QSizePolicy::Preferred,
+                                     QSizePolicy::Fixed);
+  QGridLayout* mode_indicator_layout = new QGridLayout(mode_indicator_body);
+  mode_indicator_layout->setContentsMargins(24, 9, 24, 9);
+  mode_indicator_layout->setHorizontalSpacing(8);
+  mode_indicator_layout->setVerticalSpacing(6);
+
+  useModeIndicator->setParent(mode_indicator_body);
+  useModeIndicator->show();
+  mode_indicator_layout->addWidget(useModeIndicator, 0, 0, 1, 2);
+
+  QLabel* mode_indicator_theme_label =
+      new QLabel(tr("Theme"), mode_indicator_body);
+  mode_indicator_theme_label->setMinimumHeight(24);
+  modeIndicatorThemeComboBox->setParent(mode_indicator_body);
+  modeIndicatorThemeComboBox->show();
+  modeIndicatorThemeComboBox->setMinimumHeight(24);
+  modeIndicatorThemeComboBox->setSizePolicy(QSizePolicy::Fixed,
+                                             QSizePolicy::Fixed);
+  mode_indicator_layout->addWidget(mode_indicator_theme_label, 1, 0);
+  mode_indicator_layout->addWidget(modeIndicatorThemeComboBox, 1, 1, 1, 1,
+                                   Qt::AlignRight);
+  mode_indicator_layout->setColumnStretch(1, 1);
+
+  QGroupBox* mode_indicator_custom_box =
+      new QGroupBox(tr("Custom design"), mode_indicator_body);
+  mode_indicator_custom_box->setObjectName(
+      QStringLiteral("modeIndicatorCustomGroupBox"));
+  mode_indicator_custom_box->setSizePolicy(QSizePolicy::Preferred,
+                                           QSizePolicy::Fixed);
+  QVBoxLayout* mode_indicator_custom_layout =
+      new QVBoxLayout(mode_indicator_custom_box);
+  mode_indicator_custom_layout->setContentsMargins(8, 8, 8, 8);
+  mode_indicator_custom_layout->setSpacing(8);
+
+  QGridLayout* mode_indicator_color_layout = new QGridLayout();
+  mode_indicator_color_layout->setHorizontalSpacing(8);
+  mode_indicator_color_layout->setVerticalSpacing(6);
+  mode_indicator_color_layout->addWidget(
+      new QLabel(tr("Target"), mode_indicator_custom_box), 0, 0);
+  mode_indicator_color_layout->addWidget(
+      new QLabel(tr("Background"), mode_indicator_custom_box), 0, 1);
+  mode_indicator_color_layout->addWidget(
+      new QLabel(tr("Border"), mode_indicator_custom_box), 0, 2);
+  mode_indicator_color_layout->addWidget(
+      new QLabel(tr("Text"), mode_indicator_custom_box), 0, 3);
+  mode_indicator_color_layout->addWidget(
+      new QLabel(tr("Shadow"), mode_indicator_custom_box), 0, 4);
+
+  auto add_mode_indicator_color_button =
+      [&](int row, int column, const char* object_name,
+          uint32_t default_color) {
+        QPushButton* button = new QPushButton(mode_indicator_custom_box);
+        button->setObjectName(QString::fromLatin1(object_name));
+        button->setMinimumSize(78, 26);
+        SetColorButton(button, default_color);
+        mode_indicator_color_layout->addWidget(button, row, column);
+        QObject::connect(button, SIGNAL(clicked()), this,
+                         SLOT(SelectRendererAppearanceColor()));
+      };
+
+  mode_indicator_color_layout->addWidget(
+      new QLabel(tr("Alphanumeric"), mode_indicator_custom_box), 1, 0);
+  add_mode_indicator_color_button(
+      1, 1, "modeIndicatorAsciiBackgroundColorButton",
+      GetDefaultModeIndicatorCustomStyle().ascii_background_color());
+  add_mode_indicator_color_button(
+      1, 2, "modeIndicatorAsciiBorderColorButton",
+      GetDefaultModeIndicatorCustomStyle().ascii_border_color());
+  add_mode_indicator_color_button(
+      1, 3, "modeIndicatorAsciiTextColorButton",
+      GetDefaultModeIndicatorCustomStyle().ascii_text_color());
+  add_mode_indicator_color_button(
+      1, 4, "modeIndicatorAsciiShadowColorButton",
+      GetDefaultModeIndicatorCustomStyle().ascii_shadow_color());
+
+  mode_indicator_color_layout->addWidget(
+      new QLabel(tr("Hiragana"), mode_indicator_custom_box), 2, 0);
+  add_mode_indicator_color_button(
+      2, 1, "modeIndicatorHiraganaBackgroundColorButton",
+      GetDefaultModeIndicatorCustomStyle().hiragana_background_color());
+  add_mode_indicator_color_button(
+      2, 2, "modeIndicatorHiraganaBorderColorButton",
+      GetDefaultModeIndicatorCustomStyle().hiragana_border_color());
+  add_mode_indicator_color_button(
+      2, 3, "modeIndicatorHiraganaTextColorButton",
+      GetDefaultModeIndicatorCustomStyle().hiragana_text_color());
+  add_mode_indicator_color_button(
+      2, 4, "modeIndicatorHiraganaShadowColorButton",
+      GetDefaultModeIndicatorCustomStyle().hiragana_shadow_color());
+
+  mode_indicator_color_layout->addWidget(
+      new QLabel(tr("Katakana"), mode_indicator_custom_box), 3, 0);
+  add_mode_indicator_color_button(
+      3, 1, "modeIndicatorKatakanaBackgroundColorButton",
+      GetDefaultModeIndicatorCustomStyle().katakana_background_color());
+  add_mode_indicator_color_button(
+      3, 2, "modeIndicatorKatakanaBorderColorButton",
+      GetDefaultModeIndicatorCustomStyle().katakana_border_color());
+  add_mode_indicator_color_button(
+      3, 3, "modeIndicatorKatakanaTextColorButton",
+      GetDefaultModeIndicatorCustomStyle().katakana_text_color());
+  add_mode_indicator_color_button(
+      3, 4, "modeIndicatorKatakanaShadowColorButton",
+      GetDefaultModeIndicatorCustomStyle().katakana_shadow_color());
+  mode_indicator_custom_layout->addLayout(mode_indicator_color_layout);
+
+  QGridLayout* mode_indicator_shape_layout = new QGridLayout();
+  mode_indicator_shape_layout->setHorizontalSpacing(8);
+  mode_indicator_shape_layout->setVerticalSpacing(6);
+
+  auto add_mode_indicator_spin =
+      [&](int row, int pair, const QString& label_text,
+          const char* object_name, int minimum, int maximum, int value,
+          const QString& suffix) {
+        const int label_column = pair * 2;
+        QLabel* label = new QLabel(label_text, mode_indicator_custom_box);
+        QSpinBox* spin = new QSpinBox(mode_indicator_custom_box);
+        spin->setObjectName(QString::fromLatin1(object_name));
+        spin->setRange(minimum, maximum);
+        spin->setValue(value);
+        spin->setSuffix(suffix);
+        spin->setMinimumWidth(84);
+        spin->setMinimumHeight(24);
+        mode_indicator_shape_layout->addWidget(label, row, label_column);
+        mode_indicator_shape_layout->addWidget(spin, row, label_column + 1);
+      };
+
+  add_mode_indicator_spin(
+      0, 0, tr("Width"), "modeIndicatorWidthSpinBox", 20, 96,
+      static_cast<int>(GetDefaultModeIndicatorCustomStyle().width()),
+      QStringLiteral(" px"));
+  add_mode_indicator_spin(
+      0, 1, tr("Height"), "modeIndicatorHeightSpinBox", 20, 96,
+      static_cast<int>(GetDefaultModeIndicatorCustomStyle().height()),
+      QStringLiteral(" px"));
+  add_mode_indicator_spin(
+      1, 0, tr("Corner radius"), "modeIndicatorCornerRadiusSpinBox", 0, 32,
+      static_cast<int>(GetDefaultModeIndicatorCustomStyle().corner_radius()),
+      QStringLiteral(" px"));
+  add_mode_indicator_spin(
+      1, 1, tr("Text size"), "modeIndicatorLabelSizeSpinBox", 8, 32,
+      static_cast<int>(GetDefaultModeIndicatorCustomStyle().label_size()),
+      QStringLiteral(" pt"));
+  add_mode_indicator_spin(
+      2, 0, tr("Border thickness"), "modeIndicatorBorderThicknessSpinBox", 0,
+      6,
+      static_cast<int>(
+          GetDefaultModeIndicatorCustomStyle().border_thickness()),
+      QStringLiteral(" px"));
+  add_mode_indicator_spin(
+      2, 1, tr("Shadow blur"), "modeIndicatorShadowBlurSpinBox", 0,
+      kMaxModeIndicatorShadowBlur,
+      static_cast<int>(GetDefaultModeIndicatorCustomStyle().shadow_blur()),
+      QStringLiteral(" px"));
+  add_mode_indicator_spin(
+      3, 0, tr("Shadow opacity"), "modeIndicatorShadowOpacitySpinBox", 0, 100,
+      static_cast<int>(
+          GetDefaultModeIndicatorCustomStyle().shadow_opacity_percent()),
+      QStringLiteral(" %"));
+  add_mode_indicator_spin(
+      3, 1, tr("Shadow X offset"), "modeIndicatorShadowOffsetXSpinBox", -24,
+      24, GetDefaultModeIndicatorCustomStyle().shadow_offset_x(),
+      QStringLiteral(" px"));
+  add_mode_indicator_spin(
+      4, 0, tr("Shadow Y offset"), "modeIndicatorShadowOffsetYSpinBox", -24,
+      24, GetDefaultModeIndicatorCustomStyle().shadow_offset_y(),
+      QStringLiteral(" px"));
+  mode_indicator_shape_layout->setColumnStretch(1, 1);
+  mode_indicator_shape_layout->setColumnStretch(3, 1);
+  mode_indicator_custom_layout->addLayout(mode_indicator_shape_layout);
+
+  mode_indicator_layout->addWidget(mode_indicator_custom_box, 2, 0, 1, 2);
+  mode_indicator_root_layout->addWidget(mode_indicator_body);
+
+  QObject::connect(
+      mode_indicator_reset_button, &QPushButton::clicked, this, [this]() {
+        const config::Config::WindowsModeIndicatorCustomStyle& defaults =
+            GetDefaultModeIndicatorCustomStyle();
+
+        auto reset_color = [this](const char* object_name, uint32_t rgb) {
+          SetColorButton(
+              FindButton(this, QString::fromLatin1(object_name)), rgb);
+        };
+        reset_color("modeIndicatorAsciiBackgroundColorButton",
+                    defaults.ascii_background_color());
+        reset_color("modeIndicatorAsciiBorderColorButton",
+                    defaults.ascii_border_color());
+        reset_color("modeIndicatorAsciiTextColorButton",
+                    defaults.ascii_text_color());
+        reset_color("modeIndicatorAsciiShadowColorButton",
+                    defaults.ascii_shadow_color());
+        reset_color("modeIndicatorHiraganaBackgroundColorButton",
+                    defaults.hiragana_background_color());
+        reset_color("modeIndicatorHiraganaBorderColorButton",
+                    defaults.hiragana_border_color());
+        reset_color("modeIndicatorHiraganaTextColorButton",
+                    defaults.hiragana_text_color());
+        reset_color("modeIndicatorHiraganaShadowColorButton",
+                    defaults.hiragana_shadow_color());
+        reset_color("modeIndicatorKatakanaBackgroundColorButton",
+                    defaults.katakana_background_color());
+        reset_color("modeIndicatorKatakanaBorderColorButton",
+                    defaults.katakana_border_color());
+        reset_color("modeIndicatorKatakanaTextColorButton",
+                    defaults.katakana_text_color());
+        reset_color("modeIndicatorKatakanaShadowColorButton",
+                    defaults.katakana_shadow_color());
+
+        auto reset_spin = [this](const char* object_name, int value) {
+          if (QSpinBox* spin = FindSpinBox(this, object_name)) {
+            spin->setValue(value);
+          }
+        };
+        reset_spin("modeIndicatorWidthSpinBox",
+                   static_cast<int>(defaults.width()));
+        reset_spin("modeIndicatorHeightSpinBox",
+                   static_cast<int>(defaults.height()));
+        reset_spin("modeIndicatorCornerRadiusSpinBox",
+                   static_cast<int>(defaults.corner_radius()));
+        reset_spin("modeIndicatorLabelSizeSpinBox",
+                   static_cast<int>(defaults.label_size()));
+        reset_spin("modeIndicatorBorderThicknessSpinBox",
+                   static_cast<int>(defaults.border_thickness()));
+        reset_spin("modeIndicatorShadowBlurSpinBox",
+                   static_cast<int>(defaults.shadow_blur()));
+        reset_spin("modeIndicatorShadowOpacitySpinBox",
+                   static_cast<int>(defaults.shadow_opacity_percent()));
+        reset_spin("modeIndicatorShadowOffsetXSpinBox",
+                   defaults.shadow_offset_x());
+        reset_spin("modeIndicatorShadowOffsetYSpinBox",
+                   defaults.shadow_offset_y());
+
+        SetComboCurrentData(
+            modeIndicatorThemeComboBox,
+            static_cast<int>(
+                config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM));
+        UpdateRendererAppearanceControls();
+        EnableApplyButton();
+      });
+
+  QObject::connect(modeIndicatorThemeComboBox,
+                   SIGNAL(currentIndexChanged(int)), this,
+                   SLOT(UpdateRendererAppearanceControls()));
+  QObject::connect(useModeIndicator, SIGNAL(toggled(bool)), this,
+                   SLOT(UpdateRendererAppearanceControls()));
+#endif  // _WIN32
+
   QWidget* group = new QWidget(inputSupportScrollAreaWidgetContents);
   group->setObjectName(QStringLiteral("rendererAppearanceGroupBox"));
   group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -2537,9 +2865,15 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   QFrame* section_line = new QFrame(section);
   section_line->setFrameShape(QFrame::HLine);
   section_line->setFrameShadow(QFrame::Sunken);
-  section_layout->addWidget(section_label);
-  section_layout->addWidget(reset_button);
-  section_layout->addWidget(section_line);
+  section_label->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+  reset_button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  section_line->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  section_layout->setSpacing(0);
+  section_layout->addWidget(section_label, 0, Qt::AlignVCenter);
+  section_layout->addSpacing(8);
+  section_layout->addWidget(reset_button, 0, Qt::AlignVCenter);
+  section_layout->addSpacing(8);
+  section_layout->addWidget(section_line, 1, Qt::AlignVCenter);
   QObject::connect(reset_button, SIGNAL(clicked()), this,
                    SLOT(ResetRendererAppearanceControls()));
   root_layout->addWidget(section);
@@ -2967,11 +3301,21 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                               QStringLiteral("suggestWindow"), true);
   add_ruby_palette_group();
 
-  const int insert_index =
+  // Put the frequently used candidate/suggestion/ruby appearance first.
+  // On Windows, keep the input-mode indicator next and the TSF preedit color
+  // customization after both sections.
+  const int preedit_index =
       inputSupportContentLayout->indexOf(preeditDisplayColorGroupBox);
-  inputSupportContentLayout->insertWidget(
-      insert_index >= 0 ? insert_index : inputSupportContentLayout->count(),
-      group);
+  const int renderer_insert_index =
+      preedit_index >= 0 ? preedit_index : inputSupportContentLayout->count();
+  inputSupportContentLayout->insertWidget(renderer_insert_index, group);
+
+#ifdef _WIN32
+  const int mode_indicator_insert_index =
+      inputSupportContentLayout->indexOf(group) + 1;
+  inputSupportContentLayout->insertWidget(mode_indicator_insert_index,
+                                          mode_indicator_group);
+#endif  // _WIN32
 }
 
 void ConfigDialog::ConvertFromProto(const config::Config &config) {
@@ -3168,6 +3512,78 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   SET_CHECKBOX(useJapaneseLayout, use_japanese_layout);
 
   SET_CHECKBOX(useModeIndicator, use_mode_indicator);
+#ifdef _WIN32
+  SetComboCurrentData(
+      modeIndicatorThemeComboBox,
+      static_cast<int>(config.windows_mode_indicator_theme()));
+
+  const auto& mode_indicator_style =
+      config.windows_mode_indicator_custom_style();
+  struct ModeIndicatorColorSetting {
+    const char* name;
+    uint32_t value;
+  };
+  const ModeIndicatorColorSetting mode_indicator_colors[] = {
+      {"modeIndicatorAsciiBackgroundColorButton",
+       mode_indicator_style.ascii_background_color()},
+      {"modeIndicatorAsciiBorderColorButton",
+       mode_indicator_style.ascii_border_color()},
+      {"modeIndicatorAsciiTextColorButton",
+       mode_indicator_style.ascii_text_color()},
+      {"modeIndicatorAsciiShadowColorButton",
+       mode_indicator_style.ascii_shadow_color()},
+      {"modeIndicatorHiraganaBackgroundColorButton",
+       mode_indicator_style.hiragana_background_color()},
+      {"modeIndicatorHiraganaBorderColorButton",
+       mode_indicator_style.hiragana_border_color()},
+      {"modeIndicatorHiraganaTextColorButton",
+       mode_indicator_style.hiragana_text_color()},
+      {"modeIndicatorHiraganaShadowColorButton",
+       mode_indicator_style.hiragana_shadow_color()},
+      {"modeIndicatorKatakanaBackgroundColorButton",
+       mode_indicator_style.katakana_background_color()},
+      {"modeIndicatorKatakanaBorderColorButton",
+       mode_indicator_style.katakana_border_color()},
+      {"modeIndicatorKatakanaTextColorButton",
+       mode_indicator_style.katakana_text_color()},
+      {"modeIndicatorKatakanaShadowColorButton",
+       mode_indicator_style.katakana_shadow_color()},
+  };
+  for (const auto& color : mode_indicator_colors) {
+    SetColorButton(
+        FindButton(this, QString::fromLatin1(color.name)), color.value);
+  }
+
+  struct ModeIndicatorValueSetting {
+    const char* name;
+    int value;
+  };
+  const ModeIndicatorValueSetting mode_indicator_values[] = {
+      {"modeIndicatorWidthSpinBox",
+       static_cast<int>(mode_indicator_style.width())},
+      {"modeIndicatorHeightSpinBox",
+       static_cast<int>(mode_indicator_style.height())},
+      {"modeIndicatorCornerRadiusSpinBox",
+       static_cast<int>(mode_indicator_style.corner_radius())},
+      {"modeIndicatorLabelSizeSpinBox",
+       static_cast<int>(mode_indicator_style.label_size())},
+      {"modeIndicatorBorderThicknessSpinBox",
+       static_cast<int>(mode_indicator_style.border_thickness())},
+      {"modeIndicatorShadowBlurSpinBox",
+       static_cast<int>(mode_indicator_style.shadow_blur())},
+      {"modeIndicatorShadowOpacitySpinBox",
+       static_cast<int>(mode_indicator_style.shadow_opacity_percent())},
+      {"modeIndicatorShadowOffsetXSpinBox",
+       mode_indicator_style.shadow_offset_x()},
+      {"modeIndicatorShadowOffsetYSpinBox",
+       mode_indicator_style.shadow_offset_y()},
+  };
+  for (const auto& value : mode_indicator_values) {
+    if (QSpinBox* spin = FindSpinBox(this, value.name)) {
+      spin->setValue(value.value);
+    }
+  }
+#endif  // _WIN32
   SetComboCurrentData(
       FindComboBox(this, "windowsImeIconStyleComboBox"),
       static_cast<int>(config.windows_ime_icon_style()));
@@ -3335,6 +3751,117 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   GET_CHECKBOX(useJapaneseLayout, use_japanese_layout);
 
   GET_CHECKBOX(useModeIndicator, use_mode_indicator);
+#ifdef _WIN32
+  config->set_windows_mode_indicator_theme(
+      static_cast<config::Config::WindowsModeIndicatorTheme>(
+          GetComboCurrentData(
+              modeIndicatorThemeComboBox,
+              static_cast<int>(
+                  config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM))));
+
+  auto* mode_indicator_style =
+      config->mutable_windows_mode_indicator_custom_style();
+  mode_indicator_style->set_ascii_background_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorAsciiBackgroundColorButton")),
+          GetDefaultModeIndicatorCustomStyle().ascii_background_color()));
+  mode_indicator_style->set_ascii_border_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorAsciiBorderColorButton")),
+          GetDefaultModeIndicatorCustomStyle().ascii_border_color()));
+  mode_indicator_style->set_ascii_text_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorAsciiTextColorButton")),
+          GetDefaultModeIndicatorCustomStyle().ascii_text_color()));
+  mode_indicator_style->set_ascii_shadow_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorAsciiShadowColorButton")),
+          GetDefaultModeIndicatorCustomStyle().ascii_shadow_color()));
+
+  mode_indicator_style->set_hiragana_background_color(
+      GetColorButtonRgb(
+          FindButton(
+              this,
+              QStringLiteral("modeIndicatorHiraganaBackgroundColorButton")),
+          GetDefaultModeIndicatorCustomStyle().hiragana_background_color()));
+  mode_indicator_style->set_hiragana_border_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorHiraganaBorderColorButton")),
+          GetDefaultModeIndicatorCustomStyle().hiragana_border_color()));
+  mode_indicator_style->set_hiragana_text_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorHiraganaTextColorButton")),
+          GetDefaultModeIndicatorCustomStyle().hiragana_text_color()));
+  mode_indicator_style->set_hiragana_shadow_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorHiraganaShadowColorButton")),
+          GetDefaultModeIndicatorCustomStyle().hiragana_shadow_color()));
+
+  mode_indicator_style->set_katakana_background_color(
+      GetColorButtonRgb(
+          FindButton(
+              this,
+              QStringLiteral("modeIndicatorKatakanaBackgroundColorButton")),
+          GetDefaultModeIndicatorCustomStyle().katakana_background_color()));
+  mode_indicator_style->set_katakana_border_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorKatakanaBorderColorButton")),
+          GetDefaultModeIndicatorCustomStyle().katakana_border_color()));
+  mode_indicator_style->set_katakana_text_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorKatakanaTextColorButton")),
+          GetDefaultModeIndicatorCustomStyle().katakana_text_color()));
+  mode_indicator_style->set_katakana_shadow_color(
+      GetColorButtonRgb(
+          FindButton(this,
+                     QStringLiteral("modeIndicatorKatakanaShadowColorButton")),
+          GetDefaultModeIndicatorCustomStyle().katakana_shadow_color()));
+
+  const auto spin_value = [&](const char* name, int default_value) {
+    const QSpinBox* spin = FindSpinBox(this, name);
+    return spin != nullptr ? spin->value() : default_value;
+  };
+  const auto& default_mode_indicator_style =
+      GetDefaultModeIndicatorCustomStyle();
+  mode_indicator_style->set_width(static_cast<uint32_t>(spin_value(
+      "modeIndicatorWidthSpinBox",
+      static_cast<int>(default_mode_indicator_style.width()))));
+  mode_indicator_style->set_height(static_cast<uint32_t>(spin_value(
+      "modeIndicatorHeightSpinBox",
+      static_cast<int>(default_mode_indicator_style.height()))));
+  mode_indicator_style->set_corner_radius(static_cast<uint32_t>(spin_value(
+      "modeIndicatorCornerRadiusSpinBox",
+      static_cast<int>(default_mode_indicator_style.corner_radius()))));
+  mode_indicator_style->set_label_size(static_cast<uint32_t>(spin_value(
+      "modeIndicatorLabelSizeSpinBox",
+      static_cast<int>(default_mode_indicator_style.label_size()))));
+  mode_indicator_style->set_border_thickness(static_cast<uint32_t>(spin_value(
+      "modeIndicatorBorderThicknessSpinBox",
+      static_cast<int>(default_mode_indicator_style.border_thickness()))));
+  mode_indicator_style->set_shadow_blur(static_cast<uint32_t>(spin_value(
+      "modeIndicatorShadowBlurSpinBox",
+      static_cast<int>(default_mode_indicator_style.shadow_blur()))));
+  mode_indicator_style->set_shadow_opacity_percent(
+      static_cast<uint32_t>(spin_value(
+          "modeIndicatorShadowOpacitySpinBox",
+          static_cast<int>(
+              default_mode_indicator_style.shadow_opacity_percent()))));
+  mode_indicator_style->set_shadow_offset_x(
+      spin_value("modeIndicatorShadowOffsetXSpinBox",
+                 default_mode_indicator_style.shadow_offset_x()));
+  mode_indicator_style->set_shadow_offset_y(
+      spin_value("modeIndicatorShadowOffsetYSpinBox",
+                 default_mode_indicator_style.shadow_offset_y()));
+#endif  // _WIN32
   if (const QComboBox* combo =
           FindComboBox(this, "windowsImeIconStyleComboBox")) {
     config->set_windows_ime_icon_style(
@@ -3973,6 +4500,19 @@ void ConfigDialog::LoadRendererCandidateAppearance() {
 }
 
 void ConfigDialog::UpdateRendererAppearanceControls() {
+#ifdef _WIN32
+  if (QWidget* custom_box =
+          findChild<QWidget*>(QStringLiteral("modeIndicatorCustomGroupBox"))) {
+    const int custom_theme =
+        static_cast<int>(
+            config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM);
+    custom_box->setEnabled(
+        useModeIndicator->isChecked() &&
+        GetComboCurrentData(modeIndicatorThemeComboBox, custom_theme) ==
+            custom_theme);
+  }
+#endif  // _WIN32
+
   auto enable_candidate_palette = [&](const QString& prefix, bool enabled) {
     if (QWidget* box = findChild<QWidget*>(prefix + QStringLiteral("PaletteGroupBox"))) {
       box->setEnabled(enabled);
@@ -4385,6 +4925,10 @@ void ConfigDialog::RestorePreviousDefaultImeSetting() {
 }
 
 void ConfigDialog::UpdateDependentControls() {
+#ifdef _WIN32
+  modeIndicatorThemeComboBox->setEnabled(useModeIndicator->isChecked());
+#endif  // _WIN32
+  UpdateRendererAppearanceControls();
   SelectInputModeSetting(inputModeComboBox->currentIndex());
   SelectLiveConversionSetting(
       static_cast<int>(liveConversionCheckBox->isChecked()));

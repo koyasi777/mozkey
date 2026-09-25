@@ -585,17 +585,30 @@ HBITMAP BalloonImage::CreateInternal(const BalloonImageInfo& info,
     }
   }
 
-  // Hereafter, we apply Gaussian blur.
-  GaussianBlur blur(info.blur_sigma);
+  // Preserve the legacy bitmap geometry independently from whether the blur
+  // pixels need to be evaluated. When blur alpha is zero, the Gaussian kernel
+  // is not even constructed.
+  const double normalized_blur_alpha =
+      std::clamp(info.blur_alpha, 0.0, 1.0);
+  const int blur_cutoff_length =
+      static_cast<int>(ceil(3.0 * info.blur_sigma));
+  std::unique_ptr<GaussianBlur> blur;
+  if (normalized_blur_alpha != 0.0) {
+    blur = std::make_unique<GaussianBlur>(info.blur_sigma);
+  }
 
   const int begin_x =
-      rect.Left() - std::max(blur.cutoff_length() - info.blur_offset_x, 0);
+      rect.Left() -
+      std::max(blur_cutoff_length - info.blur_offset_x, 0);
   const int begin_y =
-      rect.Top() - std::max(blur.cutoff_length() - info.blur_offset_y, 0);
+      rect.Top() -
+      std::max(blur_cutoff_length - info.blur_offset_y, 0);
   const int end_x =
-      rect.Right() + std::max(blur.cutoff_length() + info.blur_offset_x, 0);
+      rect.Right() +
+      std::max(blur_cutoff_length + info.blur_offset_x, 0);
   const int end_y =
-      rect.Bottom() + std::max(blur.cutoff_length() + info.blur_offset_y, 0);
+      rect.Bottom() +
+      std::max(blur_cutoff_length + info.blur_offset_y, 0);
 
   const int bmp_width = end_x - begin_x;
   const int bmp_height = end_y - begin_y;
@@ -652,7 +665,6 @@ HBITMAP BalloonImage::CreateInternal(const BalloonImageInfo& info,
     const int offset_y_;
   };
 
-  const double normalized_blur_alpha = std::clamp(info.blur_alpha, 0.0, 1.0);
   Accessor accessor(frame_buffer, -info.blur_offset_x, -info.blur_offset_y);
   for (int y = begin_y; y < begin_y + bmp_height; ++y) {
     for (int x = begin_x; x < begin_x + bmp_width; ++x) {
@@ -665,7 +677,23 @@ HBITMAP BalloonImage::CreateInternal(const BalloonImageInfo& info,
       double r = 0.0;
       double g = 0.0;
       double b = 0.0;
-      if (fore_color.a == 255) {
+      if (normalized_blur_alpha == 0.0) {
+        // Match the legacy pixel values exactly while skipping all Gaussian
+        // work. Fully transparent pixels historically retain blur RGB when
+        // sigma is positive, even though their alpha is zero.
+        alpha = fore_color.a;
+        if (fore_color.a == 0) {
+          if (info.blur_sigma > 0.0) {
+            r = info.blur_color.r;
+            g = info.blur_color.g;
+            b = info.blur_color.b;
+          }
+        } else {
+          r = fore_color.r;
+          g = fore_color.g;
+          b = fore_color.b;
+        }
+      } else if (fore_color.a == 255) {
         // Foreground color only.
         alpha = fore_color.a;
         r = fore_color.r;
@@ -683,12 +711,12 @@ HBITMAP BalloonImage::CreateInternal(const BalloonImageInfo& info,
           g = 0.0;
           b = 0.0;
         }
-        alpha = normalized_blur_alpha * blur.Apply(x, y, accessor);
+        alpha = normalized_blur_alpha * blur->Apply(x, y, accessor);
       } else {
         // Foreground color and background blur are mixed.
         const double fore_alpha = fore_color.a / 255.0;
         const double bg_alpha =
-            normalized_blur_alpha * blur.Apply(x, y, accessor) / 255.0;
+            normalized_blur_alpha * blur->Apply(x, y, accessor) / 255.0;
         const double norm = fore_alpha + bg_alpha - fore_alpha * bg_alpha;
         const double factor = (1.0 - fore_alpha) * bg_alpha;
         alpha = norm * 255.0;

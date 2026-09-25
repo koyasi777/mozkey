@@ -52,6 +52,114 @@ TEST(RendererColorThemeTest, ConfigDefaultsUseAuto) {
             config.ruby_window_color_theme());
 }
 
+TEST(RendererColorThemeTest, ModeIndicatorConfigDefaultsUseSystemTheme) {
+  const config::Config config;
+
+  EXPECT_FALSE(config.has_windows_mode_indicator_theme());
+  EXPECT_EQ(config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM,
+            config.windows_mode_indicator_theme());
+  EXPECT_FALSE(config.has_windows_mode_indicator_custom_style());
+
+  const auto& style = config.windows_mode_indicator_custom_style();
+  EXPECT_EQ(0xf5f8fcu, style.ascii_background_color());
+  EXPECT_EQ(0x24968cu, style.hiragana_border_color());
+  EXPECT_EQ(0x303469u, style.katakana_text_color());
+  EXPECT_EQ(36u, style.width());
+  EXPECT_EQ(28u, style.height());
+  EXPECT_EQ(8u, style.corner_radius());
+  EXPECT_EQ(12u, style.label_size());
+  EXPECT_EQ(1u, style.border_thickness());
+  EXPECT_EQ(4u, style.shadow_blur());
+  EXPECT_EQ(22u, style.shadow_opacity_percent());
+  EXPECT_EQ(0, style.shadow_offset_x());
+  EXPECT_EQ(1, style.shadow_offset_y());
+}
+
+TEST(RendererColorThemeTest, ModeIndicatorStyleDefaultsRemainNormalized) {
+  const config::Config config;
+  const WindowsModeIndicatorStyle style =
+      GetWindowsModeIndicatorStyle(config);
+
+  EXPECT_EQ(0xf5f8fcu, style.ascii_background_color);
+  EXPECT_EQ(0x24968cu, style.hiragana_border_color);
+  EXPECT_EQ(0x303469u, style.katakana_text_color);
+  EXPECT_EQ(36u, style.width);
+  EXPECT_EQ(28u, style.height);
+  EXPECT_EQ(8u, style.corner_radius);
+  EXPECT_EQ(12u, style.label_size);
+  EXPECT_EQ(1u, style.border_thickness);
+  EXPECT_EQ(4u, style.shadow_blur);
+  EXPECT_EQ(22u, style.shadow_opacity_percent);
+  EXPECT_EQ(0, style.shadow_offset_x);
+  EXPECT_EQ(1, style.shadow_offset_y);
+}
+
+TEST(RendererColorThemeTest, ModeIndicatorStyleClampsUntrustedConfig) {
+  config::Config config;
+  auto* proto = config.mutable_windows_mode_indicator_custom_style();
+  proto->set_ascii_background_color(0xff123456u);
+  proto->set_hiragana_border_color(0xab654321u);
+  proto->set_katakana_text_color(0x7fabcdefu);
+  proto->set_width(1);
+  proto->set_height(999);
+  proto->set_corner_radius(999);
+  proto->set_label_size(1);
+  proto->set_border_thickness(999);
+  proto->set_shadow_blur(999);
+  proto->set_shadow_opacity_percent(999);
+  proto->set_shadow_offset_x(-999);
+  proto->set_shadow_offset_y(999);
+
+  const WindowsModeIndicatorStyle style =
+      GetWindowsModeIndicatorStyle(config);
+
+  EXPECT_EQ(0x123456u, style.ascii_background_color);
+  EXPECT_EQ(0x654321u, style.hiragana_border_color);
+  EXPECT_EQ(0xabcdefu, style.katakana_text_color);
+  EXPECT_EQ(20u, style.width);
+  EXPECT_EQ(96u, style.height);
+  EXPECT_EQ(10u, style.corner_radius);
+  EXPECT_EQ(8u, style.label_size);
+  EXPECT_EQ(6u, style.border_thickness);
+  EXPECT_EQ(6u, style.shadow_blur);
+  EXPECT_EQ(100u, style.shadow_opacity_percent);
+  EXPECT_EQ(-24, style.shadow_offset_x);
+  EXPECT_EQ(24, style.shadow_offset_y);
+}
+
+TEST(RendererColorThemeTest, ModeIndicatorSystemThemeUsesSystemAppearance) {
+  EXPECT_EQ(SystemColorTheme::kLight,
+            ResolveWindowsModeIndicatorTheme(
+                config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM,
+                SystemColorTheme::kLight));
+  EXPECT_EQ(SystemColorTheme::kDark,
+            ResolveWindowsModeIndicatorTheme(
+                config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM,
+                SystemColorTheme::kDark));
+}
+
+TEST(RendererColorThemeTest, ModeIndicatorExplicitThemeOverridesSystem) {
+  EXPECT_EQ(SystemColorTheme::kDark,
+            ResolveWindowsModeIndicatorTheme(
+                config::Config::WINDOWS_MODE_INDICATOR_THEME_DARK,
+                SystemColorTheme::kLight));
+  EXPECT_EQ(SystemColorTheme::kLight,
+            ResolveWindowsModeIndicatorTheme(
+                config::Config::WINDOWS_MODE_INDICATOR_THEME_LIGHT,
+                SystemColorTheme::kDark));
+}
+
+TEST(RendererColorThemeTest, ModeIndicatorCustomKeepsFallbackSystemAppearance) {
+  EXPECT_EQ(SystemColorTheme::kLight,
+            ResolveWindowsModeIndicatorTheme(
+                config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM,
+                SystemColorTheme::kLight));
+  EXPECT_EQ(SystemColorTheme::kDark,
+            ResolveWindowsModeIndicatorTheme(
+                config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM,
+                SystemColorTheme::kDark));
+}
+
 TEST(RendererColorThemeTest, ResolvesAutoFromSystemTheme) {
   EXPECT_EQ(config::Config::RENDERER_WINDOW_COLOR_LIGHT,
             ResolveRendererWindowColorTheme(

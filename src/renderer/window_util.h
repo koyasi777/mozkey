@@ -73,6 +73,21 @@ class WindowUtil {
       const Size& window_size, const Point& zero_point_offset,
       const Rect& working_area, bool vertical);
 
+  // Returns the input-mode indicator rectangle. The preferred placement keeps
+  // |top_anchor_offset| aligned to the bottom-left of |target_rect|, preserving
+  // the legacy position. If that placement would cross the bottom of the
+  // working area during the downward fade animation, the visible indicator
+  // body is placed above |target_rect| while transparent/shadow bitmap margins
+  // may extend closer to the target. This avoids an unnecessarily large visual
+  // gap without allowing the body itself to overlap the target during fading.
+  // Horizontal placement and the final fallback are clamped to |working_area|.
+  // If the working area is unavailable, the legacy preferred position is
+  // returned unchanged.
+  static Rect GetIndicatorWindowRect(
+      const Rect& target_rect, const Size& window_size,
+      const Point& top_anchor_offset, int body_height,
+      int downward_animation_offset, const Rect& working_area);
+
   // Returns the preedit rectangle to use only for vertical candidate
   // placement. Hosts may report a vertical line box narrower than the visual
   // clearance needed around the line center. Preserve wider host geometry,

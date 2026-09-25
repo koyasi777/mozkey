@@ -30,6 +30,8 @@
 #ifndef MOZC_RENDERER_RENDERER_COLOR_THEME_H_
 #define MOZC_RENDERER_RENDERER_COLOR_THEME_H_
 
+#include <cstdint>
+
 #include "protocol/config.pb.h"
 
 namespace mozc {
@@ -44,6 +46,46 @@ enum class SystemColorTheme {
 // user's app mode (AppsUseLightTheme); macOS follows NSApplication's effective
 // appearance. Other platforms use Light as a conservative fallback.
 SystemColorTheme GetSystemColorTheme();
+
+// Resolves the Windows input-mode indicator preference to an effective
+// light/dark appearance. SYSTEM preserves |system_theme|; explicit DARK/LIGHT
+// override it. CUSTOM is rendered separately and preserves |system_theme| here
+// as a conservative fallback for callers that still require light/dark.
+SystemColorTheme ResolveWindowsModeIndicatorTheme(
+    config::Config::WindowsModeIndicatorTheme theme,
+    SystemColorTheme system_theme);
+
+// Sanitized renderer-side representation of the custom input-mode indicator
+// style. Config values are normalized before they reach GDI/BalloonImage.
+struct WindowsModeIndicatorStyle {
+  uint32_t ascii_background_color;
+  uint32_t ascii_border_color;
+  uint32_t ascii_text_color;
+  uint32_t ascii_shadow_color;
+  uint32_t hiragana_background_color;
+  uint32_t hiragana_border_color;
+  uint32_t hiragana_text_color;
+  uint32_t hiragana_shadow_color;
+  uint32_t katakana_background_color;
+  uint32_t katakana_border_color;
+  uint32_t katakana_text_color;
+  uint32_t katakana_shadow_color;
+  uint32_t width;
+  uint32_t height;
+  uint32_t corner_radius;
+  uint32_t label_size;
+  uint32_t border_thickness;
+  uint32_t shadow_blur;
+  uint32_t shadow_opacity_percent;
+  int32_t shadow_offset_x;
+  int32_t shadow_offset_y;
+
+  bool operator==(const WindowsModeIndicatorStyle& other) const;
+  bool operator!=(const WindowsModeIndicatorStyle& other) const;
+};
+
+WindowsModeIndicatorStyle GetWindowsModeIndicatorStyle(
+    const config::Config& config);
 
 config::Config::RendererWindowColorTheme ResolveRendererWindowColorTheme(
     config::Config::RendererWindowColorTheme theme,

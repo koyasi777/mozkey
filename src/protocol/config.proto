@@ -490,6 +490,50 @@ message Config {
   // Use mode indicator feature.
   optional bool use_mode_indicator = 120 [default = true];
 
+  // Windows input-mode indicator color theme. SYSTEM follows the current
+  // Windows app appearance; explicit DARK/LIGHT remain fixed until changed by
+  // the user. CUSTOM uses windows_mode_indicator_custom_style.
+  enum WindowsModeIndicatorTheme {
+    WINDOWS_MODE_INDICATOR_THEME_SYSTEM = 0;
+    WINDOWS_MODE_INDICATOR_THEME_DARK = 1;
+    WINDOWS_MODE_INDICATOR_THEME_LIGHT = 2;
+    WINDOWS_MODE_INDICATOR_THEME_CUSTOM = 3;
+  }
+  optional WindowsModeIndicatorTheme windows_mode_indicator_theme = 1029
+      [default = WINDOWS_MODE_INDICATOR_THEME_SYSTEM];
+
+  message WindowsModeIndicatorCustomStyle {
+    // Color values are stored as 0xRRGGBB, not Windows COLORREF.
+    optional uint32 ascii_background_color = 1 [default = 0xf5f8fc];
+    optional uint32 ascii_border_color = 2 [default = 0x5c7491];
+    optional uint32 ascii_text_color = 3 [default = 0x1c2634];
+    optional uint32 ascii_shadow_color = 4 [default = 0x788291];
+
+    optional uint32 hiragana_background_color = 5 [default = 0xebfcf8];
+    optional uint32 hiragana_border_color = 6 [default = 0x24968c];
+    optional uint32 hiragana_text_color = 7 [default = 0x124e48];
+    optional uint32 hiragana_shadow_color = 8 [default = 0x69918a];
+
+    optional uint32 katakana_background_color = 9 [default = 0xf4f4ff];
+    optional uint32 katakana_border_color = 10 [default = 0x626cd7];
+    optional uint32 katakana_text_color = 11 [default = 0x303469];
+    optional uint32 katakana_shadow_color = 12 [default = 0x78789b];
+
+    // Geometry values are logical pixels at 96 DPI unless otherwise noted.
+    optional uint32 width = 13 [default = 36];
+    optional uint32 height = 14 [default = 28];
+    optional uint32 corner_radius = 15 [default = 8];
+    // Label size is in points.
+    optional uint32 label_size = 16 [default = 12];
+    optional uint32 border_thickness = 17 [default = 1];
+    optional uint32 shadow_blur = 18 [default = 4];
+    optional uint32 shadow_opacity_percent = 19 [default = 22];
+    optional int32 shadow_offset_x = 20 [default = 0];
+    optional int32 shadow_offset_y = 21 [default = 1];
+  }
+  optional WindowsModeIndicatorCustomStyle
+      windows_mode_indicator_custom_style = 1030;
+
   // Use dark mode for candidate window and ruby overlay on Windows.
   // Deprecated UI-wise. Newer clients should use the per-window appearance
   // settings below and keep this field synchronized for backward compatibility.

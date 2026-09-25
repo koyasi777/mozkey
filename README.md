@@ -96,7 +96,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows / macOS 版では、縦書き時の連鎖候補ウィンドウを現在候補から本文の外側へ展開するよう配置し、必要に応じて反対側へフォールバック
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能
-- Windows 版の IME 切り替えインジケータが、Windows のライト / ダークテーマに合わせて表示されるように改善
+- Windows 版の IME 切り替えインジケータは、設定画面から「システムテーマに合わせる / ダーク / ライト / カスタム」を選択可能。カスタムでは入力モード別の配色とサイズ・角丸・枠線・影を調整でき、画面端付近では表示位置を自動調整
 - system dictionary 強化用の追加辞書生成パイプラインを追加
 - 日常語彙・実務語彙・外来語・英語綴り候補を小さな manual override 辞書として段階的に補強し、通常語彙は自然な第一候補、英語綴りは補助候補として扱う評価運用を追加
 - merge-ut-dictionaries 由来の地名・SudachiDict 系語彙を system dictionary に取り込めるようにした
@@ -506,7 +506,9 @@ Windows 版のルビ表示では、左右の余白、上下の余白、入力文
 
 ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。
 
-Windows 版の IME 切り替えインジケータは、Windows のライト / ダークテーマに追従し、現在の入力モードを確認しやすいように配色を切り替えます。
+Windows 版の IME 切り替えインジケータは、設定画面から「システムテーマに合わせる / ダーク / ライト / カスタム」を選択できます。「システムテーマに合わせる」では Windows のライト / ダークテーマに追従し、「ダーク」「ライト」を明示した場合は Windows のテーマ変更に追従せず、その配色を維持します。「カスタム」では英数字・ひらがな・カタカナの背景色・枠線色・文字色・影色に加え、幅・高さ・角丸・文字サイズ・枠線幅・影のぼかし・濃さ・位置を調整できます。
+
+入力位置がモニターの作業領域端付近にある場合は、インジケータが画面外にはみ出さないよう表示位置を自動調整します。外観設定の「リセット」はテーマとカスタム値を既定値へ戻しますが、インジケータの表示 ON/OFF 設定は変更しません。
 
 ### 縦書き対応（Windows / macOS）
 
@@ -788,7 +790,7 @@ Main features added in this fork
 - On Windows and macOS, places cascading candidate windows outward from the focused vertical candidate, with fallback to the opposite side when necessary
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog
-- Makes the Windows IME mode indicator follow the Windows light/dark theme
+- Allows choosing System theme, Dark, Light, or Custom for the Windows IME mode indicator, including per-mode colors and geometry/shadow customization, with automatic screen-edge repositioning
 - Adds an enhanced system dictionary generation pipeline
 - Adds a small tracked manual override dictionary for daily vocabulary, practical vocabulary, loanwords, and secondary English spelling candidates, with regression checks that keep Japanese candidates first
 - Allows incorporating place names and SudachiDict-derived vocabulary from merge-ut-dictionaries into the system dictionary
@@ -1379,8 +1381,16 @@ descriptions, footer labels, and infolist text keeps its existing weight.
 The ruby display shown during live conversion can be enabled or disabled from
 the config dialog.
 
-On Windows, the IME mode indicator follows the Windows light/dark theme and
-changes its colors to keep the current input mode easy to recognize.
+On Windows, the IME mode indicator can use System theme, Dark, Light, or
+Custom. System theme follows the Windows light/dark appearance; explicit Dark
+or Light keeps that appearance even when the Windows theme changes. Custom
+allows separate colors for alphanumeric, Hiragana, and Katakana indicators,
+plus size, corner radius, border, and shadow adjustments.
+
+When the input position is near an edge of the monitor work area, the indicator
+is automatically repositioned to stay on-screen. Reset restores the indicator
+theme and custom appearance values to their defaults without changing whether
+the indicator itself is enabled.
 
 ### Vertical writing support (Windows / macOS)
 

@@ -259,6 +259,7 @@
         <source>Show input mode indicator near the cursor</source>
         <translation>カーソル周辺に入力モードを表示する</translation>
     </message>
+
     <message>
         <location filename="config_dialog.ui" line="817"/>
         <source>Use dark mode for candidate and ruby windows</source>
@@ -1111,6 +1112,71 @@ The current Windows default IME override will be saved so it can be restored lat
         <translation>以前の Windows 既定 IME 設定に戻せませんでした。</translation>
     </message>
 
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Input mode indicator</source>
+        <translation>入力モードインジケーター</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Theme</source>
+        <translation>テーマ</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>System theme</source>
+        <translation>システムテーマに合わせる</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Custom design</source>
+        <translation>カスタムデザイン</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Hiragana</source>
+        <translation>ひらがな</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Width</source>
+        <translation>幅</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Height</source>
+        <translation>高さ</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Text size</source>
+        <translation>文字サイズ</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Border thickness</source>
+        <translation>枠線の太さ</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Shadow</source>
+        <translation>影</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Shadow blur</source>
+        <translation>影のぼかし</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Shadow X offset</source>
+        <translation>影の横方向オフセット</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Shadow Y offset</source>
+        <translation>影の縦方向オフセット</translation>
+    </message>
     <message>
         <location filename="config_dialog.cc" line="1650"/>
         <source>Candidate, suggestion, and ruby window appearance</source>

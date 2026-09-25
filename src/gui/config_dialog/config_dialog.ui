@@ -1444,13 +1444,29 @@
                   </property>
                  </widget>
                 </item>
-                <item row="5" column="0" colspan="8">
+                <item row="5" column="0" colspan="5">
                  <widget class="QCheckBox" name="useModeIndicator">
                   <property name="enabled">
                    <bool>true</bool>
                   </property>
                   <property name="text">
                    <string>Show input mode indicator near the cursor</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="5" column="5" colspan="3">
+                 <widget class="QComboBox" name="modeIndicatorThemeComboBox">
+                  <property name="minimumSize">
+                   <size>
+                    <width>190</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="maximumSize">
+                   <size>
+                    <width>190</width>
+                    <height>16777215</height>
+                   </size>
                   </property>
                  </widget>
                 </item>
