@@ -5,7 +5,7 @@
 <h1 align="center">Mozkey（もずきー）</h1>
 
 <p align="center">
-  <strong>Mozc をベースに、遅延付きライブ変換・ローカル Zenz 補正・ダークテーマ対応<br>句読点単打確定・文脈を見た変換補正などを統合した、ローカルファーストな日本語入力 fork です。</strong>
+  <strong>Mozc をベースに、遅延付きライブ変換・ローカル Zenz 補正・外観カスタマイズ機能<br>句読点単打確定・文脈を見た変換補正などを統合した、ローカルファーストな日本語入力 fork です。</strong>
 </p>
 
 <p align="center">
@@ -87,9 +87,9 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
 - Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（黒）/ モノクロ（白）から選択可能
 - Windows Search などの immersive TSF ホストでは、候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビをホストプロセス内の renderer 経路で表示し、前面表示とマウス操作を安定化。未選択のサジェストは mouse-down だけで通常変換へ移行せず、mouse-up で実際に押したサジェストを確定
-- Windows 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、ライト / ダーク / カスタム配色、サイズ、角丸、透明度、影を設定画面から個別に調整可能
+- Windows / macOS 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、ライト / ダーク / 自動（システムテーマに合わせる）/ カスタム配色、サイズ、角丸、透明度、影を設定画面から個別に調整可能。新規設定では3項目とも「自動」が既定
 - Windows 版のルビ表示は、表示先モニターの DPI に合わせて位置・サイズを補正し、左右の余白、上下の余白、入力文字との距離を設定可能
-- サジェストウィンドウとルビ表示は、候補ウィンドウの配色に追従するか、個別のテーマ・カスタム配色を使うかを選択可能
+- サジェストウィンドウとルビ表示は、候補ウィンドウの配色に追従するか、個別のテーマ・カスタム配色を使うかを選択可能。「自動」は各ウィンドウがシステムテーマを直接参照し、「候補ウィンドウに追従」とは別の設定
 - Windows 版の候補ウィンドウ・用例ウィンドウ・ライブ変換中のルビ表示に使うフォントを設定画面から変更可能
 - Windows 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、主要テキストの太さを 100～900 の範囲で個別に設定可能
 - Windows / macOS 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、対応するキー設定では候補・文節移動も視覚方向に合わせて操作可能
@@ -486,17 +486,19 @@ Windows 版では、Windows Search の検索 UI のような immersive TSF 環�
 
 サジェストを押したまま候補外へ移動して mouse-up した場合は確定せず、通常候補のクリック操作は従来の挙動を維持します。
 
-### Windows 候補ウィンドウ・サジェストウィンドウ・ルビ表示・IME インジケータの外観設定
+### 候補ウィンドウ・サジェストウィンドウ・ルビ表示の外観設定（Windows / macOS）
 
-Windows 版では、設定画面から候補ウィンドウ、サジェストウィンドウ、ライブ変換中のルビ表示の外観を調整できます。
+Windows / macOS 版では、設定画面から候補ウィンドウ、サジェストウィンドウ、ライブ変換中のルビ表示の外観を調整できます。
 
-候補ウィンドウはライト / ダーク / カスタム配色を選択できます。サジェストウィンドウとルビ表示は、候補ウィンドウの配色に追従するか、ライト / ダーク / カスタム配色を個別に使うかを選択できます。
+候補ウィンドウ、サジェストウィンドウ、ルビ表示は、ライト / ダーク / 自動（システムテーマに合わせる）/ カスタム配色を選択できます。新規設定では3項目とも「自動」が既定です。「自動」では現在のシステム外観を参照し、OS のライト / ダークテーマを変更した場合は次の renderer 更新から新しい外観を反映します。
+
+ライト / ダーク / カスタム配色を明示的に選択した場合は、システムテーマの変更には追従しません。サジェストウィンドウとルビ表示には「候補ウィンドウに追従」もあり、候補ウィンドウで解決された配色やカスタム配色を引き継ぎます。「自動」と「候補ウィンドウに追従」は別の設定です。
 
 カスタム配色では、候補ウィンドウとサジェストウィンドウについて、背景、文字、選択背景、選択枠、枠線、ショートカット、説明、フッター、スクロールバーなどの色を調整できます。ルビ表示については、背景、文字、枠線の色を調整できます。
 
 各ウィンドウの表示サイズ、角丸、透明度、影の広がり、濃さ、方向、距離も設定できます。影の方向は画面座標基準の角度で指定し、0° は右、45° は右下、90° は下を表します。影の距離を 0 にすると、全方向に均等な影になります。変換候補・用例などの候補系表示には候補ウィンドウ設定を使い、予測・サジェスト系表示にはサジェストウィンドウ設定を使います。
 
-ルビ表示では、左右の余白、上下の余白、入力文字との距離を個別に設定できます。これらは固定の物理ピクセル値ではなく、ルビ表示のサイズ設定と表示先モニターの DPI に応じて拡大縮小されます。複数モニター環境では、入力位置があるモニターの DPI を基準にフォント、余白、角丸、影、入力文字との距離を再計算し、TSF から得た入力位置も物理座標へ変換して配置します。
+Windows 版のルビ表示では、左右の余白、上下の余白、入力文字との距離を個別に設定できます。これらは固定の物理ピクセル値ではなく、ルビ表示のサイズ設定と表示先モニターの DPI に応じて拡大縮小されます。複数モニター環境では、入力位置があるモニターの DPI を基準にフォント、余白、角丸、影、入力文字との距離を再計算し、TSF から得た入力位置も物理座標へ変換して配置します。
 
 候補ウィンドウ、用例ウィンドウ、ライブ変換中のルビ表示に使うフォントも設定画面から変更できます。既定フォントに戻すこともでき、選択したフォントを候補表示に適用できない場合は、候補ウィンドウが消えないように既定フォントへフォールバックします。
 
@@ -504,7 +506,7 @@ Windows 版では、設定画面から候補ウィンドウ、サジェストウ
 
 ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。
 
-IME 切り替えインジケータは Windows のライト / ダークテーマに追従し、現在の入力モードを確認しやすいように配色を切り替えます。
+Windows 版の IME 切り替えインジケータは、Windows のライト / ダークテーマに追従し、現在の入力モードを確認しやすいように配色を切り替えます。
 
 ### 縦書き対応（Windows / macOS）
 
@@ -652,7 +654,7 @@ upstream 提案向けの変更は `pr/*` branches に整理しています。
 
 This repository is my personal fork of [google/mozc](https://github.com/google/mozc).
 
-This fork is mainly maintained for my own Windows / macOS environments and adds input assistance, live conversion, context-aware conversion, local Zenz correction, and offline-distribution-oriented adjustments to Mozc.
+This fork is mainly maintained for my own Windows / macOS environments and adds input assistance, live conversion, context-aware conversion, local Zenz correction, system-theme-aware renderer appearance, and offline-distribution-oriented adjustments to Mozc.
 
 This build is not an official google/mozc distribution.
 
@@ -777,9 +779,9 @@ Main features added in this fork
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Black), and Monochrome (White) in the config dialog
 - Supports candidate, suggestion, and live-conversion ruby rendering in immersive TSF hosts such as Windows Search through an in-process renderer path, keeping the UI above the host presentation layer and preserving correct mouse selection; an unfocused passive suggestion does not enter normal conversion on mouse-down, and mouse-up commits the suggestion that was actually clicked
-- Allows configuring light/dark/custom color themes, size, corner radius, opacity, and shadow separately for the Windows candidate window, suggestion window, and live-conversion ruby display from the config dialog
+- Allows configuring light/dark/auto (follow system theme)/custom color themes, size, corner radius, opacity, and shadow separately for the candidate window, suggestion window, and live-conversion ruby display on Windows and macOS; new configurations default all three theme selectors to Auto
 - Makes the Windows ruby display use target-monitor DPI-aware positioning and scaling, and allows configuring its horizontal padding, vertical padding, and distance from the input text
-- Allows the suggestion window and ruby display to either follow the candidate window color theme or use their own theme/custom colors
+- Allows the suggestion window and ruby display to either follow the candidate window color theme or use their own theme/custom colors; Auto follows the OS system theme directly and is distinct from Follow Candidate
 - Allows changing the font used for the Windows candidate window, infolist window, and live-conversion ruby display from the config dialog
 - Allows configuring the primary text weight independently from 100 to 900 for the Windows candidate window, suggestion window, and live-conversion ruby display
 - Adds vertical-writing layouts for candidate, suggestion, infolist, and live-conversion ruby displays on Windows and macOS, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
@@ -1326,14 +1328,22 @@ was actually clicked.
 Dragging outside the suggestion list before releasing the mouse does not commit
 a suggestion, while ordinary candidate clicking keeps its previous behavior.
 
-### Windows candidate window, suggestion window, ruby display, and IME indicator appearance
+### Candidate window, suggestion window, and ruby display appearance (Windows / macOS)
 
-On Windows, the config dialog can customize the appearance of the candidate
-window, the suggestion window, and the ruby display shown during live conversion.
+On Windows and macOS, the config dialog can customize the appearance of the
+candidate window, the suggestion window, and the ruby display shown during live
+conversion.
 
-The candidate window can use the light theme, dark theme, or custom colors. The
-suggestion window and ruby display can either follow the candidate window
-appearance or use their own light, dark, or custom color settings.
+The candidate window, suggestion window, and ruby display can use Light, Dark,
+Auto (follow system theme), or Custom colors. New configurations default all
+three theme selectors to Auto. Auto resolves the current system appearance and
+uses the corresponding light or dark renderer theme; after the OS appearance
+changes, the new theme is picked up on the next renderer update.
+
+Explicit Light, Dark, and Custom selections do not follow later system-theme
+changes. The suggestion window and ruby display can also use Follow Candidate,
+which inherits the candidate window's resolved or custom appearance. Auto and
+Follow Candidate are separate settings.
 
 Custom colors can be configured for the candidate and suggestion windows,
 including the background, text, selected background, selected border, border,
@@ -1348,8 +1358,8 @@ Candidate-like displays such as conversion candidates and usage/infolist windows
 use the candidate window settings, while prediction/suggestion displays use the
 suggestion window settings.
 
-For the ruby display, horizontal padding, vertical padding, and distance from
-the input text can be configured independently. These are logical design values,
+On Windows, horizontal padding, vertical padding, and distance from the input
+text can be configured independently for the ruby display. These are logical design values,
 not fixed physical-pixel values; they scale with the ruby display size and the
 DPI of the target monitor. In multi-monitor setups, the renderer recalculates
 the font, padding, corner radius, shadow, and input-text gap for the monitor that
@@ -1369,8 +1379,8 @@ descriptions, footer labels, and infolist text keeps its existing weight.
 The ruby display shown during live conversion can be enabled or disabled from
 the config dialog.
 
-The IME mode indicator follows the Windows light/dark theme and changes its
-colors to keep the current input mode easy to recognize.
+On Windows, the IME mode indicator follows the Windows light/dark theme and
+changes its colors to keep the current input mode easy to recognize.
 
 ### Vertical writing support (Windows / macOS)
 

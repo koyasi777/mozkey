@@ -2615,7 +2615,10 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
               config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE));
     }
     combo->addItem(
-        tr("Default (Light)"),
+        tr("Auto (follow system theme)"),
+        static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_AUTO));
+    combo->addItem(
+        tr("Light"),
         static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_LIGHT));
     combo->addItem(
         tr("Dark"),
@@ -3483,9 +3486,11 @@ void ConfigDialog::ConvertRendererAppearanceFromProto(
   const int candidate_color_theme =
       config.has_candidate_window_color_theme()
           ? static_cast<int>(config.candidate_window_color_theme())
-          : static_cast<int>(config.use_dark_mode_candidate_window()
-                             ? config::Config::RENDERER_WINDOW_COLOR_DARK
-                             : config::Config::RENDERER_WINDOW_COLOR_LIGHT);
+      : config.has_use_dark_mode_candidate_window()
+          ? static_cast<int>(config.use_dark_mode_candidate_window()
+                                 ? config::Config::RENDERER_WINDOW_COLOR_DARK
+                                 : config::Config::RENDERER_WINDOW_COLOR_LIGHT)
+          : static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_AUTO);
   SetComboCurrentData(FindComboBox(this, "candidateWindowColorThemeComboBox"),
                       candidate_color_theme);
   SetComboCurrentData(FindComboBox(this, "suggestWindowColorThemeComboBox"),
@@ -3619,7 +3624,7 @@ void ConfigDialog::ConvertRendererAppearanceToProto(
 
   const int candidate_color_theme = GetComboCurrentData(
       FindComboBox(this, "candidateWindowColorThemeComboBox"),
-      static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_LIGHT));
+      static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_AUTO));
   config->set_candidate_window_color_theme(
       static_cast<config::Config::RendererWindowColorTheme>(
           candidate_color_theme));
@@ -3631,14 +3636,12 @@ void ConfigDialog::ConvertRendererAppearanceToProto(
       static_cast<config::Config::RendererWindowColorTheme>(
           GetComboCurrentData(
               FindComboBox(this, "suggestWindowColorThemeComboBox"),
-              static_cast<int>(
-                  config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE))));
+              static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_AUTO))));
   config->set_ruby_window_color_theme(
       static_cast<config::Config::RendererWindowColorTheme>(
           GetComboCurrentData(
               FindComboBox(this, "rubyWindowColorThemeComboBox"),
-              static_cast<int>(
-                  config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE))));
+              static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_AUTO))));
 
   SaveCandidatePaletteToProto(this, QStringLiteral("candidateWindow"),
                               config->mutable_candidate_window_custom_color_palette());
@@ -3766,13 +3769,13 @@ void ConfigDialog::ConvertRendererAppearanceToProto(
 void ConfigDialog::ResetRendererAppearanceControls() {
   SetComboCurrentData(FindComboBox(this, "candidateWindowColorThemeComboBox"),
                       static_cast<int>(
-                          config::Config::RENDERER_WINDOW_COLOR_LIGHT));
+                          config::Config::RENDERER_WINDOW_COLOR_AUTO));
   SetComboCurrentData(FindComboBox(this, "suggestWindowColorThemeComboBox"),
-                      static_cast<int>(config::Config::
-                                           RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE));
+                      static_cast<int>(
+                          config::Config::RENDERER_WINDOW_COLOR_AUTO));
   SetComboCurrentData(FindComboBox(this, "rubyWindowColorThemeComboBox"),
-                      static_cast<int>(config::Config::
-                                           RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE));
+                      static_cast<int>(
+                          config::Config::RENDERER_WINDOW_COLOR_AUTO));
 
   SetCandidatePaletteButtons(this, QStringLiteral("candidateWindow"),
                              kLightCandidatePalette);

@@ -1133,8 +1133,13 @@ The current Windows default IME override will be saved so it can be restored lat
     </message>
     <message>
         <location filename="config_dialog.cc" line="1654"/>
-        <source>Default (Light)</source>
-        <translation>標準（ライト）</translation>
+        <source>Auto (follow system theme)</source>
+        <translation>自動（システムテーマに合わせる）</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="1654"/>
+        <source>Light</source>
+        <translation>ライト</translation>
     </message>
     <message>
         <location filename="config_dialog.cc" line="1655"/>

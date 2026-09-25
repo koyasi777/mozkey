@@ -1094,8 +1094,13 @@ The current Windows default IME override will be saved so it can be restored lat
     </message>
     <message>
         <location filename="config_dialog.cc" line="1654"/>
-        <source>Default (Light)</source>
-        <translation>Default (Light)</translation>
+        <source>Auto (follow system theme)</source>
+        <translation>Auto (follow system theme)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="1654"/>
+        <source>Light</source>
+        <translation>Light</translation>
     </message>
     <message>
         <location filename="config_dialog.cc" line="1655"/>

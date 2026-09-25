@@ -105,6 +105,30 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "renderer_color_theme",
+    srcs = ["renderer_color_theme.cc"],
+    hdrs = ["renderer_color_theme.h"],
+    visibility = ["//renderer:__subpackages__"],
+    deps = [
+        "//protocol:config_cc_proto",
+    ] + mozc_select(
+        macos = [":renderer_color_theme_macos"],
+        windows = ["//bazel/win32:advapi32"],
+    ),
+)
+
+mozc_cc_test(
+    name = "renderer_color_theme_test",
+    size = "small",
+    srcs = ["renderer_color_theme_test.cc"],
+    deps = [
+        ":renderer_color_theme",
+        "//protocol:config_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "renderer_style_config",
     srcs = ["renderer_style_config.cc"],
     hdrs = ["renderer_style_config.h"],
@@ -113,6 +137,7 @@ mozc_cc_library(
         "//win32/tip:__subpackages__",
     ],
     deps = [
+        ":renderer_color_theme",
         ":renderer_style_handler",
         ":window_effect_util",
         "//config:config_handler",
@@ -312,6 +337,13 @@ mozc_cc_test(
 )
 
 # macOS
+mozc_objc_library(
+    name = "renderer_color_theme_macos",
+    srcs = ["mac/renderer_color_theme_macos.mm"],
+    hdrs = ["mac/renderer_color_theme_macos.h"],
+    sdk_frameworks = ["Cocoa"],
+)
+
 mozc_cc_library(
     name = "mac_vertical_candidate_layout",
     srcs = ["mac/mac_vertical_candidate_layout.cc"],

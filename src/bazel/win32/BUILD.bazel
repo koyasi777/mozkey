@@ -62,6 +62,10 @@ mozc_win32_lib(
 )
 
 mozc_win32_lib(
+    name = "advapi32",
+)
+
+mozc_win32_lib(
     name = "d2d1",
 )
 

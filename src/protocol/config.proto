@@ -531,6 +531,8 @@ message Config {
     RENDERER_WINDOW_COLOR_DARK = 1;
     RENDERER_WINDOW_COLOR_CUSTOM = 2;
     RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE = 3;
+    // Follow the current desktop application appearance on Windows/macOS.
+    RENDERER_WINDOW_COLOR_AUTO = 4;
   }
 
   message CandidateWindowColorPalette {
@@ -563,17 +565,17 @@ message Config {
   // PREDICTION and SUGGESTION use the suggest window appearance.
   // RubyWindow has its own compact palette.
   optional RendererWindowColorTheme candidate_window_color_theme = 136
-      [default = RENDERER_WINDOW_COLOR_LIGHT];
+      [default = RENDERER_WINDOW_COLOR_AUTO];
   optional CandidateWindowColorPalette candidate_window_custom_color_palette =
       137;
 
   optional RendererWindowColorTheme suggest_window_color_theme = 138
-      [default = RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE];
+      [default = RENDERER_WINDOW_COLOR_AUTO];
   optional CandidateWindowColorPalette suggest_window_custom_color_palette =
       139;
 
   optional RendererWindowColorTheme ruby_window_color_theme = 140
-      [default = RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE];
+      [default = RENDERER_WINDOW_COLOR_AUTO];
   optional RubyWindowColorPalette ruby_window_custom_color_palette = 141;
 
   // Window corner radius. 0 means square corners.

@@ -45,6 +45,7 @@
 #include "base/win32/wide_char.h"
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
+#include "renderer/renderer_color_theme.h"
 #include "renderer/win32/win32_font_util.h"
 #include "renderer/win32/win32_image_util.h"
 #include "renderer/win32/win32_renderer_util.h"
@@ -94,39 +95,6 @@ double GetDPIScaling() {
   return static_cast<double>(dpi_x) / kDefaultDPI;
 }
 
-enum class ColorScheme {
-  kLight,
-  kDark,
-};
-
-ColorScheme GetWindowsAppColorScheme() {
-  // Windows Settings:
-  // Personalization -> Colors -> Choose your default app mode
-  //
-  // AppsUseLightTheme:
-  //   0 = Dark
-  //   1 = Light
-  //
-  // If this registry value does not exist, use Light as a safe default.
-  DWORD apps_use_light_theme = 1;
-  DWORD size = sizeof(apps_use_light_theme);
-
-  const LONG result = ::RegGetValueW(
-      HKEY_CURRENT_USER,
-      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-      L"AppsUseLightTheme",
-      RRF_RT_REG_DWORD,
-      nullptr,
-      &apps_use_light_theme,
-      &size);
-
-  if (result != ERROR_SUCCESS) {
-    return ColorScheme::kLight;
-  }
-
-  return apps_use_light_theme == 0 ? ColorScheme::kDark : ColorScheme::kLight;
-}
-
 bool IsImmersiveColorSetChange(LPCTSTR section) {
   return section != nullptr &&
          ::lstrcmpi(section, TEXT("ImmersiveColorSet")) == 0;
@@ -148,8 +116,8 @@ struct IndicatorColors {
   RGBColor label;
 };
 
-IndicatorColors GetAsciiIndicatorColors(ColorScheme color_scheme) {
-  if (color_scheme == ColorScheme::kDark) {
+IndicatorColors GetAsciiIndicatorColors(SystemColorTheme color_scheme) {
+  if (color_scheme == SystemColorTheme::kDark) {
     return {
         RGBColor(30, 38, 52),
         RGBColor(96, 130, 170),
@@ -166,8 +134,8 @@ IndicatorColors GetAsciiIndicatorColors(ColorScheme color_scheme) {
   };
 }
 
-IndicatorColors GetHiraganaIndicatorColors(ColorScheme color_scheme) {
-  if (color_scheme == ColorScheme::kDark) {
+IndicatorColors GetHiraganaIndicatorColors(SystemColorTheme color_scheme) {
+  if (color_scheme == SystemColorTheme::kDark) {
     return {
         RGBColor(20, 64, 61),
         RGBColor(70, 190, 180),
@@ -184,8 +152,8 @@ IndicatorColors GetHiraganaIndicatorColors(ColorScheme color_scheme) {
   };
 }
 
-IndicatorColors GetKatakanaIndicatorColors(ColorScheme color_scheme) {
-  if (color_scheme == ColorScheme::kDark) {
+IndicatorColors GetKatakanaIndicatorColors(SystemColorTheme color_scheme) {
+  if (color_scheme == SystemColorTheme::kDark) {
     return {
         RGBColor(42, 44, 70),
         RGBColor(126, 135, 245),
@@ -202,7 +170,7 @@ IndicatorColors GetKatakanaIndicatorColors(ColorScheme color_scheme) {
   };
 }
 
-IndicatorColors GetIndicatorColors(int mode, ColorScheme color_scheme) {
+IndicatorColors GetIndicatorColors(int mode, SystemColorTheme color_scheme) {
   switch (mode) {
     case commands::HIRAGANA:
       return GetHiraganaIndicatorColors(color_scheme);
@@ -249,7 +217,7 @@ class IndicatorWindow::WindowImpl
       : current_image_(nullptr),
         alpha_(255),
         dpi_scaling_(GetDPIScaling()),
-        color_scheme_(GetWindowsAppColorScheme()) {
+        color_scheme_(GetSystemColorTheme()) {
     sprites_.resize(commands::NUM_OF_COMPOSITIONS);
   }
   WindowImpl(const WindowImpl&) = delete;
@@ -361,7 +329,7 @@ class IndicatorWindow::WindowImpl
   }
 
   void ReloadSpritesIfColorSchemeChanged() {
-    const ColorScheme new_color_scheme = GetWindowsAppColorScheme();
+    const SystemColorTheme new_color_scheme = GetSystemColorTheme();
     if (new_color_scheme == color_scheme_) {
       return;
     }
@@ -433,7 +401,7 @@ class IndicatorWindow::WindowImpl
     info.tail_height = 0.0;
     info.tail_width = 0.0;
     info.blur_sigma = dpi_scaling_ * 4.0;
-    info.blur_alpha = color_scheme_ == ColorScheme::kDark ? 0.25 : 0.22;
+    info.blur_alpha = color_scheme_ == SystemColorTheme::kDark ? 0.25 : 0.22;
     info.frame_thickness = dpi_scaling_ * 1.0;
     info.label_size = 12.0;
     info.blur_offset_x = 0;
@@ -479,7 +447,7 @@ class IndicatorWindow::WindowImpl
   CPoint top_left_;
   BYTE alpha_;
   double dpi_scaling_;
-  ColorScheme color_scheme_;
+  SystemColorTheme color_scheme_;
   std::vector<Sprite> sprites_;
 };
 
