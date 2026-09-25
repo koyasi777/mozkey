@@ -213,6 +213,7 @@ mozc_cc_library(
         "//bazel/win32:user32",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
+        "//renderer:renderer_color_theme",
         "@com_google_absl//absl/log:check",
         "@com_microsoft_wil//:wil",
     ],

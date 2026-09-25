@@ -36,6 +36,7 @@
 #include "config/config_handler.h"
 #include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
+#include "renderer/renderer_color_theme.h"
 #include "renderer/renderer_style_handler.h"
 #include "renderer/window_effect_util.h"
 
@@ -59,21 +60,17 @@ constexpr uint32_t kMinFontWeight = 100;
 constexpr uint32_t kMaxFontWeight = 900;
 constexpr uint32_t kFontWeightStep = 100;
 
-ColorTheme GetCandidateWindowColorTheme(const config::Config& config) {
+ColorTheme GetConfiguredCandidateWindowColorTheme(
+    const config::Config& config) {
   if (config.has_candidate_window_color_theme()) {
     return config.candidate_window_color_theme();
   }
-  return config.use_dark_mode_candidate_window()
-             ? config::Config::RENDERER_WINDOW_COLOR_DARK
-             : config::Config::RENDERER_WINDOW_COLOR_LIGHT;
-}
-
-ColorTheme NormalizeDependentColorTheme(ColorTheme theme,
-                                        ColorTheme candidate_theme) {
-  if (theme == config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE) {
-    return candidate_theme;
+  if (config.has_use_dark_mode_candidate_window()) {
+    return config.use_dark_mode_candidate_window()
+               ? config::Config::RENDERER_WINDOW_COLOR_DARK
+               : config::Config::RENDERER_WINDOW_COLOR_LIGHT;
   }
-  return theme;
+  return config::Config::RENDERER_WINDOW_COLOR_AUTO;
 }
 
 uint32_t ClampCornerRadius(uint32_t radius) {
@@ -224,12 +221,38 @@ void UpdateRendererStyleFromConfig() {
 
   const auto shared_config = config::ConfigHandler::GetSharedConfig();
 
-  const ColorTheme candidate_color_theme =
-      GetCandidateWindowColorTheme(*shared_config);
-  const ColorTheme suggest_color_theme = NormalizeDependentColorTheme(
-      shared_config->suggest_window_color_theme(), candidate_color_theme);
-  const ColorTheme ruby_color_theme =
+  const ColorTheme candidate_configured_theme =
+      GetConfiguredCandidateWindowColorTheme(*shared_config);
+  const ColorTheme suggest_configured_theme =
+      shared_config->suggest_window_color_theme();
+  const ColorTheme ruby_configured_theme =
       shared_config->ruby_window_color_theme();
+
+  // Read the platform appearance at most once per renderer update, and only
+  // when AUTO is selected. This gives candidate/suggestion/ruby one coherent
+  // appearance snapshot.
+  SystemColorTheme system_color_theme = SystemColorTheme::kLight;
+  if (candidate_configured_theme ==
+          config::Config::RENDERER_WINDOW_COLOR_AUTO ||
+      suggest_configured_theme ==
+          config::Config::RENDERER_WINDOW_COLOR_AUTO ||
+      ruby_configured_theme == config::Config::RENDERER_WINDOW_COLOR_AUTO) {
+    system_color_theme = GetSystemColorTheme();
+  }
+
+  const ColorTheme candidate_color_theme = ResolveRendererWindowColorTheme(
+      candidate_configured_theme, system_color_theme);
+  const ColorTheme suggest_color_theme =
+      ResolveDependentRendererWindowColorTheme(
+          suggest_configured_theme, candidate_color_theme, system_color_theme);
+  // Keep FOLLOW_CANDIDATE distinct here: ruby copies the already-built
+  // candidate style, including a custom candidate palette.
+  const ColorTheme ruby_color_theme =
+      ruby_configured_theme ==
+              config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE
+          ? ruby_configured_theme
+          : ResolveRendererWindowColorTheme(ruby_configured_theme,
+                                            system_color_theme);
 
   RendererStyle candidate_style;
   BuildCandidateLikeStyle(candidate_color_theme,
