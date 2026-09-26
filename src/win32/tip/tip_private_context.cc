@@ -62,6 +62,11 @@ class TipPrivateContext::InternalState {
   TipZenzContextRequestState zenz_context_request_state_;
   WritingDirection composition_writing_direction_ =
       WritingDirection::kUnknown;
+  bool pending_roman_display_sample_attempted_ = false;
+  bool pending_roman_display_surface_uniform_ = false;
+  bool pending_roman_display_retry_allowed_ = false;
+  COLORREF pending_roman_text_color_ = RGB(0, 0, 0);
+  COLORREF pending_roman_background_color_ = RGB(0, 0, 0);
   VirtualKey last_down_key_;
   bool has_pending_mode_indicator_key_ = false;
   KeyInformation pending_mode_indicator_key_ = 0;
@@ -186,6 +191,44 @@ void TipPrivateContext::SetCompositionWritingDirection(
 
 void TipPrivateContext::ClearCompositionWritingDirection() {
   state_->composition_writing_direction_ = WritingDirection::kUnknown;
+}
+
+void TipPrivateContext::SetPendingRomanDisplayColors(
+    const COLORREF text_color, const COLORREF background_color,
+    const bool surface_uniform, const bool retry_allowed) {
+  state_->pending_roman_text_color_ = text_color;
+  state_->pending_roman_background_color_ = background_color;
+  state_->pending_roman_display_surface_uniform_ = surface_uniform;
+  state_->pending_roman_display_retry_allowed_ = retry_allowed;
+  state_->pending_roman_display_sample_attempted_ = true;
+}
+
+void TipPrivateContext::SetPendingRomanDisplayColorsUnavailable(
+    const bool retry_allowed) {
+  state_->pending_roman_display_surface_uniform_ = false;
+  state_->pending_roman_display_retry_allowed_ = retry_allowed;
+  state_->pending_roman_display_sample_attempted_ = true;
+}
+
+bool TipPrivateContext::GetPendingRomanDisplayColors(
+    COLORREF* text_color, COLORREF* background_color,
+    bool* surface_uniform, bool* retry_allowed) const {
+  if (!state_->pending_roman_display_sample_attempted_ ||
+      text_color == nullptr || background_color == nullptr ||
+      surface_uniform == nullptr || retry_allowed == nullptr) {
+    return false;
+  }
+  *text_color = state_->pending_roman_text_color_;
+  *background_color = state_->pending_roman_background_color_;
+  *surface_uniform = state_->pending_roman_display_surface_uniform_;
+  *retry_allowed = state_->pending_roman_display_retry_allowed_;
+  return true;
+}
+
+void TipPrivateContext::ClearPendingRomanDisplayColors() {
+  state_->pending_roman_display_sample_attempted_ = false;
+  state_->pending_roman_display_surface_uniform_ = false;
+  state_->pending_roman_display_retry_allowed_ = false;
 }
 
 }  // namespace tsf

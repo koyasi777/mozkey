@@ -5055,6 +5055,144 @@ TEST_F(SessionTest,
 }
 
 TEST_F(SessionTest,
+       LiveConversionMaterializationPreservesPendingRomanTail) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_dim_pending_roman_input(true);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(
+      commands::Request::default_instance(), config));
+  session.SetTable(table);
+
+  commands::Command command;
+  InsertCharacterChars("kyouhat", &session, &command);
+
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(), "きょうはt");
+  ASSERT_EQ(session.context().composer().GetStringForPreedit(), "きょうはｔ");
+  ASSERT_EQ(session.context().composer().GetPendingRomanDisplayLength(), 1);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("きょうはt");
+  AddCandidate("きょうはt", "今日はｔ", live_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  session.SetConfig(config);
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().live_conversion());
+  ASSERT_TRUE(command.output().has_preedit());
+
+  const commands::Preedit& preedit = command.output().preedit();
+  ASSERT_GE(preedit.segment_size(), 2);
+
+  std::string joined_key;
+  std::string joined_value;
+  for (const commands::Preedit::Segment& segment : preedit.segment()) {
+    joined_key.append(segment.key());
+    joined_value.append(segment.value());
+  }
+
+  EXPECT_EQ(joined_key, "きょうはt");
+  EXPECT_EQ(joined_value, "今日はｔ");
+
+  for (int i = 0; i + 1 < preedit.segment_size(); ++i) {
+    EXPECT_FALSE(preedit.segment(i).is_pending_roman());
+  }
+
+  const commands::Preedit::Segment& pending =
+      preedit.segment(preedit.segment_size() - 1);
+  EXPECT_EQ(pending.key(), "t");
+  EXPECT_EQ(pending.value(), "ｔ");
+  EXPECT_EQ(pending.value_length(), 1);
+  EXPECT_TRUE(pending.is_pending_roman());
+}
+TEST_F(SessionTest,
+       PendingLiveConversionDimmingPreservesSuffixKeyAndValue) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_dim_pending_roman_input(true);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(
+      commands::Request::default_instance(), config));
+  session.SetTable(table);
+
+  commands::Command command;
+  InsertCharacterChars("kyouhat", &session, &command);
+
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(), "きょうはt");
+  ASSERT_EQ(session.context().composer().GetStringForPreedit(), "きょうはｔ");
+  ASSERT_EQ(session.context().composer().GetPendingRomanDisplayLength(), 1);
+
+  session_peer.live_conversion_pending_() = true;
+  session_peer.live_conversion_key_() = "きょうは";
+  session_peer.live_conversion_preedit_() = "きょうは";
+  session_peer.live_conversion_value_() = "今日は";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("きょうは");
+  segment->set_value("今日は");
+  segment->set_value_length(Util::CharsLen("今日は"));
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.OutputPendingLiveConversion(&command));
+  ASSERT_TRUE(command.output().has_preedit());
+
+  const commands::Preedit& preedit = command.output().preedit();
+  ASSERT_EQ(preedit.segment_size(), 2);
+  EXPECT_EQ(preedit.segment(0).key(), "きょうは");
+  EXPECT_EQ(preedit.segment(0).value(), "今日は");
+  EXPECT_FALSE(preedit.segment(0).is_pending_roman());
+  EXPECT_EQ(preedit.segment(1).key(), "t");
+  EXPECT_EQ(preedit.segment(1).value(), "ｔ");
+  EXPECT_TRUE(preedit.segment(1).is_pending_roman());
+
+  std::string joined_key;
+  std::string joined_value;
+  for (const commands::Preedit::Segment& current : preedit.segment()) {
+    joined_key.append(current.key());
+    joined_value.append(current.value());
+  }
+  EXPECT_EQ(joined_key, session.context().composer().GetQueryForConversion());
+  EXPECT_EQ(joined_value, "今日はｔ");
+}
+
+TEST_F(SessionTest,
        PendingLiveConversionKeepsConvertedPrefixForRomajiEllipsis) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

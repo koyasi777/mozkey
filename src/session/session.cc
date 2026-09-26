@@ -2185,6 +2185,145 @@ void AddPreeditSegment(absl::string_view key,
   segment->set_value(std::string(value));
   segment->set_value_length(Util::CharsLen(value));
 }
+
+void AddPreeditSegmentWithPendingRomanTail(
+    absl::string_view key, absl::string_view value,
+    size_t pending_roman_length, commands::Preedit* preedit) {
+  const size_t value_length = Util::CharsLen(value);
+  if (pending_roman_length == 0 || pending_roman_length > value_length) {
+    AddPreeditSegment(key, value, commands::Preedit::Segment::UNDERLINE,
+                      preedit);
+    return;
+  }
+
+  const size_t stable_length = value_length - pending_roman_length;
+  if (stable_length == 0) {
+    AddPreeditSegment(key, value, commands::Preedit::Segment::UNDERLINE,
+                      preedit);
+    preedit->mutable_segment(preedit->segment_size() - 1)
+        ->set_is_pending_roman(true);
+    return;
+  }
+
+  const absl::string_view stable_value =
+      Util::Utf8SubString(value, 0, stable_length);
+  const absl::string_view pending_value =
+      Util::Utf8SubString(value, stable_length, pending_roman_length);
+
+  // This split is presentation-only, so it must never synthesize segment keys
+  // from values. If the supplied key cannot preserve a non-empty stable prefix
+  // plus the pending suffix exactly, keep the original segment unsplit.
+  const size_t key_length = Util::CharsLen(key);
+  if (key_length <= pending_roman_length) {
+    AddPreeditSegment(key, value, commands::Preedit::Segment::UNDERLINE,
+                      preedit);
+    return;
+  }
+
+  const size_t stable_key_length = key_length - pending_roman_length;
+  const absl::string_view stable_key =
+      Util::Utf8SubString(key, 0, stable_key_length);
+  const absl::string_view pending_key =
+      Util::Utf8SubString(key, stable_key_length, pending_roman_length);
+
+  AddPreeditSegment(stable_key, stable_value,
+                    commands::Preedit::Segment::UNDERLINE, preedit);
+  AddPreeditSegment(pending_key, pending_value,
+                    commands::Preedit::Segment::UNDERLINE, preedit);
+  preedit->mutable_segment(preedit->segment_size() - 1)
+      ->set_is_pending_roman(true);
+}
+
+void MarkPendingRomanTailOnPreedit(const composer::Composer& composer,
+                                   commands::Preedit* preedit) {
+  if (preedit == nullptr || preedit->segment_size() == 0) {
+    return;
+  }
+
+  const size_t pending_length = composer.GetPendingRomanDisplayLength();
+  if (pending_length == 0) {
+    return;
+  }
+
+  const std::string display = composer.GetStringForPreedit();
+  const size_t display_length = Util::CharsLen(display);
+  if (pending_length > display_length) {
+    return;
+  }
+
+  const absl::string_view expected_display_suffix =
+      Util::Utf8SubString(display, display_length - pending_length,
+                          pending_length);
+
+  const std::string query = composer.GetQueryForConversion();
+  const size_t query_length = Util::CharsLen(query);
+  if (pending_length > query_length) {
+    return;
+  }
+
+  const absl::string_view expected_key_suffix =
+      Util::Utf8SubString(query, query_length - pending_length,
+                          pending_length);
+
+  commands::Preedit::Segment* last =
+      preedit->mutable_segment(preedit->segment_size() - 1);
+  const size_t value_length = Util::CharsLen(last->value());
+  const size_t key_length = Util::CharsLen(last->key());
+
+  if (pending_length > value_length) {
+    return;
+  }
+
+  const absl::string_view actual_value_suffix =
+      Util::Utf8SubString(last->value(), value_length - pending_length,
+                          pending_length);
+
+  // A conversion candidate may preserve the unresolved roman either in the
+  // visible preedit style (for example, full-width "ｔ") or in the conversion
+  // query style (for example, ASCII "t").  Do not mark an unrelated converted
+  // tail.
+  if (actual_value_suffix != expected_display_suffix &&
+      actual_value_suffix != expected_key_suffix) {
+    return;
+  }
+
+  if (value_length == pending_length) {
+    last->set_is_pending_roman(true);
+    return;
+  }
+
+  // Splitting a conversion output segment is presentation-only.  Preserve the
+  // concatenated key/value, cursor, highlighted position, annotation, and every
+  // other segment field.  If the source key cannot be split at the same trailing
+  // character count, leave the converter-owned presentation untouched.
+  if (pending_length > key_length) {
+    return;
+  }
+
+  const size_t stable_value_length = value_length - pending_length;
+  const size_t stable_key_length = key_length - pending_length;
+
+  const std::string stable_value(
+      Util::Utf8SubString(last->value(), 0, stable_value_length));
+  const std::string pending_value(actual_value_suffix);
+  const std::string stable_key(
+      Util::Utf8SubString(last->key(), 0, stable_key_length));
+  const std::string pending_key(
+      Util::Utf8SubString(last->key(), stable_key_length, pending_length));
+
+  commands::Preedit::Segment pending_segment = *last;
+
+  last->set_key(stable_key);
+  last->set_value(stable_value);
+  last->set_value_length(stable_value_length);
+  last->set_is_pending_roman(false);
+
+  pending_segment.set_key(pending_key);
+  pending_segment.set_value(pending_value);
+  pending_segment.set_value_length(pending_length);
+  pending_segment.set_is_pending_roman(true);
+  *preedit->add_segment() = std::move(pending_segment);
+}
 void RestorePreeditSegmentKeysForSymbolStyle(
     absl::string_view symbol_style_source,
     commands::Preedit* preedit) {
@@ -4961,9 +5100,9 @@ bool Session::OutputPendingLiveConversionWithPresentation(
   }
 
   if (!suffix_value.empty()) {
-    AddPreeditSegment(suffix_key.empty() ? suffix_value : suffix_key,
-                      suffix_value, commands::Preedit::Segment::UNDERLINE,
-                      preedit);
+    AddPreeditSegmentWithPendingRomanTail(
+        suffix_key.empty() ? suffix_value : suffix_key, suffix_value,
+        context_->composer().GetPendingRomanDisplayLength(), preedit);
   }
 
   RestorePreeditSegmentKeysForSymbolStyle(raw_preedit, preedit);
@@ -7340,6 +7479,7 @@ bool Session::OutputZenzLiveCorrection(
       commands::Preedit::Segment::HIGHLIGHT,
       preedit);
 
+  MarkPendingRomanTailOnPreedit(context_->composer(), preedit);
   preedit->set_cursor(Util::CharsLen(value));
 
   ZenzDebugOutput(absl::StrCat(
@@ -9425,6 +9565,18 @@ void Session::Output(commands::Command* command) {
   OutputMode(command);
   context_->mutable_converter()->PopOutput(context_->composer(),
                                            command->mutable_output());
+
+  // Once live conversion materializes, EngineConverter::FillConversion()
+  // rebuilds the preedit from converter segments and therefore no longer passes
+  // through output::FillPreedit(), where pending roman metadata is normally
+  // attached. Restore only the presentation metadata here; key/value text and
+  // converter state remain unchanged.
+  if (context_->state() == ImeContext::CONVERSION &&
+      command->output().has_preedit()) {
+    MarkPendingRomanTailOnPreedit(
+        context_->composer(), command->mutable_output()->mutable_preedit());
+  }
+
   ObservePendingZenzFeedbackCommittedResult(*command, "output_result");
 }
 

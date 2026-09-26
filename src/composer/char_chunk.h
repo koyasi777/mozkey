@@ -73,6 +73,12 @@ class CharChunk final {
 
   size_t GetLength(Transliterators::Transliterator t12r) const;
 
+  // Returns the number of trailing display characters contributed only by
+  // unresolved |pending_|. Returns 0 when the current display is an ambiguous
+  // result or the selected transliterator exposes raw input as-is.
+  size_t GetPendingDisplayLength(
+      Transliterators::Transliterator t12r) const;
+
   // Append the characters representing this CharChunk according to the
   // transliterator.  If the transliterator is LOCAL, the local
   // transliterator specified via SetTransliterator is used.

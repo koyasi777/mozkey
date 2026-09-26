@@ -88,6 +88,37 @@ class TipDisplayAttributeConverted : public TipDisplayAttribute {
   static const GUID& guid();
 };
 
+// Represents the display attributes for unresolved trailing Roman input.
+class TipDisplayAttributePendingRoman : public TipDisplayAttribute {
+ public:
+  TipDisplayAttributePendingRoman();
+
+  STDMETHODIMP
+  GetAttributeInfo(TF_DISPLAYATTRIBUTE* absl_nullable attribute) override;
+
+  static const GUID& guid();
+};
+
+// Selects the visual presentation used for unresolved trailing romaji.
+// These setters are process-local and affect only the pending-romaji display
+// attribute.  The compatibility fallback intentionally avoids foreground and
+// background colors so Gecko cannot synthesize a field-colored background.
+// Per-thread Gecko compatibility state for the currently active TSF context.
+// When |use_explicit_background| is false, foreground-only behavior is
+// preserved. When true, foreground-only input/converted attributes receive the
+// sampled editor background to avoid Gecko's synthesized Field rectangle.
+void SetGeckoDisplayCompatibilityBackground(
+    COLORREF background_color, bool use_explicit_background);
+void ClearGeckoDisplayCompatibilityBackground();
+void ApplyGeckoDisplayCompatibilityBackground(
+    TF_DISPLAYATTRIBUTE* attribute);
+
+void SetPendingRomanDisplayAttributeSystemGray();
+void SetPendingRomanDisplayAttributeSampledColors(
+    COLORREF text_color, COLORREF background_color,
+    bool use_explicit_background);
+void SetPendingRomanDisplayAttributeCompatibilityFallback();
+
 }  // namespace tsf
 }  // namespace win32
 }  // namespace mozc

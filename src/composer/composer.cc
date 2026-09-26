@@ -1037,6 +1037,17 @@ std::string Composer::GetStringForPreedit() const {
   return common::GetStringForPreedit(composition_, input_field_type_);
 }
 
+size_t Composer::GetPendingRomanDisplayLength() const {
+  if (!config_->dim_pending_roman_input() ||
+      config_->preedit_method() != config::Config::ROMAN ||
+      position_ != composition_.GetLength() ||
+      output_mode_ == transliteration::HALF_ASCII ||
+      output_mode_ == transliteration::FULL_ASCII) {
+    return 0;
+  }
+  return composition_.GetTrailingPendingDisplayLength();
+}
+
 std::string Composer::GetStringForSubmission() const {
   // TODO(komatsu): We should make sure if we can integrate this
   // function to GetStringForPreedit after a while.

@@ -32,17 +32,22 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <string>
 
 #include "absl/strings/string_view.h"
 #include "base/text_normalizer.h"
 #include "base/util.h"
+#include "composer/composer.h"
+#include "composer/table.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/segments.h"
 #include "engine/candidate_list.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
+#include "protocol/config.pb.h"
+#include "transliteration/transliteration.h"
 #include "testing/gunit.h"
 
 namespace mozc {
@@ -65,6 +70,33 @@ void FillDummySegment(const DummySegment* dummy_segments, const size_t num,
     cand->usage_title = dummy_segments[i].usage_title;
     cand->usage_description = dummy_segments[i].usage_description;
   }
+}
+
+TEST(EngineOutputTest, FillPreeditMarksOnlyPendingRomanTail) {
+  auto table = std::make_shared<composer::Table>();
+  table->AddRule("ta", "た", "");
+  table->AddRule("tt", "っ", "t");
+
+  auto request = std::make_shared<commands::Request>();
+  auto config = std::make_shared<config::Config>();
+  config->set_preedit_method(config::Config::ROMAN);
+  config->set_dim_pending_roman_input(true);
+
+  composer::Composer composer(table, request, config);
+  composer.SetInputMode(transliteration::HIRAGANA);
+  composer.InsertCharacter("t");
+  composer.InsertCharacter("t");
+
+  commands::Preedit preedit;
+  output::FillPreedit(composer, &preedit);
+
+  ASSERT_EQ(preedit.segment_size(), 2);
+  EXPECT_FALSE(preedit.segment(0).is_pending_roman());
+  EXPECT_TRUE(preedit.segment(1).is_pending_roman());
+  EXPECT_EQ(preedit.segment(1).value_length(), 1);
+  EXPECT_EQ(preedit.segment(0).value() + preedit.segment(1).value(),
+            TextNormalizer::NormalizeText(composer.GetStringForPreedit()));
+  EXPECT_EQ(preedit.cursor(), composer.GetCursor());
 }
 
 TEST(EngineOutputTest, FillCandidate) {

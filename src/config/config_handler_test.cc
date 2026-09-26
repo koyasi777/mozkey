@@ -88,6 +88,14 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_use_zenz_auto_block_rejected_correction(true);
   config->set_use_zenz_live_correction_right_context(true);
   config->set_use_realtime_conversion(false);
+#ifdef _WIN32
+  config->set_dim_pending_roman_input(false);
+  config->set_pending_roman_dimness_percent(75);
+  config->set_use_custom_preedit_underline_color(true);
+  config->set_preedit_underline_color(0x30dcc8);
+  config->set_use_custom_preedit_target_underline_color(true);
+  config->set_preedit_target_underline_color(0xc1a5ab);
+#endif  // _WIN32
 }
 
 void ExpectMozkeyProductDefaults(const Config& config) {
@@ -118,6 +126,14 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_TRUE(config.use_history_suggest());
   EXPECT_TRUE(config.use_dictionary_suggest());
   EXPECT_FALSE(config.use_realtime_conversion());
+#ifdef _WIN32
+  EXPECT_FALSE(config.dim_pending_roman_input());
+  EXPECT_EQ(config.pending_roman_dimness_percent(), 75);
+  EXPECT_TRUE(config.use_custom_preedit_underline_color());
+  EXPECT_EQ(config.preedit_underline_color(), 0x30dcc8);
+  EXPECT_TRUE(config.use_custom_preedit_target_underline_color());
+  EXPECT_EQ(config.preedit_target_underline_color(), 0xc1a5ab);
+#endif  // _WIN32
   EXPECT_EQ(config.suggestions_size(), 3);
 }
 
@@ -198,6 +214,16 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   input.set_use_zenz_auto_block_rejected_correction(false);
   input.set_use_zenz_live_correction_right_context(false);
   input.set_use_realtime_conversion(true);
+#ifdef _WIN32
+  // Use values opposite to the product defaults so this test proves that
+  // presence, not value equality, protects explicit user choices.
+  input.set_dim_pending_roman_input(true);
+  input.set_pending_roman_dimness_percent(40);
+  input.set_use_custom_preedit_underline_color(false);
+  input.set_preedit_underline_color(0x112233);
+  input.set_use_custom_preedit_target_underline_color(false);
+  input.set_preedit_target_underline_color(0x445566);
+#endif  // _WIN32
 
   ConfigHandler::SetConfig(input);
   const Config output = ConfigHandler::GetCopiedConfig();
@@ -211,6 +237,14 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_FALSE(output.use_zenz_auto_block_rejected_correction());
   EXPECT_FALSE(output.use_zenz_live_correction_right_context());
   EXPECT_TRUE(output.use_realtime_conversion());
+#ifdef _WIN32
+  EXPECT_TRUE(output.dim_pending_roman_input());
+  EXPECT_EQ(output.pending_roman_dimness_percent(), 40);
+  EXPECT_FALSE(output.use_custom_preedit_underline_color());
+  EXPECT_EQ(output.preedit_underline_color(), 0x112233);
+  EXPECT_FALSE(output.use_custom_preedit_target_underline_color());
+  EXPECT_EQ(output.preedit_target_underline_color(), 0x445566);
+#endif  // _WIN32
 }
 
 TEST_F(ConfigHandlerTest, SetMetadata) {

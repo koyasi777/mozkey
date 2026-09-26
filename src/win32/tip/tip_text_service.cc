@@ -463,6 +463,7 @@ class TipTextServiceImpl
         keyboard_inputmode_conversion_cookie_(TF_INVALID_COOKIE),
         input_attribute_(TF_INVALID_GUIDATOM),
         converted_attribute_(TF_INVALID_GUIDATOM),
+        pending_roman_attribute_(TF_INVALID_GUIDATOM),
         thread_context_(nullptr),
         task_window_handle_(nullptr),
         renderer_callback_window_handle_(nullptr),
@@ -716,6 +717,8 @@ class TipTextServiceImpl
       *attribute = MakeComPtr<TipDisplayAttributeInput>().detach();
     } else if (::IsEqualGUID(guid, TipDisplayAttributeConverted::guid())) {
       *attribute = MakeComPtr<TipDisplayAttributeConverted>().detach();
+    } else if (::IsEqualGUID(guid, TipDisplayAttributePendingRoman::guid())) {
+      *attribute = MakeComPtr<TipDisplayAttributePendingRoman>().detach();
     } else {
       *attribute = nullptr;
       return E_INVALIDARG;
@@ -998,6 +1001,9 @@ class TipTextServiceImpl
   TfGuidAtom input_attribute() const override { return input_attribute_; }
   TfGuidAtom converted_attribute() const override {
     return converted_attribute_;
+  }
+  TfGuidAtom pending_roman_attribute() const override {
+    return pending_roman_attribute_;
   }
   HWND renderer_callback_window_handle() const override {
     return renderer_callback_window_handle_;
@@ -1383,12 +1389,14 @@ class TipTextServiceImpl
       return E_UNEXPECTED;
     }
 
-    // register the display attribute for input strings and the one for
-    // converted strings.
+    // Register display attributes for normal input, converted text, and
+    // unresolved trailing Roman input.
     RETURN_IF_FAILED_HRESULT(category_->RegisterGUID(
         TipDisplayAttributeInput::guid(), &input_attribute_));
-    return category_->RegisterGUID(TipDisplayAttributeConverted::guid(),
-                                   &converted_attribute_);
+    RETURN_IF_FAILED_HRESULT(category_->RegisterGUID(
+        TipDisplayAttributeConverted::guid(), &converted_attribute_));
+    return category_->RegisterGUID(TipDisplayAttributePendingRoman::guid(),
+                                   &pending_roman_attribute_);
   }
 
   HRESULT InitTaskWindow() {
@@ -1590,6 +1598,7 @@ class TipTextServiceImpl
   // Represents the display attributes.
   TfGuidAtom input_attribute_;
   TfGuidAtom converted_attribute_;
+  TfGuidAtom pending_roman_attribute_;
 
   // Used for LangBar integration.
   TipLangBar langbar_;
