@@ -178,6 +178,88 @@ std::string ZenzSafeDebugReason(absl::string_view debug) {
   return std::string(debug);
 }
 
+struct ZenzReadingPreservationCache {
+  // std::nullopt means "not computed yet".  An engaged empty string means
+  // reverse conversion was attempted but no usable reading was available.
+  std::optional<std::string> normalized_key_reading;
+  std::optional<std::string> mozc_reading;
+};
+
+ZenzValidationResult ValidateZenzReadingPreservation(
+    EngineConverterInterface* converter,
+    absl::string_view key,
+    absl::string_view mozc_value,
+    absl::string_view zenz_value,
+    ZenzReadingPreservationCache* shared_cache) {
+  if (zenz_value == key) {
+    return ZenzOutputValidator::ValidateReadingPreservation(
+        key, "", "", key);
+  }
+
+  std::string zenz_reading;
+  if (converter == nullptr ||
+      !converter->GetReadingText(zenz_value, &zenz_reading)) {
+    return ZenzOutputValidator::ValidateReadingPreservation(
+        key, "", "", "");
+  }
+
+  if (zenz_reading == key) {
+    return ZenzOutputValidator::ValidateReadingPreservation(
+        key, "", "", zenz_reading);
+  }
+
+  ZenzReadingPreservationCache local_cache;
+  ZenzReadingPreservationCache* cache =
+      shared_cache == nullptr ? &local_cache : shared_cache;
+
+  // Literal digits, katakana, mixed script, and other orthographic forms can
+  // reverse to a normalized reading different from the literal composition
+  // key.  Normalize the typed key with the same reverse-conversion path before
+  // deciding whether Zenz added any untyped reading.  A feedback fast path can
+  // test multiple candidates for the same request, so cache this request-wide
+  // anchor instead of reverse-converting the same key for every candidate.
+  if (!cache->normalized_key_reading.has_value()) {
+    std::string normalized_key_reading;
+    if (!converter->GetReadingText(key, &normalized_key_reading)) {
+      normalized_key_reading.clear();
+    }
+    cache->normalized_key_reading = std::move(normalized_key_reading);
+  }
+
+  const std::string& normalized_key_reading =
+      *cache->normalized_key_reading;
+  if (!normalized_key_reading.empty() &&
+      zenz_reading == normalized_key_reading) {
+    return ZenzOutputValidator::ValidateReadingPreservation(
+        key, normalized_key_reading, "", zenz_reading);
+  }
+
+  // User-dictionary and technical surfaces can be legitimate Mozc conversions
+  // even when their visible spelling does not reverse to the literal key.
+  // Treat the current Mozc baseline as a second trusted anchor, but only for
+  // the same request; Zenz still may not introduce a reading beyond both
+  // anchors.
+  if (!cache->mozc_reading.has_value()) {
+    std::string mozc_reading;
+    if (mozc_value == key) {
+      mozc_reading = std::string(key);
+    } else if (mozc_value == zenz_value) {
+      // The two surfaces are identical, so the reverse-conversion result is
+      // identical as well.  Reuse the already computed Zenz reading instead of
+      // running the same reverse conversion a second time.  This preserves the
+      // prior failure semantics because zenz_reading exists only after a
+      // successful reverse conversion above.
+      mozc_reading = zenz_reading;
+    } else if (!converter->GetReadingText(mozc_value, &mozc_reading)) {
+      mozc_reading.clear();
+    }
+    cache->mozc_reading = std::move(mozc_reading);
+  }
+
+  return ZenzOutputValidator::ValidateReadingPreservation(
+      key, normalized_key_reading, *cache->mozc_reading, zenz_reading);
+}
+
 // Maximum size of multiple undo stack.
 const size_t kMultipleUndoMaxSize = 10;
 
@@ -6323,6 +6405,7 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
       live_conversion_preedit_.empty() ? live_conversion_key_
                                        : live_conversion_preedit_;
 
+  ZenzReadingPreservationCache reading_preservation_cache;
   for (const ZenzFeedbackCandidate& feedback_candidate :
        feedback_candidates) {
     const std::string feedback_value =
@@ -6402,6 +6485,23 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     }
 
     const std::string adopted_feedback_value = adoption.value;
+
+    const ZenzValidationResult reading_validation =
+        ValidateZenzReadingPreservation(
+            context_->mutable_converter(), live_conversion_key_,
+            live_conversion_value_, adopted_feedback_value,
+            &reading_preservation_cache);
+    if (!reading_validation.accept) {
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] fast path candidate rejected reason=",
+          reading_validation.reason,
+          " ", ZenzRedactedTextStats("key", live_conversion_key_),
+          " ", ZenzRedactedTextStats("value", adopted_feedback_value),
+          " context_class=", context_class,
+          " accepted_count=", feedback_candidate.accepted_count,
+          " rejected_count=", feedback_candidate.rejected_count));
+      continue;
+    }
 
     ++zenz_live_generation_;
     pending_zenz_live_ = PendingZenzLiveCorrection();
@@ -7212,6 +7312,38 @@ bool Session::ApplyZenzLiveCorrectionResult(
     command->mutable_output()->set_zenz_live_correction_debug(
         absl::StrCat("adopted_value_privacy_",
                      adopted_value_privacy.reason));
+    return true;
+  }
+
+  const ZenzValidationResult reading_validation =
+      ValidateZenzReadingPreservation(
+          context_->mutable_converter(), pending_zenz_live_.key,
+          pending_zenz_live_.mozc_value, zenz_value, nullptr);
+  if (!reading_validation.accept) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz] reading validation rejected reason=",
+        reading_validation.reason,
+        " ", ZenzRedactedTextStats("value", zenz_value),
+        " ", ZenzRedactedTextStats("mozc_value",
+                                    pending_zenz_live_.mozc_value),
+        " context_class=", context_class));
+
+    CancelPendingZenzLiveCorrection();
+    Output(command);
+
+    if (command->output().has_preedit()) {
+      RestorePreeditSegmentKeysForSymbolStyle(
+          live_conversion_preedit_.empty()
+              ? live_conversion_key_
+              : live_conversion_preedit_,
+          command->mutable_output()->mutable_preedit());
+    }
+
+    command->mutable_output()->set_live_conversion(true);
+    command->mutable_output()->set_live_conversion_pending(false);
+    command->mutable_output()->set_zenz_live_correction_pending(false);
+    command->mutable_output()->set_zenz_live_correction_debug(
+        reading_validation.reason);
     return true;
   }
 

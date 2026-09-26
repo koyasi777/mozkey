@@ -1,5 +1,6 @@
 #include "rewriter/zenz_feedback_candidate_rewriter.h"
 
+#include <fstream>
 #include <string>
 #include <utility>
 
@@ -92,6 +93,10 @@ class ScopedUserProfileForZenzFeedbackCandidateRewriterTest {
 
   bool ok() const { return ok_; }
 
+  std::wstring temp_file_path(const std::wstring& name) const {
+    return JoinPath(profile_dir_, name);
+  }
+
  private:
   bool ok_ = false;
   bool has_old_profile_ = false;
@@ -113,7 +118,8 @@ void AddSegment(absl::string_view key,
   candidate->attributes = converter::Attribute::BEST_CANDIDATE;
 }
 
-ConversionRequest CreateZenzFeedbackConversionRequest() {
+ConversionRequest CreateZenzFeedbackConversionRequest(
+    absl::string_view key = "かれはてんてきです") {
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
@@ -127,7 +133,7 @@ ConversionRequest CreateZenzFeedbackConversionRequest() {
       .SetConfig(config)
       .SetOptions(std::move(options))
       .SetRequestType(ConversionRequest::CONVERSION)
-      .SetKey("かれはてんてきです")
+      .SetKey(key)
       .Build();
 }
 
@@ -161,6 +167,38 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "彼は");
   EXPECT_EQ(segments.conversion_segment(1).key(), "てんてきです");
   EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "点滴です");
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotInsertLegacyUnvalidatedFeedbackAsSyntheticCandidate) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  const std::wstring import_path =
+      profile.temp_file_path(L"legacy_unvalidated.tsv");
+  {
+    std::ofstream file(import_path, std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(file);
+    file << "v2\taccepted\tかぶしき\tempty\t株式会社\t\n";
+  }
+
+  session::ZenzFeedbackStore store;
+  ASSERT_TRUE(store.ImportFromFile(
+      import_path, session::ZenzFeedbackImportMode::kReplace));
+
+  Segments segments;
+  AddSegment("かぶしき", "株式", &segments);
+
+  const ConversionRequest request =
+      CreateZenzFeedbackConversionRequest("かぶしき");
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+
+  ASSERT_EQ(segments.conversion_segments_size(), 1);
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_EQ(segment.candidates_size(), 1);
+  EXPECT_EQ(segment.candidate(0).value, "株式");
 }
 
 TEST(ZenzFeedbackCandidateRewriterTest,
