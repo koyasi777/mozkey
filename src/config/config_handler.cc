@@ -107,6 +107,34 @@ void ApplyMozkeyProductDefaults(Config* config) {
   if (!config->has_use_realtime_conversion()) {
     config->set_use_realtime_conversion(false);
   }
+
+#ifdef _WIN32
+  // Pending-Roman presentation is a Windows TSF feature. Keep it disabled
+  // by default so users opt in explicitly. Presence checks still preserve any
+  // stored user choice, including an older explicit ON value.
+  if (!config->has_dim_pending_roman_input()) {
+    config->set_dim_pending_roman_input(false);
+  }
+  if (!config->has_pending_roman_dimness_percent()) {
+    config->set_pending_roman_dimness_percent(75);
+  }
+
+  // Default Windows TSF preedit underlines for Mozkey. Presence checks are
+  // deliberate: older/fresh profiles get the product defaults, while any
+  // explicitly stored user choice (including OFF or a custom color) is kept.
+  if (!config->has_use_custom_preedit_underline_color()) {
+    config->set_use_custom_preedit_underline_color(true);
+  }
+  if (!config->has_preedit_underline_color()) {
+    config->set_preedit_underline_color(0x30dcc8);
+  }
+  if (!config->has_use_custom_preedit_target_underline_color()) {
+    config->set_use_custom_preedit_target_underline_color(true);
+  }
+  if (!config->has_preedit_target_underline_color()) {
+    config->set_preedit_target_underline_color(0xc1a5ab);
+  }
+#endif  // _WIN32
 }
 
 void AddCharacterFormRule(const absl::string_view group,

@@ -1476,6 +1476,83 @@ TEST_F(ComposerTest, KanaTransliteration) {
   EXPECT_EQ(transliterations[transliteration::HALF_ASCII], "hello");
 }
 
+TEST_F(ComposerTest, PendingRomanDisplayLengthTracksActiveTrailingPrefix) {
+  config_->set_preedit_method(Config::ROMAN);
+  config_->set_dim_pending_roman_input(true);
+  table_->AddRule("ka", "か", "");
+  table_->AddRule("qa", "くぁ", "");
+  table_->AddRule("shi", "し", "");
+  table_->AddRule("n", "ん", "");
+  table_->AddRule("na", "な", "");
+  table_->AddRule("ta", "た", "");
+  table_->AddRule("tt", "っ", "t");
+  composer_ = std::make_unique<Composer>(table_, request_, config_);
+  composer_->SetInputMode(transliteration::HIRAGANA);
+
+  ASSERT_TRUE(InsertKey("k", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 1);
+  ASSERT_TRUE(InsertKey("a", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+
+  composer_->Reset();
+  ASSERT_TRUE(InsertKey("s", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 1);
+  ASSERT_TRUE(InsertKey("h", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 2);
+  ASSERT_TRUE(InsertKey("i", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+
+  composer_->Reset();
+  ASSERT_TRUE(InsertKey("n", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 1);
+  ASSERT_TRUE(InsertKey("a", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+
+  composer_->Reset();
+  ASSERT_TRUE(InsertKey("x", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+
+  composer_->Reset();
+  ASSERT_TRUE(InsertKey("t", composer_.get()));
+  ASSERT_TRUE(InsertKey("t", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 1);
+
+  composer_->Reset();
+  ASSERT_TRUE(InsertKey("k", composer_.get()));
+  ASSERT_TRUE(InsertKey("q", composer_.get()));
+  // The failed "k" is now an earlier chunk. Only the still-viable "q" tail
+  // is presentation metadata for dimming.
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 1);
+
+  composer_->MoveCursorLeft();
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+
+  composer_->MoveCursorToEnd();
+  composer_->SetOutputMode(transliteration::HALF_ASCII);
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+}
+
+TEST_F(ComposerTest, PendingRomanDisplayLengthIgnoresDisplayedAmbiguousResult) {
+  config_->set_preedit_method(Config::ROMAN);
+  config_->set_dim_pending_roman_input(true);
+  table_->AddRuleWithAttributes("n", "ん", "", DISPLAY_AMBIGUOUS_RESULT);
+  table_->AddRule("na", "な", "");
+  composer_ = std::make_unique<Composer>(table_, request_, config_);
+
+  ASSERT_TRUE(InsertKey("n", composer_.get()));
+  EXPECT_EQ(composer_->GetStringForPreedit(), "ん");
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+}
+
+TEST_F(ComposerTest, PendingRomanDisplayLengthIsDisabledByDefault) {
+  config_->set_preedit_method(Config::ROMAN);
+  table_->AddRule("ka", "か", "");
+  composer_ = std::make_unique<Composer>(table_, request_, config_);
+
+  ASSERT_TRUE(InsertKey("k", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+}
+
 TEST_F(ComposerTest, SetOutputMode) {
   table_->AddRule("mo", "も", "");
   table_->AddRule("zu", "ず", "");

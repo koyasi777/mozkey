@@ -84,6 +84,17 @@ class TipPrivateContext {
   void SetCompositionWritingDirection(WritingDirection direction);
   void ClearCompositionWritingDirection();
 
+  void SetPendingRomanDisplayColors(COLORREF text_color,
+                                    COLORREF background_color,
+                                    bool surface_uniform,
+                                    bool retry_allowed);
+  void SetPendingRomanDisplayColorsUnavailable(bool retry_allowed);
+  bool GetPendingRomanDisplayColors(COLORREF* text_color,
+                                    COLORREF* background_color,
+                                    bool* surface_uniform,
+                                    bool* retry_allowed) const;
+  void ClearPendingRomanDisplayColors();
+
  private:
   class InternalState;
   std::unique_ptr<InternalState> state_;

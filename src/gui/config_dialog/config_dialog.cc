@@ -355,6 +355,10 @@ ConfigDialog::ConfigDialog()
 
   suggestionsSizeSpinBox->setRange(1, 9);
 
+  pendingRomanDimnessSpinBox->setRange(0, 90);
+  pendingRomanDimnessSpinBox->setSingleStep(1);
+  pendingRomanDimnessSpinBox->setSuffix(QString::fromUtf8(" %"));
+
   liveConversionDelaySpinBox->setRange(0, 1000);
   liveConversionDelaySpinBox->setSingleStep(1);
   liveConversionDelaySpinBox->setSuffix(QString::fromUtf8(" ms"));
@@ -529,6 +533,10 @@ ConfigDialog::ConfigDialog()
                    SLOT(EditRomanTable()));
   QObject::connect(inputModeComboBox, SIGNAL(currentIndexChanged(int)), this,
                    SLOT(SelectInputModeSetting(int)));
+  QObject::connect(dimPendingRomanInputCheckBox, SIGNAL(toggled(bool)),
+                   pendingRomanDimnessLabel, SLOT(setEnabled(bool)));
+  QObject::connect(dimPendingRomanInputCheckBox, SIGNAL(toggled(bool)),
+                   pendingRomanDimnessSpinBox, SLOT(setEnabled(bool)));
   QObject::connect(liveConversionCheckBox, SIGNAL(stateChanged(int)), this,
                    SLOT(SelectLiveConversionSetting(int)));
   QObject::connect(zenzLiveCorrectionCheckBox, SIGNAL(stateChanged(int)), this,
@@ -953,6 +961,10 @@ namespace {
 
 static constexpr int kPreeditMethodSize = 2;
 
+constexpr uint32_t kDefaultPendingRomanDimnessPercent = 75;
+constexpr uint32_t kMinPendingRomanDimnessPercent = 0;
+constexpr uint32_t kMaxPendingRomanDimnessPercent = 90;
+
 constexpr uint32_t kDefaultLiveConversionDelayMsec = 228;
 constexpr uint32_t kMaxLiveConversionDelayMsec = 1000;
 constexpr uint32_t kDefaultLiveConversionMinKeyLength = 2;
@@ -976,11 +988,11 @@ constexpr uint32_t kMaxZenzAutoBlockMinimumRejectPercentage = 100;
 
 constexpr uint32_t kDefaultInputPreeditTextColor = 0xff5000;
 constexpr uint32_t kDefaultInputPreeditBackgroundColor = 0xffffcc;
-constexpr uint32_t kDefaultInputPreeditUnderlineColor = 0xff0000;
+constexpr uint32_t kDefaultInputPreeditUnderlineColor = 0x30dcc8;
 
 constexpr uint32_t kDefaultTargetPreeditTextColor = 0x000000;
 constexpr uint32_t kDefaultTargetPreeditBackgroundColor = 0xddeeff;
-constexpr uint32_t kDefaultTargetPreeditUnderlineColor = 0x0066ff;
+constexpr uint32_t kDefaultTargetPreeditUnderlineColor = 0xc1a5ab;
 
 const config::Config::WindowsModeIndicatorCustomStyle&
 GetDefaultModeIndicatorCustomStyle() {
@@ -3594,6 +3606,17 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
       candidateRubyFontComboBox,
       QString::fromUtf8(config.candidate_ruby_font_name().c_str()));
 
+  SET_CHECKBOX(dimPendingRomanInputCheckBox, dim_pending_roman_input);
+  const uint32_t pending_roman_dimness_percent =
+      config.has_pending_roman_dimness_percent()
+          ? config.pending_roman_dimness_percent()
+          : kDefaultPendingRomanDimnessPercent;
+  pendingRomanDimnessSpinBox->setValue(
+      static_cast<int>(std::clamp(
+          pending_roman_dimness_percent,
+          kMinPendingRomanDimnessPercent,
+          kMaxPendingRomanDimnessPercent)));
+
   SET_CHECKBOX(inputPreeditTextColorCheckBox, use_custom_preedit_text_color);
   SetColorButton(inputPreeditTextColorButton, config.preedit_text_color());
   inputPreeditTextColorButton->setEnabled(
@@ -3881,6 +3904,10 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   } else {
     config->clear_candidate_ruby_font_name();
   }
+
+  GET_CHECKBOX(dimPendingRomanInputCheckBox, dim_pending_roman_input);
+  config->set_pending_roman_dimness_percent(
+      static_cast<uint32_t>(pendingRomanDimnessSpinBox->value()));
 
   GET_CHECKBOX(inputPreeditTextColorCheckBox,
               use_custom_preedit_text_color);
@@ -4688,8 +4715,15 @@ void ConfigDialog::EditRomanTable() {
 }
 
 void ConfigDialog::SelectInputModeSetting(int index) {
-  // enable "EDIT" button if roman mode is selected
-  editRomanTableButton->setEnabled((index == 0));
+  // Enable Roman-table-specific controls only for Roman input.
+  const bool roman_input = (index == 0);
+  editRomanTableButton->setEnabled(roman_input);
+  dimPendingRomanInputCheckBox->setEnabled(roman_input);
+
+  const bool dimness_enabled =
+      roman_input && dimPendingRomanInputCheckBox->isChecked();
+  pendingRomanDimnessLabel->setEnabled(dimness_enabled);
+  pendingRomanDimnessSpinBox->setEnabled(dimness_enabled);
 }
 
 void ConfigDialog::SelectLiveConversionSetting(int state) {

@@ -2034,20 +2034,78 @@
                     <number>8</number>
                    </property>
                    <item row="0" column="0" colspan="3">
+                    <widget class="QCheckBox" name="dimPendingRomanInputCheckBox">
+                     <property name="text">
+                      <string>未確定のローマ字を薄く表示する</string>
+                     </property>
+                     <property name="toolTip">
+                      <string>ローマ字入力で変換規則の途中にある末尾の文字だけを薄く表示します。入力文字列や確定結果は変更しません。薄さは下の設定で調整できます。</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="1" column="0" colspan="2">
+                    <widget class="QLabel" name="pendingRomanDimnessLabel">
+                     <property name="text">
+                      <string>薄さ</string>
+                     </property>
+                     <property name="toolTip">
+                      <string>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="1" column="2">
+                    <widget class="QSpinBox" name="pendingRomanDimnessSpinBox">
+                     <property name="toolTip">
+                      <string>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</string>
+                     </property>
+                     <property name="minimum">
+                      <number>0</number>
+                     </property>
+                     <property name="maximum">
+                      <number>90</number>
+                     </property>
+                     <property name="singleStep">
+                      <number>1</number>
+                     </property>
+                     <property name="value">
+                      <number>75</number>
+                     </property>
+                     <property name="suffix">
+                      <string> %</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="2" column="0" colspan="3">
+                    <spacer name="verticalSpacer_pendingRomanDisplay">
+                     <property name="orientation">
+                      <enum>Qt::Orientation::Vertical</enum>
+                     </property>
+                     <property name="sizeType">
+                      <enum>QSizePolicy::Policy::Fixed</enum>
+                     </property>
+                     <property name="sizeHint" stdset="0">
+                      <size>
+                       <width>20</width>
+                       <height>10</height>
+                      </size>
+                     </property>
+                    </spacer>
+                   </item>
+                   <item row="3" column="0" colspan="3">
                     <widget class="QLabel" name="inputPreeditColorLabel">
                      <property name="text">
                       <string>入力中の文字</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="1" column="0" colspan="2">
+                   <item row="4" column="0" colspan="2">
                     <widget class="QCheckBox" name="inputPreeditTextColorCheckBox">
                      <property name="text">
                       <string>文字色</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="1" column="2">
+                   <item row="4" column="2">
                     <widget class="QPushButton" name="inputPreeditTextColorButton">
                      <property name="minimumSize">
                       <size>
@@ -2066,14 +2124,14 @@
                      </property>
                     </widget>
                    </item>
-                   <item row="2" column="0" colspan="2">
+                   <item row="5" column="0" colspan="2">
                     <widget class="QCheckBox" name="inputPreeditBackgroundColorCheckBox">
                      <property name="text">
                       <string>背景色</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="2" column="2">
+                   <item row="5" column="2">
                     <widget class="QPushButton" name="inputPreeditBackgroundColorButton">
                      <property name="minimumSize">
                       <size>
@@ -2092,14 +2150,14 @@
                      </property>
                     </widget>
                    </item>
-                   <item row="3" column="0" colspan="2">
+                   <item row="6" column="0" colspan="2">
                     <widget class="QCheckBox" name="inputPreeditUnderlineColorCheckBox">
                      <property name="text">
                       <string>下線色</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="3" column="2">
+                   <item row="6" column="2">
                     <widget class="QPushButton" name="inputPreeditUnderlineColorButton">
                      <property name="minimumSize">
                       <size>
@@ -2114,38 +2172,41 @@
                       </size>
                      </property>
                      <property name="text">
-                      <string>#FF0000</string>
+                      <string>#30DCC8</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="4" column="0" colspan="3">
+                   <item row="7" column="0" colspan="3">
                     <spacer name="verticalSpacer_targetPreeditColor">
                      <property name="orientation">
                       <enum>Qt::Orientation::Vertical</enum>
                      </property>
+                     <property name="sizeType">
+                      <enum>QSizePolicy::Policy::Fixed</enum>
+                     </property>
                      <property name="sizeHint" stdset="0">
                       <size>
                        <width>20</width>
-                       <height>18</height>
+                       <height>12</height>
                       </size>
                      </property>
                     </spacer>
                    </item>
-                   <item row="5" column="0" colspan="3">
+                   <item row="8" column="0" colspan="3">
                     <widget class="QLabel" name="targetPreeditColorLabel">
                      <property name="text">
                       <string>変換中の文節</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="6" column="0" colspan="2">
+                   <item row="9" column="0" colspan="2">
                     <widget class="QCheckBox" name="targetPreeditTextColorCheckBox">
                      <property name="text">
                       <string>文字色</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="6" column="2">
+                   <item row="9" column="2">
                     <widget class="QPushButton" name="targetPreeditTextColorButton">
                      <property name="minimumSize">
                       <size>
@@ -2164,14 +2225,14 @@
                      </property>
                     </widget>
                    </item>
-                   <item row="7" column="0" colspan="2">
+                   <item row="10" column="0" colspan="2">
                     <widget class="QCheckBox" name="targetPreeditBackgroundColorCheckBox">
                      <property name="text">
                       <string>背景色</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="7" column="2">
+                   <item row="10" column="2">
                     <widget class="QPushButton" name="targetPreeditBackgroundColorButton">
                      <property name="minimumSize">
                       <size>
@@ -2190,14 +2251,14 @@
                      </property>
                     </widget>
                    </item>
-                   <item row="8" column="0" colspan="2">
+                   <item row="11" column="0" colspan="2">
                     <widget class="QCheckBox" name="targetPreeditUnderlineColorCheckBox">
                      <property name="text">
                       <string>下線色</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="8" column="2">
+                   <item row="11" column="2">
                     <widget class="QPushButton" name="targetPreeditUnderlineColorButton">
                      <property name="minimumSize">
                       <size>
@@ -2212,11 +2273,27 @@
                       </size>
                      </property>
                      <property name="text">
-                      <string>#0066FF</string>
+                      <string>#C1A5AB</string>
                      </property>
                     </widget>
                    </item>
-                   <item row="9" column="0" colspan="3">
+                   <item row="12" column="0" colspan="3">
+                    <spacer name="verticalSpacer_preeditDisplayColorNote">
+                     <property name="orientation">
+                      <enum>Qt::Orientation::Vertical</enum>
+                     </property>
+                     <property name="sizeType">
+                      <enum>QSizePolicy::Policy::Fixed</enum>
+                     </property>
+                     <property name="sizeHint" stdset="0">
+                      <size>
+                       <width>20</width>
+                       <height>8</height>
+                      </size>
+                     </property>
+                    </spacer>
+                   </item>
+                   <item row="13" column="0" colspan="3">
                     <widget class="QLabel" name="preeditDisplayColorNoteLabel">
                      <property name="text">
                       <string>対応アプリのみ有効。Chrome/Edge等は非対応の場合あり。</string>
@@ -2229,6 +2306,7 @@
                      </property>
                     </widget>
                    </item>
+
                   </layout>
                  </widget>
                 </item>

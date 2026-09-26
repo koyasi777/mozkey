@@ -105,6 +105,21 @@ TEST(TipDisplayAttributesTest, BasicTest) {
   EXPECT_EQ(info.lsStyle, kTestAttribute.lsStyle);
 }
 
+TEST(TipDisplayAttributesTest,
+     PendingRomanUsesSystemGrayDottedUnderlineWithoutTextColors) {
+  TipDisplayAttributePendingRoman attribute;
+
+  TF_DISPLAYATTRIBUTE info;
+  ASSERT_EQ(attribute.GetAttributeInfo(&info), S_OK);
+  EXPECT_EQ(info.crText.type, TF_CT_NONE);
+  EXPECT_EQ(info.crBk.type, TF_CT_NONE);
+  EXPECT_EQ(info.crLine.type, TF_CT_SYSCOLOR);
+  EXPECT_EQ(info.crLine.nIndex, COLOR_GRAYTEXT);
+  EXPECT_EQ(info.lsStyle, TF_LS_DOT);
+  EXPECT_FALSE(info.fBoldLine);
+  EXPECT_EQ(info.bAttr, TF_ATTR_INPUT);
+}
+
 TEST(TipDisplayAttributesTest, SetAttributeInfo) {
   TestableTipDisplayAttribute attribute(kTestGuid, kTestAttribute,
                                         kTestDescription);
@@ -128,6 +143,104 @@ TEST(TipDisplayAttributesTest, SetAttributeInfo) {
   EXPECT_THAT(info.crText, IsSameColor(kTestAttribute.crText));
   EXPECT_EQ(info.fBoldLine, kTestAttribute.fBoldLine);
   EXPECT_EQ(info.lsStyle, kTestAttribute.lsStyle);
+}
+
+
+TEST(TipDisplayAttributesTest, PendingRomanSystemGrayHasDottedUnderline) {
+  SetPendingRomanDisplayAttributeSystemGray();
+
+  TipDisplayAttributePendingRoman attribute;
+  TF_DISPLAYATTRIBUTE info = {};
+  EXPECT_EQ(attribute.GetAttributeInfo(&info), S_OK);
+  EXPECT_EQ(info.crText.type, TF_CT_SYSCOLOR);
+  EXPECT_EQ(info.crText.nIndex, COLOR_GRAYTEXT);
+  EXPECT_EQ(info.crBk.type, TF_CT_NONE);
+  EXPECT_EQ(info.lsStyle, TF_LS_DOT);
+  EXPECT_EQ(info.fBoldLine, FALSE);
+  EXPECT_EQ(info.crLine.type, TF_CT_SYSCOLOR);
+  EXPECT_EQ(info.crLine.nIndex, COLOR_GRAYTEXT);
+  EXPECT_EQ(info.bAttr, TF_ATTR_INPUT);
+
+  SetPendingRomanDisplayAttributeCompatibilityFallback();
+}
+
+TEST(TipDisplayAttributesTest, PendingRomanSampledColorsHaveDottedUnderline) {
+  constexpr COLORREF kText = RGB(0x91, 0x92, 0x93);
+  constexpr COLORREF kBackground = RGB(0x21, 0x22, 0x23);
+  SetPendingRomanDisplayAttributeSampledColors(
+      kText, kBackground, true);
+
+  TipDisplayAttributePendingRoman attribute;
+  TF_DISPLAYATTRIBUTE info = {};
+  EXPECT_EQ(attribute.GetAttributeInfo(&info), S_OK);
+  EXPECT_EQ(info.crText.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crText.cr, kText);
+  EXPECT_EQ(info.crBk.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crBk.cr, kBackground);
+  EXPECT_EQ(info.lsStyle, TF_LS_DOT);
+  EXPECT_EQ(info.fBoldLine, FALSE);
+  EXPECT_EQ(info.crLine.type, TF_CT_SYSCOLOR);
+  EXPECT_EQ(info.crLine.nIndex, COLOR_GRAYTEXT);
+  EXPECT_EQ(info.bAttr, TF_ATTR_INPUT);
+
+  SetPendingRomanDisplayAttributeCompatibilityFallback();
+}
+
+
+TEST(TipDisplayAttributesTest,
+     PendingRomanSampledColorCanPreserveForegroundOnlyBehavior) {
+  constexpr COLORREF kText = RGB(0x91, 0x92, 0x93);
+  constexpr COLORREF kBackground = RGB(0x21, 0x22, 0x23);
+  SetPendingRomanDisplayAttributeSampledColors(
+      kText, kBackground, false);
+
+  TipDisplayAttributePendingRoman attribute;
+  TF_DISPLAYATTRIBUTE info = {};
+  EXPECT_EQ(attribute.GetAttributeInfo(&info), S_OK);
+  EXPECT_EQ(info.crText.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crText.cr, kText);
+  EXPECT_EQ(info.crBk.type, TF_CT_NONE);
+  EXPECT_EQ(info.lsStyle, TF_LS_DOT);
+  EXPECT_EQ(info.crLine.type, TF_CT_SYSCOLOR);
+  EXPECT_EQ(info.crLine.nIndex, COLOR_GRAYTEXT);
+
+  SetPendingRomanDisplayAttributeCompatibilityFallback();
+}
+
+TEST(TipDisplayAttributesTest,
+     GeckoCompatibilityBackgroundIsAddedOnlyWhenRequested) {
+  constexpr COLORREF kText = RGB(0x11, 0x22, 0x33);
+  constexpr COLORREF kBackground = RGB(0x44, 0x55, 0x66);
+
+  TF_DISPLAYATTRIBUTE foreground_only = {};
+  foreground_only.crText.type = TF_CT_COLORREF;
+  foreground_only.crText.cr = kText;
+  foreground_only.crBk.type = TF_CT_NONE;
+
+  SetGeckoDisplayCompatibilityBackground(kBackground, false);
+  ApplyGeckoDisplayCompatibilityBackground(&foreground_only);
+  EXPECT_EQ(foreground_only.crBk.type, TF_CT_NONE);
+
+  SetGeckoDisplayCompatibilityBackground(kBackground, true);
+  ApplyGeckoDisplayCompatibilityBackground(&foreground_only);
+  EXPECT_EQ(foreground_only.crBk.type, TF_CT_COLORREF);
+  EXPECT_EQ(foreground_only.crBk.cr, kBackground);
+
+  TF_DISPLAYATTRIBUTE already_has_background = {};
+  already_has_background.crText.type = TF_CT_COLORREF;
+  already_has_background.crText.cr = kText;
+  already_has_background.crBk.type = TF_CT_COLORREF;
+  already_has_background.crBk.cr = RGB(0xaa, 0xbb, 0xcc);
+  ApplyGeckoDisplayCompatibilityBackground(&already_has_background);
+  EXPECT_EQ(already_has_background.crBk.cr, RGB(0xaa, 0xbb, 0xcc));
+
+  TF_DISPLAYATTRIBUTE no_foreground = {};
+  no_foreground.crText.type = TF_CT_NONE;
+  no_foreground.crBk.type = TF_CT_NONE;
+  ApplyGeckoDisplayCompatibilityBackground(&no_foreground);
+  EXPECT_EQ(no_foreground.crBk.type, TF_CT_NONE);
+
+  ClearGeckoDisplayCompatibilityBackground();
 }
 
 }  // namespace

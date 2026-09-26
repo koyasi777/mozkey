@@ -227,6 +227,12 @@ class Composer final {
   // Returns a preedit string with user's preferences.
   std::string GetStringForPreedit() const;
 
+  // Returns the number of trailing preedit characters that represent
+  // unresolved Roman-table input and should use the subdued presentation.
+  // This is presentation metadata only; the preedit string itself is not
+  // modified.
+  size_t GetPendingRomanDisplayLength() const;
+
   // Returns a submit string with user's preferences.  The difference
   // from the preedit string is the handling of the last 'n'.
   std::string GetStringForSubmission() const;

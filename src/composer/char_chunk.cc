@@ -40,6 +40,7 @@
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "base/strings/unicode.h"
@@ -154,6 +155,24 @@ size_t CharChunk::GetLength(Transliterators::Transliterator t12r) const {
     local_length_cache_ = length;
   }
   return length;
+}
+
+size_t CharChunk::GetPendingDisplayLength(
+    Transliterators::Transliterator t12r) const {
+  if (pending_.empty() ||
+      (display_ambiguous_as_result_ && !ambiguous_.empty())) {
+    return 0;
+  }
+
+  std::string displayed;
+  AppendResult(t12r, &displayed);
+  std::string trimmed;
+  AppendTrimedResult(t12r, &trimmed);
+
+  if (!absl::StartsWith(displayed, trimmed)) {
+    return 0;
+  }
+  return Util::CharsLen(displayed) - Util::CharsLen(trimmed);
 }
 
 void CharChunk::AppendResult(Transliterators::Transliterator t12r,

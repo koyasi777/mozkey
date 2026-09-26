@@ -828,6 +828,7 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":tip_composition_util",
+        ":tip_display_attributes",
         ":tip_dll_module",
         ":tip_input_mode_manager",
         ":tip_private_context_h",
@@ -842,6 +843,7 @@ mozc_cc_library(
         "//base/win32:com",
         "//base/win32:wide_char",
         "//client:client_interface",
+        "//config:config_handler",
         "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
         "//win32/base:conversion_mode_util",

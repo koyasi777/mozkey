@@ -71,6 +71,17 @@ class TipEditSessionImpl {
                                ITfContext* context, TfEditCookie write_cookie,
                                const commands::Output& output);
 
+  // Clears per-thread Gecko display state immediately on focus transition so
+  // a previous editor's sampled background cannot leak into the next context.
+  static void ResetGeckoDisplayCompatibility();
+
+  // Opportunistically populates Gecko editor background information before
+  // typing when focus-time layout is available. Focus-generation reset is owned
+  // by OnSetFocusAsync; this asynchronous helper must not clear a newer sample.
+  static void PrewarmGeckoDisplayCompatibility(
+      TipTextService* text_service, ITfContext* context,
+      ITfRange* selection_range, TfEditCookie read_cookie);
+
   // A core logic of UI handler. This function does
   // - Invokes UI update.
   static void UpdateUI(TipTextService* text_service, ITfContext* context,

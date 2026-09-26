@@ -130,6 +130,8 @@ class Composition final {
   Transliterators::Transliterator GetTransliterator(size_t position) const;
 
   size_t GetLength() const;
+  // Returns the unresolved display length of the last chunk only.
+  size_t GetTrailingPendingDisplayLength() const;
   std::string GetString() const;
   std::string GetStringWithTransliterator(
       Transliterators::Transliterator transliterator) const;

@@ -96,6 +96,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows / macOS 版では、縦書き時の連鎖候補ウィンドウを現在候補から本文の外側へ展開するよう配置し、必要に応じて反対側へフォールバック
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能
+- Windows 版のローマ字入力で、変換規則の途中にある末尾の未確定ローマ字だけを薄く表示する opt-in 機能を追加。既定は OFF で、薄さは 0～90%（既定 75%）の範囲で調整可能
 - Windows 版の IME 切り替えインジケータは、設定画面から「システムテーマに合わせる / ダーク / ライト / カスタム」を選択可能。カスタムでは入力モード別の配色とサイズ・角丸・枠線・影を調整でき、画面端付近では表示位置を自動調整
 - system dictionary 強化用の追加辞書生成パイプラインを追加
 - 日常語彙・実務語彙・外来語・英語綴り候補を小さな manual override 辞書として段階的に補強し、通常語彙は自然な第一候補、英語綴りは補助候補として扱う評価運用を追加
@@ -549,19 +550,27 @@ macOS 版では、IMK 側で取得した writing direction をレンダラーへ
 
 これらの縦書き処理は macOS 専用の layout / writing-direction ロジックとして分離し、候補レイアウト、Infolist レイアウト、writing direction、ウィンドウ配置の単体テストを追加しています。通常の横書き経路は従来動作を維持します。
 
-### Windows 未確定文字の表示色
+### Windows 未確定文字の表示と表示色
 
-Windows 版では、設定画面から未確定文字の表示色をカスタマイズできます。
+Windows 版では、ローマ字入力時に「未確定のローマ字を薄く表示する」を有効にすると、変換規則の途中にある末尾の未確定ローマ字だけを通常の preedit と分けて表示できます。この機能は表示だけを変更し、入力文字列、変換用の key、確定結果は変更しません。
 
-入力中の文字と変換中の文節について、それぞれ以下を個別に設定できます。
+この設定は opt-in で、設定値がまだ存在しない新規・未設定のプロファイルでは既定 OFF です。すでに明示的な ON / OFF が保存されている場合は、そのユーザー設定を維持します。薄さは 0～90% の範囲を 1% 単位で設定でき、既定値は 75% です。値を大きくすると背景色に近づいてより薄く見え、0% は高いコントラスト、90% は非常に薄い表示になります。
+
+未確定ローマ字の表示情報は通常の入力中だけでなく、ライブ変換や Zenz 補正を表示している経路でも、元の segment の key / value を壊さず安全に保持できる範囲で引き継ぎます。表示のために key を value から合成することはせず、安全に分割できない segment は元の key / value のまま扱います。
+
+この表示は Windows TSF の専用 display attribute として適用します。Firefox などの Gecko 系ホストでは、編集面の背景を安全に取得できた場合だけ、その背景に合わせた薄い文字色を使用します。選択範囲、clipped な geometry、非均一な背景など信頼できない状態は背景色として固定せず、互換表示へフォールバックします。また、この機能が OFF のときは背景取得のための画面 sampling を行いません。
+
+あわせて、Windows 版では設定画面から入力中の文字と変換中の文節について、それぞれ以下の表示色を個別に設定できます。
 
 - 文字色
 - 背景色
 - 下線色
 
+新規・未設定のプロファイルでは、入力中の下線色は `#30DCC8`、変換中の文節の下線色は `#C1A5AB` が既定です。すでに下線色やその有効 / 無効を明示的に保存している場合は、その既存設定を維持します。
+
 日本語入力中・変換中の未確定文字を見やすくするための機能です。特に、視認性を高めたいユーザー向けのアクセシビリティ改善として追加しています。
 
-この設定は Windows TSF の表示属性として反映されます。対応アプリでのみ有効です。Chrome や Edge など、一部のアプリでは反映されない場合があります。
+これらの設定は Windows TSF の表示属性として反映されます。対応アプリでのみ有効です。Chrome や Edge など、一部のアプリでは反映されない場合があります。
 
 system dictionary の強化
 -----------------------
@@ -790,6 +799,7 @@ Main features added in this fork
 - On Windows and macOS, places cascading candidate windows outward from the focused vertical candidate, with fallback to the opposite side when necessary
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog
+- Adds an opt-in Windows feature for Roman input that dims only the unresolved trailing romaji still forming an incomplete conversion-rule prefix; it defaults to OFF and the dimness can be adjusted from 0% to 90% (default 75%)
 - Allows choosing System theme, Dark, Light, or Custom for the Windows IME mode indicator, including per-mode colors and geometry/shadow customization, with automatic screen-edge repositioning
 - Adds an enhanced system dictionary generation pipeline
 - Adds a small tracked manual override dictionary for daily vocabulary, practical vocabulary, loanwords, and secondary English spelling candidates, with regression checks that keep Japanese candidates first
@@ -1431,19 +1441,27 @@ Cascading candidate windows are anchored to the focused candidate and prefer exp
 
 The macOS vertical-writing implementation is separated into dedicated layout and writing-direction logic, with unit tests for candidate layout, infolist layout, writing direction, and window placement. The existing horizontal-writing path retains its previous behavior.
 
-### Windows preedit display colors
+### Windows preedit presentation and display colors
 
-On Windows, preedit display colors can be customized from the config dialog.
+On Windows, enabling `Dim unresolved Roman input` while using Roman input gives only the unresolved trailing romaji that is still an incomplete conversion-rule prefix a separate, subdued presentation. This is presentation metadata only: it does not change the input string, conversion key, or committed text.
 
-The following display attributes can be configured separately for input text and the converting segment:
+The feature is opt-in. For a new or otherwise unset profile, the default is OFF. If an explicit ON / OFF value has already been stored, that existing user choice is preserved. Dimness is configurable from 0% to 90% in 1% steps, with a default of 75%. Higher values move the unresolved Roman text closer to the background color; 0% keeps high contrast and 90% is very faint.
+
+Pending-romaji presentation metadata is also preserved through live-conversion and Zenz-correction display paths when the original segment key/value relationship can be kept safely. Presentation-only splitting never synthesizes segment keys from displayed values; if a segment cannot be split safely, its original key/value is kept unsplit.
+
+The presentation is applied through a dedicated Windows TSF display attribute. In Gecko-based hosts such as Firefox, Mozkey uses a subdued text color matched to the editor background only when that background can be sampled safely. Selection-painted regions, clipped geometry, and non-uniform surfaces are not cached as editor backgrounds; Mozkey falls back to a compatibility presentation instead. When the feature is OFF, no screen sampling is performed for this feature.
+
+The config dialog also allows the following display colors to be configured separately for input text and the converting segment:
 
 - Text color
 - Background color
 - Underline color
 
-This is intended to improve the visibility of uncommitted text, especially for users who need stronger visual contrast while composing or converting Japanese text.
+For new or otherwise unset profiles, the default underline color is `#30DCC8` for input text and `#C1A5AB` for the converting segment. Explicitly stored underline-color choices, including whether custom underline colors are enabled, are preserved.
 
-The setting is applied through Windows TSF display attributes. It works only in applications that honor those attributes. Some applications, including Chrome and Edge, may ignore them.
+These options are intended to improve the visibility of uncommitted text, especially for users who need stronger visual contrast while composing or converting Japanese text.
+
+The settings are applied through Windows TSF display attributes. They work only in applications that honor those attributes. Some applications, including Chrome and Edge, may ignore them.
 
 Enhanced system dictionary
 --------------------------

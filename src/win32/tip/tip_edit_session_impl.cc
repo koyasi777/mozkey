@@ -35,6 +35,8 @@
 #include <wil/resource.h>
 #include <windows.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -45,11 +47,13 @@
 #include "base/win32/com.h"
 #include "base/win32/wide_char.h"
 #include "client/client_interface.h"
+#include "config/config_handler.h"
 #include "protocol/commands.pb.h"
 #include "win32/base/conversion_mode_util.h"
 #include "win32/base/input_state.h"
 #include "win32/base/string_util.h"
 #include "win32/tip/tip_composition_util.h"
+#include "win32/tip/tip_display_attributes.h"
 #include "win32/tip/tip_edit_session.h"
 #include "win32/tip/tip_input_mode_manager.h"
 #include "win32/tip/tip_private_context.h"
@@ -72,6 +76,509 @@ using ::mozc::commands::Status;
 using CompositionMode = ::mozc::commands::CompositionMode;
 using Segment = ::mozc::commands::Preedit::Segment;
 using Annotation = ::mozc::commands::Preedit::Segment::Annotation;
+
+bool IsGeckoHostProcess() {
+  // Firefox, Floorp and other desktop Gecko derivatives load xul.dll into the
+  // process that owns TSFTextStore.
+  return ::GetModuleHandleW(L"xul.dll") != nullptr;
+}
+
+bool HasPendingRomanSegment(const Preedit& preedit) {
+  for (const Preedit::Segment& segment : preedit.segment()) {
+    if (segment.is_pending_roman()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int MaxColorChannelDelta(const COLORREF lhs, const COLORREF rhs) {
+  const auto delta = [](const int a, const int b) {
+    return a >= b ? a - b : b - a;
+  };
+  return std::max(
+      delta(GetRValue(lhs), GetRValue(rhs)),
+      std::max(delta(GetGValue(lhs), GetGValue(rhs)),
+               delta(GetBValue(lhs), GetBValue(rhs))));
+}
+
+// Capture one wider strip, but analyze only the far outer edges. The center
+// around the caret is deliberately ignored because transient selections and
+// the pending glyph itself can be highly uniform and otherwise look like an
+// excellent "background" sample.
+constexpr int kBackgroundCaptureWidth = 192;
+constexpr int kBackgroundCaptureHeight = 7;
+constexpr int kBackgroundEdgeRegionWidth = 24;
+constexpr int kBackgroundOneSidedCaretGap = 32;
+constexpr size_t kBackgroundCapturePixelCount =
+    kBackgroundCaptureWidth * kBackgroundCaptureHeight;
+constexpr int kBackgroundClusterDelta = 12;
+constexpr int kBackgroundRegionAgreementDelta = 12;
+constexpr int kBackgroundSystemHighlightRejectDelta = 18;
+constexpr size_t kBackgroundDominantPercent = 58;
+
+using BackgroundPixels =
+    std::array<COLORREF, kBackgroundCapturePixelCount>;
+
+bool AnalyzeBackgroundRegion(
+    const BackgroundPixels& pixels, const int x_begin, const int x_end,
+    COLORREF* color) {
+  if (color == nullptr || x_begin < 0 || x_end > kBackgroundCaptureWidth ||
+      x_begin >= x_end) {
+    return false;
+  }
+
+  const size_t region_pixel_count =
+      static_cast<size_t>(x_end - x_begin) * kBackgroundCaptureHeight;
+  size_t best_count = 0;
+  COLORREF best_seed = RGB(0, 0, 0);
+
+  for (int y = 0; y < kBackgroundCaptureHeight; ++y) {
+    for (int x = x_begin; x < x_end; ++x) {
+      const COLORREF seed =
+          pixels[static_cast<size_t>(y) * kBackgroundCaptureWidth + x];
+      size_t count = 0;
+      for (int other_y = 0; other_y < kBackgroundCaptureHeight; ++other_y) {
+        for (int other_x = x_begin; other_x < x_end; ++other_x) {
+          const COLORREF candidate =
+              pixels[static_cast<size_t>(other_y) *
+                         kBackgroundCaptureWidth +
+                     other_x];
+          if (MaxColorChannelDelta(seed, candidate) <=
+              kBackgroundClusterDelta) {
+            ++count;
+          }
+        }
+      }
+      if (count > best_count) {
+        best_count = count;
+        best_seed = seed;
+      }
+    }
+  }
+
+  if (best_count * 100 <
+      region_pixel_count * kBackgroundDominantPercent) {
+    return false;
+  }
+
+  uint64_t red_sum = 0;
+  uint64_t green_sum = 0;
+  uint64_t blue_sum = 0;
+  size_t supporting_count = 0;
+
+  for (int y = 0; y < kBackgroundCaptureHeight; ++y) {
+    for (int x = x_begin; x < x_end; ++x) {
+      const COLORREF candidate =
+          pixels[static_cast<size_t>(y) * kBackgroundCaptureWidth + x];
+      if (MaxColorChannelDelta(best_seed, candidate) >
+          kBackgroundClusterDelta) {
+        continue;
+      }
+      red_sum += GetRValue(candidate);
+      green_sum += GetGValue(candidate);
+      blue_sum += GetBValue(candidate);
+      ++supporting_count;
+    }
+  }
+
+  if (supporting_count == 0) {
+    return false;
+  }
+
+  *color = RGB(
+      static_cast<BYTE>(red_sum / supporting_count),
+      static_cast<BYTE>(green_sum / supporting_count),
+      static_cast<BYTE>(blue_sum / supporting_count));
+  return true;
+}
+
+bool SampleVisibleBackgroundAtRangeEnd(
+    ITfContext* context, ITfRange* range,
+    const TfEditCookie read_cookie, COLORREF* background,
+    bool* surface_uniform) {
+  if (context == nullptr || range == nullptr || background == nullptr ||
+      surface_uniform == nullptr) {
+    return false;
+  }
+
+  *surface_uniform = false;
+
+  // Do not sample while the active selection itself can paint a custom
+  // selection background around the caret. Treat this as a retryable,
+  // non-uniform surface rather than caching selection pixels as editor color.
+  BOOL range_empty = FALSE;
+  if (FAILED(range->IsEmpty(read_cookie, &range_empty))) {
+    return false;
+  }
+  if (range_empty == FALSE) {
+    return true;
+  }
+
+  wil::com_ptr_nothrow<ITfContextView> view;
+  if (FAILED(context->GetActiveView(&view)) || !view) {
+    return false;
+  }
+
+  wil::com_ptr_nothrow<ITfRange> caret_range;
+  if (FAILED(range->Clone(&caret_range)) || !caret_range) {
+    return false;
+  }
+  if (FAILED(caret_range->Collapse(read_cookie, TF_ANCHOR_END))) {
+    return false;
+  }
+
+  RECT caret_rect = {};
+  BOOL clipped = FALSE;
+  if (FAILED(view->GetTextExt(read_cookie, caret_range.get(), &caret_rect,
+                              &clipped))) {
+    return false;
+  }
+  if (clipped != FALSE) {
+    // Clipped geometry is not trustworthy for screen sampling, but it is
+    // commonly transient during layout/scroll/focus changes. Keep it
+    // retryable at the next new-composition boundary.
+    return true;
+  }
+
+  const int height = caret_rect.bottom - caret_rect.top;
+  if (height <= 0) {
+    return false;
+  }
+
+  const int virtual_left = ::GetSystemMetrics(SM_XVIRTUALSCREEN);
+  const int virtual_top = ::GetSystemMetrics(SM_YVIRTUALSCREEN);
+  const int virtual_right =
+      virtual_left + ::GetSystemMetrics(SM_CXVIRTUALSCREEN);
+  const int virtual_bottom =
+      virtual_top + ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+  const int caret_center_x =
+      caret_rect.left + (caret_rect.right - caret_rect.left) / 2;
+
+  // Prefer a strip centered on the caret so the two analyzed regions are far
+  // away on opposite sides. Near a virtual-screen edge, fall back to a strip
+  // on one side, still leaving a gap before the first analyzed region.
+  int capture_x = caret_center_x - kBackgroundCaptureWidth / 2;
+  if (capture_x < virtual_left ||
+      capture_x + kBackgroundCaptureWidth > virtual_right) {
+    const int right_candidate =
+        caret_rect.right + kBackgroundOneSidedCaretGap;
+    const int left_candidate =
+        caret_rect.left - kBackgroundOneSidedCaretGap -
+        kBackgroundCaptureWidth;
+
+    if (right_candidate >= virtual_left &&
+        right_candidate + kBackgroundCaptureWidth <= virtual_right) {
+      capture_x = right_candidate;
+    } else if (left_candidate >= virtual_left &&
+               left_candidate + kBackgroundCaptureWidth <= virtual_right) {
+      capture_x = left_candidate;
+    } else {
+      return false;
+    }
+  }
+
+  const int center_y = caret_rect.top + height / 2;
+  int capture_y = center_y - kBackgroundCaptureHeight / 2;
+  capture_y = std::max(
+      virtual_top,
+      std::min(capture_y,
+               virtual_bottom - kBackgroundCaptureHeight));
+
+  HDC screen_dc = ::GetDC(nullptr);
+  if (screen_dc == nullptr) {
+    return false;
+  }
+
+  HDC memory_dc = ::CreateCompatibleDC(screen_dc);
+  if (memory_dc == nullptr) {
+    ::ReleaseDC(nullptr, screen_dc);
+    return false;
+  }
+
+  BITMAPINFO bitmap_info = {};
+  bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bitmap_info.bmiHeader.biWidth = kBackgroundCaptureWidth;
+  bitmap_info.bmiHeader.biHeight = -kBackgroundCaptureHeight;
+  bitmap_info.bmiHeader.biPlanes = 1;
+  bitmap_info.bmiHeader.biBitCount = 32;
+  bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+  void* bitmap_bits = nullptr;
+  HBITMAP bitmap = ::CreateDIBSection(
+      screen_dc, &bitmap_info, DIB_RGB_COLORS, &bitmap_bits, nullptr, 0);
+  if (bitmap == nullptr || bitmap_bits == nullptr) {
+    if (bitmap != nullptr) {
+      ::DeleteObject(bitmap);
+    }
+    ::DeleteDC(memory_dc);
+    ::ReleaseDC(nullptr, screen_dc);
+    return false;
+  }
+
+  HGDIOBJ old_bitmap = ::SelectObject(memory_dc, bitmap);
+  if (old_bitmap == nullptr || old_bitmap == HGDI_ERROR) {
+    ::DeleteObject(bitmap);
+    ::DeleteDC(memory_dc);
+    ::ReleaseDC(nullptr, screen_dc);
+    return false;
+  }
+
+  // Do not use CAPTUREBLT here. Layered/transient windows are not part of the
+  // editor's own surface and can otherwise poison the cached background.
+  const BOOL copied = ::BitBlt(
+      memory_dc, 0, 0, kBackgroundCaptureWidth, kBackgroundCaptureHeight,
+      screen_dc, capture_x, capture_y, SRCCOPY);
+
+  BackgroundPixels pixels = {};
+  if (copied) {
+    const BYTE* source = static_cast<const BYTE*>(bitmap_bits);
+    for (size_t i = 0; i < kBackgroundCapturePixelCount; ++i) {
+      pixels[i] =
+          RGB(source[i * 4 + 2], source[i * 4 + 1], source[i * 4 + 0]);
+    }
+  }
+
+  ::SelectObject(memory_dc, old_bitmap);
+  ::DeleteObject(bitmap);
+  ::DeleteDC(memory_dc);
+  ::ReleaseDC(nullptr, screen_dc);
+
+  if (!copied) {
+    return false;
+  }
+
+  COLORREF left_color = RGB(0, 0, 0);
+  COLORREF right_color = RGB(0, 0, 0);
+  const bool left_uniform =
+      AnalyzeBackgroundRegion(
+          pixels, 0, kBackgroundEdgeRegionWidth, &left_color);
+  const bool right_uniform =
+      AnalyzeBackgroundRegion(
+          pixels,
+          kBackgroundCaptureWidth - kBackgroundEdgeRegionWidth,
+          kBackgroundCaptureWidth, &right_color);
+
+  if (!left_uniform || !right_uniform ||
+      MaxColorChannelDelta(left_color, right_color) >
+          kBackgroundRegionAgreementDelta) {
+    return true;
+  }
+
+  const COLORREF candidate_background = RGB(
+      static_cast<BYTE>(
+          (static_cast<int>(GetRValue(left_color)) +
+           static_cast<int>(GetRValue(right_color))) /
+          2),
+      static_cast<BYTE>(
+          (static_cast<int>(GetGValue(left_color)) +
+           static_cast<int>(GetGValue(right_color))) /
+          2),
+      static_cast<BYTE>(
+          (static_cast<int>(GetBValue(left_color)) +
+           static_cast<int>(GetBValue(right_color))) /
+          2));
+
+  // The default Windows selection highlight is commonly #0078D4. If a
+  // transient selection fills both analyzed regions, geometric agreement alone
+  // is not enough. Reject a candidate close to the current system highlight;
+  // the one-shot typing retry can then sample again after selection settles.
+  if (MaxColorChannelDelta(
+          candidate_background, ::GetSysColor(COLOR_HIGHLIGHT)) <=
+      kBackgroundSystemHighlightRejectDelta) {
+    return true;
+  }
+
+  *background = candidate_background;
+  *surface_uniform = true;
+  return true;
+}
+
+constexpr uint32_t kDefaultPendingRomanDimnessPercent = 75;
+constexpr uint32_t kMaxPendingRomanDimnessPercent = 90;
+
+bool IsPendingRomanDimmingEnabled() {
+  const auto current_config = config::ConfigHandler::GetSharedConfig();
+  return current_config != nullptr &&
+         current_config->dim_pending_roman_input();
+}
+
+uint32_t GetPendingRomanDimnessPercent() {
+  const auto current_config = config::ConfigHandler::GetSharedConfig();
+  if (!current_config) {
+    return kDefaultPendingRomanDimnessPercent;
+  }
+  return std::min(current_config->pending_roman_dimness_percent(),
+                  kMaxPendingRomanDimnessPercent);
+}
+
+COLORREF CreateMutedPendingRomanTextColor(
+    const COLORREF background, const uint32_t dimness_percent) {
+  const int r = GetRValue(background);
+  const int g = GetGValue(background);
+  const int b = GetBValue(background);
+
+  const int luma = (299 * r + 587 * g + 114 * b) / 1000;
+  const int contrast_percent =
+      100 - static_cast<int>(
+                std::min(dimness_percent,
+                         kMaxPendingRomanDimnessPercent));
+  constexpr int kPercentDenominator = 100;
+
+  const auto blend_toward =
+      [contrast_percent](const int component, const int target) -> BYTE {
+    return static_cast<BYTE>(
+        component +
+        ((target - component) * contrast_percent) /
+            kPercentDenominator);
+  };
+
+  const int target = luma < 128 ? 255 : 0;
+  return RGB(blend_toward(r, target),
+             blend_toward(g, target),
+             blend_toward(b, target));
+}
+
+enum class GeckoSurfaceSamplePhase {
+  // Focus can arrive before Gecko has finished layout/paint. A hard sampling
+  // failure gets one retry when the first real composition begins.
+  kFocusPrewarm,
+  // A composition boundary is a safe recovery point. A previously non-uniform
+  // surface may be sampled once here, but never repeatedly inside the same
+  // composition.
+  kNewComposition,
+  // Existing-composition updates must not trigger screen reads after a failed
+  // sample. This keeps the per-key hot path free of repeated BitBlt calls.
+  kExistingComposition,
+};
+
+bool EnsureGeckoDisplayCompatibility(
+    TipTextService* text_service, ITfContext* context, ITfRange* sample_range,
+    const TfEditCookie read_cookie, const GeckoSurfaceSamplePhase phase) {
+  if (text_service == nullptr || context == nullptr || sample_range == nullptr) {
+    ClearGeckoDisplayCompatibilityBackground();
+    SetPendingRomanDisplayAttributeCompatibilityFallback();
+    return false;
+  }
+
+  TipPrivateContext* private_context =
+      text_service->GetPrivateContext(context);
+
+  // The feature is opt-in. When disabled, perform no screen capture at all and
+  // discard any old sample so re-enabling cannot revive stale background data.
+  if (!IsPendingRomanDimmingEnabled()) {
+    if (private_context != nullptr) {
+      private_context->ClearPendingRomanDisplayColors();
+    }
+    ClearGeckoDisplayCompatibilityBackground();
+    SetPendingRomanDisplayAttributeCompatibilityFallback();
+    return false;
+  }
+
+  if (!IsGeckoHostProcess()) {
+    ClearGeckoDisplayCompatibilityBackground();
+    return false;
+  }
+
+  if (private_context == nullptr) {
+    ClearGeckoDisplayCompatibilityBackground();
+    return false;
+  }
+
+  COLORREF text_color = RGB(0, 0, 0);
+  COLORREF background = RGB(0, 0, 0);
+  bool surface_uniform = false;
+  bool retry_allowed = false;
+  const bool has_cached_sample =
+      private_context->GetPendingRomanDisplayColors(
+          &text_color, &background, &surface_uniform, &retry_allowed);
+
+  if (has_cached_sample && surface_uniform) {
+    SetGeckoDisplayCompatibilityBackground(background, true);
+    return true;
+  }
+
+  if (has_cached_sample) {
+    // Failed/non-uniform cache entries may be retried only at the next
+    // composition boundary. Existing-composition updates never sample again.
+    // A hard failure after typing starts clears retry_allowed below and remains
+    // unavailable until the next focus transition.
+    if (phase != GeckoSurfaceSamplePhase::kNewComposition ||
+        !retry_allowed) {
+      ClearGeckoDisplayCompatibilityBackground();
+      return false;
+    }
+  }
+
+  if (!SampleVisibleBackgroundAtRangeEnd(
+          context, sample_range, read_cookie, &background,
+          &surface_uniform)) {
+    // A focus-time hard failure can be a layout/paint race, so permit one
+    // composition-boundary retry. If the real typing-time screen read itself
+    // fails, treat it as unavailable for the remainder of this focus.
+    private_context->SetPendingRomanDisplayColorsUnavailable(
+        phase == GeckoSurfaceSamplePhase::kFocusPrewarm);
+    ClearGeckoDisplayCompatibilityBackground();
+    return false;
+  }
+
+  if (surface_uniform) {
+    text_color = CreateMutedPendingRomanTextColor(
+        background, GetPendingRomanDimnessPercent());
+  }
+
+  // A successful but non-uniform read is not a permanent capability failure.
+  // Keep it retryable so the next new composition can recover after transient
+  // selection/layout/paint content disappears. A uniform sample becomes the
+  // stable cache for the remainder of this focus.
+  private_context->SetPendingRomanDisplayColors(
+      text_color, background, surface_uniform,
+      !surface_uniform);
+
+  if (!surface_uniform) {
+    ClearGeckoDisplayCompatibilityBackground();
+    return false;
+  }
+
+  // A high-confidence flat surface is safe to reproduce explicitly. This
+  // avoids guessing Gecko's internal Field color or color-scheme.
+  SetGeckoDisplayCompatibilityBackground(background, true);
+  return true;
+}
+
+void PreparePendingRomanDisplayAttribute(
+    TipTextService* text_service, ITfContext* context,
+    const Preedit& preedit) {
+  if (!HasPendingRomanSegment(preedit)) {
+    return;
+  }
+
+  if (!IsGeckoHostProcess()) {
+    SetPendingRomanDisplayAttributeSystemGray();
+    return;
+  }
+
+  TipPrivateContext* private_context =
+      text_service->GetPrivateContext(context);
+  COLORREF text_color = RGB(0, 0, 0);
+  COLORREF background = RGB(0, 0, 0);
+  bool surface_uniform = false;
+  bool retry_allowed = false;
+  if (private_context != nullptr &&
+      private_context->GetPendingRomanDisplayColors(
+          &text_color, &background, &surface_uniform, &retry_allowed) &&
+      surface_uniform) {
+    // Pending foreground is only used together with a trusted explicit
+    // background. If the surface is not trustworthy, use the no-color
+    // compatibility fallback rather than triggering Gecko's Field fill.
+    SetPendingRomanDisplayAttributeSampledColors(
+        text_color, background, true);
+    return;
+  }
+
+  SetPendingRomanDisplayAttributeCompatibilityFallback();
+}
 
 HRESULT SetReadingProperties(ITfContext* context, ITfRange* range,
                              const std::string& reading_string_utf8,
@@ -294,6 +801,14 @@ HRESULT UpdateComposition(TipTextService* text_service, ITfContext* context,
     if (FAILED(result)) {
       return result;
     }
+
+    // Usually this is already warm from the asynchronous focus edit session.
+    // If the cached surface was transiently non-uniform, a new composition is
+    // the only typing-time point where we allow one recovery sample.
+    EnsureGeckoDisplayCompatibility(
+        text_service, context, insertion_pos.get(), write_cookie,
+        GeckoSurfaceSamplePhase::kNewComposition);
+
     composition = CreateComposition(text_service, context, write_cookie);
     if (!composition) {
       return E_FAIL;
@@ -307,39 +822,117 @@ HRESULT UpdateComposition(TipTextService* text_service, ITfContext* context,
 
   const Preedit& preedit = output.preedit();
   const std::wstring& preedit_text = StringUtil::ComposePreeditText(preedit);
-  result = composition_range->SetText(write_cookie, 0, preedit_text.c_str(),
-                                      preedit_text.size());
-  if (FAILED(result)) {
-    return result;
-  }
 
-  // Get out the display attribute property
+  // Resolve the display-property interface before changing visible text. This
+  // minimizes the interval between SetText() and assigning the pending style.
   wil::com_ptr_nothrow<ITfProperty> display_attribute;
   result = context->GetProperty(GUID_PROP_ATTRIBUTE, &display_attribute);
   if (FAILED(result)) {
     return result;
   }
 
-  // Get out the reading property
+  EnsureGeckoDisplayCompatibility(
+      text_service, context, composition_range.get(), write_cookie,
+      GeckoSurfaceSamplePhase::kExistingComposition);
+  PreparePendingRomanDisplayAttribute(
+      text_service, context, preedit);
+
+  result = composition_range->SetText(write_cookie, 0, preedit_text.c_str(),
+                                      preedit_text.size());
+  if (FAILED(result)) {
+    return result;
+  }
+
+  std::vector<int> segment_starts(preedit.segment_size());
+  std::vector<int> segment_ends(preedit.segment_size());
+  int offset = 0;
+  for (int i = 0; i < preedit.segment_size(); ++i) {
+    segment_starts[i] = offset;
+    offset += WideCharsLen(preedit.segment(i).value());
+    segment_ends[i] = offset;
+  }
+
+  auto apply_display_attribute = [&](const int i) -> HRESULT {
+    const Preedit::Segment& segment = preedit.segment(i);
+    const Preedit::Segment::Annotation& annotation = segment.annotation();
+
+    TfGuidAtom attribute = TF_INVALID_GUIDATOM;
+    if (segment.is_pending_roman()) {
+      attribute = text_service->pending_roman_attribute();
+    } else if (annotation == Preedit::Segment::UNDERLINE) {
+      attribute = text_service->input_attribute();
+    } else if (annotation == Preedit::Segment::HIGHLIGHT) {
+      attribute = text_service->converted_attribute();
+    } else {
+      return S_FALSE;
+    }
+
+    wil::com_ptr_nothrow<ITfRange> segment_range;
+    HRESULT hr = composition_range->Clone(&segment_range);
+    if (FAILED(hr)) {
+      return hr;
+    }
+    hr = segment_range->Collapse(write_cookie, TF_ANCHOR_START);
+    if (FAILED(hr)) {
+      return hr;
+    }
+    LONG shift = 0;
+    hr = segment_range->ShiftEnd(
+        write_cookie, segment_ends[i], &shift, nullptr);
+    if (FAILED(hr)) {
+      return hr;
+    }
+    hr = segment_range->ShiftStart(
+        write_cookie, segment_starts[i], &shift, nullptr);
+    if (FAILED(hr)) {
+      return hr;
+    }
+
+    wil::unique_variant var;
+    var.vt = VT_I4;
+    var.lVal = attribute;
+    return display_attribute->SetValue(
+        write_cookie, segment_range.get(), var.addressof());
+  };
+
+  // Pending romaji is the visually time-sensitive range. Assign its display
+  // attribute first, before normal preedit ranges or reading properties.
+  for (int i = 0; i < preedit.segment_size(); ++i) {
+    if (!preedit.segment(i).is_pending_roman()) {
+      continue;
+    }
+    result = apply_display_attribute(i);
+    if (FAILED(result)) {
+      return result;
+    }
+  }
+  for (int i = 0; i < preedit.segment_size(); ++i) {
+    if (preedit.segment(i).is_pending_roman()) {
+      continue;
+    }
+    result = apply_display_attribute(i);
+    if (FAILED(result)) {
+      return result;
+    }
+  }
+
+  // Reading properties are not visual. Defer them until all display
+  // attributes have been assigned.
   wil::com_ptr_nothrow<ITfProperty> reading_property;
   result = context->GetProperty(GUID_PROP_READING, &reading_property);
   if (FAILED(result)) {
     return result;
   }
 
-  // Set each segment's display attribute
-  int start = 0;
-  int end = 0;
   for (int i = 0; i < preedit.segment_size(); ++i) {
     const Preedit::Segment& segment = preedit.segment(i);
-    end = start + WideCharsLen(segment.value());
     const Preedit::Segment::Annotation& annotation = segment.annotation();
-    TfGuidAtom attribute = TF_INVALID_GUIDATOM;
-    if (annotation == Preedit::Segment::UNDERLINE) {
-      attribute = text_service->input_attribute();
-    } else if (annotation == Preedit::Segment::HIGHLIGHT) {
-      attribute = text_service->converted_attribute();
-    } else {  // mozc::commands::Preedit::Segment::NONE or unknown value
+    if (!segment.is_pending_roman() &&
+        annotation != Preedit::Segment::UNDERLINE &&
+        annotation != Preedit::Segment::HIGHLIGHT) {
+      continue;
+    }
+    if (!segment.has_key()) {
       continue;
     }
 
@@ -353,29 +946,26 @@ HRESULT UpdateComposition(TipTextService* text_service, ITfContext* context,
       return result;
     }
     LONG shift = 0;
-    result = segment_range->ShiftEnd(write_cookie, end, &shift, nullptr);
+    result = segment_range->ShiftEnd(
+        write_cookie, segment_ends[i], &shift, nullptr);
     if (FAILED(result)) {
       return result;
     }
-    result = segment_range->ShiftStart(write_cookie, start, &shift, nullptr);
+    result = segment_range->ShiftStart(
+        write_cookie, segment_starts[i], &shift, nullptr);
     if (FAILED(result)) {
       return result;
     }
-    wil::unique_variant var;
-    // set the value over the range
-    var.vt = VT_I4;
-    var.lVal = attribute;
-    result = display_attribute->SetValue(write_cookie, segment_range.get(),
-                                         var.addressof());
-    if (segment.has_key()) {
-      const std::wstring& reading_string =
-          StringUtil::KeyToReading(segment.key());
-      wil::unique_variant reading =
-          wil::make_variant_bstr_nothrow(reading_string.c_str());
-      result = reading_property->SetValue(write_cookie, segment_range.get(),
-                                          reading.addressof());
+
+    const std::wstring& reading_string =
+        StringUtil::KeyToReading(segment.key());
+    wil::unique_variant reading =
+        wil::make_variant_bstr_nothrow(reading_string.c_str());
+    result = reading_property->SetValue(
+        write_cookie, segment_range.get(), reading.addressof());
+    if (FAILED(result)) {
+      return result;
     }
-    start = end;
   }
 
   // Update cursor.
@@ -609,6 +1199,28 @@ HRESULT OnEndEditImpl(TipTextService* text_service, ITfContext* context,
 }
 
 }  // namespace
+
+void TipEditSessionImpl::ResetGeckoDisplayCompatibility() {
+  ClearGeckoDisplayCompatibilityBackground();
+  SetPendingRomanDisplayAttributeCompatibilityFallback();
+}
+
+void TipEditSessionImpl::PrewarmGeckoDisplayCompatibility(
+    TipTextService* text_service, ITfContext* context,
+    ITfRange* selection_range, const TfEditCookie read_cookie) {
+  if (text_service == nullptr || context == nullptr ||
+      selection_range == nullptr || !IsGeckoHostProcess()) {
+    return;
+  }
+
+  // OnSetFocusAsync synchronously owns generation reset. This asynchronous
+  // callback is population-only: if typing has already produced a sample, the
+  // cache must survive unchanged. EnsureGeckoDisplayCompatibility therefore
+  // either reuses that cache or samples only when the generation still needs it.
+  EnsureGeckoDisplayCompatibility(
+      text_service, context, selection_range, read_cookie,
+      GeckoSurfaceSamplePhase::kFocusPrewarm);
+}
 
 HRESULT TipEditSessionImpl::OnEndEdit(TipTextService* text_service,
                                       ITfContext* context,

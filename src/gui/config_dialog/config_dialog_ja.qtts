@@ -4,6 +4,26 @@
 <context>
     <name>ConfigDialog</name>
     <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>未確定のローマ字を薄く表示する</source>
+        <translation>未確定のローマ字を薄く表示する</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>ローマ字入力で変換規則の途中にある末尾の文字だけを薄く表示します。入力文字列や確定結果は変更しません。薄さは下の設定で調整できます。</source>
+        <translation>ローマ字入力で変換規則の途中にある末尾の文字だけを薄く表示します。入力文字列や確定結果は変更しません。薄さは下の設定で調整できます。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>薄さ</source>
+        <translation>薄さ</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</source>
+        <translation>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</translation>
+    </message>
+    <message>
         <location filename="config_dialog.ui" line="32"/>
         <source>[ProductName] Settings</source>
         <translation>[ProductName] プロパティ</translation>

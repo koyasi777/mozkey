@@ -130,13 +130,24 @@ class AsyncSetFocusEditSessionImpl final
  public:
   AsyncSetFocusEditSessionImpl(
       wil::com_ptr_nothrow<TipTextService> text_service,
-      wil::com_ptr_nothrow<ITfContext> context)
-      : text_service_(std::move(text_service)), context_(std::move(context)) {}
+      wil::com_ptr_nothrow<ITfContext> context, const int32_t focus_revision)
+      : text_service_(std::move(text_service)),
+        context_(std::move(context)),
+        focus_revision_(focus_revision) {}
 
   // The ITfEditSession interface method.
   // This function is called back by the TSF thread manager when an edit
   // request is granted.
   STDMETHODIMP DoEditSession(TfEditCookie read_cookie) override {
+    TipThreadContext* thread_context = text_service_->GetThreadContext();
+    if (thread_context == nullptr ||
+        thread_context->GetFocusRevision() != focus_revision_) {
+      // RequestEditSession(TF_ES_ASYNCDONTCARE) may be granted after focus has
+      // already moved elsewhere. Never let a stale callback update display
+      // sampling or input-mode state for a newer focus generation.
+      return S_OK;
+    }
+
     std::vector<InputScope> input_scopes;
     wil::com_ptr_nothrow<ITfRange> selection_range;
     TfActiveSelEnd active_sel_end = TF_AE_NONE;
@@ -144,9 +155,11 @@ class AsyncSetFocusEditSessionImpl final
             context_.get(), read_cookie, &selection_range, &active_sel_end))) {
       TipRangeUtil::GetInputScopes(selection_range.get(), read_cookie,
                                    &input_scopes);
+      TipEditSessionImpl::PrewarmGeckoDisplayCompatibility(
+          text_service_.get(), context_.get(), selection_range.get(),
+          read_cookie);
     }
     ITfThreadMgr* thread_manager = text_service_->GetThreadManager();
-    TipThreadContext* thread_context = text_service_->GetThreadContext();
     DWORD system_input_mode = 0;
     if (!TipStatus::GetInputModeConversion(
             thread_manager, text_service_->GetClientID(), &system_input_mode)) {
@@ -164,6 +177,7 @@ class AsyncSetFocusEditSessionImpl final
  private:
   wil::com_ptr_nothrow<TipTextService> text_service_;
   wil::com_ptr_nothrow<ITfContext> context_;
+  const int32_t focus_revision_;
 };
 
 bool OnUpdateOnOffModeAsync(TipTextService* text_service, ITfContext* context,
@@ -800,6 +814,14 @@ bool TipEditSession::OnLayoutChangedAsync(TipTextService* text_service,
 
 bool TipEditSession::OnSetFocusAsync(TipTextService* text_service,
                                      ITfDocumentMgr* document_manager) {
+  // This does not touch TSF text and can run before the asynchronous read edit
+  // session. It prevents a previous context's dynamic display background from
+  // remaining active during the focus handoff.
+  TipEditSessionImpl::ResetGeckoDisplayCompatibility();
+
+  if (text_service == nullptr) {
+    return false;
+  }
   if (document_manager == nullptr) {
     TipUiHandler::OnFocusChange(text_service, nullptr);
     return true;
@@ -810,11 +832,27 @@ bool TipEditSession::OnSetFocusAsync(TipTextService* text_service,
     return false;
   }
 
+  // The per-context sample belongs to a focus generation. Clear it
+  // synchronously, before the asynchronous edit session can race with the
+  // first real composition. The later prewarm callback may only populate an
+  // empty/retryable cache; it must never clear a sample created by typing.
+  if (TipPrivateContext* private_context =
+          text_service->GetPrivateContext(context.get());
+      private_context != nullptr) {
+    private_context->ClearPendingRomanDisplayColors();
+  }
+
+  TipThreadContext* thread_context = text_service->GetThreadContext();
+  if (thread_context == nullptr) {
+    return false;
+  }
+  const int32_t focus_revision = thread_context->GetFocusRevision();
+
   // When RequestEditSession fails, it does not maintain the reference count.
   // So we need to ensure that AddRef/Release should be called at least once
   // per object.
-  auto edit_session =
-      MakeComPtr<AsyncSetFocusEditSessionImpl>(text_service, context);
+  auto edit_session = MakeComPtr<AsyncSetFocusEditSessionImpl>(
+      text_service, context, focus_revision);
 
   HRESULT edit_session_result = S_OK;
   const HRESULT hr = context->RequestEditSession(

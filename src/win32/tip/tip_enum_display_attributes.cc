@@ -74,6 +74,9 @@ STDMETHODIMP TipEnumDisplayAttributes::Next(
     } else if (index_ == 1) {
       attribute_array[items] =
           MakeComPtr<TipDisplayAttributeConverted>().detach();
+    } else if (index_ == 2) {
+      attribute_array[items] =
+          MakeComPtr<TipDisplayAttributePendingRoman>().detach();
     } else {
       break;
     }
@@ -94,11 +97,16 @@ STDMETHODIMP TipEnumDisplayAttributes::Reset() {
 // Implements the IEnumTfDisplayAttributeInfo::Skip() function.
 // This function skips |count| items in this enumeration list.
 STDMETHODIMP TipEnumDisplayAttributes::Skip(ULONG count) {
-  // There is only a single item to enum
-  // so just skip it and avoid any overflow errors
-  if (count > 0 && index_ == 0) {
-    ++index_;
+  constexpr LONG kAttributeCount = 3;
+  const ULONG remaining =
+      static_cast<ULONG>(kAttributeCount - index_);
+
+  if (count > remaining) {
+    index_ = kAttributeCount;
+    return S_FALSE;
   }
+
+  index_ += static_cast<LONG>(count);
   return S_OK;
 }
 

@@ -454,7 +454,25 @@ void FillPreedit(const composer::Composer& composer,
   const std::string output = composer.GetStringForPreedit();
 
   constexpr uint32_t kBaseType = PREEDIT;
-  AddSegment(output, output, kBaseType, preedit);
+  const size_t output_length = Util::CharsLen(output);
+  const size_t pending_length = composer.GetPendingRomanDisplayLength();
+  if (pending_length == 0 || pending_length > output_length) {
+    AddSegment(output, output, kBaseType, preedit);
+  } else {
+    const size_t stable_length = output_length - pending_length;
+    if (stable_length > 0) {
+      const absl::string_view stable =
+          Util::Utf8SubString(output, 0, stable_length);
+      AddSegment(stable, stable, kBaseType, preedit);
+    }
+
+    const absl::string_view pending =
+        Util::Utf8SubString(output, stable_length, pending_length);
+    if (AddSegment(pending, pending, kBaseType, preedit)) {
+      preedit->mutable_segment(preedit->segment_size() - 1)
+          ->set_is_pending_roman(true);
+    }
+  }
   preedit->set_cursor(static_cast<uint32_t>(composer.GetCursor()));
   preedit->set_is_toggleable(composer.IsToggleable());
 }

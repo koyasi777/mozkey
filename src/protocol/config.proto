@@ -539,6 +539,16 @@ message Config {
   // settings below and keep this field synchronized for backward compatibility.
   optional bool use_dark_mode_candidate_window = 121 [default = false];
 
+  // On Windows TSF, render unresolved trailing Roman input with a subdued
+  // system appearance. This changes presentation only; composer state and
+  // submitted text are unchanged.
+  optional bool dim_pending_roman_input = 1031 [default = false];
+
+  // User-visible dimness of unresolved Roman input. 0 keeps high contrast,
+  // while larger values move the text closer to the sampled background.
+  // Windows UI/runtime clamps the supported value to 0..90.
+  optional uint32 pending_roman_dimness_percent = 1032 [default = 75];
+
   // Customize preedit display attributes on Windows TSF.
   // Color values are stored as 0xRRGGBB, not Windows COLORREF.
 

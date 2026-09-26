@@ -1333,6 +1333,11 @@ message Preedit {
 
     // Source of the value.  It is almost always the reading of the value.
     optional string key = 6;
+
+    // True when this segment is unresolved trailing Roman input. Clients that
+    // do not support a dedicated appearance can safely ignore this field and
+    // continue to render the segment according to |annotation|.
+    optional bool is_pending_roman = 7 [default = false];
   }
 
   // The position of the first segment whose annotation is 'HIGHLIGHT'. Not set

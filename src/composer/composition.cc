@@ -236,6 +236,13 @@ size_t Composition::GetLength() const {
   return GetPosition(Transliterators::LOCAL, chunks_.end());
 }
 
+size_t Composition::GetTrailingPendingDisplayLength() const {
+  if (chunks_.empty()) {
+    return 0;
+  }
+  return chunks_.back().GetPendingDisplayLength(Transliterators::LOCAL);
+}
+
 std::string Composition::GetStringWithModes(
     Transliterators::Transliterator transliterator,
     const TrimMode trim_mode) const {
