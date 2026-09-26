@@ -64,6 +64,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 
 - 曖昧なローマ字規則でも途中表示できるオプションを追加
 - ローマ字テーブル編集画面に、そのオプション用のチェックボックス UI を追加
+- カスタムローマ字テーブルの 1 規則あたりの出力を UTF-8 で 1024 bytes 未満まで扱えるように拡張。入力・次入力の上限は従来どおり 300 bytes 未満
 - 句読点・記号を単打で確定できるオプションを追加
 - 単打確定の対象を設定画面のチェックボックスで選択可能
 - 句読点変換と句読点・記号の単打確定は排他的に動作
@@ -204,6 +205,14 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 のような規則がある場合、`ctnnaru` は `ctn + naru` として解釈され、`ことになる` になります。
 一方で、`ctnnr` や `ctnnc` のように長い規則として成立する入力は、従来どおりその規則が使われます。
+
+### 長いカスタムローマ字テーブル出力
+
+カスタムローマ字テーブルでは、1 規則あたりの出力を UTF-8 で 1024 bytes 未満まで扱えます。入力と次入力の上限は従来どおり 300 bytes 未満です。
+
+従来は入力・出力・次入力のすべてが 300 bytes 未満に制限されていたため、一般的な 3-byte UTF-8 の日本語文字では、1 規則の出力は最大 99 文字相当でした。この fork では出力だけを拡張し、最大 1023 bytes、3-byte 文字なら 341 文字相当まで扱えるようにしています。
+
+この上限はローマ字テーブルの 1 規則に設定する出力に対するものです。変換器全体の入力長制限を変更するものではありません。
 
 ### ライブ変換
 
@@ -768,6 +777,7 @@ Main features added in this fork
 
 - Adds an option to display ambiguous romaji rules before the input is fully disambiguated
 - Adds a checkbox UI for that option to the romaji table editor
+- Allows a custom romaji-table rule to produce output shorter than 1024 UTF-8 bytes while keeping the existing input and pending limits below 300 bytes
 - Adds an option to directly commit punctuations and symbols with a single key press
 - Allows choosing direct-commit punctuations and symbols from the config dialog
 - Makes punctuation conversion and punctuation/symbol direct commit mutually exclusive
@@ -873,6 +883,14 @@ For example, with rules such as:
 
 typing `ctnnaru` is interpreted as `ctn + naru`, resulting in `ことになる`,
 while valid longer rules such as `ctnnr` and `ctnnc` still work.
+
+### Long custom romaji-table outputs
+
+A custom romaji-table rule can produce output shorter than 1024 UTF-8 bytes. The input and pending fields keep their existing limits below 300 bytes.
+
+Previously, input, output, and pending all shared the same limit below 300 bytes. For typical Japanese characters encoded as three UTF-8 bytes, this limited one rule's output to the equivalent of 99 characters. This fork raises only the output limit, allowing up to 1023 bytes, or the equivalent of 341 three-byte characters.
+
+This is a per-rule romaji-table output limit. It does not change the converter's whole-composition input-length limit.
 
 ### Live conversion
 

@@ -304,40 +304,32 @@ TEST_F(TableTest, InvalidEntryTest) {
     EXPECT_EQ(table.LookUp("a"), nullptr);
   }
 
-  // Too long input
+  // Input and pending strings are limited to less than 300 bytes.
   {
     Table table;
-    std::string too_long;
-    // Maximum size is 300 now.
-    for (int i = 0; i < 1024; ++i) {
-      too_long += 'a';
-    }
-    table.AddRule(too_long, "test", "test");
-    EXPECT_EQ(table.LookUp(too_long), nullptr);
+    const std::string max_input(299, 'a');
+    EXPECT_NE(table.AddRule(max_input, "test", ""), nullptr);
 
-    table.AddRule("a", too_long, "test");
-    EXPECT_EQ(table.LookUp("a"), nullptr);
+    const std::string too_long_input(300, 'a');
+    EXPECT_EQ(table.AddRule(too_long_input, "test", ""), nullptr);
+  }
+  {
+    Table table;
+    const std::string max_pending(299, 'a');
+    EXPECT_NE(table.AddRule("b", "test", max_pending), nullptr);
 
-    table.AddRule("a", "test", too_long);
-    EXPECT_EQ(table.LookUp("a"), nullptr);
+    const std::string too_long_pending(300, 'a');
+    EXPECT_EQ(table.AddRule("c", "test", too_long_pending), nullptr);
   }
 
-  // reasonably long
+  // Output strings are limited to less than 1024 bytes.
   {
     Table table;
-    std::string reasonably_long;
-    // Maximum size is 300 now.
-    for (int i = 0; i < 200; ++i) {
-      reasonably_long += 'a';
-    }
-    table.AddRule(reasonably_long, "test", "test");
-    EXPECT_NE(table.LookUp(reasonably_long), nullptr);
+    const std::string max_output(1023, 'a');
+    EXPECT_NE(table.AddRule("a", max_output, ""), nullptr);
 
-    table.AddRule("a", reasonably_long, "test");
-    EXPECT_NE(table.LookUp("a"), nullptr);
-
-    table.AddRule("a", "test", reasonably_long);
-    EXPECT_NE(table.LookUp("a"), nullptr);
+    const std::string too_long_output(1024, 'a');
+    EXPECT_EQ(table.AddRule("b", too_long_output, ""), nullptr);
   }
 }
 
