@@ -267,6 +267,17 @@ mozc_cc_test(
 )
 
 mozc_cc_test(
+    name = "zenz_named_pipe_client_test",
+    size = "small",
+    srcs = ["zenz_named_pipe_client_test.cc"],
+    deps = [
+        ":session",
+        "//testing:gunit_main",
+        "//zenz:wire_protocol",
+    ],
+)
+
+mozc_cc_test(
     name = "zenz_segment_projection_test",
     size = "small",
     srcs = ["zenz_segment_projection_test.cc"],

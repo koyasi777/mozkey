@@ -1,13 +1,16 @@
 #ifndef MOZC_SESSION_ZENZ_LIVE_CORRECTOR_H_
 #define MOZC_SESSION_ZENZ_LIVE_CORRECTOR_H_
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
-#include <condition_variable>
-#include <mutex>
+#include <utility>
 
 #include "absl/time/time.h"
 
@@ -57,6 +60,47 @@ class ZenzClient {
   virtual bool IsAvailable() const = 0;
 
   virtual ZenzLiveResponse Convert(const ZenzLiveRequest& request) = 0;
+
+  // Sticky until Stop() has joined the worker.  A transport registers only a
+  // wakeup callback; ownership of pipe/socket handles remains on the worker.
+  void RequestStop() {
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    stop_requested_.store(true);
+    if (interrupt_) {
+      interrupt_();
+    }
+  }
+
+  void ResetStop() { stop_requested_.store(false); }
+  bool IsStopRequested() const { return stop_requested_.load(); }
+
+  class ScopedInterrupt {
+   public:
+    ScopedInterrupt(ZenzClient& client, std::function<void()> interrupt)
+        : client_(client) {
+      std::lock_guard<std::mutex> lock(client_.stop_mutex_);
+      client_.interrupt_ = std::move(interrupt);
+      if (client_.IsStopRequested()) {
+        client_.interrupt_();
+      }
+    }
+
+    ~ScopedInterrupt() {
+      std::lock_guard<std::mutex> lock(client_.stop_mutex_);
+      client_.interrupt_ = nullptr;
+    }
+
+    ScopedInterrupt(const ScopedInterrupt&) = delete;
+    ScopedInterrupt& operator=(const ScopedInterrupt&) = delete;
+
+   private:
+    ZenzClient& client_;
+  };
+
+ private:
+  std::atomic<bool> stop_requested_{false};
+  std::mutex stop_mutex_;
+  std::function<void()> interrupt_;
 };
 
 class ZenzLiveCorrector {

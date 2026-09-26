@@ -274,6 +274,66 @@ TEST(ZenzUnixSocketClientTest, LaunchesScorerAndUsesFreshRequestDeadline) {
   EXPECT_EQ(response.debug, expected_debug);
 }
 
+TEST(ZenzUnixSocketClientTest, StopInterruptsColdStartWait) {
+  ScopedSocketDirectory directory;
+  ASSERT_FALSE(directory.directory().empty());
+  std::atomic<bool> launched{false};
+  auto client =
+      std::make_unique<ZenzUnixSocketClient>(directory.socket_path(), [&] {
+        launched = true;
+        return true;
+      });
+  ZenzLiveCorrector corrector(std::move(client));
+  corrector.Submit(MakeRequest(101, "prompt", 5000));
+  for (int i = 0; i < 2000 && !launched.load(); ++i) {
+    absl::SleepFor(absl::Milliseconds(1));
+  }
+  const auto started = absl::Now();
+  corrector.Stop();
+  EXPECT_TRUE(launched.load());
+  EXPECT_LT(absl::Now() - started, absl::Seconds(2));
+
+  EXPECT_FALSE(corrector.TakeResult(101).has_value());
+}
+
+TEST(ZenzUnixSocketClientTest, StopInterruptsMissingResponse) {
+  ScopedSocketDirectory directory;
+  ASSERT_FALSE(directory.directory().empty());
+  const int server = CreateListeningSocket(directory.socket_path());
+  ASSERT_GE(server, 0);
+  std::atomic<bool> connected{false};
+  std::atomic<bool> done{false};
+  std::thread peer([&] {
+    pollfd descriptor = {};
+    descriptor.fd = server;
+    descriptor.events = POLLIN;
+    if (::poll(&descriptor, 1, 2000) > 0) {
+      const int fd = ::accept(server, nullptr, nullptr);
+      if (fd >= 0) {
+        connected = true;
+        for (int i = 0; i < 5000 && !done.load(); ++i) {
+          absl::SleepFor(absl::Milliseconds(1));
+        }
+        ::close(fd);
+      }
+    }
+  });
+  ZenzLiveCorrector corrector(
+      std::make_unique<ZenzUnixSocketClient>(directory.socket_path()));
+  corrector.Submit(MakeRequest(102, "prompt", 5000));
+  for (int i = 0; i < 2000 && !connected.load(); ++i) {
+    absl::SleepFor(absl::Milliseconds(1));
+  }
+  const auto started = absl::Now();
+  corrector.Stop();
+  const auto elapsed = absl::Now() - started;
+  done = true;
+  peer.join();
+  ::close(server);
+  EXPECT_TRUE(connected.load());
+  EXPECT_LT(elapsed, absl::Seconds(2));
+}
+
 TEST(ZenzUnixSocketClientTest, ReportsDefinitiveScorerLaunchFailure) {
   ScopedSocketDirectory socket_directory;
   ASSERT_FALSE(socket_directory.directory().empty());

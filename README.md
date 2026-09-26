@@ -268,6 +268,8 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 Windows 版では、Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
+Windows の Zenz named-pipe 通信は、接続・request/response I/O を有限の deadline で扱い、停止時には待機中の I/O を明示的に解除します。scorer または peer が応答しない場合でも Zenz worker / scorer が無期限に待機せず、stall から復帰した後は次の request を処理できるようにしています。macOS の Unix-domain socket 経路でも、停止時に待機中の poll を明示的に解除します。
+
 Zenz に渡す surrounding context は、通常 Mozc の generic context とは分離した専用 field を使用します。Server は Zenz 補正に必要な preceding / following length を Client へ通知し、Windows TSF と macOS IMK は要求された方向・長さだけを追加取得して、`zenz_preceding_text` / `zenz_following_text` として渡します。通常 Mozc の surrounding text semantics は変更しません。
 
 Zenz 補正は設定可能なデバウンス時間の後に実行されます。デフォルトは 1000 ms です。また、Zenz 補正を開始する最小文字数も設定画面から変更できます。Zenz 結果が返る前に入力内容が変わった場合、古い結果は generation / key の検査により破棄されます。
@@ -950,6 +952,13 @@ bundled `llama-server.exe` on a localhost endpoint for local inference. The
 localhost transport is hardened so that it does not rely on a fixed endpoint,
 and internal requests include protection against accidental or stale local
 endpoint mismatches.
+
+The Windows Zenz named-pipe transport uses finite deadlines for connection and
+request/response I/O, and explicitly interrupts pending I/O during shutdown.
+A stalled scorer or peer therefore cannot leave the Zenz worker or scorer
+waiting indefinitely, and the scorer can recover to serve subsequent requests.
+The macOS Unix-domain socket path likewise wakes pending poll operations during
+shutdown.
 
 Surrounding context for Zenz uses dedicated fields separate from the normal Mozc
 generic context. The Server reports the required preceding / following lengths
