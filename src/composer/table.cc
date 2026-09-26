@@ -370,9 +370,11 @@ const Entry* absl_nullable Table::AddRuleWithAttributes(
                           NO_TABLE_ATTRIBUTE);
   }
 
-  constexpr size_t kMaxSize = 300;
-  if (escaped_input.size() >= kMaxSize || output.size() >= kMaxSize ||
-      escaped_pending.size() >= kMaxSize) {
+  constexpr size_t kMaxInputOrPendingSize = 300;
+  constexpr size_t kMaxOutputSize = 1024;
+  if (escaped_input.size() >= kMaxInputOrPendingSize ||
+      output.size() >= kMaxOutputSize ||
+      escaped_pending.size() >= kMaxInputOrPendingSize) {
     LOG(ERROR) << "Invalid input/output/pending";
     return nullptr;
   }

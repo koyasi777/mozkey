@@ -244,6 +244,24 @@ TEST_F(ComposerTest, OutputMode) {
   EXPECT_EQ(composer_->GetStringForPreedit(), "ａｉｕあいう");
 }
 
+TEST_F(ComposerTest, LongRomanTableOutput) {
+  std::string output;
+  // The reported issue uses 208 three-byte Hiragana characters
+  // (624 UTF-8 bytes), which used to exceed the 300-byte table limit.
+  for (int i = 0; i < 208; ++i) {
+    output.append("\xE3\x81\x82");  // U+3042
+  }
+  ASSERT_EQ(output.size(), 624);
+
+  ASSERT_NE(table_->AddRule("txt", output, ""), nullptr);
+
+  composer_->InsertCharacter("t");
+  composer_->InsertCharacter("x");
+  composer_->InsertCharacter("t");
+
+  EXPECT_EQ(composer_->GetStringForPreedit(), output);
+}
+
 TEST_F(ComposerTest, OutputMode2) {
   // This behaviour is based on Kotoeri
 
