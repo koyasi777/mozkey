@@ -17,7 +17,8 @@ TEST(ZenzClientFactoryTest, CreatesCurrentPlatformClient) {
   std::unique_ptr<ZenzClient> client = CreateZenzClient();
   ASSERT_NE(client, nullptr);
 
-#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX)
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || \
+    (defined(__linux__) && !defined(__ANDROID__))
   EXPECT_TRUE(client->IsAvailable());
 #else
   EXPECT_FALSE(client->IsAvailable());
