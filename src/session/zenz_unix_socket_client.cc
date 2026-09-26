@@ -59,6 +59,13 @@ class ScopedFd {
   int fd_;
 };
 
+bool IsCancelled(int fd) {
+  pollfd descriptor = {};
+  descriptor.fd = fd;
+  descriptor.events = POLLIN;
+  return ::poll(&descriptor, 1, 0) > 0;
+}
+
 int RemainingTimeoutMsec(absl::Time deadline) {
   const absl::Duration remaining = deadline - absl::Now();
   if (remaining <= absl::ZeroDuration()) {
@@ -70,29 +77,37 @@ int RemainingTimeoutMsec(absl::Time deadline) {
       remaining_msec, std::numeric_limits<int>::max()));
 }
 
-bool WaitForFd(int fd, short events, absl::Time deadline, bool* timed_out) {
-  while (true) {
+bool WaitForFd(int fd, short events, absl::Time deadline, bool* timed_out,
+               int cancellation_fd) {
+  while (!IsCancelled(cancellation_fd)) {
     const int timeout_msec = RemainingTimeoutMsec(deadline);
     if (timeout_msec == 0) {
       *timed_out = true;
       return false;
     }
 
-    pollfd descriptor = {};
-    descriptor.fd = fd;
-    descriptor.events = events;
-    const int result = ::poll(&descriptor, 1, timeout_msec);
+    pollfd descriptors[2] = {};
+    descriptors[0].fd = fd;
+    descriptors[0].events = events;
+    descriptors[1].fd = cancellation_fd;
+    descriptors[1].events = POLLIN;
+    const int result = ::poll(descriptors, 2, timeout_msec);
     if (result > 0) {
+      if (descriptors[1].revents != 0) {
+        errno = ECANCELED;
+        return false;
+      }
       return true;
     }
     if (result == 0) {
-      *timed_out = true;
-      return false;
+      continue;
     }
     if (errno != EINTR) {
       return false;
     }
   }
+  errno = ECANCELED;
+  return false;
 }
 
 bool SetNonBlockingAndCloseOnExec(int fd) {
@@ -119,7 +134,7 @@ bool DisableSigPipe(int fd) {
 
 bool ConnectWithDeadline(int fd, const std::string& socket_path,
                          absl::Time deadline, bool* timed_out,
-                         int* connect_error) {
+                         int* connect_error, int cancellation_fd) {
   *connect_error = 0;
 
   sockaddr_un address = {};
@@ -142,7 +157,7 @@ bool ConnectWithDeadline(int fd, const std::string& socket_path,
     *connect_error = initial_error;
     return false;
   }
-  if (!WaitForFd(fd, POLLOUT, deadline, timed_out)) {
+  if (!WaitForFd(fd, POLLOUT, deadline, timed_out, cancellation_fd)) {
     *connect_error = *timed_out ? ETIMEDOUT : errno;
     return false;
   }
@@ -171,8 +186,14 @@ struct SocketConnectResult {
 };
 
 SocketConnectResult OpenConnectedSocket(const std::string& socket_path,
-                                         absl::Time deadline) {
+                                        absl::Time deadline,
+                                        int cancellation_fd) {
   SocketConnectResult result;
+  if (IsCancelled(cancellation_fd)) {
+    result.error = ECANCELED;
+    result.debug = "socket_cancelled";
+    return result;
+  }
 
   const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -189,7 +210,7 @@ SocketConnectResult OpenConnectedSocket(const std::string& socket_path,
   }
 
   if (!ConnectWithDeadline(fd, socket_path, deadline, &result.timed_out,
-                           &result.error)) {
+                           &result.error, cancellation_fd)) {
     result.debug = result.timed_out ? "socket_connect_timeout"
                                     : "socket_connect_failed";
     ::close(fd);
@@ -209,10 +230,13 @@ int SendFlags() {
 }
 
 bool WriteAll(int fd, const void* data, uint32_t size, absl::Time deadline,
-              bool* timed_out) {
+              bool* timed_out, int cancellation_fd) {
   const uint8_t* current = static_cast<const uint8_t*>(data);
   uint32_t remaining = size;
   while (remaining > 0) {
+    if (IsCancelled(cancellation_fd)) {
+      return false;
+    }
     const ssize_t written =
         ::send(fd, current, remaining, SendFlags());
     if (written > 0) {
@@ -227,7 +251,7 @@ bool WriteAll(int fd, const void* data, uint32_t size, absl::Time deadline,
       continue;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      if (!WaitForFd(fd, POLLOUT, deadline, timed_out)) {
+      if (!WaitForFd(fd, POLLOUT, deadline, timed_out, cancellation_fd)) {
         return false;
       }
       continue;
@@ -238,10 +262,13 @@ bool WriteAll(int fd, const void* data, uint32_t size, absl::Time deadline,
 }
 
 bool ReadAll(int fd, void* data, uint32_t size, absl::Time deadline,
-             bool* timed_out) {
+             bool* timed_out, int cancellation_fd) {
   uint8_t* current = static_cast<uint8_t*>(data);
   uint32_t remaining = size;
   while (remaining > 0) {
+    if (IsCancelled(cancellation_fd)) {
+      return false;
+    }
     const ssize_t read_size = ::recv(fd, current, remaining, 0);
     if (read_size > 0) {
       current += read_size;
@@ -255,7 +282,7 @@ bool ReadAll(int fd, void* data, uint32_t size, absl::Time deadline,
       continue;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      if (!WaitForFd(fd, POLLIN, deadline, timed_out)) {
+      if (!WaitForFd(fd, POLLIN, deadline, timed_out, cancellation_fd)) {
         return false;
       }
       continue;
@@ -314,13 +341,32 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
     return response;
   }
 
+  int cancellation_pipe[2];
+  if (::pipe(cancellation_pipe) != 0) {
+    response.debug = "socket_cancellation_pipe_failed";
+    return response;
+  }
+  ScopedFd cancellation_read(cancellation_pipe[0]);
+  ScopedFd cancellation_write(cancellation_pipe[1]);
+  if (!SetNonBlockingAndCloseOnExec(cancellation_read.get()) ||
+      !SetNonBlockingAndCloseOnExec(cancellation_write.get())) {
+    response.debug = "socket_cancellation_pipe_failed";
+    return response;
+  }
+  ScopedInterrupt interrupt(*this, [&] {
+    const char byte = 0;
+    // Nonblocking: one byte is enough to wake every wait in this conversion.
+    while (::write(cancellation_write.get(), &byte, 1) < 0 && errno == EINTR) {
+    }
+  });
+
   const absl::Time start = absl::Now();
   const absl::Duration request_timeout =
       absl::Milliseconds(std::max<uint32_t>(1, request.timeout_msec));
   absl::Time request_deadline = start + request_timeout;
 
-  SocketConnectResult connection =
-      OpenConnectedSocket(socket_path_, request_deadline);
+  SocketConnectResult connection = OpenConnectedSocket(
+      socket_path_, request_deadline, cancellation_read.get());
 
   if (connection.fd < 0 && !connection.timed_out && scorer_launcher_ &&
       IsColdStartConnectError(connection.error)) {
@@ -335,7 +381,8 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
 
     const absl::Time startup_deadline = absl::Now() + startup_timeout_;
     while (true) {
-      connection = OpenConnectedSocket(socket_path_, startup_deadline);
+      connection = OpenConnectedSocket(socket_path_, startup_deadline,
+                                       cancellation_read.get());
       if (connection.fd >= 0 || connection.timed_out ||
           !IsColdStartConnectError(connection.error)) {
         break;
@@ -346,7 +393,11 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
         connection.timed_out = true;
         break;
       }
-      absl::SleepFor(std::min(absl::Milliseconds(20), remaining));
+      pollfd descriptor = {};
+      descriptor.fd = cancellation_read.get();
+      descriptor.events = POLLIN;
+      ::poll(&descriptor, 1,
+             std::min(20, RemainingTimeoutMsec(startup_deadline)));
     }
 
     if (connection.fd < 0 &&
@@ -381,12 +432,12 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
   request_header.max_output_chars = request.max_output_chars;
   request_header.prompt_size = static_cast<uint32_t>(request.prompt.size());
 
-  bool ok = WriteAll(socket_fd.get(), &request_header,
-                     sizeof(request_header), request_deadline, &timed_out);
+  bool ok = WriteAll(socket_fd.get(), &request_header, sizeof(request_header),
+                     request_deadline, &timed_out, cancellation_read.get());
   if (ok && !request.prompt.empty()) {
     ok = WriteAll(socket_fd.get(), request.prompt.data(),
                   static_cast<uint32_t>(request.prompt.size()),
-                  request_deadline, &timed_out);
+                  request_deadline, &timed_out, cancellation_read.get());
   }
   if (!ok) {
     response.timeout = timed_out;
@@ -397,7 +448,7 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
 
   ZenzWireResponseHeader response_header = {};
   ok = ReadAll(socket_fd.get(), &response_header, sizeof(response_header),
-               request_deadline, &timed_out);
+               request_deadline, &timed_out, cancellation_read.get());
   if (!ok) {
     response.timeout = timed_out;
     response.debug = timed_out ? "socket_read_header_timeout"
@@ -420,12 +471,12 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
   std::string value(response_header.value_size, '\0');
   if (response_header.value_size > 0) {
     ok = ReadAll(socket_fd.get(), value.data(), response_header.value_size,
-                 request_deadline, &timed_out);
+                 request_deadline, &timed_out, cancellation_read.get());
   }
   std::string debug(response_header.debug_size, '\0');
   if (ok && response_header.debug_size > 0) {
     ok = ReadAll(socket_fd.get(), debug.data(), response_header.debug_size,
-                 request_deadline, &timed_out);
+                 request_deadline, &timed_out, cancellation_read.get());
   }
   if (!ok) {
     response.timeout = timed_out;

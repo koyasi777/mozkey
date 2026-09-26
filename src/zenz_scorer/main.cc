@@ -1,11 +1,14 @@
 #define WIN32_LEAN_AND_MEAN
 
+// Windows SDK headers require Winsock and Windows types before bcrypt/sddl.
+// clang-format off
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <bcrypt.h>
 #include <sddl.h>
 #include <winhttp.h>
+// clang-format on
 
 #include <algorithm>
 #include <atomic>
@@ -22,6 +25,7 @@
 #include <vector>
 
 #include "zenz/zenz_wire_protocol.h"
+#include "zenz_scorer/synchronous_io_deadline.h"
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "Bcrypt.lib")
@@ -73,6 +77,10 @@ constexpr uint32_t kMinLlamaReadyWaitMsec = 1500;
 constexpr uint32_t kMaxPromptBytes = 8192;
 constexpr uint32_t kMaxOutputChars = 256;
 constexpr uint32_t kMaxRequestTimeoutMsec = 5000;
+constexpr uint32_t kPipeConnectSafetyTimeoutMsec = 1000;
+constexpr uint32_t kPipeIoSafetyTimeoutMsec =
+    kMinLlamaReadyWaitMsec + kMaxRequestTimeoutMsec + 1500;
+constexpr uint32_t kPipeFlushSafetyTimeoutMsec = 1000;
 constexpr size_t kMaxHttpResponseBytes = 65536;
 
 // Hard caps for environment-controlled runtime knobs.
@@ -569,16 +577,152 @@ std::string CleanGeneratedText(std::string text, uint32_t max_output_chars) {
   return text;
 }
 
-bool ReadAll(HANDLE handle, void* data, uint32_t size) {
+using Clock = std::chrono::steady_clock;
+using PipeDeadline = Clock::time_point;
+
+enum class PipeIoResult {
+  kOk,
+  kTimeout,
+  kError,
+};
+
+class ScopedWinHandle {
+ public:
+  explicit ScopedWinHandle(HANDLE handle = nullptr) : handle_(handle) {}
+  ~ScopedWinHandle() { Reset(); }
+
+  ScopedWinHandle(const ScopedWinHandle&) = delete;
+  ScopedWinHandle& operator=(const ScopedWinHandle&) = delete;
+
+  HANDLE get() const { return handle_; }
+
+  void Reset(HANDLE handle = nullptr) {
+    if (handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE) {
+      ::CloseHandle(handle_);
+    }
+    handle_ = handle;
+  }
+
+ private:
+  HANDLE handle_;
+};
+
+DWORD RemainingMsec(PipeDeadline deadline) {
+  const auto remaining =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          deadline - Clock::now());
+  if (remaining.count() <= 0) {
+    return 0;
+  }
+  return static_cast<DWORD>(std::min<int64_t>(
+      std::max<int64_t>(1, remaining.count()),
+      std::numeric_limits<DWORD>::max()));
+}
+
+// CancelIoEx is asynchronous. Keep the OVERLAPPED and its event alive until
+// GetOverlappedResult has reaped the cancellation.
+void CancelAndReap(HANDLE handle, OVERLAPPED* overlapped) {
+  if (!::CancelIoEx(handle, overlapped)) {
+    const DWORD error = ::GetLastError();
+    if (error != ERROR_NOT_FOUND) {
+      Debug(L"CancelIoEx failed error=" + std::to_wstring(error));
+    }
+  }
+
+  DWORD ignored = 0;
+  if (!::GetOverlappedResult(handle, overlapped, &ignored, TRUE)) {
+    const DWORD error = ::GetLastError();
+    if (error != ERROR_OPERATION_ABORTED) {
+      Debug(L"GetOverlappedResult after cancel failed error=" +
+            std::to_wstring(error));
+    }
+  }
+}
+
+PipeIoResult WaitForPendingIo(HANDLE handle, OVERLAPPED* overlapped,
+                              PipeDeadline deadline, DWORD* transferred) {
+  const DWORD remaining = RemainingMsec(deadline);
+  if (remaining == 0) {
+    CancelAndReap(handle, overlapped);
+    return PipeIoResult::kTimeout;
+  }
+
+  const DWORD wait = ::WaitForSingleObject(overlapped->hEvent, remaining);
+  if (wait == WAIT_OBJECT_0) {
+    return ::GetOverlappedResult(handle, overlapped, transferred, FALSE)
+               ? PipeIoResult::kOk
+               : PipeIoResult::kError;
+  }
+
+  CancelAndReap(handle, overlapped);
+  return wait == WAIT_TIMEOUT ? PipeIoResult::kTimeout
+                              : PipeIoResult::kError;
+}
+
+PipeIoResult ReadSomeUntil(HANDLE handle, void* data, DWORD size,
+                           PipeDeadline deadline, DWORD* transferred) {
+  if (transferred == nullptr) {
+    return PipeIoResult::kError;
+  }
+  *transferred = 0;
+
+  ScopedWinHandle event(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+  if (event.get() == nullptr) {
+    return PipeIoResult::kError;
+  }
+
+  OVERLAPPED overlapped = {};
+  overlapped.hEvent = event.get();
+
+  if (::ReadFile(handle, data, size, nullptr, &overlapped)) {
+    return ::GetOverlappedResult(handle, &overlapped, transferred, FALSE)
+               ? PipeIoResult::kOk
+               : PipeIoResult::kError;
+  }
+
+  if (::GetLastError() != ERROR_IO_PENDING) {
+    return PipeIoResult::kError;
+  }
+  return WaitForPendingIo(handle, &overlapped, deadline, transferred);
+}
+
+PipeIoResult WriteSomeUntil(HANDLE handle, const void* data, DWORD size,
+                            PipeDeadline deadline, DWORD* transferred) {
+  if (transferred == nullptr) {
+    return PipeIoResult::kError;
+  }
+  *transferred = 0;
+
+  ScopedWinHandle event(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+  if (event.get() == nullptr) {
+    return PipeIoResult::kError;
+  }
+
+  OVERLAPPED overlapped = {};
+  overlapped.hEvent = event.get();
+
+  if (::WriteFile(handle, data, size, nullptr, &overlapped)) {
+    return ::GetOverlappedResult(handle, &overlapped, transferred, FALSE)
+               ? PipeIoResult::kOk
+               : PipeIoResult::kError;
+  }
+
+  if (::GetLastError() != ERROR_IO_PENDING) {
+    return PipeIoResult::kError;
+  }
+  return WaitForPendingIo(handle, &overlapped, deadline, transferred);
+}
+
+bool ReadAll(HANDLE handle, void* data, uint32_t size,
+             PipeDeadline deadline) {
   uint8_t* ptr = static_cast<uint8_t*>(data);
   uint32_t remaining = size;
 
   while (remaining > 0) {
     DWORD read = 0;
-    if (!ReadFile(handle, ptr, remaining, &read, nullptr)) {
-      return false;
-    }
-    if (read == 0) {
+    if (ReadSomeUntil(handle, ptr, remaining, deadline, &read) !=
+            PipeIoResult::kOk ||
+        read == 0) {
       return false;
     }
     ptr += read;
@@ -588,16 +732,16 @@ bool ReadAll(HANDLE handle, void* data, uint32_t size) {
   return true;
 }
 
-bool WriteAll(HANDLE handle, const void* data, uint32_t size) {
+bool WriteAll(HANDLE handle, const void* data, uint32_t size,
+              PipeDeadline deadline) {
   const uint8_t* ptr = static_cast<const uint8_t*>(data);
   uint32_t remaining = size;
 
   while (remaining > 0) {
     DWORD written = 0;
-    if (!WriteFile(handle, ptr, remaining, &written, nullptr)) {
-      return false;
-    }
-    if (written == 0) {
+    if (WriteSomeUntil(handle, ptr, remaining, deadline, &written) !=
+            PipeIoResult::kOk ||
+        written == 0) {
       return false;
     }
     ptr += written;
@@ -605,6 +749,30 @@ bool WriteAll(HANDLE handle, const void* data, uint32_t size) {
   }
 
   return true;
+}
+
+PipeIoResult ConnectPipeUntil(HANDLE pipe, PipeDeadline deadline) {
+  ScopedWinHandle event(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+  if (event.get() == nullptr) {
+    return PipeIoResult::kError;
+  }
+
+  OVERLAPPED overlapped = {};
+  overlapped.hEvent = event.get();
+  if (::ConnectNamedPipe(pipe, &overlapped)) {
+    return PipeIoResult::kOk;
+  }
+
+  const DWORD error = ::GetLastError();
+  if (error == ERROR_PIPE_CONNECTED) {
+    return PipeIoResult::kOk;
+  }
+  if (error != ERROR_IO_PENDING) {
+    return PipeIoResult::kError;
+  }
+
+  DWORD ignored = 0;
+  return WaitForPendingIo(pipe, &overlapped, deadline, &ignored);
 }
 
 bool GetCurrentUserSidString(std::wstring* sid_string) {
@@ -1412,7 +1580,8 @@ void SendResponse(
     uint32_t status,
     uint32_t latency_msec,
     const std::string& value,
-    const std::string& debug) {
+    const std::string& debug,
+    PipeDeadline deadline) {
   ZenzWireResponseHeader header = {};
   header.magic = kZenzWireMagic;
   header.version = kZenzWireVersion;
@@ -1423,22 +1592,22 @@ void SendResponse(
   header.value_size = static_cast<uint32_t>(value.size());
   header.debug_size = static_cast<uint32_t>(debug.size());
 
-  WriteAll(pipe, &header, sizeof(header));
+  WriteAll(pipe, &header, sizeof(header), deadline);
 
   if (!value.empty()) {
-    WriteAll(pipe, value.data(), static_cast<uint32_t>(value.size()));
+    WriteAll(pipe, value.data(), static_cast<uint32_t>(value.size()), deadline);
   }
 
   if (!debug.empty()) {
-    WriteAll(pipe, debug.data(), static_cast<uint32_t>(debug.size()));
+    WriteAll(pipe, debug.data(), static_cast<uint32_t>(debug.size()), deadline);
   }
 }
 
-void HandleClient(HANDLE pipe, const Options& options) {
+void HandleClient(HANDLE pipe, const Options& options, PipeDeadline deadline) {
   const DWORD start = GetTickCount();
 
   ZenzWireRequestHeader request_header = {};
-  if (!ReadAll(pipe, &request_header, sizeof(request_header))) {
+  if (!ReadAll(pipe, &request_header, sizeof(request_header), deadline)) {
     return;
   }
 
@@ -1446,19 +1615,19 @@ void HandleClient(HANDLE pipe, const Options& options) {
       request_header.version != kZenzWireVersion ||
       request_header.kind != kZenzWireKindRequest) {
     SendResponse(pipe, request_header.generation, kZenzWireStatusError, 0, "",
-                 "bad_request_header");
+                 "bad_request_header", deadline);
     return;
   }
 
   if (request_header.prompt_size == 0) {
     SendResponse(pipe, request_header.generation, kZenzWireStatusError, 0, "",
-                 "empty_prompt");
+                 "empty_prompt", deadline);
     return;
   }
 
   if (request_header.prompt_size > kMaxPromptBytes) {
     SendResponse(pipe, request_header.generation, kZenzWireStatusError, 0, "",
-                 "prompt_too_large");
+                 "prompt_too_large", deadline);
     return;
   }
 
@@ -1477,9 +1646,9 @@ void HandleClient(HANDLE pipe, const Options& options) {
       kMaxOutputChars);
 
   std::string prompt(request_header.prompt_size, '\0');
-  if (!ReadAll(pipe, prompt.data(), request_header.prompt_size)) {
+  if (!ReadAll(pipe, prompt.data(), request_header.prompt_size, deadline)) {
     SendResponse(pipe, request_header.generation, kZenzWireStatusError, 0, "",
-                 "failed_to_read_prompt");
+                 "failed_to_read_prompt", deadline);
     return;
   }
 
@@ -1492,7 +1661,7 @@ void HandleClient(HANDLE pipe, const Options& options) {
           options, timeout_msec, &port, &debug)) {
     const DWORD latency = GetTickCount() - start;
     SendResponse(pipe, request_header.generation, kZenzWireStatusTimeout,
-                 latency, "", debug);
+                 latency, "", debug, deadline);
     return;
   }
 
@@ -1523,7 +1692,7 @@ void HandleClient(HANDLE pipe, const Options& options) {
 
     const DWORD latency = GetTickCount() - start;
     SendResponse(pipe, request_header.generation, kZenzWireStatusError, latency,
-                 "", debug);
+                 "", debug, deadline);
     return;
   }
 
@@ -1534,7 +1703,7 @@ void HandleClient(HANDLE pipe, const Options& options) {
         L" " + RedactedUtf8Bytes(L"value", value));
 
   SendResponse(pipe, request_header.generation, kZenzWireStatusOk, latency,
-               value, debug);
+               value, debug, deadline);
 }
 
 int RunServer(const Options& options) {
@@ -1570,7 +1739,7 @@ int RunServer(const Options& options) {
 
     HANDLE pipe = ::CreateNamedPipeW(
         options.pipe_name.c_str(),
-        PIPE_ACCESS_DUPLEX,
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
         PIPE_UNLIMITED_INSTANCES,
         65536,
@@ -1590,19 +1759,41 @@ int RunServer(const Options& options) {
       continue;
     }
 
-    BOOL connected = ::ConnectNamedPipe(pipe, nullptr);
-    if (!connected) {
-      const DWORD err = ::GetLastError();
-      if (err != ERROR_PIPE_CONNECTED) {
-        Debug(L"ConnectNamedPipe failed error=" + std::to_wstring(err));
-        ::CloseHandle(pipe);
-        continue;
+    const PipeDeadline connection_deadline =
+        Clock::now() +
+        std::chrono::milliseconds(kPipeConnectSafetyTimeoutMsec);
+    const PipeIoResult connection_result =
+        ConnectPipeUntil(pipe, connection_deadline);
+    if (connection_result != PipeIoResult::kOk) {
+      // A timed-out accept is normal idle polling.  It exists only so the
+      // server periodically observes g_shutdown_requested; do not emit an
+      // error every second while no Mozkey client is connected.
+      if (connection_result == PipeIoResult::kError) {
+        const DWORD err = ::GetLastError();
+        Debug(L"ConnectPipeUntil failed error=" + std::to_wstring(err));
       }
+      ::CloseHandle(pipe);
+      continue;
     }
 
-    HandleClient(pipe, options);
+    // Connect/read/write are overlapped and use an absolute deadline.  Keep the
+    // watchdog only around FlushFileBuffers, the remaining synchronous pipe
+    // operation, so it cannot accidentally cancel unrelated backend I/O.
+    const PipeDeadline io_deadline =
+        Clock::now() +
+        std::chrono::milliseconds(kPipeIoSafetyTimeoutMsec);
+    HandleClient(pipe, options, io_deadline);
 
-    ::FlushFileBuffers(pipe);
+    {
+      mozc::zenz::SynchronousIoDeadline flush_deadline(
+          pipe,
+          std::chrono::milliseconds(kPipeFlushSafetyTimeoutMsec));
+      if (flush_deadline.valid()) {
+        ::FlushFileBuffers(pipe);
+      } else {
+        Debug(L"failed to arm pipe flush deadline");
+      }
+    }
     ::DisconnectNamedPipe(pipe);
     ::CloseHandle(pipe);
   }

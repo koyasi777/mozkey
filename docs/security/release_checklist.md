@@ -217,6 +217,13 @@ Expected DebugView markers:
 [zenz] async response ok=true timeout=false
 ```
 
+- [ ] a partial or stalled named-pipe request is bounded and the scorer accepts a subsequent client after its configured I/O deadline
+- [ ] an unread scorer response does not leave `FlushFileBuffers` blocked indefinitely
+- [ ] after a stalled peer is released, the scorer can process the next request successfully
+- [ ] an idle named-pipe accept deadline is treated as normal polling and does not emit repeated error logs
+- [ ] Windows client stalled-response and `ZenzLiveCorrector::Stop()` cancellation tests pass without cached test results
+- [ ] macOS Unix-domain socket shutdown cancellation tests pass
+
 ## Windows Firewall checks
 
 - [ ] Outbound block rules exist for Mozc runtime executables

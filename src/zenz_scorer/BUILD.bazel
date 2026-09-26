@@ -7,6 +7,17 @@ load(
 
 package(default_visibility = ["//visibility:private"])
 
+mozc_cc_test(
+    name = "synchronous_io_deadline_test",
+    size = "small",
+    srcs = [
+        "synchronous_io_deadline.h",
+        "synchronous_io_deadline_test.cc",
+    ],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = ["//testing:gunit_main"],
+)
+
 mozc_cc_library(
     name = "llama_http_client",
     srcs = ["llama_http_client.cc"],
@@ -129,7 +140,10 @@ mozc_cc_binary(
     name = "mozc_zenz_scorer",
     srcs = select({
         "@platforms//os:macos": ["main_posix.cc"],
-        "@platforms//os:windows": ["main.cc"],
+        "@platforms//os:windows": [
+            "main.cc",
+            "synchronous_io_deadline.h",
+        ],
         "//conditions:default": [],
     }),
     linkopts = select({
