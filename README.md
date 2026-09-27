@@ -108,6 +108,9 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 大規模な生成辞書は Git に含めず、ローカルで再生成して Bazel の辞書入力へ切り替える運用に
 - `には` や `してたの` のような自然な機能語かな列が、`二は` や `して他の` のような 1 文字漢字候補に過剰変換される挙動を抑制
 - `にじ` のような 2 文字ひらがな入力で、`に|じ` のような短すぎる文節分割が全体候補を隠す挙動を抑制
+- 日付入力を強化し、`20260927` のような8桁数字や、`2026/9/27`、`2026-9-27`、`2026.9.27`、`9/27` などから日付候補を生成。全角入力にも対応し、存在しない日付は日付候補として展開しない
+- `きんよう` / `きんようび` などの曜日入力では、通常の「金曜」「金曜日」を優先したまま、今週・来週・先週の該当日を追加候補として提示
+- `ほんじつ` / `みょうにち` などの日付表現を補強し、`9/27` など明示的に入力された日付表記は候補順位でも尊重
 - llama.cpp ベースのローカル Zenz live correction pipeline を追加
 - Zenz 文脈処理を共通化し、通常 Mozc の `preceding_text` / `following_text` とは分離した `zenz_preceding_text` / `zenz_following_text` を使用
 - Zenz が必要とする preceding / following の長さを Server から Client へ通知し、Windows TSF / macOS IMK では要求された方向・長さだけ surrounding text を追加取得
@@ -822,6 +825,9 @@ Main features added in this fork
 - Keeps large generated dictionary files out of Git and switches Bazel dictionary inputs to locally generated files
 - Reduces over-conversion of natural functional kana sequences such as `には` and `してたの`
 - Reduces cases where short two-character hiragana inputs such as `にじ` are split too aggressively
+- Improves date input conversion for compact forms such as `20260927` and separated forms such as `2026/9/27`, `2026-9-27`, `2026.9.27`, and `9/27`; full-width input is also recognized, and invalid calendar dates are not expanded as date candidates
+- For weekday readings such as `きんよう` / `きんようび`, keeps the normal lexical candidates `金曜` / `金曜日` ahead of additional candidates for the matching date in this week, next week, and the previous week
+- Adds date expressions such as `ほんじつ` / `みょうにち` while preserving explicitly typed date forms such as `9/27` at the front of the candidate order
 - Adds a local Zenz live correction pipeline based on llama.cpp
 - Uses dedicated `zenz_preceding_text` / `zenz_following_text` fields for Zenz context without changing the normal Mozc `preceding_text` / `following_text` semantics
 - Lets the Server request the required preceding / following lengths and lets Windows TSF / macOS IMK acquire only the requested directions and lengths
