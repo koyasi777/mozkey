@@ -5973,6 +5973,13 @@ void Session::SetPendingZenzFeedbackAccepted(
         return true;
       };
 
+  // Context-loss hardening is useful for reusable lexical choices such as
+  // "げんしょう -> 現象", but it is optional learning work. Bound the number
+  // of extra fixed-boundary conversions per accepted Zenz result so
+  // punctuation-heavy text cannot turn history enrichment into input latency.
+  constexpr size_t kMaxContextLossProbesPerAcceptedFeedback = 2;
+  size_t context_loss_probe_count = 0;
+
   auto append_context_loss_hardening =
       [&](absl::Span<const ZenzProjectedLearningSegment> evaluation_prefix,
           absl::Span<const ZenzProjectedLearningSegment> lexical_island,
@@ -5993,6 +6000,14 @@ void Session::SetPendingZenzFeedbackAccepted(
           expected_segments.push_back(
               {projected.key, projected.value, false, false});
         }
+
+        if (context_loss_probe_count >=
+            kMaxContextLossProbesPerAcceptedFeedback) {
+          ZenzDebugOutput(
+              "[zenz-feedback] context-loss probe budget exhausted");
+          return false;
+        }
+        ++context_loss_probe_count;
 
         std::vector<ExternalConversionSegment> evaluated_segments;
         if (!context_->mutable_converter()->EvaluateExternalConversionSegments(

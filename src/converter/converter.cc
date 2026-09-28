@@ -664,15 +664,17 @@ bool Converter::ResolveExternalConversionSegments(
   segments->clear();
 
   constexpr size_t kMaxSegments = 16;
-  constexpr size_t kMaxKeyChars = 256;
-  constexpr size_t kMaxValueChars = 256;
+  // Native resegmentation is best-effort user-history enrichment on the
+  // latency-sensitive IME path. Long spans are more expensive to reverse and
+  // are also less suitable for durable local generalization, so fail closed
+  // and leave them to the existing full-sequence feedback/fallback paths.
+  constexpr size_t kMaxKeyChars = 64;
+  constexpr size_t kMaxValueChars = 64;
   constexpr size_t kMaxValueBytes = 1024;
-  // Explore all bounded reverse-reading paths, including alternatives to
-  // Mozc's top-ranked reading, and accept only a unique path that round-trips.
-  // Bound the search state rather than the number of learnable corrections:
-  // exceeding this limit is an ambiguity / computation guard and fails closed
-  // without writing history.
-  constexpr size_t kMaxReverseReadingPaths = 4096;
+  // Explore lower-ranked reverse readings only while the ambiguity remains
+  // small. Once many exact prefix paths survive, the evidence is weak enough
+  // that persistent local-boundary learning is not worth blocking the IME.
+  constexpr size_t kMaxReverseReadingPaths = 16;
 
   if (key.empty() || value.empty() ||
       request.request_type() != ConversionRequest::CONVERSION) {

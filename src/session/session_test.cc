@@ -2345,6 +2345,66 @@ TEST_F(SessionTest,
 }
 
 TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackCapsContextLossProbeWork) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  const std::vector<std::pair<std::string, std::string>> baseline = {
+      {"あ", "亜"}, {",", "、"}, {"い", "伊"},
+      {".", "。"}, {"う", "宇"}, {"(", "（"}};
+  for (const auto& [key, value] : baseline) {
+    commands::Preedit::Segment* segment = live_preedit.add_segment();
+    segment->set_key(key);
+    segment->set_value(value);
+    segment->set_value_length(Util::CharsLen(value));
+  }
+
+  // Three unchanged lexical islands end immediately before separators. Only
+  // the first two may consume optional context-loss probes. Neither produces a
+  // rerank signal here; the third island must be left unchanged without a
+  // third converter call.
+  converter->evaluated_segments_results = {
+      {{"あ", "亜", false, false}},
+      {{"あ", "亜", false, false},
+       {",", "、", false, false},
+       {"い", "伊", false, false}}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "あ,い.う(", "empty", "亜、伊。宇（");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(converter->resolve_segments_call_count, 0);
+  ASSERT_EQ(converter->evaluate_segments_call_count, 2);
+  ASSERT_EQ(converter->evaluate_segments_calls.size(), 2);
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 6);
+  for (const ZenzProjectedLearningSegment& segment : projected) {
+    EXPECT_FALSE(segment.is_reranked);
+    EXPECT_FALSE(segment.boundary_resized);
+    EXPECT_FALSE(segment.needs_native_resolution);
+  }
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackResolvesChangedLexicalIslandBeforeSymbol) {
 #if defined(_WIN32)
   MockEngine engine;

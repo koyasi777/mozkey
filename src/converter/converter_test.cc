@@ -141,6 +141,7 @@ enum class AlternateReverseReadingMode {
   kUniqueAlternate,
   kAmbiguousAlternates,
   kAmbiguousIncludingPreferred,
+  kPathBudgetExceeded,
 };
 
 class AlternateReverseReadingImmutableConverter
@@ -206,6 +207,23 @@ class AlternateReverseReadingImmutableConverter
       return true;
     }
 
+    if (mode_ == AlternateReverseReadingMode::kPathBudgetExceeded) {
+      if (input != "甲甲甲甲甲甲甲甲") {
+        return false;
+      }
+      // Eight reverse segments, each with one- or two-kana readings, create
+      // more than the resolver's small ambiguity budget for a 12-kana key.
+      // The resolver must stop before attempting expensive forward validation.
+      for (size_t i = 0; i < 8; ++i) {
+        Segment* segment = segments->add_segment();
+        segment->set_key("甲");
+        segment->set_segment_type(Segment::FREE);
+        AddReverseCandidate("甲", "あ", segment);
+        AddReverseCandidate("甲", "ああ", segment);
+      }
+      return true;
+    }
+
     if (input != "甲乙") {
       return false;
     }
@@ -245,6 +263,11 @@ class AlternateReverseReadingImmutableConverter
       segment->clear_candidates();
       AddForwardCandidate("もと", "本", segment);
       return true;
+    }
+
+    if (mode_ == AlternateReverseReadingMode::kPathBudgetExceeded) {
+      // A path-budget failure should return before forward verification.
+      return false;
     }
 
     if (segments->conversion_segments_size() != 2) {
@@ -1622,6 +1645,51 @@ TEST_F(ConverterTest,
   }
   EXPECT_EQ(reconstructed_key, "わたしのなまえ");
   EXPECT_EQ(reconstructed_value, "私の名前");
+}
+
+TEST_F(ConverterTest,
+       ResolveExternalConversionSegmentsRejectsOverBudgetLongSpan) {
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Engine> engine,
+                       MockDataEngineFactory::Create());
+  const std::shared_ptr<const ConverterInterface> converter =
+      engine->GetConverter();
+
+  const std::string key(65, 'a');
+  const std::string value(65, 'A');
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey(key)
+          .Build();
+
+  std::vector<ExternalConversionSegment> segments;
+  EXPECT_FALSE(converter->ResolveExternalConversionSegments(
+      request, key, value, &segments));
+  EXPECT_TRUE(segments.empty());
+}
+
+TEST_F(ConverterTest,
+       ResolveExternalConversionSegmentsRejectsPathBudgetExplosion) {
+  std::unique_ptr<Converter> converter =
+      CreateConverterForAlternateReverseReading(
+          AlternateReverseReadingMode::kPathBudgetExceeded);
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("ああああああああああああ")
+          .Build();
+
+  std::vector<ExternalConversionSegment> segments;
+  EXPECT_FALSE(converter->ResolveExternalConversionSegments(
+      request, "ああああああああああああ", "甲甲甲甲甲甲甲甲", &segments));
+  EXPECT_TRUE(segments.empty());
 }
 
 TEST_F(ConverterTest,
