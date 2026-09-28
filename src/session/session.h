@@ -66,6 +66,20 @@ struct ZenzProjectedLearningSegment {
   std::string key;
   std::string value;
   bool is_reranked = false;
+
+  // Sequence-level signal consumed by LearnExternalConversionSegments.
+  bool boundary_resized = false;
+
+  // True only for an aggregate projection whose internal live-Mozc boundary
+  // was intentionally left unresolved. SetPendingZenzFeedbackAccepted tries
+  // Mozc-native resegmentation for this unit without affecting neighboring
+  // safe units.
+  bool needs_native_resolution = false;
+
+  // Original live-Mozc segment keys inside an unresolved aggregate. Used only
+  // to decide whether a successfully resolved native sequence really changed
+  // a boundary; never used to guess a boundary.
+  std::vector<std::string> baseline_keys;
 };
 
 class Session {

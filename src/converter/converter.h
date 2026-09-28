@@ -116,6 +116,18 @@ class Converter final : public ConverterInterface {
       const ConversionRequest& request,
       absl::Span<const ExternalConversionSegment> segments) const override;
 
+  [[nodiscard]]
+  bool ResolveExternalConversionSegments(
+      const ConversionRequest& request, absl::string_view key,
+      absl::string_view value,
+      std::vector<ExternalConversionSegment>* segments) const override;
+
+  [[nodiscard]]
+  bool EvaluateExternalConversionSegments(
+      const ConversionRequest& request,
+      absl::Span<const ExternalConversionSegment> segments,
+      std::vector<ExternalConversionSegment>* evaluated_segments) const override;
+
   void CancelConversion(Segments* segments) const override;
   void ResetConversion(Segments* segments) const override;
   void RevertConversion(Segments* segments) const override;

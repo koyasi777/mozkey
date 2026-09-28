@@ -1583,18 +1583,19 @@ std::vector<ZenzBaselineSegment> BuildZenzBaselineSegmentsFromPreedit(
 std::vector<ZenzBaselineSegment> BuildZenzAdoptionBaselineSegments(
     const commands::Preedit& preedit, absl::string_view full_key,
     absl::string_view full_value) {
-  std::vector<ZenzBaselineSegment> segments =
+  const std::vector<ZenzBaselineSegment> segments =
       BuildZenzBaselineSegmentsFromPreedit(preedit);
 
-  std::string concatenated_key;
-  std::string concatenated_value;
-  for (const ZenzBaselineSegment& segment : segments) {
-    concatenated_key.append(segment.key);
-    concatenated_value.append(segment.value);
-  }
-  if (!segments.empty() && concatenated_key == full_key &&
-      concatenated_value == full_value) {
-    return segments;
+  std::vector<ZenzBaselineSegment> reconciled_segments;
+  if (ReconcileZenzBaselineKeysForRequest(
+          segments, full_key, &reconciled_segments)) {
+    std::string concatenated_value;
+    for (const ZenzBaselineSegment& segment : reconciled_segments) {
+      concatenated_value.append(segment.value);
+    }
+    if (concatenated_value == full_value) {
+      return reconciled_segments;
+    }
   }
 
   if (full_key.empty() || full_value.empty()) {
@@ -1612,8 +1613,6 @@ ZenzReverseLearningProjection BuildZenzReverseLearningSegmentsFromPreedit(
     const commands::Preedit& preedit,
     absl::string_view full_key,
     absl::string_view full_value) {
-  constexpr int kMaxReverseLearningPairs = 4;
-
   const std::vector<ZenzBaselineSegment> baseline_segments =
       BuildZenzBaselineSegmentsFromPreedit(preedit);
   const ZenzSegmentProjection projection = ProjectZenzValueToMozcSegments(
@@ -1626,28 +1625,28 @@ ZenzReverseLearningProjection BuildZenzReverseLearningSegmentsFromPreedit(
   result.projected_segments.reserve(projection.segments.size());
   for (const ZenzProjectedSegment& segment : projection.segments) {
     result.projected_segments.push_back(
-        {segment.key, segment.zenz_value, segment.changed});
+        {segment.key, segment.zenz_value, segment.changed, false,
+         !segment.boundary_known, segment.baseline_keys});
 
-    // Full-sequence learning already covers the whole accepted result.  The
-    // reverse path records only segments that Zenz actually changed relative to
-    // the visible Mozc live-conversion result.
-    if (!segment.changed) {
+    // If structured projected learning later fails, the full-sequence fallback
+    // still covers the accepted result. Local synthetic fallback is allowed
+    // only when projection proved an exact original Mozc boundary. Ambiguous
+    // aggregate gaps must be converter-resolved instead of being generalized
+    // merely because they fit under an arbitrary count cap.
+    if (!segment.changed || !segment.boundary_known) {
       continue;
     }
     if (segment.key == full_key && segment.zenz_value == full_value) {
       continue;
     }
     result.changed_segments.push_back({segment.key, segment.zenz_value});
-    if (result.changed_segments.size() > kMaxReverseLearningPairs) {
-      return {};
-    }
   }
 
-  // If the correction rewrites too many independent segments, it is likely a
-  // style-level rewrite rather than a stable local conversion preference.
-  if (result.changed_segments.empty()) {
-    result.projected_segments.clear();
-  }
+  // Keep the projected sequence even when the full-context Mozc surfaces are
+  // already identical to the accepted Zenz result. A later context-loss probe
+  // may still find that a segment (for example "げんしょう" -> "現象") stops
+  // being the top candidate when a following punctuation separator has not yet
+  // been typed. No learning happens merely because this projection is kept.
   return result;
 }
 
@@ -5649,53 +5648,108 @@ int Session::MaybeLearnZenzProjectedSegmentsToMozcHistory(
   if (!UseZenzFeedbackLearning(context_->GetConfig())) {
     return 0;
   }
-  if (segments.size() < 2) {
-    return 0;
-  }
   if (context_->composer().GetInputFieldType() ==
       commands::Context::PASSWORD) {
     return 0;
   }
 
-  std::vector<ExternalConversionSegment> external_segments;
-  external_segments.reserve(segments.size());
+  int learned_count = 0;
+  std::vector<ExternalConversionSegment> external_span;
+  external_span.reserve(segments.size());
+
+  auto flush_span = [&]() {
+    if (external_span.empty()) {
+      return;
+    }
+
+    bool has_learning_signal = external_span.front().boundary_resized;
+    for (const ExternalConversionSegment& segment : external_span) {
+      has_learning_signal = has_learning_signal || segment.is_reranked;
+    }
+    if (!has_learning_signal) {
+      external_span.clear();
+      return;
+    }
+
+    if (context_->mutable_converter()->LearnExternalConversionSegments(
+            external_span, context_->client_context())) {
+      learned_count += static_cast<int>(external_span.size());
+      external_span.clear();
+      return;
+    }
+
+    // A structured commit can still fail for a local downstream reason.
+    // Preserve only explicit rerank evidence as independent single-segment
+    // learning; never synthesize boundary history from a degraded span.
+    for (const ExternalConversionSegment& segment : external_span) {
+      if (segment.is_reranked &&
+          MaybeLearnZenzCandidateToMozcHistory(segment.key, segment.value)) {
+        ++learned_count;
+      }
+    }
+    external_span.clear();
+  };
+
+  bool span_boundary_resized = false;
   for (const ZenzProjectedLearningSegment& segment : segments) {
     const std::string& key = segment.key;
     const std::string& value = segment.value;
+
+    // An unresolved aggregate proves only its outer correspondence. Keep it as
+    // a barrier between independently safe spans, but never generalize it as a
+    // synthetic reranked segment when native resegmentation failed.
+    if (segment.needs_native_resolution) {
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] split projected mozc history unresolved native ",
+          ZenzRedactedTextStats("key", key),
+          " ", ZenzRedactedTextStats("value", value)));
+      flush_span();
+      continue;
+    }
+
     if (key.empty() || value.empty()) {
-      return 0;
+      flush_span();
+      continue;
     }
 
     const ZenzTextPrivacyDecision key_privacy =
         EvaluateZenzLiveKeyPrivacy(key);
     if (!key_privacy.allow) {
       ZenzDebugOutput(absl::StrCat(
-          "[zenz-feedback] skip projected mozc history key_privacy reason=",
+          "[zenz-feedback] split projected mozc history key_privacy reason=",
           key_privacy.reason,
           " ",
           ZenzRedactedTextStats("key", key)));
-      return 0;
+      flush_span();
+      continue;
     }
 
     const ZenzTextPrivacyDecision value_privacy =
         EvaluateZenzLiveValuePrivacy(value);
     if (!value_privacy.allow) {
       ZenzDebugOutput(absl::StrCat(
-          "[zenz-feedback] skip projected mozc history value_privacy reason=",
+          "[zenz-feedback] split projected mozc history value_privacy reason=",
           value_privacy.reason,
           " ",
           ZenzRedactedTextStats("value", value)));
-      return 0;
+      flush_span();
+      continue;
     }
 
-    external_segments.push_back({key, value, segment.is_reranked});
+    if (!external_span.empty() &&
+        span_boundary_resized != segment.boundary_resized) {
+      flush_span();
+    }
+    if (external_span.empty()) {
+      span_boundary_resized = segment.boundary_resized;
+    }
+
+    external_span.push_back(
+        {key, value, segment.is_reranked, segment.boundary_resized});
   }
 
-  if (!context_->mutable_converter()->LearnExternalConversionSegments(
-          external_segments, context_->client_context())) {
-    return 0;
-  }
-  return static_cast<int>(external_segments.size());
+  flush_span();
+  return learned_count;
 }
 
 bool Session::HasVisibleZenzLiveCorrection() const {
@@ -5770,9 +5824,457 @@ void Session::SetPendingZenzFeedbackAccepted(
   pending_zenz_feedback_.final_committed_value.clear();
   pending_zenz_feedback_.require_final_committed_key_match = false;
   pending_zenz_feedback_.final_committed_key.clear();
-  const ZenzReverseLearningProjection reverse_learning_projection =
+  ZenzReverseLearningProjection reverse_learning_projection =
       BuildZenzReverseLearningSegmentsFromPreedit(
           live_conversion_preedit_output_, key, value);
+
+  auto is_projected_segment_learnable =
+      [&](const ZenzProjectedLearningSegment& projected) {
+        return !projected.key.empty() && !projected.value.empty() &&
+               EvaluateZenzLiveKeyPrivacy(projected.key).allow &&
+               EvaluateZenzLiveValuePrivacy(projected.value).allow;
+      };
+
+  auto append_native_resolution =
+      [&](absl::Span<const ZenzProjectedLearningSegment> projected_span,
+          absl::string_view reason,
+          std::vector<ZenzProjectedLearningSegment>* output) -> bool {
+        if (projected_span.empty() || output == nullptr) {
+          return false;
+        }
+
+        // Prefer the exact live-Mozc boundaries whenever projection already
+        // proved them. A fixed-boundary immutable conversion is stronger
+        // evidence than reverse conversion because it does not have to infer
+        // reading boundaries from the accepted surface. Native resegmentation
+        // remains the fallback only when these known boundaries cannot
+        // reproduce the accepted surfaces.
+        bool all_boundaries_known = true;
+        std::vector<ExternalConversionSegment> fixed_boundary_segments;
+        fixed_boundary_segments.reserve(projected_span.size());
+        for (const ZenzProjectedLearningSegment& projected : projected_span) {
+          if (projected.needs_native_resolution ||
+              projected.boundary_resized) {
+            all_boundaries_known = false;
+            break;
+          }
+          fixed_boundary_segments.push_back(
+              {projected.key, projected.value, false, false});
+        }
+
+        if (all_boundaries_known) {
+          std::vector<ExternalConversionSegment> evaluated_segments;
+          if (context_->mutable_converter()->EvaluateExternalConversionSegments(
+                  fixed_boundary_segments, context_->client_context(),
+                  &evaluated_segments) &&
+              evaluated_segments.size() == projected_span.size()) {
+            bool exact_fixed_boundary_match = true;
+            for (size_t i = 0; i < evaluated_segments.size(); ++i) {
+              if (evaluated_segments[i].key != projected_span[i].key ||
+                  evaluated_segments[i].value != projected_span[i].value ||
+                  evaluated_segments[i].boundary_resized) {
+                exact_fixed_boundary_match = false;
+                break;
+              }
+            }
+
+            if (exact_fixed_boundary_match) {
+              size_t reranked_count = 0;
+              for (size_t i = 0; i < evaluated_segments.size(); ++i) {
+                const bool is_reranked =
+                    evaluated_segments[i].is_reranked ||
+                    projected_span[i].is_reranked;
+                if (is_reranked) {
+                  ++reranked_count;
+                }
+                output->push_back(
+                    {evaluated_segments[i].key, evaluated_segments[i].value,
+                     is_reranked, false, false, {}});
+              }
+
+              ZenzDebugOutput(absl::StrCat(
+                  "[zenz-feedback] fixed-boundary projection preserved ",
+                  reason, " segments=", evaluated_segments.size(),
+                  " reranked=", reranked_count));
+              return true;
+            }
+          }
+        }
+
+        std::string span_key;
+        std::string span_value;
+        std::vector<std::string> baseline_keys;
+        for (const ZenzProjectedLearningSegment& projected : projected_span) {
+          span_key.append(projected.key);
+          span_value.append(projected.value);
+          if (projected.needs_native_resolution &&
+              !projected.baseline_keys.empty()) {
+            baseline_keys.insert(baseline_keys.end(),
+                                 projected.baseline_keys.begin(),
+                                 projected.baseline_keys.end());
+          } else {
+            baseline_keys.push_back(projected.key);
+          }
+        }
+
+        std::vector<ExternalConversionSegment> native_segments;
+        if (!context_->mutable_converter()->ResolveExternalConversionSegments(
+                span_key, span_value, context_->client_context(),
+                &native_segments)) {
+          return false;
+        }
+
+        if (native_segments.empty()) {
+          return false;
+        }
+
+        bool boundary_resized =
+            native_segments.size() != baseline_keys.size();
+        if (!boundary_resized) {
+          for (size_t i = 0; i < native_segments.size(); ++i) {
+            if (native_segments[i].key != baseline_keys[i]) {
+              boundary_resized = true;
+              break;
+            }
+          }
+        }
+
+        bool one_to_one_projection =
+            native_segments.size() == projected_span.size();
+        if (one_to_one_projection) {
+          for (size_t i = 0; i < native_segments.size(); ++i) {
+            if (native_segments[i].key != projected_span[i].key ||
+                native_segments[i].value != projected_span[i].value) {
+              one_to_one_projection = false;
+              break;
+            }
+          }
+        }
+
+        size_t reranked_count = 0;
+        for (size_t i = 0; i < native_segments.size(); ++i) {
+          const ExternalConversionSegment& segment = native_segments[i];
+          const bool is_reranked =
+              segment.is_reranked ||
+              (one_to_one_projection && projected_span[i].is_reranked);
+          if (is_reranked) {
+            ++reranked_count;
+          }
+          output->push_back(
+              {segment.key, segment.value, is_reranked,
+               boundary_resized, false, {}});
+        }
+
+        ZenzDebugOutput(absl::StrCat(
+            "[zenz-feedback] native resegmentation resolved ", reason,
+            " segments=", native_segments.size(),
+            " reranked=", reranked_count,
+            " boundary_resized=", ZenzBool(boundary_resized)));
+        return true;
+      };
+
+  // Context-loss hardening is useful for reusable lexical choices such as
+  // "げんしょう -> 現象", but it is optional learning work. Bound the number
+  // of extra fixed-boundary conversions per accepted Zenz result so
+  // punctuation-heavy text cannot turn history enrichment into input latency.
+  constexpr size_t kMaxContextLossProbesPerAcceptedFeedback = 2;
+  size_t context_loss_probe_count = 0;
+
+  auto append_context_loss_hardening =
+      [&](absl::Span<const ZenzProjectedLearningSegment> evaluation_prefix,
+          absl::Span<const ZenzProjectedLearningSegment> lexical_island,
+          std::vector<ZenzProjectedLearningSegment>* output) -> bool {
+        if (evaluation_prefix.empty() || lexical_island.empty() ||
+            output == nullptr) {
+          return false;
+        }
+
+        std::vector<ExternalConversionSegment> expected_segments;
+        expected_segments.reserve(evaluation_prefix.size());
+        for (const ZenzProjectedLearningSegment& projected :
+             evaluation_prefix) {
+          if (projected.needs_native_resolution ||
+              projected.boundary_resized) {
+            return false;
+          }
+          expected_segments.push_back(
+              {projected.key, projected.value, false, false});
+        }
+
+        if (context_loss_probe_count >=
+            kMaxContextLossProbesPerAcceptedFeedback) {
+          ZenzDebugOutput(
+              "[zenz-feedback] context-loss probe budget exhausted");
+          return false;
+        }
+        ++context_loss_probe_count;
+
+        std::vector<ExternalConversionSegment> evaluated_segments;
+        if (!context_->mutable_converter()->EvaluateExternalConversionSegments(
+                expected_segments, context_->client_context(),
+                &evaluated_segments)) {
+          return false;
+        }
+
+        if (evaluated_segments.size() != evaluation_prefix.size()) {
+          return false;
+        }
+
+        for (size_t i = 0; i < evaluated_segments.size(); ++i) {
+          if (evaluated_segments[i].key != evaluation_prefix[i].key ||
+              evaluated_segments[i].value != evaluation_prefix[i].value ||
+              evaluated_segments[i].boundary_resized) {
+            return false;
+          }
+        }
+
+        // The prefix probe preserves every already-typed segment and removes
+        // only future right context. Therefore only the final lexical segment
+        // has direct evidence of context loss. Do not promote earlier non-top
+        // candidates merely because they are lower ranked in a history-free
+        // probe.
+        if (!evaluated_segments.back().is_reranked) {
+          return false;
+        }
+
+        for (size_t i = 0; i < lexical_island.size(); ++i) {
+          const ZenzProjectedLearningSegment& segment = lexical_island[i];
+          output->push_back(
+              {segment.key, segment.value,
+               i + 1 == lexical_island.size(),
+               false, false, {}});
+        }
+
+        ZenzDebugOutput(absl::StrCat(
+            "[zenz-feedback] fixed-boundary context-loss hardening prefix=",
+            evaluated_segments.size(), " island=", lexical_island.size(),
+            " reranked=1"));
+        return true;
+      };
+  // Punctuation and other non-learnable projected units divide the accepted
+  // text into lexical islands. Within each island, re-run Mozc-native
+  // resegmentation only for the smallest range that actually changed. This is
+  // important when a changed lexical item is embedded in a larger live-Mozc
+  // segment, e.g.
+  //   key:   きいたりするげんしょう(
+  //   Mozc:  聞いたりする減少（
+  //   Zenz:  聞いたりする現象（
+  // Stage 2D can peel the unchanged '(' separator. The resolver below then
+  // sees "きいたりするげんしょう" -> "聞いたりする現象" and can recover
+  // [きいたりする][げんしょう], allowing boundary history and candidate
+  // history to be learned without teaching any boundary across punctuation.
+  if (!reverse_learning_projection.projected_segments.empty()) {
+    const std::vector<ZenzProjectedLearningSegment> projected_segments =
+        reverse_learning_projection.projected_segments;
+    std::vector<ZenzProjectedLearningSegment> resolved_projection;
+    resolved_projection.reserve(projected_segments.size());
+
+    size_t island_begin = 0;
+    while (island_begin < projected_segments.size()) {
+      if (!is_projected_segment_learnable(
+              projected_segments[island_begin])) {
+        ZenzProjectedLearningSegment separator =
+            projected_segments[island_begin];
+        separator.boundary_resized = false;
+        separator.needs_native_resolution = false;
+        separator.baseline_keys.clear();
+        resolved_projection.push_back(std::move(separator));
+        ++island_begin;
+        continue;
+      }
+
+      size_t island_end = island_begin;
+      while (island_end < projected_segments.size() &&
+             is_projected_segment_learnable(
+                 projected_segments[island_end])) {
+        ++island_end;
+      }
+
+      size_t first_changed = island_end;
+      size_t last_changed = island_begin;
+      for (size_t i = island_begin; i < island_end; ++i) {
+        if (projected_segments[i].is_reranked ||
+            projected_segments[i].needs_native_resolution) {
+          if (first_changed == island_end) {
+            first_changed = i;
+          }
+          last_changed = i;
+        }
+      }
+
+      if (first_changed == island_end) {
+        const absl::Span<const ZenzProjectedLearningSegment> unchanged_island(
+            projected_segments.data() + island_begin,
+            island_end - island_begin);
+        const bool has_following_separator =
+            island_end < projected_segments.size() &&
+            !is_projected_segment_learnable(projected_segments[island_end]);
+
+        // Full-context Mozc may already show the accepted surface because of
+        // future right context that has not been typed yet. Preserve all
+        // already-typed left context in the read-only prefix probe, omit the
+        // following separator/right context, and harden only the final lexical
+        // segment when that exact surface stops being top-ranked.
+        const absl::Span<const ZenzProjectedLearningSegment> evaluation_prefix(
+            projected_segments.data(), island_end);
+        if (!has_following_separator ||
+            !append_context_loss_hardening(
+                evaluation_prefix, unchanged_island,
+                &resolved_projection)) {
+          for (size_t i = island_begin; i < island_end; ++i) {
+            resolved_projection.push_back(projected_segments[i]);
+          }
+        }
+        island_begin = island_end;
+        continue;
+      }
+
+      for (size_t i = island_begin; i < first_changed; ++i) {
+        resolved_projection.push_back(projected_segments[i]);
+      }
+
+      const absl::Span<const ZenzProjectedLearningSegment> changed_span(
+          projected_segments.data() + first_changed,
+          last_changed - first_changed + 1);
+      const bool range_resolved = append_native_resolution(
+          changed_span, "lexical island", &resolved_projection);
+
+      if (!range_resolved) {
+        for (size_t i = first_changed; i <= last_changed; ++i) {
+          ZenzProjectedLearningSegment projected = projected_segments[i];
+
+          // If the failed changed range contains several projected units, an
+          // unresolved aggregate inside it may still be independently
+          // resolvable. Preserve that narrower fallback. For a one-unit range
+          // the exact same key/value was already tried above, so do not probe
+          // it twice.
+          if (projected.needs_native_resolution &&
+              first_changed != last_changed) {
+            const absl::Span<const ZenzProjectedLearningSegment> local_span(
+                &projected_segments[i], 1);
+            if (append_native_resolution(local_span, "local span",
+                                         &resolved_projection)) {
+              continue;
+            }
+          }
+
+          if (projected.needs_native_resolution) {
+            // Native resegmentation failed, so preserve the unresolved marker.
+            // MaybeLearnZenzProjectedSegmentsToMozcHistory treats this unit as
+            // a non-learnable span barrier instead of inventing one segment.
+            projected.boundary_resized = false;
+            resolved_projection.push_back(std::move(projected));
+            continue;
+          }
+
+          projected.boundary_resized = false;
+          projected.baseline_keys.clear();
+          resolved_projection.push_back(std::move(projected));
+        }
+      }
+
+      for (size_t i = last_changed + 1; i < island_end; ++i) {
+        resolved_projection.push_back(projected_segments[i]);
+      }
+
+      island_begin = island_end;
+    }
+
+    reverse_learning_projection.projected_segments =
+        std::move(resolved_projection);
+  }
+
+  // A projection can still be unavailable when the live snapshot does not
+  // describe the accepted full key at all. Preserve the conservative
+  // whole-sequence native fallback for that case.
+  if (reverse_learning_projection.projected_segments.empty()) {
+    std::vector<ExternalConversionSegment> native_segments;
+    if (context_->mutable_converter()->ResolveExternalConversionSegments(
+            key, value, context_->client_context(), &native_segments)) {
+      size_t reranked_count = 0;
+      bool all_native_segments_privacy_valid = true;
+      for (const ExternalConversionSegment& segment : native_segments) {
+        if (segment.is_reranked) {
+          ++reranked_count;
+        }
+        if (!EvaluateZenzLiveKeyPrivacy(segment.key).allow ||
+            !EvaluateZenzLiveValuePrivacy(segment.value).allow) {
+          all_native_segments_privacy_valid = false;
+        }
+      }
+
+      if (!native_segments.empty()) {
+        bool boundary_resized = false;
+        if (all_native_segments_privacy_valid) {
+          const std::vector<ZenzBaselineSegment> live_baseline =
+              BuildZenzBaselineSegmentsFromPreedit(
+                  live_conversion_preedit_output_);
+          std::vector<ZenzBaselineSegment> reconciled_live_baseline;
+          if (ReconcileZenzBaselineKeysForRequest(
+                  live_baseline, key, &reconciled_live_baseline)) {
+            boundary_resized =
+                reconciled_live_baseline.size() != native_segments.size();
+            if (!boundary_resized) {
+              for (size_t i = 0; i < native_segments.size(); ++i) {
+                if (reconciled_live_baseline[i].key !=
+                    native_segments[i].key) {
+                  boundary_resized = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        reverse_learning_projection.projected_segments.reserve(
+            native_segments.size());
+        for (const ExternalConversionSegment& segment : native_segments) {
+          reverse_learning_projection.projected_segments.push_back(
+              {segment.key, segment.value, segment.is_reranked,
+               boundary_resized, false, {}});
+          if (segment.is_reranked &&
+              !(segment.key == key && segment.value == value)) {
+            reverse_learning_projection.changed_segments.push_back(
+                {segment.key, segment.value});
+          }
+        }
+        ZenzDebugOutput(absl::StrCat(
+            "[zenz-feedback] native resegmentation resolved full sequence"
+            " segments=",
+            native_segments.size(), " reranked=", reranked_count,
+            " boundary_resized=", ZenzBool(boundary_resized)));
+      }
+    }
+  }
+
+  // reverse_learning_projection.changed_segments was collected before native
+  // fixed-boundary evaluation / resegmentation.  Do not let that stale local
+  // evidence reappear through ConfirmPendingZenzFeedback's fallback after the
+  // resolved projection changed either the surface partition or its rerank
+  // evidence.  A local fallback pair remains valid only when the final
+  // projection still contains the exact key/value pair with explicit rerank
+  // evidence and no unresolved native-boundary question.
+  std::vector<std::pair<std::string, std::string>>
+      validated_changed_segments;
+  validated_changed_segments.reserve(
+      reverse_learning_projection.changed_segments.size());
+  for (const auto& changed_segment :
+       reverse_learning_projection.changed_segments) {
+    const auto resolved = std::find_if(
+        reverse_learning_projection.projected_segments.begin(),
+        reverse_learning_projection.projected_segments.end(),
+        [&](const ZenzProjectedLearningSegment& segment) {
+          return !segment.needs_native_resolution && segment.is_reranked &&
+                 segment.key == changed_segment.first &&
+                 segment.value == changed_segment.second;
+        });
+    if (resolved != reverse_learning_projection.projected_segments.end()) {
+      validated_changed_segments.push_back(changed_segment);
+    }
+  }
+  reverse_learning_projection.changed_segments =
+      std::move(validated_changed_segments);
+
   pending_zenz_feedback_.reverse_learning_segments =
       reverse_learning_projection.changed_segments;
   pending_zenz_feedback_.reverse_projected_learning_segments =
@@ -5920,18 +6422,6 @@ void Session::ConfirmPendingZenzFeedback() {
         pending_zenz_feedback_.context_class,
         pending_zenz_feedback_.value);
 
-    const bool learned_to_mozc_history =
-        MaybeLearnZenzCandidateToMozcHistory(
-            pending_zenz_feedback_.key,
-            pending_zenz_feedback_.value);
-
-    ZenzDebugOutput(absl::StrCat(
-        "[zenz-feedback] mozc history learning ",
-        ZenzBool(learned_to_mozc_history),
-        " ", ZenzRedactedTextStats("key", pending_zenz_feedback_.key),
-        " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
-        " context_class=", pending_zenz_feedback_.context_class));
-
     const int projected_segment_learning_count =
         MaybeLearnZenzProjectedSegmentsToMozcHistory(
             pending_zenz_feedback_.reverse_projected_learning_segments);
@@ -5941,12 +6431,30 @@ void Session::ConfirmPendingZenzFeedback() {
         projected_segment_learning_count,
         " context_class=", pending_zenz_feedback_.context_class));
 
+    // Prefer structured/local virtual commits.  Multi-segment commits already
+    // teach UserHistoryPredictor their concatenated span, while one-segment or
+    // punctuation-split commits intentionally prioritize reusable local
+    // evidence. ZenzFeedbackStore remains the exact full-sequence memory in
+    // either case. Keep synthetic full-sequence Mozc learning only as the
+    // fallback when no projected/local evidence could be committed.
+    bool learned_to_mozc_history = false;
     int reverse_segment_learning_count = 0;
     if (projected_segment_learning_count == 0) {
+      learned_to_mozc_history =
+          MaybeLearnZenzCandidateToMozcHistory(
+              pending_zenz_feedback_.key,
+              pending_zenz_feedback_.value);
       reverse_segment_learning_count =
           MaybeLearnZenzReverseSegmentsToMozcHistory(
               pending_zenz_feedback_.reverse_learning_segments);
     }
+
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] fallback full mozc history learning ",
+        ZenzBool(learned_to_mozc_history),
+        " ", ZenzRedactedTextStats("key", pending_zenz_feedback_.key),
+        " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
+        " context_class=", pending_zenz_feedback_.context_class));
 
     ZenzDebugOutput(absl::StrCat(
         "[zenz-feedback] reverse segment mozc history learning count=",

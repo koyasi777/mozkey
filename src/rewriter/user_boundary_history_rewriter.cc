@@ -60,6 +60,11 @@ constexpr int kValueSize = 4;
 constexpr uint32_t kLruSize = 5000;
 constexpr uint32_t kSeedValue = 0x761fea81;
 
+// boundary.db stores eight segment lengths as 4-bit fields in 4 bytes.
+// A learned target segment longer than 15 characters cannot be represented
+// losslessly and must never be persisted.
+constexpr size_t kMaxStoredSegmentLength = 15;
+
 constexpr char kFileName[] = "user://boundary.db";
 
 class LengthArray {
@@ -315,6 +320,18 @@ bool UserBoundaryHistoryRewriter::Insert(const ConversionRequest& request,
   // No effective segments found
   if (target_segments_size == 0) {
     return false;
+  }
+
+  // LengthArray stores each learned target length in a 4-bit field. Reject an
+  // unrepresentable target before it can be truncated and poison boundary.db.
+  // Keep SegmentsKey::Create permissive: a current unsplit segment can be
+  // longer than 15 characters and still needs to look up a previously learned
+  // representable split such as 8 + 8.
+  for (const Segment& segment : segments.conversion_segments()) {
+    if (segment.segment_type() == Segment::FIXED_VALUE &&
+        segment.key_len() > kMaxStoredSegmentLength) {
+      return false;
+    }
   }
 
   std::optional<const SegmentsKey> segments_key = SegmentsKey::Create(segments);
