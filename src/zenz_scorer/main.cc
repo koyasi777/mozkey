@@ -1075,6 +1075,11 @@ bool LaunchLlamaServer(const Options& options,
   // versions.  Mozkey has one local scorer client and does not need multiple
   // parallel server slots.
   cmd += L" --parallel 1";
+  // Disable llama-server's global RAM prompt cache. Mozkey uses one local
+  // scorer client, and retaining historical prompt states causes private-memory
+  // growth during continuous IME use. Request-level cache_prompt remains
+  // enabled, so the current slot can still reuse common prompt prefixes.
+  cmd += L" --cache-ram 0";
   cmd += L" --host 127.0.0.1 --port ";
   cmd += std::to_wstring(port);
   // The API key is defense-in-depth for accidental or stale localhost servers.
