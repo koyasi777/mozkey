@@ -210,7 +210,7 @@ class EngineConverterInterface {
     return false;
   }
 
-  // Learns an externally committed multi-segment conversion result without
+  // Learns an externally committed segmented conversion result without
   // changing the current session-visible conversion state.  This is used when
   // an accepted Zenz correction can be safely projected onto Mozc
   // live-conversion phrase boundaries.
@@ -218,6 +218,36 @@ class EngineConverterInterface {
   virtual bool LearnExternalConversionSegments(
       absl::Span<const ExternalConversionSegment> segments,
       const commands::Context& context) {
+    return false;
+  }
+
+  // Resolves an accepted external full-sequence result into Mozc-native
+  // phrase boundaries without changing session-visible converter state or
+  // writing history.  This is a conservative fallback for Zenz corrections
+  // whose accepted surface cannot be projected onto the current live
+  // conversion boundaries.
+  [[nodiscard]]
+  virtual bool ResolveExternalConversionSegments(
+      absl::string_view key, absl::string_view value,
+      const commands::Context& context,
+      std::vector<ExternalConversionSegment>* segments) {
+    if (segments != nullptr) {
+      segments->clear();
+    }
+    return false;
+  }
+
+  // Evaluates an already-known segment sequence with those exact boundaries,
+  // without mutating history. This is used for context-loss hardening when the
+  // live full-context Mozc segmentation is already trustworthy.
+  [[nodiscard]]
+  virtual bool EvaluateExternalConversionSegments(
+      absl::Span<const ExternalConversionSegment> segments,
+      const commands::Context& context,
+      std::vector<ExternalConversionSegment>* evaluated_segments) {
+    if (evaluated_segments != nullptr) {
+      evaluated_segments->clear();
+    }
     return false;
   }
 

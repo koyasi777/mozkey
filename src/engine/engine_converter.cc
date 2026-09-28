@@ -863,7 +863,7 @@ bool EngineConverter::LearnExternalConversionSegments(
   options.request_type = ConversionRequest::CONVERSION;
   options.enable_user_history_for_conversion = true;
 
-  // Learn one externally committed multi-segment result.  The segment list is
+  // Learn one externally committed segmented result.  The segment list is
   // already projected by session code and represents a virtual normal
   // conversion commit, not segment-local Zenz feedback-store records.
   const ConversionRequest conversion_request =
@@ -877,6 +877,78 @@ bool EngineConverter::LearnExternalConversionSegments(
 
   return converter_->LearnExternalConversionSegments(
       conversion_request, segments);
+}
+
+bool EngineConverter::ResolveExternalConversionSegments(
+    absl::string_view key, absl::string_view value,
+    const commands::Context& context,
+    std::vector<ExternalConversionSegment>* segments) {
+  if (segments == nullptr) {
+    return false;
+  }
+  segments->clear();
+  if (key.empty() || value.empty()) {
+    return false;
+  }
+
+  DCHECK(request_);
+  DCHECK(config_);
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder()
+          .SetRequestView(*request_)
+          .SetContextView(context)
+          .SetConfigView(*config_)
+          .SetOptions(std::move(options))
+          .SetKey(key)
+          .Build();
+
+  return converter_->ResolveExternalConversionSegments(
+      conversion_request, key, value, segments);
+}
+
+bool EngineConverter::EvaluateExternalConversionSegments(
+    absl::Span<const ExternalConversionSegment> segments,
+    const commands::Context& context,
+    std::vector<ExternalConversionSegment>* evaluated_segments) {
+  if (evaluated_segments == nullptr) {
+    return false;
+  }
+  evaluated_segments->clear();
+  if (segments.empty()) {
+    return false;
+  }
+
+  DCHECK(request_);
+  DCHECK(config_);
+
+  std::string full_key;
+  for (const ExternalConversionSegment& segment : segments) {
+    if (segment.key.empty() || segment.value.empty()) {
+      return false;
+    }
+    absl::StrAppend(&full_key, segment.key);
+  }
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder()
+          .SetRequestView(*request_)
+          .SetContextView(context)
+          .SetConfigView(*config_)
+          .SetOptions(std::move(options))
+          .SetKey(full_key)
+          .Build();
+
+  return converter_->EvaluateExternalConversionSegments(
+      conversion_request, segments, evaluated_segments);
 }
 
 void EngineConverter::LookupUserDictionaryPrefixEntries(

@@ -794,6 +794,20 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
           continue;
         }
 
+        // An unresolved multi-segment aggregate proves only the outer span;
+        // it does not identify which original Mozc segment owns the unsafe
+        // orthographic transition.  Repairing the whole aggregate back to the
+        // Mozc baseline would report an accepted Zenz result even though none
+        // of that ambiguous rewrite was adopted.  Fail closed instead.  Known
+        // one-segment boundaries may still be repaired locally below.
+        if (!segment.boundary_known) {
+          ZenzAdoptionResult result;
+          result.action = ZenzAdoptionResult::Action::kReject;
+          result.value = std::string(input.mozc_value);
+          result.reason = "orthographic_transition_projection_failed";
+          return result;
+        }
+
         orthography_repaired_value.append(segment.mozc_value);
         orthography_repaired = true;
       }

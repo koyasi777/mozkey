@@ -55,6 +55,11 @@ struct ExternalConversionSegment {
   std::string key;
   std::string value;
   bool is_reranked = false;
+
+  // True only when this segment sequence represents a boundary change from the
+  // live Mozc conversion that the user saw. Callers must set this consistently
+  // for every segment in the same sequence.
+  bool boundary_resized = false;
 };
 
 class ConverterInterface {
@@ -112,7 +117,7 @@ class ConverterInterface {
     return false;
   }
 
-  // Learns externally committed multi-segment conversion results, such as a
+  // Learns externally committed segmented conversion results, such as a
   // Zenz accepted result safely projected onto Mozc live-conversion segments.
   // This represents one virtual conversion commit with phrase boundaries, not
   // multiple independent feedback-store records.
@@ -120,6 +125,36 @@ class ConverterInterface {
   virtual bool LearnExternalConversionSegments(
       const ConversionRequest& request,
       absl::Span<const ExternalConversionSegment> segments) const {
+    return false;
+  }
+
+  // Resolves an accepted external full-sequence key/value pair into Mozc-native
+  // phrase boundaries without mutating user history.  Implementations must
+  // return only boundaries for which both reverse reading and fixed-boundary
+  // forward conversion agree exactly with |key| and |value|.
+  [[nodiscard]]
+  virtual bool ResolveExternalConversionSegments(
+      const ConversionRequest& request, absl::string_view key,
+      absl::string_view value,
+      std::vector<ExternalConversionSegment>* segments) const {
+    if (segments != nullptr) {
+      segments->clear();
+    }
+    return false;
+  }
+
+  // Evaluates a caller-supplied external segment sequence under exactly those
+  // reading boundaries, without mutating history. The output preserves the
+  // supplied keys/values and marks is_reranked when the accepted surface is a
+  // normal Mozc candidate but not candidate(0) with user history disabled.
+  [[nodiscard]]
+  virtual bool EvaluateExternalConversionSegments(
+      const ConversionRequest& request,
+      absl::Span<const ExternalConversionSegment> segments,
+      std::vector<ExternalConversionSegment>* evaluated_segments) const {
+    if (evaluated_segments != nullptr) {
+      evaluated_segments->clear();
+    }
     return false;
   }
 

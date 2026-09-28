@@ -44,13 +44,21 @@ struct ZenzBaselineSegment {
   std::string value;
 };
 
-// A conservative projection of one full Zenz value back onto normal-Mozc
-// segment boundaries.
+// A conservative projection unit of one full Zenz value.  When
+// `boundary_known` is true, the unit corresponds to one original Mozc segment.
+// When it is false, the unit is an exact aggregate of multiple consecutive
+// baseline segments whose internal mapping is ambiguous.  Such an aggregate
+// may later be passed to Mozc's native resegmentation resolver, but this layer
+// never guesses its internal boundary.
 struct ZenzProjectedSegment {
   std::string key;
   std::string mozc_value;
   std::string zenz_value;
   bool changed = false;
+  bool boundary_known = true;
+
+  // Populated only for an aggregate with unknown internal boundaries.
+  std::vector<std::string> baseline_keys;
 };
 
 struct ZenzSegmentProjection {
@@ -58,10 +66,22 @@ struct ZenzSegmentProjection {
   std::vector<ZenzProjectedSegment> segments;
 };
 
+
+// Reconciles display-only punctuation-width differences between live preedit
+// segment keys and the canonical Zenz request key.  This is deliberately
+// narrower than NFKC: only full-width ASCII punctuation and WAVE DASH are
+// mapped to the ASCII key form used by the composer.  Returns false unless the
+// reconciled concatenated key matches `full_key` byte-for-byte.
+bool ReconcileZenzBaselineKeysForRequest(
+    const std::vector<ZenzBaselineSegment>& baseline_segments,
+    absl::string_view full_key,
+    std::vector<ZenzBaselineSegment>* reconciled_segments);
+
 // Projects `full_value` onto `baseline_segments` without guessing ambiguous
-// boundaries.  Unchanged normal-Mozc surfaces that occur exactly once are used
-// as anchors.  A gap containing one segment may absorb a changed Zenz surface;
-// a multi-segment gap is accepted only when it is unchanged byte-for-byte.
+// boundaries. Unchanged normal-Mozc surfaces that occur exactly once are used
+// as anchors. A one-segment gap can absorb a changed surface. A changed
+// multi-segment gap is retained as one aggregate with `boundary_known=false`
+// instead of invalidating the safe projection before and after that gap.
 ZenzSegmentProjection ProjectZenzValueToMozcSegments(
     const std::vector<ZenzBaselineSegment>& baseline_segments,
     absl::string_view full_key, absl::string_view full_value);

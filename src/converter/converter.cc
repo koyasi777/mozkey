@@ -459,6 +459,10 @@ bool Converter::LearnExternalConversionSegments(
   constexpr size_t kMaxSegmentKeyChars = 128;
   constexpr size_t kMaxSegmentValueChars = 128;
   constexpr size_t kMaxSegmentValueBytes = 512;
+  // UserBoundaryHistoryRewriter persists each target segment length in a
+  // 4-bit field. A boundary-resized external commit must not claim success
+  // when its target boundary cannot be represented by that downstream store.
+  constexpr size_t kMaxBoundaryHistorySegmentKeyChars = 15;
   constexpr size_t kMinTotalKeyChars = 2;
   constexpr size_t kMaxTotalKeyChars = 256;
   constexpr size_t kMaxTotalValueChars = 256;
@@ -485,12 +489,20 @@ bool Converter::LearnExternalConversionSegments(
     return false;
   }
 
+  const bool boundary_resized = segments.front().boundary_resized;
+
   std::vector<ExternalConversionSegment> normalized_segments;
   normalized_segments.reserve(segments.size());
+  std::vector<uint8_t> key_sizes;
+  key_sizes.reserve(segments.size());
 
   std::string total_key;
   std::string total_value;
   for (const ExternalConversionSegment& segment : segments) {
+    if (segment.boundary_resized != boundary_resized) {
+      return false;
+    }
+
     const std::string key =
         std::string(absl::StripAsciiWhitespace(segment.key));
     const std::string value =
@@ -502,9 +514,16 @@ bool Converter::LearnExternalConversionSegments(
     if (!Util::IsValidUtf8(key) || !Util::IsValidUtf8(value)) {
       return false;
     }
-    if (Util::CharsLen(key) > kMaxSegmentKeyChars ||
+
+    const size_t key_chars = Util::CharsLen(key);
+    if (key_chars > kMaxSegmentKeyChars ||
         Util::CharsLen(value) > kMaxSegmentValueChars ||
-        value.size() > kMaxSegmentValueBytes) {
+        value.size() > kMaxSegmentValueBytes ||
+        key_chars > std::numeric_limits<uint8_t>::max()) {
+      return false;
+    }
+    if (boundary_resized &&
+        key_chars > kMaxBoundaryHistorySegmentKeyChars) {
       return false;
     }
 
@@ -520,7 +539,9 @@ bool Converter::LearnExternalConversionSegments(
 
     absl::StrAppend(&total_key, key);
     absl::StrAppend(&total_value, value);
-    normalized_segments.push_back({key, value, segment.is_reranked});
+    key_sizes.push_back(static_cast<uint8_t>(key_chars));
+    normalized_segments.push_back(
+        {key, value, segment.is_reranked, boundary_resized});
   }
 
   if (Util::CharsLen(total_key) < kMinTotalKeyChars ||
@@ -530,66 +551,445 @@ bool Converter::LearnExternalConversionSegments(
     return false;
   }
 
-  // Learn the accepted external result as one multi-segment committed
-  // conversion.  This keeps the phrase boundaries derived from Mozc live
-  // conversion, so callers can approximate a normal multi-segment commit
-  // without writing segment-local records to ZenzFeedbackStore.
+  // Probe the accepted sequence once with the caller-supplied boundaries and
+  // user history disabled.  This preserves intra-phrase context when copying
+  // native candidate metadata and avoids N independent StartConversion calls.
+  // For a caller-reported boundary change, every accepted surface must be
+  // reproduced exactly by this immutable fixed-boundary conversion.
+  std::vector<std::optional<Candidate>> fixed_boundary_candidates(
+      normalized_segments.size());
+  bool fixed_boundary_probe_valid = false;
+
+  Segments fixed_segments;
+  fixed_segments.InitForConvert(total_key);
+  if (fixed_segments.Resize(0, key_sizes)) {
+    ConversionRequest::Options fixed_options = request.options();
+    fixed_options.request_type = ConversionRequest::CONVERSION;
+    fixed_options.enable_user_history_for_conversion = false;
+    fixed_options.max_conversion_candidates_size =
+        std::max<int>(64, fixed_options.max_conversion_candidates_size);
+
+    if (immutable_converter_->Convert(fixed_options, &fixed_segments) &&
+        fixed_segments.conversion_segments_size() ==
+            normalized_segments.size()) {
+      fixed_boundary_probe_valid = true;
+      for (size_t i = 0; i < normalized_segments.size(); ++i) {
+        const Segment& fixed_segment = fixed_segments.conversion_segment(i);
+        if (fixed_segment.key() != normalized_segments[i].key) {
+          fixed_boundary_probe_valid = false;
+          break;
+        }
+
+        for (size_t j = 0; j < fixed_segment.candidates_size(); ++j) {
+          const Candidate& candidate = fixed_segment.candidate(j);
+          if (candidate.value == normalized_segments[i].value) {
+            fixed_boundary_candidates[i] = candidate;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (boundary_resized) {
+    if (!fixed_boundary_probe_valid) {
+      return false;
+    }
+    for (const std::optional<Candidate>& candidate :
+         fixed_boundary_candidates) {
+      if (!candidate.has_value()) {
+        return false;
+      }
+    }
+  }
+
+  // Learn the accepted external result as one committed sequence. Phrase
+  // boundaries are either the unchanged live Mozc boundaries or a
+  // converter-verified native resegmentation.
   Segments learning_segments;
   learning_segments.clear_conversion_segments();
 
-  for (const ExternalConversionSegment& segment : normalized_segments) {
+  for (size_t segment_index = 0;
+       segment_index < normalized_segments.size(); ++segment_index) {
+    const ExternalConversionSegment& segment =
+        normalized_segments[segment_index];
+
     Segment* learning_segment = learning_segments.add_segment();
     learning_segment->set_key(segment.key);
     learning_segment->set_segment_type(Segment::FIXED_VALUE);
 
     Candidate* candidate = learning_segment->add_candidate();
-
-    bool copied_normal_candidate = false;
-    Segments probe_segments;
-    probe_segments.InitForConvert(segment.key);
-
-    const ConversionRequest probe_request =
-        ConversionRequestBuilder()
-            .SetConversionRequestView(request)
-            .SetKey(segment.key)
-            .Build();
-
-    if (StartConversion(probe_request, &probe_segments) &&
-        probe_segments.conversion_segments_size() == 1) {
-      const Segment& probe_segment = probe_segments.conversion_segment(0);
-      for (size_t i = 0; i < probe_segment.candidates_size(); ++i) {
-        const Candidate& probe_candidate = probe_segment.candidate(i);
-        if (probe_candidate.value == segment.value) {
-          *candidate = probe_candidate;
-          copied_normal_candidate = true;
-          break;
-        }
-      }
-    }
-
-    if (!copied_normal_candidate) {
+    if (fixed_boundary_probe_valid &&
+        fixed_boundary_candidates[segment_index].has_value()) {
+      *candidate = *fixed_boundary_candidates[segment_index];
+    } else {
       candidate->key = segment.key;
       candidate->content_key = segment.key;
       candidate->value = segment.value;
       candidate->content_value = segment.value;
     }
 
-    // The copied candidate may already contain ranking-related attributes from
-    // normal conversion.  External learning should control those explicitly.
+    // The copied candidate may already contain ranking-related attributes.
+    // External learning controls only those ranking signals explicitly.
     candidate->attributes &=
         ~(Attribute::RERANKED |
           Attribute::BEST_CANDIDATE |
           Attribute::USER_SEGMENT_HISTORY_REWRITER);
 
-    // Treat only segments actually changed by Zenz as user-selected non-default
-    // commits.  Unchanged context segments are kept in the committed phrase
-    // sequence, but they should not create extra trigger-key evidence.
+    // Treat only segments with explicit local evidence as user-selected
+    // non-default commits. Other context segments remain part of the committed
+    // sequence and are learned with ordinary Mozc commit semantics.
     if (segment.is_reranked) {
       candidate->attributes |= Attribute::RERANKED;
     }
   }
 
+  // A caller-proven and converter-verified resegmentation reproduces the same
+  // signal as a manual boundary edit.  A one-segment result is intentional:
+  // UserBoundaryHistoryRewriter uses it to learn joining several old segments
+  // into one.
+  learning_segments.set_resized(boundary_resized);
+
   FinishConversion(request, &learning_segments);
+  return true;
+}
+
+bool Converter::ResolveExternalConversionSegments(
+    const ConversionRequest& request, absl::string_view key,
+    absl::string_view value,
+    std::vector<ExternalConversionSegment>* segments) const {
+  if (segments == nullptr) {
+    return false;
+  }
+  segments->clear();
+
+  constexpr size_t kMaxSegments = 16;
+  constexpr size_t kMaxKeyChars = 256;
+  constexpr size_t kMaxValueChars = 256;
+  constexpr size_t kMaxValueBytes = 1024;
+  // Explore all bounded reverse-reading paths, including alternatives to
+  // Mozc's top-ranked reading, and accept only a unique path that round-trips.
+  // Bound the search state rather than the number of learnable corrections:
+  // exceeding this limit is an ambiguity / computation guard and fails closed
+  // without writing history.
+  constexpr size_t kMaxReverseReadingPaths = 4096;
+
+  if (key.empty() || value.empty() ||
+      request.request_type() != ConversionRequest::CONVERSION) {
+    return false;
+  }
+  if (!Util::IsValidUtf8(key) || !Util::IsValidUtf8(value) ||
+      Util::CharsLen(key) > kMaxKeyChars ||
+      Util::CharsLen(value) > kMaxValueChars ||
+      value.size() > kMaxValueBytes) {
+    return false;
+  }
+
+  // First ask Mozc's reverse converter for a native surface segmentation.
+  // Reverse conversion can expose multiple reading candidates for one surface.
+  // Candidate rank is useful evidence, but it must not choose a persistent
+  // boundary when another exact reading-boundary explanation also round-trips.
+  Segments reverse_segments;
+  if (!StartReverseConversion(&reverse_segments, value)) {
+    return false;
+  }
+  const size_t reverse_size = reverse_segments.conversion_segments_size();
+  if (reverse_size == 0 || reverse_size > kMaxSegments) {
+    return false;
+  }
+
+  std::vector<std::string> native_values;
+  native_values.reserve(reverse_size);
+  std::string reconstructed_value;
+  for (const Segment& reverse_segment : reverse_segments.conversion_segments()) {
+    if (reverse_segment.key().empty() ||
+        reverse_segment.candidates_size() == 0 ||
+        reverse_segment.candidate(0).value.empty()) {
+      return false;
+    }
+
+    const std::string native_value(reverse_segment.key());
+    // LearnExternalConversionSegments strips ASCII whitespace at segment
+    // boundaries.  A reverse surface containing such whitespace cannot be
+    // represented by the downstream learning contract without mutation.
+    if (absl::StripAsciiWhitespace(native_value).size() !=
+        native_value.size()) {
+      return false;
+    }
+    reconstructed_value.append(native_value);
+    native_values.push_back(native_value);
+  }
+  if (reconstructed_value != value) {
+    return false;
+  }
+
+  ConversionRequest::Options probe_options = request.options();
+  probe_options.request_type = ConversionRequest::CONVERSION;
+  probe_options.enable_user_history_for_conversion = false;
+  probe_options.max_conversion_candidates_size =
+      std::max<int>(64, probe_options.max_conversion_candidates_size);
+
+  // Validates one complete reading path by forcing its boundaries onto the
+  // original key and asking the immutable converter to reproduce every reverse
+  // surface exactly.  This probe has no rewriter / Finish() side effects.
+  auto validate_reading_path =
+      [&](const std::vector<std::string>& native_keys,
+          std::vector<ExternalConversionSegment>* resolved) -> bool {
+    if (resolved == nullptr || native_keys.size() != reverse_size) {
+      return false;
+    }
+    resolved->clear();
+
+    std::vector<uint8_t> native_key_sizes;
+    native_key_sizes.reserve(reverse_size);
+    std::string reconstructed_key;
+    for (const std::string& native_key : native_keys) {
+      if (native_key.empty() || !Util::IsValidUtf8(native_key) ||
+          absl::StripAsciiWhitespace(native_key).size() != native_key.size()) {
+        return false;
+      }
+      const size_t key_chars = Util::CharsLen(native_key);
+      if (key_chars == 0 || key_chars > std::numeric_limits<uint8_t>::max()) {
+        return false;
+      }
+      reconstructed_key.append(native_key);
+      native_key_sizes.push_back(static_cast<uint8_t>(key_chars));
+    }
+    if (reconstructed_key != key) {
+      return false;
+    }
+
+    Segments forward_segments;
+    forward_segments.InitForConvert(key);
+    if (!forward_segments.Resize(0, native_key_sizes)) {
+      return false;
+    }
+    if (!immutable_converter_->Convert(probe_options, &forward_segments) ||
+        forward_segments.conversion_segments_size() != reverse_size) {
+      return false;
+    }
+
+    std::vector<ExternalConversionSegment> candidate_resolution;
+    candidate_resolution.reserve(reverse_size);
+    for (size_t i = 0; i < reverse_size; ++i) {
+      const Segment& forward_segment = forward_segments.conversion_segment(i);
+      if (forward_segment.key() != native_keys[i]) {
+        return false;
+      }
+
+      size_t matched_index = forward_segment.candidates_size();
+      for (size_t j = 0; j < forward_segment.candidates_size(); ++j) {
+        if (forward_segment.candidate(j).value == native_values[i]) {
+          matched_index = j;
+          break;
+        }
+      }
+      if (matched_index == forward_segment.candidates_size()) {
+        return false;
+      }
+
+      candidate_resolution.push_back(
+          {native_keys[i], native_values[i], matched_index != 0});
+    }
+
+    *resolved = std::move(candidate_resolution);
+    return true;
+  };
+
+  // Enumerate every byte-exact reverse-reading path, including candidate(0).
+  // The resolver is allowed to persist a boundary only when forward verification
+  // leaves exactly one explanation.  This intentionally gives up the old
+  // candidate(0) fast return in exchange for fail-closed boundary learning.
+
+  struct ReverseReadingPath {
+    size_t key_bytes = 0;
+    std::vector<std::string> readings;
+  };
+
+  std::vector<ReverseReadingPath> paths(1);
+  paths.front().readings.reserve(reverse_size);
+
+  // Search only reading candidates that are byte-exact prefixes of the
+  // original Zenz key.  Duplicate readings inside one reverse segment are
+  // collapsed so duplicate dictionary candidates do not create fake
+  // ambiguity.  Search explosion fails closed.
+  for (size_t segment_index = 0; segment_index < reverse_size;
+       ++segment_index) {
+    const Segment& reverse_segment =
+        reverse_segments.conversion_segment(segment_index);
+    std::vector<ReverseReadingPath> next_paths;
+
+    for (const ReverseReadingPath& path : paths) {
+      std::vector<absl::string_view> seen_readings;
+      seen_readings.reserve(reverse_segment.candidates_size());
+
+      for (const auto& candidate_ptr : reverse_segment.candidates()) {
+        const Candidate& candidate = *candidate_ptr;
+        const absl::string_view reading = candidate.value;
+        if (reading.empty() ||
+            std::find(seen_readings.begin(), seen_readings.end(), reading) !=
+                seen_readings.end()) {
+          continue;
+        }
+        seen_readings.push_back(reading);
+
+        if (absl::StripAsciiWhitespace(reading).size() != reading.size() ||
+            path.key_bytes + reading.size() > key.size() ||
+            key.substr(path.key_bytes, reading.size()) != reading) {
+          continue;
+        }
+
+        const size_t next_key_bytes = path.key_bytes + reading.size();
+        const bool is_last = segment_index + 1 == reverse_size;
+        if ((is_last && next_key_bytes != key.size()) ||
+            (!is_last && next_key_bytes == key.size())) {
+          continue;
+        }
+
+        if (next_paths.size() >= kMaxReverseReadingPaths) {
+          return false;
+        }
+        ReverseReadingPath next = path;
+        next.key_bytes = next_key_bytes;
+        next.readings.emplace_back(reading);
+        next_paths.push_back(std::move(next));
+      }
+    }
+
+    if (next_paths.empty()) {
+      return false;
+    }
+    paths = std::move(next_paths);
+  }
+
+  // Do not guess between multiple reading-boundary explanations, regardless of
+  // reverse-candidate rank.  Forward verification may eliminate false reverse
+  // candidates; exactly one verified path is required.
+  std::vector<ExternalConversionSegment> unique_resolution;
+  bool found_resolution = false;
+  for (const ReverseReadingPath& path : paths) {
+    if (path.key_bytes != key.size()) {
+      continue;
+    }
+    std::vector<ExternalConversionSegment> candidate_resolution;
+    if (!validate_reading_path(path.readings, &candidate_resolution)) {
+      continue;
+    }
+    if (found_resolution) {
+      segments->clear();
+      return false;
+    }
+    unique_resolution = std::move(candidate_resolution);
+    found_resolution = true;
+  }
+
+  if (!found_resolution) {
+    return false;
+  }
+  *segments = std::move(unique_resolution);
+  return true;
+}
+
+bool Converter::EvaluateExternalConversionSegments(
+    const ConversionRequest& request,
+    absl::Span<const ExternalConversionSegment> segments,
+    std::vector<ExternalConversionSegment>* evaluated_segments) const {
+  if (evaluated_segments == nullptr) {
+    return false;
+  }
+  evaluated_segments->clear();
+
+  constexpr size_t kMaxSegments = 16;
+  constexpr size_t kMaxTotalKeyChars = 256;
+  constexpr size_t kMaxTotalValueChars = 256;
+  constexpr size_t kMaxTotalValueBytes = 1024;
+
+  if (segments.empty() || segments.size() > kMaxSegments ||
+      request.request_type() != ConversionRequest::CONVERSION) {
+    return false;
+  }
+
+  std::string total_key;
+  std::string total_value;
+  std::vector<uint8_t> key_sizes;
+  key_sizes.reserve(segments.size());
+
+  for (const ExternalConversionSegment& segment : segments) {
+    if (segment.key.empty() || segment.value.empty() ||
+        !Util::IsValidUtf8(segment.key) || !Util::IsValidUtf8(segment.value)) {
+      return false;
+    }
+
+    // Keep the exact boundary contract. Trimming here would make the probe
+    // evaluate a different segment sequence than the one observed by Session.
+    if (absl::StripAsciiWhitespace(segment.key).size() != segment.key.size() ||
+        absl::StripAsciiWhitespace(segment.value).size() !=
+            segment.value.size()) {
+      return false;
+    }
+
+    const size_t key_chars = Util::CharsLen(segment.key);
+    if (key_chars == 0 || key_chars > std::numeric_limits<uint8_t>::max()) {
+      return false;
+    }
+
+    total_key.append(segment.key);
+    total_value.append(segment.value);
+    key_sizes.push_back(static_cast<uint8_t>(key_chars));
+  }
+
+  if (Util::CharsLen(total_key) > kMaxTotalKeyChars ||
+      Util::CharsLen(total_value) > kMaxTotalValueChars ||
+      total_value.size() > kMaxTotalValueBytes) {
+    return false;
+  }
+
+  Segments probe_segments;
+  probe_segments.InitForConvert(total_key);
+  if (!probe_segments.Resize(0, key_sizes)) {
+    return false;
+  }
+
+  ConversionRequest::Options probe_options = request.options();
+  probe_options.request_type = ConversionRequest::CONVERSION;
+  probe_options.enable_user_history_for_conversion = false;
+  probe_options.max_conversion_candidates_size =
+      std::max<int>(64, probe_options.max_conversion_candidates_size);
+
+  // Use the immutable converter so this probe cannot invoke a history rewriter
+  // or a Finish() hook. The supplied Resize() boundaries are the only
+  // segmentation under evaluation.
+  if (!immutable_converter_->Convert(probe_options, &probe_segments) ||
+      probe_segments.conversion_segments_size() != segments.size()) {
+    return false;
+  }
+
+  std::vector<ExternalConversionSegment> evaluated;
+  evaluated.reserve(segments.size());
+  for (size_t i = 0; i < segments.size(); ++i) {
+    const Segment& probe_segment = probe_segments.conversion_segment(i);
+    const ExternalConversionSegment& expected = segments[i];
+
+    if (probe_segment.key() != expected.key) {
+      return false;
+    }
+
+    size_t matched_index = probe_segment.candidates_size();
+    for (size_t j = 0; j < probe_segment.candidates_size(); ++j) {
+      if (probe_segment.candidate(j).value == expected.value) {
+        matched_index = j;
+        break;
+      }
+    }
+    if (matched_index == probe_segment.candidates_size()) {
+      return false;
+    }
+
+    evaluated.push_back(
+        {expected.key, expected.value, matched_index != 0, false});
+  }
+
+  *evaluated_segments = std::move(evaluated);
   return true;
 }
 

@@ -86,6 +86,7 @@ mozc_cc_library(
     srcs = ["zenz_segment_projection.cc"],
     hdrs = ["zenz_segment_projection.h"],
     deps = [
+        "//base:util",
         "@com_google_absl//absl/strings",
     ],
 )

@@ -177,6 +177,59 @@ TEST_F(UserBoundaryHistoryRewriterTest, JoinSegmentsByHistory) {
   }
 }
 
+TEST_F(UserBoundaryHistoryRewriterTest,
+       DoesNotStoreUnrepresentableJoinedSegmentLength) {
+  SetIncognito(false);
+  SetLearningLevel(config::Config::DEFAULT_HISTORY);
+  const ConversionRequest convreq = CreateConversionRequest();
+
+  UserBoundaryHistoryRewriter rewriter;
+  {
+    // A 16-character joined target does not fit in one 4-bit length field.
+    Segments segments =
+        MakeSegments({"abcdefghijklmnop"}, Segment::FIXED_VALUE);
+    segments.set_resized(true);
+    rewriter.Finish(convreq, segments);
+  }
+  {
+    // If the invalid target had been truncated and stored, this two-segment
+    // input would find a boundary record. No record must exist.
+    Segments segments =
+        MakeSegments({"abcdefgh", "ijklmnop"}, Segment::FREE);
+    EXPECT_FALSE(
+        rewriter.CheckResizeSegmentsRequest(convreq, segments).has_value());
+  }
+}
+
+TEST_F(UserBoundaryHistoryRewriterTest,
+       StoresRepresentableSplitAcrossLongWholeKey) {
+  SetIncognito(false);
+  SetLearningLevel(config::Config::DEFAULT_HISTORY);
+  const ConversionRequest convreq = CreateConversionRequest();
+
+  UserBoundaryHistoryRewriter rewriter;
+  {
+    // The whole key is 16 characters, but each learned target boundary is
+    // representable. This must remain learnable.
+    Segments segments =
+        MakeSegments({"abcdefgh", "ijklmnop"}, Segment::FIXED_VALUE);
+    segments.set_resized(true);
+    rewriter.Finish(convreq, segments);
+  }
+  {
+    // SegmentsKey::Create intentionally remains permissive for the current
+    // unsplit 16-character segment so the stored 8 + 8 split can be recalled.
+    Segments segments =
+        MakeSegments({"abcdefghijklmnop"}, Segment::FREE);
+    std::optional<RewriterInterface::ResizeSegmentsRequest> resize_request =
+        rewriter.CheckResizeSegmentsRequest(convreq, segments);
+    ASSERT_TRUE(resize_request.has_value());
+    EXPECT_EQ(resize_request->segment_index, 0);
+    EXPECT_THAT(resize_request->segment_sizes,
+                ElementsAre(8, 8, 0, 0, 0, 0, 0, 0));
+  }
+}
+
 TEST_F(UserBoundaryHistoryRewriterTest, NoInsertWhenIncognito) {
   SetLearningLevel(config::Config::DEFAULT_HISTORY);
 

@@ -1373,23 +1373,82 @@ class RecordingExternalLearningConverter : public MockConverter {
     std::vector<std::string> keys;
     std::vector<std::string> values;
     std::vector<bool> reranked;
+    std::vector<bool> boundary_resized;
     keys.reserve(segments.size());
     values.reserve(segments.size());
     reranked.reserve(segments.size());
+    boundary_resized.reserve(segments.size());
     for (const ExternalConversionSegment& segment : segments) {
       keys.push_back(segment.key);
       values.push_back(segment.value);
       reranked.push_back(segment.is_reranked);
+      boundary_resized.push_back(segment.boundary_resized);
     }
     learned_segment_keys.push_back(std::move(keys));
     learned_segment_values.push_back(std::move(values));
     learned_segment_reranked.push_back(std::move(reranked));
+    learned_segment_boundary_resized.push_back(
+        std::move(boundary_resized));
     return learn_segments_result;
+  }
+
+  bool ResolveExternalConversionSegments(
+      const ConversionRequest& request, absl::string_view key,
+      absl::string_view value,
+      std::vector<ExternalConversionSegment>* segments) const override {
+    ++resolve_segments_call_count;
+    last_resolve_request_type = request.request_type();
+    last_resolve_key = std::string(key);
+    last_resolve_value = std::string(value);
+    if (segments == nullptr) {
+      return false;
+    }
+    segments->clear();
+    if (!resolve_segments_result) {
+      return false;
+    }
+    *segments = resolved_segments;
+    return true;
+  }
+
+  bool EvaluateExternalConversionSegments(
+      const ConversionRequest& request,
+      absl::Span<const ExternalConversionSegment> segments,
+      std::vector<ExternalConversionSegment>* evaluated_segments)
+      const override {
+    ++evaluate_segments_call_count;
+    last_evaluate_request_type = request.request_type();
+    last_evaluate_segments.assign(segments.begin(), segments.end());
+    evaluate_segments_calls.emplace_back(segments.begin(), segments.end());
+    if (evaluated_segments == nullptr) {
+      return false;
+    }
+    evaluated_segments->clear();
+    if (!evaluated_segments_results.empty()) {
+      const size_t result_index =
+          static_cast<size_t>(evaluate_segments_call_count - 1);
+      if (result_index >= evaluated_segments_results.size()) {
+        return false;
+      }
+      *evaluated_segments = evaluated_segments_results[result_index];
+      return true;
+    }
+    if (!evaluate_segments_result) {
+      return false;
+    }
+    *evaluated_segments = evaluated_segments_result;
+    return true;
   }
 
   mutable int learn_call_count = 0;
   mutable int learn_segments_call_count = 0;
+  mutable int resolve_segments_call_count = 0;
+  mutable int evaluate_segments_call_count = 0;
   mutable ConversionRequest::RequestType last_request_type =
+      ConversionRequest::CONVERSION;
+  mutable ConversionRequest::RequestType last_resolve_request_type =
+      ConversionRequest::CONVERSION;
+  mutable ConversionRequest::RequestType last_evaluate_request_type =
       ConversionRequest::CONVERSION;
   mutable bool last_enable_user_history = false;
   mutable std::string last_key;
@@ -1399,8 +1458,20 @@ class RecordingExternalLearningConverter : public MockConverter {
   mutable std::vector<std::vector<std::string>> learned_segment_keys;
   mutable std::vector<std::vector<std::string>> learned_segment_values;
   mutable std::vector<std::vector<bool>> learned_segment_reranked;
+  mutable std::vector<std::vector<bool>> learned_segment_boundary_resized;
+  mutable std::string last_resolve_key;
+  mutable std::string last_resolve_value;
+  mutable std::vector<ExternalConversionSegment> last_evaluate_segments;
+  mutable std::vector<std::vector<ExternalConversionSegment>>
+      evaluate_segments_calls;
   bool learn_result = true;
   bool learn_segments_result = true;
+  bool resolve_segments_result = false;
+  std::vector<ExternalConversionSegment> resolved_segments;
+  bool evaluate_segments_result = false;
+  std::vector<ExternalConversionSegment> evaluated_segments_result;
+  std::vector<std::vector<ExternalConversionSegment>>
+      evaluated_segments_results;
 };
 
 std::shared_ptr<RecordingExternalLearningConverter>
@@ -1537,7 +1608,7 @@ TEST_F(SessionTest,
 
   session_peer.ConfirmPendingZenzFeedback();
 
-  ASSERT_EQ(converter->learn_call_count, 1);
+  ASSERT_EQ(converter->learn_call_count, 0);
   ASSERT_EQ(converter->learn_segments_call_count, 1);
   EXPECT_EQ(converter->learned_segment_keys[0],
             std::vector<std::string>({"かれは", "てんてきです"}));
@@ -1545,8 +1616,6 @@ TEST_F(SessionTest,
             std::vector<std::string>({"彼は", "天敵です"}));
   EXPECT_EQ(converter->learned_segment_reranked[0],
             std::vector<bool>({false, true}));
-  EXPECT_EQ(converter->learned_keys[0], "かれはてんてきです");
-  EXPECT_EQ(converter->learned_values[0], "彼は天敵です");
 
   const std::vector<ZenzFeedbackEntry> entries =
       session_peer.zenz_feedback_store_().ListEntries();
@@ -1615,12 +1684,8 @@ TEST_F(SessionTest,
 
   session_peer.ConfirmPendingZenzFeedback();
 
-  ASSERT_EQ(converter->learn_call_count, 1);
+  ASSERT_EQ(converter->learn_call_count, 0);
   ASSERT_EQ(converter->learn_segments_call_count, 1);
-  EXPECT_EQ(converter->learned_keys[0],
-            "かたろぐにのせたほうがいい");
-  EXPECT_EQ(converter->learned_values[0],
-            "カタログに載せた方がいい");
   EXPECT_EQ(converter->learned_segment_keys[0],
             std::vector<std::string>(
                 {"かたろぐに", "のせたほうが", "いい"}));
@@ -1629,6 +1694,1116 @@ TEST_F(SessionTest,
                 {"カタログに", "載せた方が", "いい"}));
   EXPECT_EQ(converter->learned_segment_reranked[0],
             std::vector<bool>({false, true, false}));
+  EXPECT_EQ(converter->learned_segment_boundary_resized[0],
+            std::vector<bool>({false, false, false}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackLearnsMozcNativeResegmentationFallback) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("ほんむ");
+  segment->set_value("本務");
+  segment->set_value_length(Util::CharsLen("本務"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("りょう");
+  segment->set_value("量");
+  segment->set_value_length(Util::CharsLen("量"));
+
+  // The live boundaries cannot project "本無料" safely.  Simulate the
+  // converter proving that ordinary Mozc can instead reproduce the accepted
+  // value with [ほん -> 本] [むりょう -> 無料].  Both are top candidates, so
+  // this is a boundary-only virtual user operation rather than reranking.
+  converter->resolve_segments_result = true;
+  converter->resolved_segments = {
+      {"ほん", "本", false}, {"むりょう", "無料", false}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "ほんむりょう", "empty", "本無料");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->resolve_segments_call_count, 1);
+  EXPECT_EQ(converter->last_resolve_key, "ほんむりょう");
+  EXPECT_EQ(converter->last_resolve_value, "本無料");
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_()
+                  .reverse_learning_segments.empty());
+  ASSERT_EQ(session_peer.pending_zenz_feedback_()
+                .reverse_projected_learning_segments.size(),
+            2);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_()
+                .reverse_projected_learning_segments[0].key,
+            "ほん");
+  EXPECT_EQ(session_peer.pending_zenz_feedback_()
+                .reverse_projected_learning_segments[0].value,
+            "本");
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_()
+                   .reverse_projected_learning_segments[0].is_reranked);
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_()
+                  .reverse_projected_learning_segments[0].boundary_resized);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_()
+                .reverse_projected_learning_segments[1].key,
+            "むりょう");
+  EXPECT_EQ(session_peer.pending_zenz_feedback_()
+                .reverse_projected_learning_segments[1].value,
+            "無料");
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_()
+                   .reverse_projected_learning_segments[1].is_reranked);
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_()
+                  .reverse_projected_learning_segments[1].boundary_resized);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  ASSERT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_keys[0],
+            std::vector<std::string>({"ほん", "むりょう"}));
+  EXPECT_EQ(converter->learned_segment_values[0],
+            std::vector<std::string>({"本", "無料"}));
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({false, false}));
+  EXPECT_EQ(converter->learned_segment_boundary_resized[0],
+            std::vector<bool>({true, true}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackDoesNotLearnUnresolvedAggregateSegment) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("ほんむ");
+  segment->set_value("本務");
+  segment->set_value_length(Util::CharsLen("本務"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("りょう");
+  segment->set_value("量");
+  segment->set_value_length(Util::CharsLen("量"));
+
+  // Projection can prove only the outer span.  Leave native resolution
+  // disabled so the aggregate remains ambiguous. It must remain a barrier and
+  // must not be committed as one synthetic structured segment.
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "ほんむりょう", "empty", "本無料");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->resolve_segments_call_count, 1);
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 1);
+  EXPECT_TRUE(projected[0].needs_native_resolution);
+  EXPECT_TRUE(projected[0].is_reranked);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_EQ(converter->learn_segments_call_count, 0);
+  // The existing exact full-sequence fallback is a separate policy choice;
+  // this test only forbids treating the unresolved aggregate as structured
+  // local evidence.
+  ASSERT_EQ(converter->learn_call_count, 1);
+  EXPECT_EQ(converter->learned_keys[0], "ほんむりょう");
+  EXPECT_EQ(converter->learned_values[0], "本無料");
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackKeepsMoreThanFourExactProjectedFallbacks) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  const std::vector<std::pair<std::string, std::string>> baseline = {
+      {"あ", "亜"}, {"の", "の"}, {"い", "伊"}, {"は", "は"},
+      {"う", "宇"}, {"に", "に"}, {"え", "江"}, {"を", "を"},
+      {"お", "尾"}};
+  for (const auto& [key, value] : baseline) {
+    commands::Preedit::Segment* segment = live_preedit.add_segment();
+    segment->set_key(key);
+    segment->set_value(value);
+    segment->set_value_length(Util::CharsLen(value));
+  }
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "あのいはうにえをお", "empty", "阿の衣は羽に絵を緒");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  const auto& fallback =
+      session_peer.pending_zenz_feedback_().reverse_learning_segments;
+  ASSERT_EQ(fallback.size(), 5);
+  EXPECT_EQ(fallback[0],
+            std::make_pair(std::string("あ"), std::string("阿")));
+  EXPECT_EQ(fallback[4],
+            std::make_pair(std::string("お"), std::string("緒")));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackKeepsMoreThanFourVerifiedNativeReranks) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  // No live preedit projection is available, so exercise the converter-verified
+  // whole-sequence resolver. Every returned segment is independently verified
+  // by that resolver; there is no reason to discard the fifth signal merely
+  // because of a fixed count cap.
+  session_peer.live_conversion_preedit_output_().Clear();
+  converter->resolve_segments_result = true;
+  converter->resolved_segments = {
+      {"あ", "亜", true}, {"い", "伊", true}, {"う", "宇", true},
+      {"え", "江", true}, {"お", "尾", true}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "あいうえお", "empty", "亜伊宇江尾");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 5);
+  for (const ZenzProjectedLearningSegment& segment : projected) {
+    EXPECT_TRUE(segment.is_reranked);
+  }
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({true, true, true, true, true}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackKeepsNativePrefixAcrossSymbolSeparator) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("ほんむ");
+  segment->set_value("本務");
+  segment->set_value_length(Util::CharsLen("本務"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("りょう");
+  segment->set_value("量");
+  segment->set_value_length(Util::CharsLen("量"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("(");
+  segment->set_value("（");
+  segment->set_value_length(Util::CharsLen("（"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("げんかく");
+  segment->set_value("幻覚");
+  segment->set_value_length(Util::CharsLen("幻覚"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key(")");
+  segment->set_value("）");
+  segment->set_value_length(Util::CharsLen("）"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("のことです");
+  segment->set_value("のことです");
+  segment->set_value_length(Util::CharsLen("のことです"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key(".");
+  segment->set_value("。");
+  segment->set_value_length(Util::CharsLen("。"));
+
+  // Only the ambiguous prefix is sent to the native resolver. The parentheses
+  // and punctuation remain ordinary projection units and later act as
+  // separators because symbol-only keys do not pass the segment privacy gate.
+  converter->resolve_segments_result = true;
+  converter->resolved_segments = {
+      {"ほん", "本", false}, {"むりょう", "無料", false}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "ほんむりょう(げんかく)のことです.", "empty",
+      "本無料（幻覚）のことです。");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->resolve_segments_call_count, 1);
+  EXPECT_EQ(converter->last_resolve_key, "ほんむりょう");
+  EXPECT_EQ(converter->last_resolve_value, "本無料");
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 7);
+  EXPECT_EQ(projected[0].key, "ほん");
+  EXPECT_EQ(projected[1].key, "むりょう");
+  EXPECT_TRUE(projected[0].boundary_resized);
+  EXPECT_TRUE(projected[1].boundary_resized);
+  EXPECT_EQ(projected[2].key, "(");
+  EXPECT_EQ(projected[3].key, "げんかく");
+  EXPECT_EQ(projected[4].key, ")");
+  EXPECT_EQ(projected[5].key, "のことです");
+  EXPECT_EQ(projected[6].key, ".");
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  // The verified prefix is learned once as the structured virtual commit.
+  // ZenzFeedbackStore keeps the exact full sequence, so Mozc history does not
+  // learn the same accepted sentence again as a synthetic single segment.
+  ASSERT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_keys[0],
+            std::vector<std::string>({"ほん", "むりょう"}));
+  EXPECT_EQ(converter->learned_segment_values[0],
+            std::vector<std::string>({"本", "無料"}));
+  EXPECT_EQ(converter->learned_segment_boundary_resized[0],
+            std::vector<bool>({true, true}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackLearnsLexicalCoreBeforeAttachedParenthesis) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("げんしょう(");
+  segment->set_value("減少（");
+  segment->set_value_length(Util::CharsLen("減少（"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("げんかく");
+  segment->set_value("幻覚");
+  segment->set_value_length(Util::CharsLen("幻覚"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key(")");
+  segment->set_value("）");
+  segment->set_value_length(Util::CharsLen("）"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("のことです.");
+  segment->set_value("のことです。");
+  segment->set_value_length(Util::CharsLen("のことです。"));
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "げんしょう(げんかく)のことです.", "empty",
+      "現象（幻覚）のことです。");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  // A changed lexical core first gets an exact-boundary read-only probe. This
+  // mock leaves both that probe and native resolution disabled, exercising the
+  // final safe candidate-only fallback without assuming one-segment native
+  // resolution is unsupported.
+  ASSERT_EQ(converter->evaluate_segments_call_count, 2);
+  ASSERT_EQ(converter->evaluate_segments_calls.size(), 2);
+  ASSERT_EQ(converter->evaluate_segments_calls[0].size(), 1);
+  EXPECT_EQ(converter->evaluate_segments_calls[0][0].key, "げんしょう");
+  EXPECT_EQ(converter->evaluate_segments_calls[0][0].value, "現象");
+  ASSERT_EQ(converter->evaluate_segments_calls[1].size(), 3);
+  EXPECT_EQ(converter->evaluate_segments_calls[1][0].key, "げんしょう");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][1].key, "(");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][2].key, "げんかく");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][2].value, "幻覚");
+  EXPECT_EQ(converter->resolve_segments_call_count, 1);
+  EXPECT_EQ(converter->last_resolve_key, "げんしょう");
+  EXPECT_EQ(converter->last_resolve_value, "現象");
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 5);
+  EXPECT_EQ(projected[0].key, "げんしょう");
+  EXPECT_EQ(projected[0].value, "現象");
+  EXPECT_TRUE(projected[0].is_reranked);
+  EXPECT_FALSE(projected[0].boundary_resized);
+  EXPECT_EQ(projected[1].key, "(");
+  EXPECT_EQ(projected[1].value, "（");
+  EXPECT_FALSE(projected[1].is_reranked);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  // The changed lexical core is learned as a one-segment structured commit.
+  // The exact full sentence remains in ZenzFeedbackStore, avoiding duplicate
+  // Mozc history strength for the same acceptance.
+  ASSERT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  ASSERT_EQ(converter->learned_segment_keys.size(), 1);
+  EXPECT_EQ(converter->learned_segment_keys[0],
+            std::vector<std::string>({"げんしょう"}));
+  EXPECT_EQ(converter->learned_segment_values[0],
+            std::vector<std::string>({"現象"}));
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({true}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackHardensUnchangedIslandAgainstContextLoss) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  // This models the observed real-machine state: with the full right context,
+  // Mozc already displays "現象" in its own independent segment.
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("きいたり");
+  segment->set_value("聞いたり");
+  segment->set_value_length(Util::CharsLen("聞いたり"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("する");
+  segment->set_value("する");
+  segment->set_value_length(Util::CharsLen("する"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("げんしょう");
+  segment->set_value("現象");
+  segment->set_value_length(Util::CharsLen("現象"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("(");
+  segment->set_value("（");
+  segment->set_value_length(Util::CharsLen("（"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("げんかく");
+  segment->set_value("幻覚");
+  segment->set_value_length(Util::CharsLen("幻覚"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key(")");
+  segment->set_value("）");
+  segment->set_value_length(Util::CharsLen("）"));
+
+  // When the following "(" is removed, simulate native Mozc still using the
+  // same boundaries/surfaces but ranking "現象" below another candidate.
+  converter->evaluated_segments_results = {
+      {{"きいたり", "聞いたり", false, false},
+       {"する", "する", false, false},
+       {"げんしょう", "現象", true, false}},
+      {{"きいたり", "聞いたり", false, false},
+       {"する", "する", false, false},
+       {"げんしょう", "現象", false, false},
+       {"(", "（", false, false},
+       {"げんかく", "幻覚", false, false}}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "きいたりするげんしょう(げんかく)", "empty",
+      "聞いたりする現象（幻覚）");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(converter->resolve_segments_call_count, 0);
+  ASSERT_EQ(converter->evaluate_segments_call_count, 2);
+  ASSERT_EQ(converter->evaluate_segments_calls.size(), 2);
+  ASSERT_EQ(converter->evaluate_segments_calls[0].size(), 3);
+  EXPECT_EQ(converter->evaluate_segments_calls[0][0].key, "きいたり");
+  EXPECT_EQ(converter->evaluate_segments_calls[0][1].key, "する");
+  EXPECT_EQ(converter->evaluate_segments_calls[0][2].key, "げんしょう");
+  EXPECT_EQ(converter->evaluate_segments_calls[0][2].value, "現象");
+
+  // Single-segment hardening also probes the later "幻覚" island.  The
+  // prefix includes the already-typed parenthesis and the earlier lexical
+  // island, and candidate(0) remains "幻覚", so no learning signal is added.
+  ASSERT_EQ(converter->evaluate_segments_calls[1].size(), 5);
+  EXPECT_EQ(converter->evaluate_segments_calls[1][0].key, "きいたり");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][2].key, "げんしょう");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][3].key, "(");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][4].key, "げんかく");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][4].value, "幻覚");
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 6);
+  EXPECT_EQ(projected[0].key, "きいたり");
+  EXPECT_FALSE(projected[0].is_reranked);
+  EXPECT_FALSE(projected[0].boundary_resized);
+  EXPECT_EQ(projected[1].key, "する");
+  EXPECT_FALSE(projected[1].is_reranked);
+  EXPECT_FALSE(projected[1].boundary_resized);
+  EXPECT_EQ(projected[2].key, "げんしょう");
+  EXPECT_EQ(projected[2].value, "現象");
+  EXPECT_TRUE(projected[2].is_reranked);
+  EXPECT_FALSE(projected[2].boundary_resized);
+  EXPECT_EQ(projected[3].key, "(");
+  EXPECT_FALSE(projected[3].is_reranked);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  // The lexical island before '(' is learned once with the original visible
+  // boundaries and only its final context-sensitive segment marked reranked.
+  ASSERT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_keys[0],
+            std::vector<std::string>(
+                {"きいたり", "する", "げんしょう"}));
+  EXPECT_EQ(converter->learned_segment_values[0],
+            std::vector<std::string>(
+                {"聞いたり", "する", "現象"}));
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({false, false, true}));
+  EXPECT_EQ(converter->learned_segment_boundary_resized[0],
+            std::vector<bool>({false, false, false}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackContextLossProbePreservesTypedPrefix) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("てんてき");
+  segment->set_value("点滴");
+  segment->set_value_length(Util::CharsLen("点滴"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key(",");
+  segment->set_value("、");
+  segment->set_value_length(Util::CharsLen("、"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("げんしょう");
+  segment->set_value("現象");
+  segment->set_value_length(Util::CharsLen("現象"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("(");
+  segment->set_value("（");
+  segment->set_value_length(Util::CharsLen("（"));
+
+  // The first lexical island is an explicit Zenz change. Round 3 first proves
+  // that its accepted surface is reproducible under the exact live boundary;
+  // projected.is_reranked must preserve the explicit acceptance even when the
+  // history-free native candidate is top-ranked. The second unchanged island
+  // is then context-loss probed with the entire typed prefix, including the
+  // comma, instead of being evaluated in isolation.
+  converter->evaluated_segments_results = {
+      {{"てんてき", "天敵", false, false}},
+      {{"てんてき", "天敵", false, false},
+       {",", "、", false, false},
+       {"げんしょう", "現象", true, false}}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "てんてき,げんしょう(", "empty", "天敵、現象（");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(converter->resolve_segments_call_count, 0);
+  ASSERT_EQ(converter->evaluate_segments_call_count, 2);
+  ASSERT_EQ(converter->evaluate_segments_calls.size(), 2);
+
+  // First call: Round 3 fixed-boundary evidence for the explicit change.
+  ASSERT_EQ(converter->evaluate_segments_calls[0].size(), 1);
+  EXPECT_EQ(converter->evaluate_segments_calls[0][0].key, "てんてき");
+  EXPECT_EQ(converter->evaluate_segments_calls[0][0].value, "天敵");
+
+  // Second call: context-loss evidence for the later unchanged island. This is
+  // a different question and intentionally preserves the already-typed comma
+  // and accepted left context.
+  ASSERT_EQ(converter->evaluate_segments_calls[1].size(), 3);
+  EXPECT_EQ(converter->evaluate_segments_calls[1][0].key, "てんてき");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][0].value, "天敵");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][1].key, ",");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][1].value, "、");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][2].key, "げんしょう");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][2].value, "現象");
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 4);
+  EXPECT_TRUE(projected[0].is_reranked);
+  EXPECT_FALSE(projected[1].is_reranked);
+  EXPECT_TRUE(projected[2].is_reranked);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackResolvesChangedLexicalIslandBeforeSymbol) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  // The lexical correction is buried in a larger live-Mozc segment and the
+  // opening parenthesis is attached to its tail.
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("きいたりするげんしょう(");
+  segment->set_value("聞いたりする減少（");
+  segment->set_value_length(Util::CharsLen("聞いたりする減少（"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("げんかく");
+  segment->set_value("幻覚");
+  segment->set_value_length(Util::CharsLen("幻覚"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key(")");
+  segment->set_value("）");
+  segment->set_value_length(Util::CharsLen("）"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("のことです.");
+  segment->set_value("のことです。");
+  segment->set_value_length(Util::CharsLen("のことです。"));
+
+  // The exact one-segment visible boundary cannot reproduce the accepted
+  // surface in this probe, so Round 3 must fall back to Mozc-native
+  // resegmentation. The resolver then proves
+  // [きいたりする -> 聞いたりする] [げんしょう -> 現象].
+  converter->evaluate_segments_result = false;
+  converter->resolve_segments_result = true;
+  converter->resolved_segments = {
+      {"きいたりする", "聞いたりする", false},
+      {"げんしょう", "現象", true}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "きいたりするげんしょう(げんかく)のことです.", "empty",
+      "聞いたりする現象（幻覚）のことです。");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->evaluate_segments_call_count, 2);
+  ASSERT_EQ(converter->evaluate_segments_calls.size(), 2);
+  ASSERT_EQ(converter->evaluate_segments_calls[0].size(), 1);
+  EXPECT_EQ(converter->evaluate_segments_calls[0][0].key,
+            "きいたりするげんしょう");
+  EXPECT_EQ(converter->evaluate_segments_calls[0][0].value,
+            "聞いたりする現象");
+  ASSERT_EQ(converter->evaluate_segments_calls[1].size(), 3);
+  EXPECT_EQ(converter->evaluate_segments_calls[1][0].key,
+            "きいたりするげんしょう");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][1].key, "(");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][2].key, "げんかく");
+  EXPECT_EQ(converter->evaluate_segments_calls[1][2].value, "幻覚");
+  ASSERT_EQ(converter->resolve_segments_call_count, 1);
+  EXPECT_EQ(converter->last_resolve_key, "きいたりするげんしょう");
+  EXPECT_EQ(converter->last_resolve_value, "聞いたりする現象");
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 6);
+  EXPECT_EQ(projected[0].key, "きいたりする");
+  EXPECT_EQ(projected[0].value, "聞いたりする");
+  EXPECT_FALSE(projected[0].is_reranked);
+  EXPECT_TRUE(projected[0].boundary_resized);
+
+  EXPECT_EQ(projected[1].key, "げんしょう");
+  EXPECT_EQ(projected[1].value, "現象");
+  EXPECT_TRUE(projected[1].is_reranked);
+  EXPECT_TRUE(projected[1].boundary_resized);
+
+  EXPECT_EQ(projected[2].key, "(");
+  EXPECT_EQ(projected[2].value, "（");
+  EXPECT_FALSE(projected[2].boundary_resized);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  // The verified lexical island is learned once as a native multi-segment
+  // commit, and the parenthesis prevents boundary history from leaking into
+  // the following island.
+  ASSERT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_keys[0],
+            std::vector<std::string>({"きいたりする", "げんしょう"}));
+  EXPECT_EQ(converter->learned_segment_values[0],
+            std::vector<std::string>({"聞いたりする", "現象"}));
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({false, true}));
+  EXPECT_EQ(converter->learned_segment_boundary_resized[0],
+            std::vector<bool>({true, true}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackHardensSingleSegmentBeforeSymbol) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("げんしょう");
+  segment->set_value("現象");
+  segment->set_value_length(Util::CharsLen("現象"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("(");
+  segment->set_value("（");
+  segment->set_value_length(Util::CharsLen("（"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("げんかく");
+  segment->set_value("幻覚");
+  segment->set_value_length(Util::CharsLen("幻覚"));
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"げんしょう", "現象", true, false}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "げんしょう(げんかく", "empty", "現象（幻覚");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->last_evaluate_segments.size(), 1);
+  EXPECT_EQ(converter->last_evaluate_segments[0].key, "げんしょう");
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 3);
+  EXPECT_TRUE(projected[0].is_reranked);
+  EXPECT_FALSE(projected[0].boundary_resized);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_keys[0],
+            std::vector<std::string>({"げんしょう"}));
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({true}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackPrefersKnownBoundariesBeforeNativeResegmentation) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("こうしょう");
+  segment->set_value("交章");
+  segment->set_value_length(Util::CharsLen("交章"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("を");
+  segment->set_value("を");
+  segment->set_value_length(Util::CharsLen("を"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("すすめる");
+  segment->set_value("進める");
+  segment->set_value_length(Util::CharsLen("進める"));
+
+  // Both changed surfaces are reproducible under the exact visible boundaries.
+  // Even if a reverse resolver could invent another valid segmentation, the
+  // stronger fixed-boundary evidence must win and no boundary history should
+  // be synthesized.
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"こうしょう", "交渉", true, false},
+      {"を", "を", false, false},
+      {"すすめる", "勧める", true, false}};
+  converter->resolve_segments_result = true;
+  converter->resolved_segments = {
+      {"こうしょうを", "交渉を", false},
+      {"すすめる", "勧める", false}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "こうしょうをすすめる", "empty", "交渉を勧める");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->resolve_segments_call_count, 0);
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 3);
+  EXPECT_EQ(projected[0].key, "こうしょう");
+  EXPECT_EQ(projected[1].key, "を");
+  EXPECT_EQ(projected[2].key, "すすめる");
+  EXPECT_TRUE(projected[0].is_reranked);
+  EXPECT_FALSE(projected[1].is_reranked);
+  EXPECT_TRUE(projected[2].is_reranked);
+  EXPECT_FALSE(projected[0].boundary_resized);
+  EXPECT_FALSE(projected[1].boundary_resized);
+  EXPECT_FALSE(projected[2].boundary_resized);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_keys[0],
+            std::vector<std::string>(
+                {"こうしょう", "を", "すすめる"}));
+  EXPECT_EQ(converter->learned_segment_values[0],
+            std::vector<std::string>(
+                {"交渉", "を", "勧める"}));
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({true, false, true}));
+  EXPECT_EQ(converter->learned_segment_boundary_resized[0],
+            std::vector<bool>({false, false, false}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackKeepsExplicitChangeWhenNativeCandidateIsTop) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("げんしょう(");
+  segment->set_value("減少（");
+  segment->set_value_length(Util::CharsLen("減少（"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("げんかく");
+  segment->set_value("幻覚");
+  segment->set_value_length(Util::CharsLen("幻覚"));
+
+  // The accepted surface is candidate(0) under the exact visible boundary,
+  // but Zenz explicitly changed the live surface. Preserve that stronger
+  // acceptance signal without invoking reverse resegmentation.
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"げんしょう", "現象", false, false}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "げんしょう(げんかく", "empty", "現象（幻覚");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->resolve_segments_call_count, 0);
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 3);
+  EXPECT_EQ(projected[0].key, "げんしょう");
+  EXPECT_EQ(projected[0].value, "現象");
+  EXPECT_TRUE(projected[0].is_reranked);
+  EXPECT_FALSE(projected[0].boundary_resized);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({true}));
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackDoesNotTransferSignalAcrossValueRepartition) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("あ");
+  segment->set_value("亜");
+  segment->set_value_length(Util::CharsLen("亜"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("い");
+  segment->set_value("中");
+  segment->set_value_length(Util::CharsLen("中"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("う");
+  segment->set_value("宇");
+  segment->set_value_length(Util::CharsLen("宇"));
+
+  // The accepted surface projects as [あ -> 阿衣] [い -> 中] [う -> 雨雲].
+  // Force fixed-boundary evaluation to fail, then simulate a native resolver
+  // returning the same key boundaries but a different surface partition.
+  // Explicit Zenz rerank evidence must not cross that value-boundary change.
+  converter->resolve_segments_result = true;
+  converter->resolved_segments = {
+      {"あ", "阿", false}, {"い", "衣中", false}, {"う", "雨雲", false}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "あいう", "empty", "阿衣中雨雲");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->resolve_segments_call_count, 1);
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 3);
+  EXPECT_EQ(projected[0].key, "あ");
+  EXPECT_EQ(projected[0].value, "阿");
+  EXPECT_EQ(projected[1].key, "い");
+  EXPECT_EQ(projected[1].value, "衣中");
+  EXPECT_EQ(projected[2].key, "う");
+  EXPECT_EQ(projected[2].value, "雨雲");
+  EXPECT_FALSE(projected[0].is_reranked);
+  EXPECT_FALSE(projected[1].is_reranked);
+  EXPECT_FALSE(projected[2].is_reranked);
+  EXPECT_FALSE(projected[0].boundary_resized);
+  EXPECT_FALSE(projected[1].boundary_resized);
+  EXPECT_FALSE(projected[2].boundary_resized);
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_()
+                  .reverse_learning_segments.empty());
+
+  session_peer.ConfirmPendingZenzFeedback();
+  EXPECT_EQ(converter->learn_segments_call_count, 0);
+  EXPECT_EQ(converter->learn_call_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackLearnsNativeBoundaryJoin) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("ほんむ");
+  segment->set_value("本務");
+  segment->set_value_length(Util::CharsLen("本務"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("りょう");
+  segment->set_value("量");
+  segment->set_value_length(Util::CharsLen("量"));
+
+  converter->resolve_segments_result = true;
+  converter->resolved_segments = {
+      {"ほんむりょう", "本無料", false}};
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "ほんむりょう", "empty", "本無料");
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(converter->resolve_segments_call_count, 1);
+
+  const auto& projected = session_peer.pending_zenz_feedback_()
+                              .reverse_projected_learning_segments;
+  ASSERT_EQ(projected.size(), 1);
+  EXPECT_EQ(projected[0].key, "ほんむりょう");
+  EXPECT_EQ(projected[0].value, "本無料");
+  // The native candidate is already top-ranked in the history-free probe,
+  // but Zenz explicitly changed the live Mozc surface.  Preserve that stronger
+  // acceptance signal while also learning the 2 -> 1 boundary join.
+  EXPECT_TRUE(projected[0].is_reranked);
+  EXPECT_TRUE(projected[0].boundary_resized);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_EQ(converter->learn_call_count, 0);
+  ASSERT_EQ(converter->learn_segments_call_count, 1);
+  EXPECT_EQ(converter->learned_segment_keys[0],
+            std::vector<std::string>({"ほんむりょう"}));
+  EXPECT_EQ(converter->learned_segment_reranked[0],
+            std::vector<bool>({true}));
+  EXPECT_EQ(converter->learned_segment_boundary_resized[0],
+            std::vector<bool>({true}));
 #else
   GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
 #endif

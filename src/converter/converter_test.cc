@@ -136,6 +136,140 @@ void PushBackCandidate(absl::string_view text, Segment& segment) {
   cand->content_value = cand->key;
 }
 
+
+enum class AlternateReverseReadingMode {
+  kUniqueAlternate,
+  kAmbiguousAlternates,
+  kAmbiguousIncludingPreferred,
+};
+
+class AlternateReverseReadingImmutableConverter
+    : public ImmutableConverterInterface {
+ public:
+  explicit AlternateReverseReadingImmutableConverter(
+      AlternateReverseReadingMode mode)
+      : mode_(mode) {}
+
+  bool Convert(const ConversionOptions& options,
+               Segments* segments) const override {
+    if (segments == nullptr) {
+      return false;
+    }
+    if (options.request_type == RequestType::REVERSE_CONVERSION) {
+      return ReverseConvert(segments);
+    }
+    if (options.request_type == RequestType::CONVERSION) {
+      return ForwardConvert(segments);
+    }
+    return false;
+  }
+
+ private:
+  static void AddReverseCandidate(absl::string_view surface,
+                                  absl::string_view reading,
+                                  Segment* segment) {
+    Candidate* candidate = segment->add_candidate();
+    candidate->key = std::string(surface);
+    candidate->content_key = candidate->key;
+    candidate->value = std::string(reading);
+    candidate->content_value = candidate->value;
+  }
+
+  static void AddForwardCandidate(absl::string_view key,
+                                  absl::string_view surface,
+                                  Segment* segment) {
+    Candidate* candidate = segment->add_candidate();
+    candidate->key = std::string(key);
+    candidate->content_key = candidate->key;
+    candidate->value = std::string(surface);
+    candidate->content_value = candidate->value;
+  }
+
+  bool ReverseConvert(Segments* segments) const {
+    if (segments->conversion_segments_size() != 1) {
+      return false;
+    }
+    const std::string input(segments->conversion_segment(0).key());
+    segments->clear_conversion_segments();
+
+    if (mode_ == AlternateReverseReadingMode::kUniqueAlternate) {
+      if (input != "本") {
+        return false;
+      }
+      Segment* segment = segments->add_segment();
+      segment->set_key("本");
+      segment->set_segment_type(Segment::FREE);
+      // Candidate 0 deliberately does not match the original key.  The second
+      // reverse reading is the only exact round-trip.
+      AddReverseCandidate("本", "ほん", segment);
+      AddReverseCandidate("本", "もと", segment);
+      return true;
+    }
+
+    if (input != "甲乙") {
+      return false;
+    }
+    Segment* first = segments->add_segment();
+    first->set_key("甲");
+    first->set_segment_type(Segment::FREE);
+    Segment* second = segments->add_segment();
+    second->set_key("乙");
+    second->set_segment_type(Segment::FREE);
+
+    if (mode_ == AlternateReverseReadingMode::kAmbiguousIncludingPreferred) {
+      // Candidate(0) itself forms one exact path: [あ][いう].  A lower-ranked
+      // path [あい][う] is also exact and must make the resolver fail closed.
+      AddReverseCandidate("甲", "あ", first);
+      AddReverseCandidate("甲", "あい", first);
+      AddReverseCandidate("乙", "いう", second);
+      AddReverseCandidate("乙", "う", second);
+      return true;
+    }
+
+    AddReverseCandidate("甲", "か", first);  // preferred but non-matching
+    AddReverseCandidate("甲", "あ", first);
+    AddReverseCandidate("甲", "あい", first);
+    AddReverseCandidate("乙", "き", second);  // preferred but non-matching
+    AddReverseCandidate("乙", "いう", second);
+    AddReverseCandidate("乙", "う", second);
+    return true;
+  }
+
+  bool ForwardConvert(Segments* segments) const {
+    if (mode_ == AlternateReverseReadingMode::kUniqueAlternate) {
+      if (segments->conversion_segments_size() != 1 ||
+          segments->conversion_segment(0).key() != "もと") {
+        return false;
+      }
+      Segment* segment = segments->mutable_conversion_segment(0);
+      segment->clear_candidates();
+      AddForwardCandidate("もと", "本", segment);
+      return true;
+    }
+
+    if (segments->conversion_segments_size() != 2) {
+      return false;
+    }
+    std::string reconstructed_key;
+    for (const Segment& segment : segments->conversion_segments()) {
+      reconstructed_key.append(segment.key());
+    }
+    if (reconstructed_key != "あいう") {
+      return false;
+    }
+
+    Segment* first = segments->mutable_conversion_segment(0);
+    Segment* second = segments->mutable_conversion_segment(1);
+    first->clear_candidates();
+    second->clear_candidates();
+    AddForwardCandidate(first->key(), "甲", first);
+    AddForwardCandidate(second->key(), "乙", second);
+    return true;
+  }
+
+  AlternateReverseReadingMode mode_;
+};
+
 class StubPredictor : public PredictorInterface {
  public:
   StubPredictor() : predictor_name_("StubPredictor") {}
@@ -164,6 +298,23 @@ class StubRewriter : public RewriterInterface {
                Segments* segments) const override {
     return true;
   }
+};
+
+class RecordingFinishRewriter : public RewriterInterface {
+ public:
+  bool Rewrite(const ConversionRequest& request,
+               Segments* segments) const override {
+    return true;
+  }
+
+  void Finish(const ConversionRequest& request,
+              const Segments& segments) override {
+    ++finish_count;
+    last_resized = segments.resized();
+  }
+
+  int finish_count = 0;
+  bool last_resized = false;
 };
 
 class InsertPlaceholderWordsRewriter : public RewriterInterface {
@@ -315,6 +466,27 @@ class ConverterTest : public testing::TestWithTempUserProfile {
 
   std::unique_ptr<Converter> CreateStubbedConverter() {
     return CreateConverter(std::make_unique<StubRewriter>(), STUB_PREDICTOR);
+  }
+
+
+  std::unique_ptr<Converter> CreateConverterForAlternateReverseReading(
+      AlternateReverseReadingMode mode) {
+    absl::StatusOr<std::unique_ptr<engine::Modules>> modules =
+        engine::Modules::Create(std::make_unique<testing::MockDataManager>());
+    CHECK_OK(modules);
+    return std::make_unique<Converter>(
+        *std::move(modules),
+        [mode](const engine::Modules&) {
+          return std::make_unique<AlternateReverseReadingImmutableConverter>(
+              mode);
+        },
+        [](const engine::Modules&, const ConverterInterface&,
+           const ImmutableConverterInterface&) {
+          return std::make_unique<StubPredictor>();
+        },
+        [](const engine::Modules&) {
+          return std::make_unique<StubRewriter>();
+        });
   }
 
   std::unique_ptr<Converter> CreateConverterWithUserDefinedEntries(
@@ -1302,6 +1474,326 @@ TEST_F(ConverterTest, EmptyConvertReverseIssue8661091) {
   EXPECT_FALSE(converter->StartReverseConversion(&segments, ""));
 }
 
+TEST_F(ConverterTest, LearnExternalConversionSegmentsMarksNativeResegmentation) {
+  auto rewriter = std::make_unique<RecordingFinishRewriter>();
+  RecordingFinishRewriter* recording_rewriter = rewriter.get();
+  std::unique_ptr<Converter> converter =
+      CreateConverter(std::move(rewriter), STUB_PREDICTOR);
+
+  config::Config config;
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetConfig(config)
+          .SetOptions(std::move(options))
+          .SetKey("あいうえお")
+          .Build();
+
+  const std::vector<ExternalConversionSegment> segments = {
+      {"あ", "あ", false, true}, {"い", "い", false, true},
+      {"う", "う", false, true}, {"え", "え", false, true},
+      {"お", "お", false, true}};
+
+  ASSERT_TRUE(converter->LearnExternalConversionSegments(request, segments));
+  ASSERT_EQ(recording_rewriter->finish_count, 1);
+  EXPECT_TRUE(recording_rewriter->last_resized);
+}
+
+TEST_F(ConverterTest,
+       LearnExternalConversionSegmentsLearnsSingleSegmentBoundaryJoin) {
+  auto rewriter = std::make_unique<RecordingFinishRewriter>();
+  RecordingFinishRewriter* recording_rewriter = rewriter.get();
+  std::unique_ptr<Converter> converter =
+      CreateConverter(std::move(rewriter), STUB_PREDICTOR);
+
+  config::Config config;
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetConfig(config)
+          .SetOptions(std::move(options))
+          .SetKey("あいうえお")
+          .Build();
+
+  // A one-segment resized result represents joining multiple old segments.
+  // UserBoundaryHistoryRewriter natively supports this signal.
+  const std::vector<ExternalConversionSegment> segments = {
+      {"あいうえお", "あいうえお", false, true}};
+
+  ASSERT_TRUE(converter->LearnExternalConversionSegments(request, segments));
+  ASSERT_EQ(recording_rewriter->finish_count, 1);
+  EXPECT_TRUE(recording_rewriter->last_resized);
+}
+
+TEST_F(ConverterTest,
+       LearnExternalConversionSegmentsRejectsUnrepresentableBoundaryHistory) {
+  auto rewriter = std::make_unique<RecordingFinishRewriter>();
+  RecordingFinishRewriter* recording_rewriter = rewriter.get();
+  std::unique_ptr<Converter> converter =
+      CreateConverter(std::move(rewriter), STUB_PREDICTOR);
+
+  config::Config config;
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetConfig(config)
+          .SetOptions(std::move(options))
+          .SetKey("abcdefghijklmnop")
+          .Build();
+
+  // UserBoundaryHistoryRewriter stores each target segment length in 4 bits.
+  // Sixteen characters therefore cannot represent a resized target boundary
+  // exactly. Fail closed before FinishConversion instead of truncating it in
+  // boundary.db.
+  const std::vector<ExternalConversionSegment> resized_segments = {
+      {"abcdefghijklmnop",
+       "abcdefghijklmnop", false, true}};
+
+  EXPECT_FALSE(
+      converter->LearnExternalConversionSegments(request, resized_segments));
+  EXPECT_EQ(recording_rewriter->finish_count, 0);
+}
+
+TEST_F(ConverterTest,
+       LearnExternalConversionSegmentsDoesNotInventBoundaryResize) {
+  auto rewriter = std::make_unique<RecordingFinishRewriter>();
+  RecordingFinishRewriter* recording_rewriter = rewriter.get();
+  std::unique_ptr<Converter> converter =
+      CreateConverter(std::move(rewriter), STUB_PREDICTOR);
+
+  config::Config config;
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetConfig(config)
+          .SetOptions(std::move(options))
+          .SetKey("あいうえお")
+          .Build();
+
+  // These phrase boundaries may differ from immutable conversion defaults, but
+  // the caller did not observe an actual boundary change from live conversion.
+  const std::vector<ExternalConversionSegment> segments = {
+      {"あ", "あ", false}, {"い", "い", false}, {"う", "う", false},
+      {"え", "え", false}, {"お", "お", false}};
+
+  ASSERT_TRUE(converter->LearnExternalConversionSegments(request, segments));
+  ASSERT_EQ(recording_rewriter->finish_count, 1);
+  EXPECT_FALSE(recording_rewriter->last_resized);
+}
+
+TEST_F(ConverterTest,
+       ResolveExternalConversionSegmentsRoundTripsNativeBoundaries) {
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Engine> engine,
+                       MockDataEngineFactory::Create());
+  const std::shared_ptr<const ConverterInterface> converter =
+      engine->GetConverter();
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("わたしのなまえ")
+          .Build();
+
+  std::vector<ExternalConversionSegment> segments;
+  ASSERT_TRUE(converter->ResolveExternalConversionSegments(
+      request, "わたしのなまえ", "私の名前", &segments));
+  ASSERT_GE(segments.size(), 2);
+
+  std::string reconstructed_key;
+  std::string reconstructed_value;
+  for (const ExternalConversionSegment& segment : segments) {
+    reconstructed_key.append(segment.key);
+    reconstructed_value.append(segment.value);
+  }
+  EXPECT_EQ(reconstructed_key, "わたしのなまえ");
+  EXPECT_EQ(reconstructed_value, "私の名前");
+}
+
+TEST_F(ConverterTest,
+       ResolveExternalConversionSegmentsRejectsUnlearnableWhitespaceBoundary) {
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Engine> engine,
+                       MockDataEngineFactory::Create());
+  const std::shared_ptr<const ConverterInterface> converter =
+      engine->GetConverter();
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("ほん むりょう")
+          .Build();
+
+  std::vector<ExternalConversionSegment> segments;
+  EXPECT_FALSE(converter->ResolveExternalConversionSegments(
+      request, "ほん むりょう", "本 無料", &segments));
+  EXPECT_TRUE(segments.empty());
+}
+
+TEST_F(ConverterTest, ResolveExternalConversionSegmentsSupportsSingleSegment) {
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Engine> engine,
+                       MockDataEngineFactory::Create());
+  const std::shared_ptr<const ConverterInterface> converter =
+      engine->GetConverter();
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("ほん")
+          .Build();
+
+  std::vector<ExternalConversionSegment> segments;
+  ASSERT_TRUE(converter->ResolveExternalConversionSegments(
+      request, "ほん", "本", &segments));
+  ASSERT_EQ(segments.size(), 1);
+  EXPECT_EQ(segments[0].key, "ほん");
+  EXPECT_EQ(segments[0].value, "本");
+}
+
+
+TEST_F(ConverterTest,
+       ResolveExternalConversionSegmentsUsesLowerRankedReverseReading) {
+  std::unique_ptr<Converter> converter =
+      CreateConverterForAlternateReverseReading(
+          AlternateReverseReadingMode::kUniqueAlternate);
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("もと")
+          .Build();
+
+  std::vector<ExternalConversionSegment> segments;
+  ASSERT_TRUE(converter->ResolveExternalConversionSegments(
+      request, "もと", "本", &segments));
+  ASSERT_EQ(segments.size(), 1);
+  EXPECT_EQ(segments[0].key, "もと");
+  EXPECT_EQ(segments[0].value, "本");
+  EXPECT_FALSE(segments[0].is_reranked);
+}
+
+TEST_F(ConverterTest,
+       ResolveExternalConversionSegmentsRejectsAmbiguousAlternateReadings) {
+  std::unique_ptr<Converter> converter =
+      CreateConverterForAlternateReverseReading(
+          AlternateReverseReadingMode::kAmbiguousAlternates);
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("あいう")
+          .Build();
+
+  std::vector<ExternalConversionSegment> segments;
+  EXPECT_FALSE(converter->ResolveExternalConversionSegments(
+      request, "あいう", "甲乙", &segments));
+  EXPECT_TRUE(segments.empty());
+}
+
+TEST_F(ConverterTest,
+       ResolveExternalConversionSegmentsRejectsAmbiguityIncludingPreferred) {
+  std::unique_ptr<Converter> converter =
+      CreateConverterForAlternateReverseReading(
+          AlternateReverseReadingMode::kAmbiguousIncludingPreferred);
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("あいう")
+          .Build();
+
+  std::vector<ExternalConversionSegment> segments;
+  EXPECT_FALSE(converter->ResolveExternalConversionSegments(
+      request, "あいう", "甲乙", &segments));
+  EXPECT_TRUE(segments.empty());
+}
+
+TEST_F(ConverterTest,
+       EvaluateExternalConversionSegmentsSupportsSingleSegment) {
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Engine> engine,
+                       MockDataEngineFactory::Create());
+  const std::shared_ptr<const ConverterInterface> converter =
+      engine->GetConverter();
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("ほん")
+          .Build();
+
+  const std::vector<ExternalConversionSegment> expected = {
+      {"ほん", "本", false, false}};
+  std::vector<ExternalConversionSegment> evaluated;
+  ASSERT_TRUE(converter->EvaluateExternalConversionSegments(
+      request, expected, &evaluated));
+  ASSERT_EQ(evaluated.size(), 1);
+  EXPECT_EQ(evaluated[0].key, "ほん");
+  EXPECT_EQ(evaluated[0].value, "本");
+  EXPECT_FALSE(evaluated[0].boundary_resized);
+}
+
+TEST_F(ConverterTest,
+       EvaluateExternalConversionSegmentsUsesSuppliedNativeBoundaries) {
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Engine> engine,
+                       MockDataEngineFactory::Create());
+  const std::shared_ptr<const ConverterInterface> converter =
+      engine->GetConverter();
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("わたしのなまえ")
+          .Build();
+
+  std::vector<ExternalConversionSegment> native_segments;
+  ASSERT_TRUE(converter->ResolveExternalConversionSegments(
+      request, "わたしのなまえ", "私の名前", &native_segments));
+  ASSERT_GE(native_segments.size(), 2);
+
+  std::vector<ExternalConversionSegment> evaluated_segments;
+  ASSERT_TRUE(converter->EvaluateExternalConversionSegments(
+      request, native_segments, &evaluated_segments));
+  ASSERT_EQ(evaluated_segments.size(), native_segments.size());
+
+  for (size_t i = 0; i < native_segments.size(); ++i) {
+    EXPECT_EQ(evaluated_segments[i].key, native_segments[i].key);
+    EXPECT_EQ(evaluated_segments[i].value, native_segments[i].value);
+    EXPECT_FALSE(evaluated_segments[i].boundary_resized);
+  }
+}
 TEST_F(ConverterTest, StartReverseConversion) {
   ASSERT_OK_AND_ASSIGN(std::unique_ptr<Engine> engine,
                        MockDataEngineFactory::Create());

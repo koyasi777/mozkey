@@ -140,6 +140,18 @@ class EngineConverter : public EngineConverterInterface {
       absl::Span<const ExternalConversionSegment> segments,
       const commands::Context& context) override;
 
+  [[nodiscard]]
+  bool ResolveExternalConversionSegments(
+      absl::string_view key, absl::string_view value,
+      const commands::Context& context,
+      std::vector<ExternalConversionSegment>* segments) override;
+
+  [[nodiscard]]
+  bool EvaluateExternalConversionSegments(
+      absl::Span<const ExternalConversionSegment> segments,
+      const commands::Context& context,
+      std::vector<ExternalConversionSegment>* evaluated_segments) override;
+
   // Fixes the suggestion candidate. Stores the number of characters in the key
   // of the committed candidate to committed_key_size.
   // For example, assume that "日本語" was suggested as a candidate for "にほ".

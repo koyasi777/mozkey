@@ -137,7 +137,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 複数文節に分かれるライブ変換では、全文補正の学習を保つため、accepted Zenz feedback を session-level live correction fast path として再利用
 - sensitive-like context で得られた feedback は、通常文脈の候補 ranking / reuse には使わない
 - accepted として確定した Zenz 候補は、条件を満たす場合は Mozc の user history にも外部変換結果として学習
-- accepted Zenz 補正を直前の通常 Mozc ライブ変換文節へ安全に逆投影できる場合は、文節列全体を外部 multi-segment commit として Mozc history に学習。通常変換候補を再利用できる場合は candidate 構造も引き継ぎ、Zenz が実際に変更した文節だけを強い選択履歴として扱う
+- accepted Zenz 補正は、直前の通常 Mozc ライブ変換文節へ安全に対応付けられる場合、既知の文節境界を優先してユーザー履歴を参照しない固定境界再評価を行い、必要な範囲だけ Mozc native の再文節化で検証してから外部 multi-segment commit として Mozc history に学習。複数の境界解釈が残る範囲や安全に解決できない範囲では、その推定境界を使った局所・境界学習を行わず、句読点などの区切りもまたいで学習しない。通常変換候補を再利用できる場合は candidate 構造を引き継ぎ、Zenz が実際に変更した語彙単位だけを強い選択履歴として扱う。安全な局所学習を1件も確定できなかった場合は、別経路の full-sequence Mozc-history fallback を試みる
 - 通常 Mozc ライブ変換で現在の結果として現れているユーザー辞書由来候補や ASCII / mixed-script 表記を、Zenz live correction の採用時に保護
 - ASCII / mixed-script 表記は、読みを安全に特定できる場合に Zenz prompt 内で一時 placeholder 化し、応答後に元の表記へ復元。`もずきー -> Mozkey` のような表記が `モズキー` へ上書きされるのを避けつつ、前後の文は補正できるようにした
 - 通常 Mozc が選んだ表記を orthographic baseline として保持し、`東京 -> Tokyo`、`コンピュータ -> computer` のように Zenz だけが新しい英字表記を持ち込む場合は、文節へ安全に逆投影できる範囲で該当部分だけ通常 Mozc 表記へ戻す。`GitHub`、`iPhone`、`AI`、`C++`、`GPT-5` など、通常 Mozc がすでに選んでいる Latin / technical token は維持する
@@ -307,7 +307,7 @@ Zenz feedback の自動ブロックは、通常却下回数だけではなく拒
 
 通常の自動ブロック中は、Zenz の内部生成自体を止めず、結果だけをユーザーには表示しない shadow observation を続けます。その状態で同じ読みが最終確定され、非表示の Zenz 結果と確定値が一致した場合は accepted feedback を 1 件加算します。この hidden match は Zenz feedback の回復観測であり、Mozc user history への追加学習は行いません。一致が積み重なって拒否割合がしきい値を下回れば、たとえば `accepted=2 / rejected=1` の 33% のように自動ブロックは解除されます。同じ読みで異なる値が確定した場合は通常却下を加算し、入力継続などで最終的な読みが shadow observation の読みと異なる場合は feedback を更新しません。明示的な hard reject は shadow observation を行わず、自動回復しません。
 
-Zenz feedback TSV は、完全な読み key、完全な補正 value、粗い非可逆 context class からなる full-sequence 単位に限定します。segment-local や lexical-unit の feedback は保存しません。accepted Zenz 補正は条件を満たす場合に Mozc user history へ外部変換結果として学習されますが、それは Zenz feedback store の追加 record ではなく、別の Mozc-history 経路です。さらに、accepted Zenz 補正を直前の通常 Mozc ライブ変換文節へ安全に逆投影できる場合は、逆投影後の文節列全体を外部 multi-segment commit として Mozc history に学習します。このとき、通常 Mozc 変換で同じ key/value の候補を再取得できる場合は、その candidate 構造を再利用し、通常変換確定に近い形で user history に渡します。Zenz が実際に変更した文節だけを強い選択履歴として扱い、変更されていない文節は文脈として保持します。逆投影できない場合や privacy / password gate に該当する場合は、full-sequence 学習だけに戻ります。
+Zenz feedback TSV は、完全な読み key、完全な補正 value、粗い非可逆 context class からなる full-sequence 単位に限定します。segment-local や lexical-unit の feedback は保存しません。accepted Zenz 補正は条件を満たす場合に Mozc user history へ外部変換結果として学習されますが、それは Zenz feedback store の追加 record ではなく、別の Mozc-history 経路です。局所学習では、まず直前の通常 Mozc ライブ変換で既知の文節境界を優先し、ユーザー履歴を参照しない固定境界再評価で accepted surface を正確に再現できるか確認します。その境界で説明できない範囲だけ Mozc native の再文節化と forward verification を行い、accepted surface を説明する境界・読みの経路が一意に検証できる場合だけ、その推定境界を局所学習に使います。複数の境界解釈が成立する範囲や安全に解決できない aggregate は、推定境界を学習せず非学習の barrier として扱います。その前後に独立して安全な lexical island があれば、そこは別々に学習できます。句読点などの非学習単位も lexical island の区切りとして扱い、その区切りをまたぐ境界履歴は作りません。Zenz が実際に変更したことを最終的な key/value 対応で確認できる語彙単位だけを強い選択履歴として扱います。安全な structured / local commit が1件でも成立した場合は、同じ accepted result を全文単位で重ねて Mozc history に学習しません。一方、安全な projected / local evidence を1件も commit できなかった場合は、曖昧な局所境界を捏造せず、別経路として exact accepted result の full-sequence Mozc-history fallback を試みます。Zenz feedback store 側の full-sequence accepted record はこの局所境界判定とは別に保持されます。privacy / password gate に該当する入力は、この Mozc-history 学習自体の対象外です。
 
 特に Space は、Zenz 補正を単にキャンセルしてライブ変換中の入力列へ戻すキーではなく、通常変換候補へ戻る候補変更操作として扱います。deferred 表示でまだ Zenz の応答待ちの場合は、最初の Space でその時点の Mozc 通常変換結果を表示しますが、候補は次へ進めません。すでに Zenz 補正が表示されている場合も、Space を押すと補正前の Mozc 変換結果を通常変換状態として表示し、候補ウィンドウはまだ開きません。そのまま次の文字を入力した場合は、戻した Mozc 変換結果を確定してから新しい入力を開始します。さらに Space を押した場合は、従来どおり通常変換の候補ウィンドウを開いて次候補へ進みます。
 
@@ -854,7 +854,7 @@ Main features added in this fork
 - Reuses accepted Zenz feedback via the session-level live-correction fast path for multi-segment live conversion to preserve learned full-phrase corrections
 - Does not reuse feedback obtained from `sensitive_like` context for ordinary-context candidate ranking
 - Learns accepted Zenz candidates into Mozc user history as external conversion results when the runtime conditions allow it
-- When an accepted Zenz correction can be safely reverse-projected onto the previous normal Mozc live-conversion segments, learns the projected segment sequence as an external multi-segment commit. If Mozc can reproduce the same key/value candidate through normal conversion, the candidate structure is reused so user history receives evidence closer to a normal conversion commit. Only segments actually changed by Zenz are marked as strong user-selected history.
+- For accepted Zenz corrections that can be mapped safely onto the previous normal Mozc live-conversion segments, prefers known boundaries, verifies them with a history-free fixed-boundary conversion, and uses Mozc-native resegmentation only for ranges that still need resolution before learning an external multi-segment commit. If multiple boundary interpretations remain, Mozkey does not learn local or boundary history from that inferred split; punctuation-like separators are not crossed either. Candidate structure is reused when possible, and only lexical units with verified Zenz-change evidence are marked as strong user-selected history. If no safe projected/local Mozc-history evidence can be committed at all, the separate full-sequence Mozc-history fallback may still be attempted.
 - Protects user-dictionary candidates and ASCII / mixed-script surfaces that appear in the current normal Mozc live-conversion result before adopting Zenz live-correction output
 - For ASCII / mixed-script surfaces, temporarily replaces the reading with a placeholder in the Zenz prompt when it can be identified safely, then restores the selected surface after the response, so entries such as `もずきー -> Mozkey` are not silently overwritten as `モズキー` while surrounding text can still be corrected
 - Treats the surface selected by normal Mozc as an orthographic baseline. When Zenz alone introduces or mutates a Latin / technical spelling such as `東京 -> Tokyo` or `コンピュータ -> computer`, Mozkey restores the affected safely projectable segment to the Mozc surface; Latin / technical tokens already selected by Mozc, such as `GitHub`, `iPhone`, `AI`, `C++`, `GPT-5`, `UTF-8`, `HTTP/2`, and `Windows11`, remain valid
@@ -1104,14 +1104,26 @@ complete correction value, and a coarse non-reversible context class. It does no
 store segment-local or lexical-unit feedback. Accepted Zenz corrections may still
 be learned into Mozc user history as external conversion results, but that is a
 separate Mozc-history path rather than an additional Zenz feedback-store record.
-When the accepted Zenz result can be safely reverse-projected onto the previous
-normal Mozc live-conversion segments, Mozkey learns the projected segment
-sequence as an external multi-segment commit. If Mozc can reproduce the same
-key/value candidate through normal conversion, the candidate structure is reused
-so user history receives evidence closer to a normal conversion commit. Only
-segments actually changed by Zenz are marked as strong user-selected commits. If
-reverse projection fails, or if the privacy / password gates reject the text,
-Mozkey falls back to full-sequence learning only.
+For local learning, Mozkey first prefers the known segment boundaries from the
+preceding normal Mozc live conversion and checks whether a history-free
+fixed-boundary conversion can reproduce the accepted surface exactly. Only ranges
+that cannot be explained by those boundaries are passed to Mozc-native
+resegmentation and forward verification. An inferred boundary/reading path is
+used for local learning only when it is uniquely verified. If multiple boundary
+interpretations remain, or an aggregate cannot be resolved safely, Mozkey keeps
+that range as a non-learnable barrier rather than inventing a local split; safe
+lexical islands on either side can still be learned independently. Punctuation
+and other non-learnable separators also split lexical islands, so learned
+boundaries do not cross them. Strong selection history is attached only to
+lexical units whose final key/value mapping still carries verified evidence of an
+actual Zenz change. When at least one safe structured/local commit succeeds,
+Mozkey does not additionally teach the same accepted result as a whole-sequence
+Mozc-history entry. When no safe projected/local evidence can be committed at
+all, Mozkey may still try the exact accepted result through the separate
+full-sequence Mozc-history fallback without inventing ambiguous local boundaries.
+The Zenz feedback store keeps its accepted full-sequence record independently of
+this local-boundary decision. Privacy and password gates still exclude the input
+from this Mozc-history learning path.
 
 Space is treated specifically as a candidate-change operation, not as a plain
 cancel back into the live-conversion composition. If deferred presentation is
