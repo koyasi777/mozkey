@@ -118,6 +118,21 @@ TEST(LlamaServerProcessTest, StartsWithRandomEndpointAndStopsChild) {
   EXPECT_EQ(errno, ECHILD);
 }
 
+TEST(LlamaServerProcessTest, DisablesGlobalPromptCacheWhenRequested) {
+  TemporaryModel model;
+  ASSERT_FALSE(model.path().empty());
+
+  LlamaServerProcessOptions options = MakeOptions(model.path());
+  options.disable_global_prompt_cache = true;
+  options.additional_args = {"--test-mode=require-cache-ram-zero"};
+
+  LlamaServerProcess process(std::move(options));
+  std::string error;
+  ASSERT_TRUE(process.Start(&error)) << error;
+  EXPECT_TRUE(process.running());
+  process.Stop();
+}
+
 TEST(LlamaServerProcessTest, GeneratesNewApiKeyForEachLaunch) {
   TemporaryModel model;
   ASSERT_FALSE(model.path().empty());

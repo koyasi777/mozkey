@@ -72,6 +72,10 @@ mozc::zenz_scorer::PosixScorerRuntimeOptions LoadRuntimeOptions() {
       JoinPath(JoinPath(executable_directory, "models"), kModelFileName);
   options.llama_server.context_size = kDefaultContextSize;
   options.llama_server.threads = kDefaultThreads;
+  // Mozkey uses one local scorer client. Retaining historical prompt states in
+  // llama-server's global RAM cache causes memory growth during continuous IME
+  // use. Request-level cache_prompt remains enabled for current-prefix reuse.
+  options.llama_server.disable_global_prompt_cache = true;
   options.n_predict = kDefaultNPredict;
   return options;
 }

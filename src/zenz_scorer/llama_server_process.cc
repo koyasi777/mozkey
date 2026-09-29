@@ -312,7 +312,7 @@ std::vector<std::string> BuildArguments(
     const LlamaServerProcessOptions& options, int port,
     const std::string& api_key) {
   std::vector<std::string> arguments;
-  arguments.reserve(14 + options.additional_args.size());
+  arguments.reserve(16 + options.additional_args.size());
   arguments.push_back(options.executable_path);
   arguments.push_back("-m");
   arguments.push_back(options.model_path);
@@ -320,6 +320,10 @@ std::vector<std::string> BuildArguments(
   arguments.push_back(std::to_string(options.context_size));
   arguments.push_back("-t");
   arguments.push_back(std::to_string(options.threads));
+  if (options.disable_global_prompt_cache) {
+    arguments.push_back("--cache-ram");
+    arguments.push_back("0");
+  }
   arguments.push_back("--host");
   arguments.push_back("127.0.0.1");
   arguments.push_back("--port");
