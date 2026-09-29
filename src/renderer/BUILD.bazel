@@ -345,6 +345,30 @@ mozc_objc_library(
 )
 
 mozc_cc_library(
+    name = "mac_candidate_interaction",
+    srcs = ["mac/mac_candidate_interaction.cc"],
+    hdrs = ["mac/mac_candidate_interaction.h"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "//protocol:candidate_window_cc_proto",
+        "//protocol:commands_cc_proto",
+    ],
+)
+
+mozc_cc_test(
+    name = "mac_candidate_interaction_test",
+    size = "small",
+    srcs = ["mac/mac_candidate_interaction_test.cc"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":mac_candidate_interaction",
+        "//protocol:candidate_window_cc_proto",
+        "//protocol:commands_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "mac_vertical_candidate_layout",
     srcs = ["mac/mac_vertical_candidate_layout.cc"],
     hdrs = ["mac/mac_vertical_candidate_layout.h"],
@@ -472,6 +496,7 @@ mozc_objc_library(
         "Foundation",
     ],
     deps = [
+        ":mac_candidate_interaction",
         ":mac_vertical_candidate_layout",
         ":mac_vertical_infolist_layout",
         ":mac_writing_direction",

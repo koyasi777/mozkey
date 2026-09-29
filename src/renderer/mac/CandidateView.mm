@@ -34,6 +34,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -42,6 +44,7 @@
 #include "client/client_interface.h"
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_style.pb.h"
+#include "renderer/mac/mac_candidate_interaction.h"
 #include "renderer/mac/mac_vertical_candidate_layout.h"
 #include "renderer/mac/mac_view_util.h"
 #include "renderer/renderer_style_handler.h"
@@ -59,7 +62,11 @@ using mozc::renderer::kColumnCandidate;
 using mozc::renderer::kColumnDescription;
 using mozc::renderer::kNumberOfColumns;
 using mozc::renderer::TableLayout;
+using mozc::renderer::mac::ContainsPassiveSuggestionCandidateIdentity;
+using mozc::renderer::mac::GetPassiveSuggestionCandidateIdentity;
+using mozc::renderer::mac::IsPassiveSuggestionCandidateWindow;
 using mozc::renderer::mac::MacVerticalCandidateLayout;
+using mozc::renderer::mac::PassiveSuggestionCandidateIdentity;
 using mozc::renderer::mac::MacViewUtil;
 using mozc::renderer::mac::WritingDirection;
 
@@ -377,6 +384,9 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
 
 // Draw scroll bar
 - (void)drawVScrollBar;
+
+// Returns the candidate row under |localPos|, or -1 outside all rows.
+- (int)candidateRowAtPoint:(mozc::Point)localPos;
 @end
 
 @implementation CandidateView {
@@ -404,6 +414,13 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
 
   // |command_sender_| holds a callback for mouse clicks.
   mozc::client::SendCommandInterface *command_sender_;
+
+  // Passive suggestions are generated from a cloned Session context. Keep the
+  // exact ID selected during the mouse gesture so an asynchronous renderer
+  // refresh cannot reinterpret mouse-up against an unrelated candidate list.
+  bool suggestionMouseGestureActive_;
+  std::optional<PassiveSuggestionCandidateIdentity>
+      pressedSuggestionCandidate_;
 }
 
 #pragma mark initialization
@@ -414,6 +431,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
     [self initializeDefaultStyle];
     focusedRow_ = -1;
     writingDirection_ = WritingDirection::kHorizontal;
+    suggestionMouseGestureActive_ = false;
   }
   return self;
 }
@@ -474,6 +492,13 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
 }
 
 - (void)setCandidateWindow:(const CandidateWindow *)candidate_window {
+  if (suggestionMouseGestureActive_ &&
+      pressedSuggestionCandidate_.has_value() &&
+      !ContainsPassiveSuggestionCandidateIdentity(
+          *candidate_window, *pressedSuggestionCandidate_)) {
+    pressedSuggestionCandidate_.reset();
+  }
+
   candidate_window_ = *candidate_window;
   [self reloadStyleForCandidateWindow];
 }
@@ -1223,27 +1248,46 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   [NSBezierPath fillRect:MacViewUtil::ToNSRect(indicatorRect)];
 }
 
+- (int)candidateRowAtPoint:(mozc::Point)localPos {
+  if (writingDirection_ == WritingDirection::kVertical) {
+    if (candidate_window_.candidate_size() <
+        static_cast<int>(verticalLayout_.candidate_count())) {
+      return -1;
+    }
+    for (size_t i = 0; i < verticalLayout_.candidate_count(); ++i) {
+      if (verticalLayout_.GetCandidateRect(i).PtrInRect(localPos)) {
+        return static_cast<int>(i);
+      }
+    }
+    return -1;
+  }
+
+  if (candidate_window_.candidate_size() < tableLayout_.number_of_rows()) {
+    return -1;
+  }
+  for (int i = 0; i < tableLayout_.number_of_rows(); ++i) {
+    if (tableLayout_.GetRowRect(i).PtrInRect(localPos)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 #pragma mark event handling callbacks
 
 - (void)mouseDown:(NSEvent *)event {
-  const mozc::Point localPos = MacViewUtil::ToPoint([self convertPoint:[event locationInWindow]
-                                                              fromView:nil]);
-  int clickedRow = -1;
-  if (writingDirection_ == WritingDirection::kVertical) {
-    for (size_t i = 0; i < verticalLayout_.candidate_count(); ++i) {
-      if (verticalLayout_.GetCandidateRect(i).PtrInRect(localPos)) {
-        clickedRow = static_cast<int>(i);
-        break;
-      }
-    }
+  const mozc::Point localPos =
+      MacViewUtil::ToPoint([self convertPoint:[event locationInWindow]
+                                     fromView:nil]);
+  const int clickedRow = [self candidateRowAtPoint:localPos];
+
+  if (IsPassiveSuggestionCandidateWindow(candidate_window_)) {
+    suggestionMouseGestureActive_ = true;
+    pressedSuggestionCandidate_ =
+        GetPassiveSuggestionCandidateIdentity(candidate_window_, clickedRow);
   } else {
-    for (int i = 0; i < tableLayout_.number_of_rows(); ++i) {
-      const mozc::Rect rowRect = tableLayout_.GetRowRect(i);
-      if (rowRect.PtrInRect(localPos)) {
-        clickedRow = i;
-        break;
-      }
-    }
+    suggestionMouseGestureActive_ = false;
+    pressedSuggestionCandidate_.reset();
   }
 
   if (clickedRow >= 0 && clickedRow != focusedRow_) {
@@ -1253,47 +1297,63 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
 }
 
 - (void)mouseUp:(NSEvent *)event {
-  const mozc::Point localPos = MacViewUtil::ToPoint([self convertPoint:[event locationInWindow]
-                                                              fromView:nil]);
+  if (suggestionMouseGestureActive_) {
+    suggestionMouseGestureActive_ = false;
+    const std::optional<PassiveSuggestionCandidateIdentity> candidate =
+        pressedSuggestionCandidate_;
+    pressedSuggestionCandidate_.reset();
+
+    if (command_sender_ != nullptr && candidate.has_value()) {
+      SessionCommand command;
+      command.set_type(SessionCommand::SUBMIT_CANDIDATE);
+      command.set_id(candidate->id);
+      Output dummy_output;
+      command_sender_->SendCommand(command, &dummy_output);
+    }
+    return;
+  }
+
   if (command_sender_ == nullptr) {
     return;
   }
-  if (writingDirection_ == WritingDirection::kVertical) {
-    if (candidate_window_.candidate_size() <
-        static_cast<int>(verticalLayout_.candidate_count())) {
-      return;
-    }
-    for (size_t i = 0; i < verticalLayout_.candidate_count(); ++i) {
-      if (verticalLayout_.GetCandidateRect(i).PtrInRect(localPos)) {
-        SessionCommand command;
-        command.set_type(SessionCommand::SELECT_CANDIDATE);
-        command.set_id(
-            candidate_window_.candidate(static_cast<int>(i)).id());
-        Output dummy_output;
-        command_sender_->SendCommand(command, &dummy_output);
-        break;
-      }
-    }
+
+  const mozc::Point localPos =
+      MacViewUtil::ToPoint([self convertPoint:[event locationInWindow]
+                                     fromView:nil]);
+  const int clickedRow = [self candidateRowAtPoint:localPos];
+  if (clickedRow < 0) {
     return;
   }
 
-  if (candidate_window_.candidate_size() < tableLayout_.number_of_rows()) {
-    return;
-  }
-  for (int i = 0; i < tableLayout_.number_of_rows(); ++i) {
-    const mozc::Rect rowRect = tableLayout_.GetRowRect(i);
-    if (rowRect.PtrInRect(localPos)) {
-      SessionCommand command;
-      command.set_type(SessionCommand::SELECT_CANDIDATE);
-      command.set_id(candidate_window_.candidate(i).id());
-      Output dummy_output;
-      command_sender_->SendCommand(command, &dummy_output);
-      break;
-    }
-  }
+  SessionCommand command;
+  command.set_type(SessionCommand::SELECT_CANDIDATE);
+  command.set_id(candidate_window_.candidate(clickedRow).id());
+  Output dummy_output;
+  command_sender_->SendCommand(command, &dummy_output);
 }
 
 - (void)mouseDragged:(NSEvent *)event {
-  [self mouseDown:event];
+  if (!suggestionMouseGestureActive_) {
+    [self mouseDown:event];
+    return;
+  }
+
+  const mozc::Point localPos =
+      MacViewUtil::ToPoint([self convertPoint:[event locationInWindow]
+                                     fromView:nil]);
+
+  if (!IsPassiveSuggestionCandidateWindow(candidate_window_)) {
+    pressedSuggestionCandidate_.reset();
+    return;
+  }
+
+  const int clickedRow = [self candidateRowAtPoint:localPos];
+  pressedSuggestionCandidate_ =
+      GetPassiveSuggestionCandidateIdentity(candidate_window_, clickedRow);
+  if (pressedSuggestionCandidate_.has_value() &&
+      clickedRow != focusedRow_) {
+    focusedRow_ = clickedRow;
+    [self setNeedsDisplay:YES];
+  }
 }
 @end

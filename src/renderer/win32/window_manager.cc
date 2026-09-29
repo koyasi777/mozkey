@@ -249,31 +249,21 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
       !output.candidate_window().has_focused_index();
   const bool is_live_conversion_passive_suggestion =
       output.live_conversion() && has_passive_suggestion_window;
-  const bool should_keep_previous_live_conversion_passive_suggestion =
-      output.live_conversion() && !is_live_conversion_passive_suggestion &&
-      last_live_conversion_passive_suggestion_visible_ &&
-      (output.zenz_live_correction_pending() ||
-       output.zenz_live_correction_applied() ||
-       output.has_zenz_live_correction_debug());
 
   const bool should_defer_ruby_update =
       is_live_conversion_passive_suggestion;
-  const RECT* ruby_avoid_rect = nullptr;
-  if (should_keep_previous_live_conversion_passive_suggestion &&
-      has_last_live_conversion_passive_suggestion_rect_) {
-    ruby_avoid_rect = &last_live_conversion_passive_suggestion_rect_;
-  }
   if (!should_defer_ruby_update) {
-    ruby_window_->OnUpdate(command, *layout_manager_, ruby_avoid_rect);
+    ruby_window_->OnUpdate(command, *layout_manager_);
   }
 
   if (output.live_conversion() && !is_live_conversion_passive_suggestion) {
+    // Session output is authoritative.  If this output does not carry a
+    // semantically valid passive SUGGESTION, do not keep an older candidate
+    // surface alive based on Zenz state flags.
     cascading_window_->HideWithEffects();
-    if (!should_keep_previous_live_conversion_passive_suggestion) {
-      main_window_->HideWithEffects();
-      last_live_conversion_passive_suggestion_visible_ = false;
-      has_last_live_conversion_passive_suggestion_rect_ = false;
-    }
+    main_window_->HideWithEffects();
+    last_live_conversion_passive_suggestion_visible_ = false;
+    has_last_live_conversion_passive_suggestion_rect_ = false;
     indicator_window_->Hide();
     infolist_window_->DelayHide(0);
     return;

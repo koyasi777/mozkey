@@ -79,10 +79,9 @@ class WindowManager {
   std::unique_ptr<LayoutManager> layout_manager_;
   client::SendCommandInterface* send_command_interface_;
   POINT last_position_;
-  // True while the last visible candidate window was a passive suggestion
-  // attached to live conversion.  Zenz callbacks may redraw live conversion
-  // without candidate_window; in that case the renderer can keep the existing
-  // passive suggestion window visible instead of hiding it.
+  // Tracks the last passive-suggestion geometry only for candidate/ruby
+  // transition handling. Candidate visibility itself is always derived from
+  // the current RendererCommand output.
   bool last_live_conversion_passive_suggestion_visible_;
   RECT last_live_conversion_passive_suggestion_rect_;
   bool has_last_live_conversion_passive_suggestion_rect_;

@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include "base/const.h"
 #include "base/coordinates.h"
@@ -175,8 +176,20 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   // width) for the current |dpi_|.
   void UpdateDpiDependentResources();
 
+  struct PressedSuggestionCandidateIdentity {
+    int32_t id = 0;
+    std::string value;
+  };
+
   // Returns the candidate ID under |point| in the currently rendered list.
   std::optional<int32_t> GetCandidateIdAtPoint(const CPoint& point) const;
+
+  std::optional<PressedSuggestionCandidateIdentity>
+  GetPassiveSuggestionCandidateIdentityAtPoint(const CPoint& point) const;
+
+  static bool ContainsPassiveSuggestionCandidateIdentity(
+      const commands::CandidateWindow& candidate_window,
+      const PressedSuggestionCandidateIdentity& identity);
 
   // Sends a candidate mouse command without re-reading the rendered list.
   void SendCandidateCommand(commands::SessionCommand::CommandType type,
@@ -191,7 +204,8 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   // can replace the rendered list before WM_LBUTTONUP.  Keep the suggestion
   // mouse gesture local until mouse-up instead.
   bool suggestion_mouse_gesture_active_ = false;
-  std::optional<int32_t> pressed_suggestion_candidate_id_;
+  std::optional<PressedSuggestionCandidateIdentity>
+      pressed_suggestion_candidate_;
 
   // Even though the candidate window supports limited mouse operations, we
   // accept them when and only when SPI_GETACTIVEWINDOWTRACKING is disabled
