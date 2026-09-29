@@ -19,6 +19,11 @@ struct LlamaServerProcessOptions {
   int context_size = 256;
   int threads = 4;
 
+  // When true, launch llama-server with --cache-ram 0. This disables the
+  // global historical prompt-state RAM cache only; request-level cache_prompt
+  // remains controlled independently by the HTTP client.
+  bool disable_global_prompt_cache = false;
+
   // Cold start includes model loading and the first authenticated completion.
   // Keep each completion probe long enough for slower supported hosts to
   // finish useful work instead of repeatedly cancelling in-flight inference.

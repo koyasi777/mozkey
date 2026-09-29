@@ -32,6 +32,7 @@ struct Options {
   int port = 0;
   int context_size = 0;
   int threads = 0;
+  bool cache_ram_zero = false;
 };
 
 bool ParseInteger(const char* text, int* value) {
@@ -78,6 +79,9 @@ bool ParseOptions(int argc, char** argv, Options* options) {
       }
     } else if (argument == "--api-key") {
       if (!take_value(&options->api_key)) return false;
+    } else if (argument == "--cache-ram") {
+      if (i + 1 >= argc || std::string_view(argv[++i]) != "0") return false;
+      options->cache_ram_zero = true;
     } else if (argument.starts_with("--test-mode=")) {
       options->test_mode = std::string(argument.substr(12));
     } else {
@@ -272,6 +276,10 @@ int main(int argc, char** argv) {
   }
   if (options.test_mode == "exit") {
     return 11;
+  }
+  if (options.test_mode == "require-cache-ram-zero" &&
+      !options.cache_ram_zero) {
+    return 13;
   }
   if (options.test_mode == "exit-with-stderr") {
     std::string diagnostic = "diagnostic-start\n";
