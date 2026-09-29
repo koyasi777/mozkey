@@ -198,6 +198,27 @@ TEST(ZenzFeedbackStoreTest, DecideTreatsOrdinaryRejectedAsSoftSignal) {
 }
 
 TEST(ZenzFeedbackStoreTest,
+     CancelVisibleZenzRejectUsesExplicitConversionWeight) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  ZenzFeedbackStore store;
+  store.RecordAccepted("k", "empty", "v");
+  store.RecordRejected(
+      "k", "empty", "v", "cancel_visible_zenz_to_composition");
+
+  const ZenzFeedbackDecision decision =
+      store.Decide("k", "empty", "v");
+
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 1);
+  EXPECT_EQ(decision.positive_score, 1000);
+  EXPECT_EQ(decision.negative_score, 400);
+  EXPECT_EQ(decision.total_score, 600);
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+}
+
+TEST(ZenzFeedbackStoreTest,
      DecideAutoBlockPolicyUsesMinimumRejectCountAndPercentageDynamically) {
   ScopedUserProfileForZenzFeedbackStoreTest profile;
   ASSERT_TRUE(profile.ok());

@@ -3880,6 +3880,37 @@ bool Session::SendKeyConversionState(commands::Command* command) {
           remaining_sequence, &zenz_commit_output, command);
     }
 
+    // Cancelling a still-visible Zenz correction is not itself negative
+    // feedback. Preserve the exact Zenz observation across ConvertCancel(),
+    // then compare it with the user's eventual full commit. Requiring the
+    // reading to match prevents edits to the composition from being treated as
+    // rejection of the original correction.
+    if (key_command == keymap::ConversionState::CANCEL &&
+        HasVisibleZenzLiveCorrection()) {
+      const std::string cancelled_zenz_key = zenz_live_key_;
+      const std::string cancelled_zenz_context_class =
+          zenz_live_context_class_.empty()
+              ? "empty"
+              : zenz_live_context_class_;
+      const std::string cancelled_zenz_value = zenz_live_value_;
+
+      if (!ExecuteCommandSequence(command_sequence, command)) {
+        return false;
+      }
+
+      if (context_->state() == ImeContext::COMPOSITION &&
+          context_->composer().GetQueryForConversion() ==
+              cancelled_zenz_key) {
+        SetPendingZenzFeedbackComparison(
+            cancelled_zenz_key,
+            cancelled_zenz_context_class,
+            cancelled_zenz_value,
+            "cancel_visible_zenz_to_composition",
+            true);
+      }
+      return true;
+    }
+
     // While a hidden Mozc result is waiting for Zenz, plain Space explicitly
     // asks for normal Mozc conversion. Reveal the already-computed first Mozc
     // result without advancing to the second candidate on the same keypress.
@@ -6452,6 +6483,13 @@ void Session::ObservePendingZenzFeedbackCommittedResult(
     return;
   }
 
+  // A direct-commit punctuation path may have already captured the user's
+  // suffix-free final choice before emitting a result that contains the
+  // punctuation. Do not overwrite that stronger comparison target.
+  if (pending_zenz_feedback_.has_final_committed_value) {
+    return;
+  }
+
   // Only a fully committed conversion/direct commit should resolve a pending
   // final comparison. Partial segment commits stay in CONVERSION and must not
   // be interpreted as the user's final full-sequence decision.
@@ -8329,6 +8367,22 @@ bool Session::InsertCharacter(commands::Command* command) {
 
   const commands::KeyEvent& key = command->input().key();
 
+  // A cancel-to-composition Zenz comparison normally treats the next inserted
+  // character as continued editing and neutralizes it. A configured
+  // direct-commit punctuation/symbol is different: it finalizes the restored
+  // preedit. Defer feedback confirmation until after insertion so the
+  // suffix-free preedit can be captured as the user's final choice.
+  const bool defer_pending_zenz_comparison_for_direct_commit =
+      pending_zenz_feedback_.pending &&
+      pending_zenz_feedback_.action ==
+          PendingZenzFeedback::Action::kCompareFinalCommit &&
+      pending_zenz_feedback_.require_final_committed_key_match &&
+      !pending_zenz_feedback_.has_final_committed_value &&
+      context_->state() == ImeContext::COMPOSITION &&
+      context_->composer().GetQueryForConversion() ==
+          pending_zenz_feedback_.key &&
+      CanDirectCommitPendingLiveConversionBeforeInsert(key);
+
   // A pending direct-commit learning entry is finalized only when the next real
   // text input starts. If the next key is Backspace/Escape, it is discarded.
   HandlePendingDirectCommitLearningForKeyEvent(key);
@@ -8336,7 +8390,9 @@ bool Session::InsertCharacter(commands::Command* command) {
   // A pending zenz feedback entry is finalized only when the next real text
   // input starts. This prevents learning immediately on Enter/Space, while still
   // learning once the user continues typing after the committed result.
-  HandlePendingZenzFeedbackForKeyEvent(key);
+  if (!defer_pending_zenz_comparison_for_direct_commit) {
+    HandlePendingZenzFeedbackForKeyEvent(key);
+  }
 
   if (key.input_style() == commands::KeyEvent::DIRECT_INPUT &&
       context_->state() == ImeContext::PRECOMPOSITION) {
@@ -8543,6 +8599,25 @@ bool Session::InsertCharacter(commands::Command* command) {
     const auto [direct_commit_key, direct_commit_value] =
         GetDirectCommitStringsWithDirectCommitSuffixFallback(
             composer_before_insert, key);
+
+    if (defer_pending_zenz_comparison_for_direct_commit) {
+      pending_zenz_feedback_.has_final_committed_value = true;
+      pending_zenz_feedback_.final_committed_key =
+          composer_before_insert.GetQueryForConversion();
+      pending_zenz_feedback_.final_committed_value =
+          composer_before_insert.GetStringForSubmission();
+
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] captured suffix-free final choice before direct "
+          "commit ",
+          ZenzRedactedTextStats(
+              "key", pending_zenz_feedback_.final_committed_key),
+          " ",
+          ZenzRedactedTextStats(
+              "value", pending_zenz_feedback_.final_committed_value),
+          " pending_reason=", pending_zenz_feedback_.reason));
+    }
+
     const bool learned_reranked_preedit_after_cancel =
         CommitPendingRerankedPreeditAfterConvertCancelForDirectCommit(
             composer_before_insert, command->input().context(),
@@ -8614,6 +8689,14 @@ bool Session::InsertCharacter(commands::Command* command) {
 
     CommitCompositionDirectly(command);
     return true;
+  }
+
+  if (defer_pending_zenz_comparison_for_direct_commit) {
+    // The physical key looked like a configured direct-commit trigger, but
+    // insertion did not produce a direct commit (for example because a custom
+    // roman rule transformed it). This is ordinary editing, so keep the
+    // original cancel comparison neutral.
+    ConfirmPendingZenzFeedback();
   }
 
   ClearPendingRerankedPreeditCommitAfterConvertCancel();
