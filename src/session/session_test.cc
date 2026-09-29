@@ -15185,6 +15185,61 @@ TEST_F(SessionTest,
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
 }
 
+TEST_F(SessionTest, PendingZenzFeedbackIsDiscardedByCancelKeyEchoBack) {
+  config::Config config;
+  config.set_session_keymap(config::Config::MSIME);
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  auto key_map_manager = std::make_shared<keymap::KeyMapManager>(config);
+  session.SetConfig(config);
+  session.SetKeyMapManager(key_map_manager);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "\xE3\x81\x82", "empty", "zenzvalue");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  commands::Command command;
+  ASSERT_TRUE(SetSendKeyCommand("Ctrl z", &command));
+  EXPECT_TRUE(session.SendKey(&command));
+
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+}
+
+TEST_F(SessionTest,
+       TestSendKeyPendingZenzFeedbackIsDiscardedByCancelKeyEchoBack) {
+  config::Config config;
+  config.set_session_keymap(config::Config::MSIME);
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  auto key_map_manager = std::make_shared<keymap::KeyMapManager>(config);
+  session.SetConfig(config);
+  session.SetKeyMapManager(key_map_manager);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "\xE3\x81\x82", "empty", "zenzvalue");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  commands::Command command;
+  ASSERT_TRUE(SetSendKeyCommand("Ctrl z", &command));
+  EXPECT_TRUE(session.TestSendKey(&command));
+
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+}
+
 // Undo command must call RervertConversion
 TEST_F(SessionTest, Issue3428520) {
   MockEngine engine;
