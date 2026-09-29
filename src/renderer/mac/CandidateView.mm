@@ -97,10 +97,8 @@ NSDictionary *VerticalFrameAttributes() {
   };
 }
 
-bool ShouldRenderVerticalFooterText(
-    const CandidateWindow &candidate_window, const std::string &text) {
-  return candidate_window.category() != mozc::commands::SUGGESTION ||
-         text != "Tabキーで選択";
+bool ShouldRenderFooterText(const std::string &text) {
+  return text != "Tabキーで選択";
 }
 
 NSAttributedString *MakeVerticalAttributedString(
@@ -587,7 +585,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
 
     const mozc::commands::Footer &footer = candidate_window_.footer();
 
-    if (footer.has_label()) {
+    if (footer.has_label() && ShouldRenderFooterText(footer.label())) {
       const NSAttributedString *footerLabel =
           MacViewUtil::ToNSAttributedString(footer.label(), style_.footer_style());
       const NSSize footerLabelSize =
@@ -596,7 +594,8 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
       footerSize.height = std::max(footerSize.height, footerLabelSize.height);
     }
 
-    if (footer.has_sub_label()) {
+    if (footer.has_sub_label() &&
+        ShouldRenderFooterText(footer.sub_label())) {
       const NSAttributedString *footerSubLabel =
           MacViewUtil::ToNSAttributedString(footer.sub_label(), style_.footer_sub_label_style());
       const NSSize footerSubLabelSize =
@@ -624,8 +623,10 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
       footerSize.height = std::max(footerSize.height, footerIndexSize.height);
     }
 
-    footerSize.height += style_.footer_border_colors_size();
-    tableLayout_.EnsureFooterSize(MacViewUtil::ToSize(footerSize));
+    if (footerSize.height > 0) {
+      footerSize.height += style_.footer_border_colors_size();
+      tableLayout_.EnsureFooterSize(MacViewUtil::ToSize(footerSize));
+    }
   }
 
   tableLayout_.SetRowRectPadding(style_.row_rect_padding());
@@ -693,7 +694,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   const mozc::commands::Footer &footer = candidate_window_.footer();
 
   if (footer.has_label() &&
-      ShouldRenderVerticalFooterText(candidate_window_, footer.label())) {
+      ShouldRenderFooterText(footer.label())) {
     const NSAttributedString *footerLabel =
         MacViewUtil::ToNSAttributedString(footer.label(), style_.footer_style());
     const NSSize size =
@@ -703,7 +704,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   }
 
   if (footer.has_sub_label() &&
-      ShouldRenderVerticalFooterText(candidate_window_, footer.sub_label())) {
+      ShouldRenderFooterText(footer.sub_label())) {
     const NSAttributedString *footerSubLabel =
         MacViewUtil::ToNSAttributedString(footer.sub_label(),
                                           style_.footer_sub_label_style());
@@ -1050,7 +1051,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   }
 
   if (footer.has_label() &&
-      ShouldRenderVerticalFooterText(candidate_window_, footer.label())) {
+      ShouldRenderFooterText(footer.label())) {
     const NSAttributedString *footerLabel =
         MacViewUtil::ToNSAttributedString(footer.label(), style_.footer_style());
     footerRect.origin.x += style_.footer_style().left_padding();
@@ -1061,7 +1062,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   }
 
   if (footer.has_sub_label() &&
-      ShouldRenderVerticalFooterText(candidate_window_, footer.sub_label())) {
+      ShouldRenderFooterText(footer.sub_label())) {
     const NSAttributedString *footerSubLabel =
         MacViewUtil::ToNSAttributedString(footer.sub_label(),
                                           style_.footer_sub_label_style());
@@ -1157,8 +1158,12 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   if (!candidate_window_.has_footer()) {
     return;
   }
+  const mozc::Rect footerLogicalRect = tableLayout_.GetFooterRect();
+  if (footerLogicalRect.IsRectEmpty()) {
+    return;
+  }
   const mozc::commands::Footer &footer = candidate_window_.footer();
-  NSRect footerRect = MacViewUtil::ToNSRect(tableLayout_.GetFooterRect());
+  NSRect footerRect = MacViewUtil::ToNSRect(footerLogicalRect);
 
   // Draw footer border
   for (int i = 0; i < style_.footer_border_colors_size(); ++i) {
@@ -1192,7 +1197,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   }
 
   // Draw label
-  if (footer.has_label()) {
+  if (footer.has_label() && ShouldRenderFooterText(footer.label())) {
     const NSAttributedString *footerLabel =
         MacViewUtil::ToNSAttributedString(footer.label(), style_.footer_style());
     footerRect.origin.x += style_.footer_style().left_padding();
@@ -1203,7 +1208,8 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   }
 
   // Draw sub_label
-  if (footer.has_sub_label()) {
+  if (footer.has_sub_label() &&
+      ShouldRenderFooterText(footer.sub_label())) {
     const NSAttributedString *footerSubLabel =
         MacViewUtil::ToNSAttributedString(footer.sub_label(), style_.footer_sub_label_style());
     footerRect.origin.x += style_.footer_sub_label_style().left_padding();
