@@ -338,6 +338,11 @@ class Session {
   // prevents the visible suggestion window from disappearing at materialization.
   commands::CandidateWindow pending_live_conversion_suggestion_candidate_window_;
 
+  // Exact cloned context that owns candidate IDs in the pending window above.
+  // Pending and active live-conversion suggestions are separate semantic
+  // snapshots and must never share ownership implicitly.
+  std::unique_ptr<ImeContext> pending_live_conversion_suggestion_context_;
+
   // Passive suggestion window currently associated with live conversion output.
   // Some delayed callbacks re-render live conversion without regenerating
   // suggestions; this cache keeps the passive suggestion window stable there.
@@ -417,6 +422,11 @@ class Session {
     std::string previous_live_value;
     commands::Preedit previous_live_preedit_output;
     commands::CandidateWindow previous_live_suggestion_candidate_window;
+
+    // Exact cloned context that produced the previous passive suggestion
+    // window. Candidate IDs are meaningful only together with this converter
+    // state, so deferred presentation must preserve both as one snapshot.
+    std::unique_ptr<ImeContext> previous_live_suggestion_context;
 
     // Stable presentation basis from before any transient unresolved-romaji
     // suffix.  Keep this basis across hidden Mozc/Zenz rounds so a sequence
@@ -542,6 +552,7 @@ class Session {
     commands::Input pending_input;
     std::optional<PendingLiveConversionPresentation> pending_presentation;
     commands::CandidateWindow pending_suggestion_candidate_window;
+    std::unique_ptr<ImeContext> pending_suggestion_context;
     commands::CandidateWindow live_suggestion_candidate_window;
     std::unique_ptr<ImeContext> live_suggestion_context;
     std::string live_key;

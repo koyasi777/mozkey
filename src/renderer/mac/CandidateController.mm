@@ -37,6 +37,7 @@
 #include "renderer/mac/CandidateWindow.h"
 #include "renderer/mac/InfolistWindow.h"
 #include "renderer/mac/RubyWindow.h"
+#include "renderer/mac/mac_candidate_interaction.h"
 #include "renderer/mac/mac_view_util.h"
 #include "renderer/renderer_style_handler.h"
 #include "renderer/window_util.h"
@@ -167,11 +168,8 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
   if (command_.has_output() && command_.output().live_conversion()) {
     const bool has_passive_suggestion =
         command_.output().has_candidate_window() &&
-        command_.output().candidate_window().has_category() &&
-        command_.output().candidate_window().category() ==
-            commands::SUGGESTION &&
-        command_.output().candidate_window().candidate_size() > 0 &&
-        !command_.output().candidate_window().has_focused_index();
+        IsPassiveSuggestionCandidateWindow(
+            command_.output().candidate_window());
 
     cascading_window_->Hide();
     infolist_window_->Hide();

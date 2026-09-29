@@ -117,19 +117,24 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(MergeStablePresentationSpans);
   PEER_METHOD(AttachLiveConversionSuggestionCandidateWindow);
   PEER_METHOD(AttachCachedLiveConversionSuggestionCandidateWindow);
+  PEER_METHOD(OutputCurrentLiveConversionWithZenzPending);
+  PEER_METHOD(RestoreDeferredZenzLivePresentationForEditing);
 
   PEER_VARIABLE(context_);
   PEER_VARIABLE(undo_contexts_);
   PEER_VARIABLE(live_conversion_active_);
   PEER_VARIABLE(live_conversion_pending_);
   PEER_VARIABLE(pending_live_conversion_key_);
+  PEER_VARIABLE(pending_live_conversion_input_);
   PEER_VARIABLE(live_conversion_key_);
   PEER_VARIABLE(live_conversion_preedit_);
   PEER_VARIABLE(live_conversion_value_);
   PEER_VARIABLE(live_conversion_preedit_output_);
   PEER_VARIABLE(pending_live_conversion_presentation_);
   PEER_VARIABLE(pending_live_conversion_suggestion_candidate_window_);
+  PEER_VARIABLE(pending_live_conversion_suggestion_context_);
   PEER_VARIABLE(live_conversion_suggestion_candidate_window_);
+  PEER_VARIABLE(live_conversion_suggestion_context_);
   PEER_VARIABLE(zenz_live_visible_generation_);
   PEER_VARIABLE(zenz_live_key_);
   PEER_VARIABLE(zenz_live_value_);
@@ -3607,6 +3612,88 @@ TEST_F(SessionTest,
   EXPECT_TRUE(session_peer.zenz_live_value_().empty());
 }
 
+TEST_F(SessionTest,
+       ZenzFeedbackFastPathKeepsCurrentPassiveSuggestionVisible) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  const std::string kKey = "かれはてんてきです";
+  const std::string kFirstKey = "かれは";
+  const std::string kSecondKey = "てんてきです";
+  const std::string kFirstValue = "彼は";
+  const std::string kMozcSecondValue = "点滴です";
+  const std::string kZenzValue = "彼は天敵です";
+  const std::string kSuggestionValue = "彼は天敵ですよ";
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(false);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("karehatentekidesu", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(), kKey);
+
+  config.set_use_dictionary_suggest(true);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      kKey, "empty", kZenzValue);
+  ASSERT_FALSE(session_peer.zenz_feedback_store_().ListEntries().empty());
+
+  Segments live_segments;
+  Segment* first = live_segments.add_segment();
+  first->set_key(kFirstKey);
+  AddCandidate(kFirstKey, kFirstValue, first);
+  Segment* second = live_segments.add_segment();
+  second->set_key(kSecondKey);
+  AddCandidate(kSecondKey, kMozcSecondValue, second);
+
+  Segments suggestion_segments;
+  Segment* suggestion = suggestion_segments.add_segment();
+  suggestion->set_key(kKey);
+  AddCandidate(kKey, kSuggestionValue, suggestion);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(1)
+      .WillOnce(DoAll(
+          SetArgPointee<1>(suggestion_segments), Return(true)));
+
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+
+  EXPECT_TRUE(command.output().live_conversion());
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT(kZenzValue, command);
+
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_FALSE(command.output().candidate_window().has_focused_index());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            kSuggestionValue);
+}
 #endif  // defined(_WIN32)
 
 TEST_F(SessionTest, LiveConversionUsesDefaultMinKeyLength) {
@@ -3966,6 +4053,132 @@ TEST_F(SessionTest,
   EXPECT_FALSE(session_peer.live_conversion_active_());
 }
 
+TEST_F(
+    SessionTest,
+    DelayedPassiveSuggestionFallbackKeepsExactSemanticContextAndSubmits) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  const std::string kA = "あ";
+  const std::string kLiveFirst = "亜";
+  const std::string kLiveSecond = "阿";
+  const std::string kSuggestionFirst = "ありがとう";
+  const std::string kSuggestionSecond = "ありがたい";
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString(kA, "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+
+  config.set_use_dictionary_suggest(true);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  session.SetConfig(config);
+
+  Segments pending_suggestion_segments;
+  Segment* pending_suggestion =
+      pending_suggestion_segments.add_segment();
+  pending_suggestion->set_key(kA);
+  AddCandidate(kA, kSuggestionFirst, pending_suggestion);
+  AddCandidate(kA, kSuggestionSecond, pending_suggestion);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(1)
+      .WillOnce(DoAll(
+          SetArgPointee<1>(pending_suggestion_segments), Return(true)));
+
+  commands::Input pending_input = command.input();
+  commands::Output pending_output;
+  ASSERT_TRUE(session_peer.AttachLiveConversionSuggestionCandidateWindow(
+      pending_input, &pending_output));
+  ASSERT_TRUE(pending_output.has_candidate_window());
+  ASSERT_EQ(pending_output.candidate_window().candidate_size(), 2);
+  ASSERT_NE(session_peer.live_conversion_suggestion_context_().get(), nullptr);
+
+  session_peer.live_conversion_pending_() = true;
+  session_peer.pending_live_conversion_key_() = kA;
+  session_peer.pending_live_conversion_input_() = pending_input;
+  session_peer.pending_live_conversion_suggestion_candidate_window_() =
+      std::move(session_peer.live_conversion_suggestion_candidate_window_());
+  session_peer.pending_live_conversion_suggestion_context_() =
+      std::move(session_peer.live_conversion_suggestion_context_());
+
+  ASSERT_NE(
+      session_peer.pending_live_conversion_suggestion_context_().get(),
+      nullptr);
+  EXPECT_EQ(
+      session_peer.live_conversion_suggestion_candidate_window_()
+          .candidate_size(),
+      0);
+  EXPECT_EQ(session_peer.live_conversion_suggestion_context_().get(), nullptr);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key(kA);
+  AddCandidate(kA, kLiveFirst, live_segment);
+  AddCandidate(kA, kLiveSecond, live_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(1)
+      .WillOnce(Return(false));
+
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_TRUE(session_peer.live_conversion_active_());
+  EXPECT_FALSE(session_peer.live_conversion_pending_());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_FALSE(command.output().candidate_window().has_focused_index());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 2);
+  EXPECT_EQ(command.output().candidate_window().candidate(1).value(),
+            kSuggestionSecond);
+  ASSERT_NE(session_peer.live_conversion_suggestion_context_().get(), nullptr);
+  EXPECT_EQ(
+      session_peer.pending_live_conversion_suggestion_context_().get(),
+      nullptr);
+
+  const int suggestion_id =
+      command.output().candidate_window().candidate(1).id();
+
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  Segments empty_segments;
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(empty_segments));
+
+  command.Clear();
+  SetSendCommandCommand(
+      commands::SessionCommand::SUBMIT_CANDIDATE, &command);
+  command.mutable_input()->mutable_command()->set_id(suggestion_id);
+
+  EXPECT_TRUE(session.SendCommand(&command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT(kSuggestionSecond, command);
+  EXPECT_FALSE(command.output().has_preedit());
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  EXPECT_FALSE(session_peer.live_conversion_active_());
+  EXPECT_FALSE(session_peer.live_conversion_pending_());
+}
 TEST_F(SessionTest,
        ShiftedAsciiRevertSuppressesPassiveSuggestionWhenDictionarySuggestOff) {
   MockEngine engine;
@@ -3994,21 +4207,37 @@ TEST_F(SessionTest,
   commands::Output output;
 
   EXPECT_CALL(*converter, StartPrediction(_, _)).Times(0);
+
+  session_peer.pending_live_conversion_suggestion_context_() =
+      std::make_unique<ImeContext>(*session_peer.context_());
   EXPECT_FALSE(session_peer.Suggest(input));
   EXPECT_FALSE(output.has_candidate_window());
+  EXPECT_EQ(
+      session_peer.pending_live_conversion_suggestion_context_().get(),
+      nullptr);
 
+  session_peer.pending_live_conversion_suggestion_context_() =
+      std::make_unique<ImeContext>(*session_peer.context_());
   EXPECT_FALSE(session_peer.AttachLiveConversionSuggestionCandidateWindow(
       input, &output));
   EXPECT_FALSE(output.has_candidate_window());
+  EXPECT_EQ(
+      session_peer.pending_live_conversion_suggestion_context_().get(),
+      nullptr);
 
   commands::CandidateWindow& cached_window =
       session_peer.live_conversion_suggestion_candidate_window_();
   cached_window.set_category(commands::SUGGESTION);
   cached_window.add_candidate()->set_value("AAa");
+  session_peer.pending_live_conversion_suggestion_context_() =
+      std::make_unique<ImeContext>(*session_peer.context_());
 
   EXPECT_FALSE(session_peer.AttachCachedLiveConversionSuggestionCandidateWindow(
       &output));
   EXPECT_FALSE(output.has_candidate_window());
+  EXPECT_EQ(
+      session_peer.pending_live_conversion_suggestion_context_().get(),
+      nullptr);
   EXPECT_EQ(session_peer.live_conversion_suggestion_candidate_window_()
                 .candidate_size(),
             0);
@@ -4584,6 +4813,337 @@ TEST_F(SessionTest,
   EXPECT_EQ(command.output().callback().delay_millisec(), 24);
 }
 
+TEST_F(SessionTest,
+       DeferredZenzKeepsPassiveSuggestionVisibleAcrossPendingRefresh) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  const std::string kAi = "あい";
+  const std::string kLove = "愛";
+  const std::string kLoveYou = "愛してる";
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key(kAi);
+  AddCandidate(kAi, kLove, live_segment);
+
+  Segments suggestion_segments;
+  Segment* suggestion_segment = suggestion_segments.add_segment();
+  suggestion_segment->set_key(kAi);
+  AddCandidate(kAi, kLoveYou, suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  // InsertCharacterString() sends one key event per character.  The first
+  // character runs the ordinary composition suggestion path; the second
+  // character reaches live conversion and builds the passive suggestion.
+  // Model both calls explicitly so this regression tests the intended
+  // deferred-Zenz behavior rather than depending on an over-saturated mock.
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(Return(false))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString(kAi, "ai", &session, &command);
+
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT(kAi, command);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_FALSE(command.output().candidate_window().has_focused_index());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            kLoveYou);
+
+  command.Clear();
+  ASSERT_TRUE(
+      session_peer.OutputCurrentLiveConversionWithZenzPending(&command));
+
+  EXPECT_TRUE(command.output().live_conversion());
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT(kAi, command);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            kLoveYou);
+
+  session_peer.live_conversion_suggestion_context_().reset();
+
+  command.Clear();
+  ASSERT_TRUE(
+      session_peer.OutputCurrentLiveConversionWithZenzPending(&command));
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_PREEDIT(kAi, command);
+  EXPECT_FALSE(command.output().has_candidate_window());
+}
+
+TEST_F(SessionTest,
+       DeferredZenzFailureFallbackKeepsPassiveSuggestionVisible) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  const std::string kAi = "あい";
+  const std::string kLove = "愛";
+  const std::string kLoveYou = "愛してる";
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key(kAi);
+  AddCandidate(kAi, kLove, live_segment);
+
+  Segments suggestion_segments;
+  Segment* suggestion_segment = suggestion_segments.add_segment();
+  suggestion_segment->set_key(kAi);
+  AddCandidate(kAi, kLoveYou, suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  // InsertCharacterString() sends one key event per character.  The first
+  // character runs the ordinary composition suggestion path; the second
+  // character reaches live conversion and builds the passive suggestion.
+  // Model both calls explicitly so this regression tests the intended
+  // deferred-Zenz behavior rather than depending on an over-saturated mock.
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(Return(false))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString(kAi, "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  ASSERT_TRUE(command.output().has_candidate_window());
+
+  ZenzLiveResponse response;
+  response.ok = false;
+  response.debug = "test_failure_with_suggestion";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_PREEDIT(kLove, command);
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "test_failure_with_suggestion");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_FALSE(command.output().candidate_window().has_focused_index());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            kLoveYou);
+}
+
+TEST_F(SessionTest,
+       DeferredZenzAcceptedResultKeepsPassiveSuggestionVisible) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  const std::string kAi = "あい";
+  const std::string kLove = "愛";
+  const std::string kLoveYou = "愛してる";
+  const std::string kZenzValue = "亜衣";
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key(kAi);
+  AddCandidate(kAi, kLove, live_segment);
+
+  Segments suggestion_segments;
+  Segment* suggestion_segment = suggestion_segments.add_segment();
+  suggestion_segment->set_key(kAi);
+  AddCandidate(kAi, kLoveYou, suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  // InsertCharacterString() sends one key event per character.  The first
+  // character runs the ordinary composition suggestion path; the second
+  // character reaches live conversion and builds the passive suggestion.
+  // Model both calls explicitly so this regression tests the intended
+  // deferred-Zenz behavior rather than depending on an over-saturated mock.
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(Return(false))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString(kAi, "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  ASSERT_TRUE(command.output().has_candidate_window());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = kZenzValue;
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_PREEDIT(kZenzValue, command);
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_FALSE(command.output().candidate_window().has_focused_index());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            kLoveYou);
+}
+
+TEST_F(SessionTest,
+       DeferredZenzRestoreKeepsSuggestionWindowAndSemanticContextTogether) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  const std::string kAi = "あい";
+  const std::string kLove = "愛";
+  const std::string kOldSuggestion = "旧候補";
+  const std::string kNewSuggestion = "新候補";
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(false);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterString(kAi, "ai", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+
+  config.set_use_dictionary_suggest(true);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  Segments old_suggestion_segments;
+  Segment* old_suggestion = old_suggestion_segments.add_segment();
+  old_suggestion->set_key(kAi);
+  AddCandidate(kAi, kOldSuggestion, old_suggestion);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key(kAi);
+  AddCandidate(kAi, kLove, live_segment);
+
+  Segments new_suggestion_segments;
+  Segment* new_suggestion = new_suggestion_segments.add_segment();
+  new_suggestion->set_key(kAi);
+  AddCandidate(kAi, kNewSuggestion, new_suggestion);
+
+  {
+    ::testing::InSequence sequence;
+    EXPECT_CALL(*converter, StartPrediction(_, _))
+        .WillOnce(DoAll(
+            SetArgPointee<1>(old_suggestion_segments), Return(true)));
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+    EXPECT_CALL(*converter, StartPrediction(_, _))
+        .WillOnce(DoAll(
+            SetArgPointee<1>(new_suggestion_segments), Return(true)));
+  }
+
+  commands::Input suggestion_input = command.input();
+  commands::Output suggestion_output;
+  ASSERT_TRUE(session_peer.AttachLiveConversionSuggestionCandidateWindow(
+      suggestion_input, &suggestion_output));
+  ASSERT_TRUE(suggestion_output.has_candidate_window());
+  ASSERT_EQ(suggestion_output.candidate_window().candidate_size(), 1);
+  EXPECT_EQ(suggestion_output.candidate_window().candidate(0).value(),
+            kOldSuggestion);
+  ASSERT_NE(session_peer.live_conversion_suggestion_context_().get(), nullptr);
+
+  command.mutable_output()->Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            kNewSuggestion);
+
+  session_peer.RestoreDeferredZenzLivePresentationForEditing();
+
+  ASSERT_EQ(
+      session_peer.live_conversion_suggestion_candidate_window_()
+          .candidate_size(),
+      1);
+  EXPECT_EQ(
+      session_peer.live_conversion_suggestion_candidate_window_()
+          .candidate(0)
+          .value(),
+      kOldSuggestion);
+  ASSERT_NE(session_peer.live_conversion_suggestion_context_().get(), nullptr);
+
+  commands::Output restored_suggestion_output;
+  session_peer.live_conversion_suggestion_context_()->converter().FillOutput(
+      session_peer.live_conversion_suggestion_context_()->composer(),
+      &restored_suggestion_output);
+  ASSERT_TRUE(restored_suggestion_output.has_candidate_window());
+  ASSERT_EQ(restored_suggestion_output.candidate_window().candidate_size(), 1);
+  EXPECT_EQ(restored_suggestion_output.candidate_window()
+                .candidate(0)
+                .value(),
+            kOldSuggestion);
+}
 TEST_F(SessionTest,
        DeferredZenzPresentationTimeoutFallsBackAfterRequestSubmission) {
   MockEngine engine;

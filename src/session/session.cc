@@ -2715,6 +2715,11 @@ void Session::PushUndoContext() {
     state.pending_presentation = pending_live_conversion_presentation_;
     state.pending_suggestion_candidate_window =
         pending_live_conversion_suggestion_candidate_window_;
+    if (pending_live_conversion_suggestion_context_ != nullptr) {
+      state.pending_suggestion_context =
+          std::make_unique<ImeContext>(
+              *pending_live_conversion_suggestion_context_);
+    }
     state.live_suggestion_candidate_window =
         live_conversion_suggestion_candidate_window_;
     if (live_conversion_suggestion_context_ != nullptr) {
@@ -2775,6 +2780,8 @@ void Session::PopUndoContext() {
   pending_live_conversion_input_ = std::move(state.pending_input);
   pending_live_conversion_suggestion_candidate_window_ =
       std::move(state.pending_suggestion_candidate_window);
+  pending_live_conversion_suggestion_context_ =
+      std::move(state.pending_suggestion_context);
   live_conversion_suggestion_candidate_window_ =
       std::move(state.live_suggestion_candidate_window);
   live_conversion_suggestion_context_ =
@@ -4402,21 +4409,30 @@ bool Session::CommitCandidate(commands::Command* command) {
   // against the real converter: the same integer can identify an unrelated
   // normal-conversion candidate.
   const commands::CandidateWindow* passive_suggestion_window = nullptr;
-  if ((live_conversion_active_ || live_conversion_pending_) &&
+  std::unique_ptr<ImeContext>* passive_suggestion_context_owner = nullptr;
+
+  if (live_conversion_active_ &&
       live_conversion_suggestion_candidate_window_.has_category() &&
       live_conversion_suggestion_candidate_window_.category() ==
           commands::SUGGESTION &&
+      live_conversion_suggestion_candidate_window_.candidate_size() > 0 &&
       !live_conversion_suggestion_candidate_window_.has_focused_index()) {
     passive_suggestion_window = &live_conversion_suggestion_candidate_window_;
+    passive_suggestion_context_owner =
+        &live_conversion_suggestion_context_;
   } else if (
       live_conversion_pending_ &&
       pending_live_conversion_suggestion_candidate_window_.has_category() &&
       pending_live_conversion_suggestion_candidate_window_.category() ==
           commands::SUGGESTION &&
+      pending_live_conversion_suggestion_candidate_window_.candidate_size() >
+          0 &&
       !pending_live_conversion_suggestion_candidate_window_
            .has_focused_index()) {
     passive_suggestion_window =
         &pending_live_conversion_suggestion_candidate_window_;
+    passive_suggestion_context_owner =
+        &pending_live_conversion_suggestion_context_;
   }
 
   const commands::CandidateWindow::Candidate* passive_suggestion = nullptr;
@@ -4431,18 +4447,21 @@ bool Session::CommitCandidate(commands::Command* command) {
 
   bool submit_passive_live_suggestion = false;
   if (passive_suggestion != nullptr) {
-    if (live_conversion_suggestion_context_ == nullptr) {
+    if (passive_suggestion_context_owner == nullptr ||
+        *passive_suggestion_context_owner == nullptr) {
       LOG(ERROR) << "passive suggestion context is missing";
       return DoNothing(command);
     }
 
+    ImeContext& passive_suggestion_context =
+        **passive_suggestion_context_owner;
+
     // Verify that the stored semantic context still owns exactly the candidate
-    // the renderer displayed.  If it does not, failing closed is safer than
-    // aliasing the ID into the real CONVERSION list.
+    // the renderer displayed. If it does not, failing closed is safer than
+    // aliasing the ID into another converter state.
     commands::Output suggestion_snapshot;
-    live_conversion_suggestion_context_->converter().FillOutput(
-        live_conversion_suggestion_context_->composer(),
-        &suggestion_snapshot);
+    passive_suggestion_context.converter().FillOutput(
+        passive_suggestion_context.composer(), &suggestion_snapshot);
 
     const commands::CandidateWindow::Candidate* snapshot_candidate = nullptr;
     if (suggestion_snapshot.has_candidate_window() &&
@@ -4460,8 +4479,7 @@ bool Session::CommitCandidate(commands::Command* command) {
 
     if (snapshot_candidate == nullptr ||
         snapshot_candidate->value() != passive_suggestion->value() ||
-        live_conversion_suggestion_context_->composer()
-                .GetQueryForConversion() !=
+        passive_suggestion_context.composer().GetQueryForConversion() !=
             context_->composer().GetQueryForConversion()) {
       LOG(ERROR) << "passive suggestion semantic snapshot mismatch";
       return DoNothing(command);
@@ -4489,7 +4507,7 @@ bool Session::CommitCandidate(commands::Command* command) {
     }
 
     std::unique_ptr<ImeContext> suggestion_context =
-        std::move(live_conversion_suggestion_context_);
+        std::move(*passive_suggestion_context_owner);
     ClearLiveConversionState();
     context_ = std::move(suggestion_context);
   }
@@ -4577,6 +4595,7 @@ void Session::CancelPendingLiveConversion() {
   pending_live_conversion_key_.clear();
   pending_live_conversion_input_.Clear();
   pending_live_conversion_suggestion_candidate_window_.Clear();
+  pending_live_conversion_suggestion_context_.reset();
   CancelPendingZenzLiveCorrection();
 }
 
@@ -4589,6 +4608,7 @@ void Session::ClearLiveConversionState() {
   pending_live_conversion_key_.clear();
   pending_live_conversion_input_.Clear();
   pending_live_conversion_suggestion_candidate_window_.Clear();
+  pending_live_conversion_suggestion_context_.reset();
   live_conversion_suggestion_candidate_window_.Clear();
   live_conversion_suggestion_context_.reset();
 
@@ -4622,6 +4642,39 @@ void Session::CancelLiveConversionForEditing() {
 }
 
 namespace {
+bool IsPassiveLiveSuggestionCandidateWindow(
+    const commands::CandidateWindow& candidate_window) {
+  return candidate_window.has_category() &&
+         candidate_window.category() == commands::SUGGESTION &&
+         candidate_window.candidate_size() > 0 &&
+         !candidate_window.has_focused_index();
+}
+
+bool HaveSamePassiveSuggestionCandidates(
+    const commands::CandidateWindow& lhs,
+    const commands::CandidateWindow& rhs) {
+  if (!IsPassiveLiveSuggestionCandidateWindow(lhs) ||
+      !IsPassiveLiveSuggestionCandidateWindow(rhs) ||
+      lhs.candidate_size() != rhs.candidate_size()) {
+    return false;
+  }
+
+  for (int i = 0; i < lhs.candidate_size(); ++i) {
+    const commands::CandidateWindow::Candidate& lhs_candidate =
+        lhs.candidate(i);
+    const commands::CandidateWindow::Candidate& rhs_candidate =
+        rhs.candidate(i);
+
+    if (lhs_candidate.has_id() != rhs_candidate.has_id() ||
+        (lhs_candidate.has_id() &&
+         lhs_candidate.id() != rhs_candidate.id()) ||
+        lhs_candidate.value() != rhs_candidate.value()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool ShouldSuppressShiftedAsciiAutoSuggestion(
     const config::Config& config,
     const composer::Composer& composer);
@@ -4697,6 +4750,14 @@ bool Session::MaybeStartLiveConversionInternal(
     state.previous_live_preedit_output = live_conversion_preedit_output_;
     state.previous_live_suggestion_candidate_window =
         live_conversion_suggestion_candidate_window_;
+    if (IsPassiveLiveSuggestionCandidateWindow(
+            state.previous_live_suggestion_candidate_window) &&
+        live_conversion_suggestion_context_ != nullptr) {
+      state.previous_live_suggestion_context =
+          std::make_unique<ImeContext>(*live_conversion_suggestion_context_);
+    } else {
+      state.previous_live_suggestion_candidate_window.Clear();
+    }
 
     if (pending_live_conversion_presentation_.has_value()) {
       // Keep the full previous visible basis even when the current composition
@@ -4733,15 +4794,17 @@ bool Session::MaybeStartLiveConversionInternal(
   const commands::Input live_conversion_suggestion_input =
       use_pending_live_conversion_input ? pending_live_conversion_input_
                                         : command->input();
-  const commands::CandidateWindow
-      pending_live_conversion_suggestion_candidate_window =
-          pending_live_conversion_suggestion_candidate_window_;
+  commands::CandidateWindow pending_live_conversion_suggestion_candidate_window =
+      std::move(pending_live_conversion_suggestion_candidate_window_);
+  std::unique_ptr<ImeContext> pending_live_conversion_suggestion_context =
+      std::move(pending_live_conversion_suggestion_context_);
 
   live_conversion_pending_ = false;
   pending_live_conversion_generation_ = 0;
   pending_live_conversion_key_.clear();
   pending_live_conversion_input_.Clear();
   pending_live_conversion_suggestion_candidate_window_.Clear();
+  pending_live_conversion_suggestion_context_.reset();
 
   if (!context_->mutable_converter()->Convert(context_->composer())) {
     if (ShouldKeepPendingLiveConversionForTransientSokuon(live_conversion_key) &&
@@ -4798,11 +4861,10 @@ bool Session::MaybeStartLiveConversionInternal(
 
   ClearZenzLiveCorrectionState();
 
-  if (allow_zenz_live_correction &&
-      MaybeApplyZenzFeedbackLiveCorrection(command)) {
-    return true;
-  }
-
+  // Passive suggestion belongs to the current composer query and must be
+  // materialized before any synchronous Zenz feedback fast-path can replace
+  // the preedit. Otherwise a feedback hit skips Suggest() entirely and either
+  // hides the suggestion or leaves a renderer-specific stale window behind.
   const bool should_suppress_shifted_ascii_suggestion =
       ShouldSuppressShiftedAsciiAutoSuggestion(context_->GetConfig(),
                                                context_->composer());
@@ -4811,16 +4873,27 @@ bool Session::MaybeStartLiveConversionInternal(
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
     live_conversion_suggestion_context_.reset();
+    pending_live_conversion_suggestion_context_.reset();
     command->mutable_output()->clear_candidate_window();
   } else if (
       !AttachLiveConversionSuggestionCandidateWindow(
           live_conversion_suggestion_input, command->mutable_output()) &&
       pending_live_conversion_suggestion_candidate_window.candidate_size() > 0) {
+    // A delayed-live-conversion suggestion may only be reused with the exact
+    // cloned context that produced its candidate IDs.
     live_conversion_suggestion_candidate_window_ =
-        pending_live_conversion_suggestion_candidate_window;
-    *command->mutable_output()->mutable_candidate_window() =
-        live_conversion_suggestion_candidate_window_;
+        std::move(pending_live_conversion_suggestion_candidate_window);
+    live_conversion_suggestion_context_ =
+        std::move(pending_live_conversion_suggestion_context);
+    AttachCachedLiveConversionSuggestionCandidateWindow(
+        command->mutable_output());
   }
+
+  if (allow_zenz_live_correction &&
+      MaybeApplyZenzFeedbackLiveCorrection(command)) {
+    return true;
+  }
+
   const bool zenz_scheduled =
       allow_zenz_live_correction && MaybeScheduleZenzLiveCorrection(command);
   if (zenz_scheduled && deferred_zenz_presentation.has_value()) {
@@ -5390,6 +5463,7 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
       pending_live_conversion_key_ = key;
       pending_live_conversion_input_ = command->input();
       pending_live_conversion_suggestion_candidate_window_.Clear();
+      pending_live_conversion_suggestion_context_.reset();
 
       if (OutputPendingLiveConversion(command)) {
         AttachDelayedLiveConversionCallback(command);
@@ -5415,6 +5489,7 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
   pending_live_conversion_key_ = key;
   pending_live_conversion_input_ = command->input();
   pending_live_conversion_suggestion_candidate_window_.Clear();
+  pending_live_conversion_suggestion_context_.reset();
 
   if (!OutputPendingLiveConversion(command)) {
     // Avoid showing raw hiragana fallback. If pending display cannot be built
@@ -5426,6 +5501,9 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
                                                     command->mutable_output())) {
     pending_live_conversion_suggestion_candidate_window_ =
         command->output().candidate_window();
+    pending_live_conversion_suggestion_context_ =
+        std::move(live_conversion_suggestion_context_);
+    live_conversion_suggestion_candidate_window_.Clear();
   }
   AttachDelayedLiveConversionCallback(command);
 
@@ -6708,7 +6786,10 @@ void Session::OverrideOutputWithDeferredZenzLivePresentation(
   }
 
   commands::Output* output = command->mutable_output();
-  output->clear_candidate_window();
+  if (output->has_candidate_window() &&
+      !IsPassiveLiveSuggestionCandidateWindow(output->candidate_window())) {
+    output->clear_candidate_window();
+  }
   *output->mutable_preedit() =
       deferred_zenz_live_presentation_->visible_preedit;
   output->set_live_conversion(true);
@@ -6732,6 +6813,7 @@ void Session::RestoreDeferredZenzLivePresentationForEditing() {
   pending_live_conversion_key_.clear();
   pending_live_conversion_input_.Clear();
   pending_live_conversion_suggestion_candidate_window_.Clear();
+  pending_live_conversion_suggestion_context_.reset();
 
   CancelPendingZenzLiveCorrection();
 
@@ -6749,6 +6831,8 @@ void Session::RestoreDeferredZenzLivePresentationForEditing() {
       std::move(state.previous_live_preedit_output);
   live_conversion_suggestion_candidate_window_ =
       std::move(state.previous_live_suggestion_candidate_window);
+  live_conversion_suggestion_context_ =
+      std::move(state.previous_live_suggestion_context);
   live_conversion_protected_spans_.clear();
 }
 
@@ -7630,21 +7714,7 @@ bool Session::ApplyZenzLiveCorrectionResult(
             : ZenzSafeDebugReason(response.debug);
 
     CancelPendingZenzLiveCorrection();
-    Output(command);
-
-    if (command->output().has_preedit()) {
-      RestorePreeditSegmentKeysForSymbolStyle(
-          live_conversion_preedit_.empty()
-              ? live_conversion_key_
-              : live_conversion_preedit_,
-          command->mutable_output()->mutable_preedit());
-    }
-
-    command->mutable_output()->set_live_conversion(true);
-    command->mutable_output()->set_live_conversion_pending(false);
-    command->mutable_output()->set_zenz_live_correction_pending(false);
-    command->mutable_output()->set_zenz_live_correction_debug(debug);
-    return true;
+    return OutputCurrentLiveConversionAfterZenzStop(command, debug);
   }
 
   std::string zenz_value = response.value;
@@ -7723,22 +7793,8 @@ bool Session::ApplyZenzLiveCorrectionResult(
         " context_class=", context_class));
 
     CancelPendingZenzLiveCorrection();
-    Output(command);
-
-    if (command->output().has_preedit()) {
-      RestorePreeditSegmentKeysForSymbolStyle(
-          live_conversion_preedit_.empty()
-              ? live_conversion_key_
-              : live_conversion_preedit_,
-          command->mutable_output()->mutable_preedit());
-    }
-
-    command->mutable_output()->set_live_conversion(true);
-    command->mutable_output()->set_live_conversion_pending(false);
-    command->mutable_output()->set_zenz_live_correction_pending(false);
-    command->mutable_output()->set_zenz_live_correction_debug(
-        validation.reason);
-    return true;
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, validation.reason);
   }
 
   const ZenzTextPrivacyDecision key_privacy =
@@ -7755,22 +7811,8 @@ bool Session::ApplyZenzLiveCorrectionResult(
         " context_class=", context_class));
 
     CancelPendingZenzLiveCorrection();
-    Output(command);
-
-    if (command->output().has_preedit()) {
-      RestorePreeditSegmentKeysForSymbolStyle(
-          live_conversion_preedit_.empty()
-              ? live_conversion_key_
-              : live_conversion_preedit_,
-          command->mutable_output()->mutable_preedit());
-    }
-
-    command->mutable_output()->set_live_conversion(true);
-    command->mutable_output()->set_live_conversion_pending(false);
-    command->mutable_output()->set_zenz_live_correction_pending(false);
-    command->mutable_output()->set_zenz_live_correction_debug(
-        absl::StrCat("key_privacy_", key_privacy.reason));
-    return true;
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, absl::StrCat("key_privacy_", key_privacy.reason));
   }
 
   const ZenzTextPrivacyDecision value_privacy =
@@ -7787,22 +7829,8 @@ bool Session::ApplyZenzLiveCorrectionResult(
         " context_class=", context_class));
 
     CancelPendingZenzLiveCorrection();
-    Output(command);
-
-    if (command->output().has_preedit()) {
-      RestorePreeditSegmentKeysForSymbolStyle(
-          live_conversion_preedit_.empty()
-              ? live_conversion_key_
-              : live_conversion_preedit_,
-          command->mutable_output()->mutable_preedit());
-    }
-
-    command->mutable_output()->set_live_conversion(true);
-    command->mutable_output()->set_live_conversion_pending(false);
-    command->mutable_output()->set_zenz_live_correction_pending(false);
-    command->mutable_output()->set_zenz_live_correction_debug(
-        absl::StrCat("value_privacy_", value_privacy.reason));
-    return true;
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, absl::StrCat("value_privacy_", value_privacy.reason));
   }
 
   ZenzAdoptionInput adoption_input;
@@ -7823,21 +7851,8 @@ bool Session::ApplyZenzLiveCorrectionResult(
         " context_class=", context_class));
 
     CancelPendingZenzLiveCorrection();
-    Output(command);
-
-    if (command->output().has_preedit()) {
-      RestorePreeditSegmentKeysForSymbolStyle(
-          live_conversion_preedit_.empty()
-              ? live_conversion_key_
-              : live_conversion_preedit_,
-          command->mutable_output()->mutable_preedit());
-    }
-
-    command->mutable_output()->set_live_conversion(true);
-    command->mutable_output()->set_live_conversion_pending(false);
-    command->mutable_output()->set_zenz_live_correction_pending(false);
-    command->mutable_output()->set_zenz_live_correction_debug(adoption.reason);
-    return true;
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, adoption.reason);
   }
 
   zenz_value = adoption.value;
@@ -7852,14 +7867,9 @@ bool Session::ApplyZenzLiveCorrectionResult(
         " context_class=", context_class));
 
     CancelPendingZenzLiveCorrection();
-    Output(command);
-    command->mutable_output()->set_live_conversion(true);
-    command->mutable_output()->set_live_conversion_pending(false);
-    command->mutable_output()->set_zenz_live_correction_pending(false);
-    command->mutable_output()->set_zenz_live_correction_debug(
-        absl::StrCat("adopted_value_privacy_",
-                     adopted_value_privacy.reason));
-    return true;
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, absl::StrCat("adopted_value_privacy_",
+                              adopted_value_privacy.reason));
   }
 
   std::string feedback_reason = "feedback_learning_disabled";
@@ -7891,13 +7901,8 @@ bool Session::ApplyZenzLiveCorrectionResult(
       }
 
       CancelPendingZenzLiveCorrection();
-      Output(command);
-      command->mutable_output()->set_live_conversion(true);
-      command->mutable_output()->set_live_conversion_pending(false);
-      command->mutable_output()->set_zenz_live_correction_pending(false);
-      command->mutable_output()->set_zenz_live_correction_debug(
-          feedback_decision.reason);
-      return true;
+      return OutputCurrentLiveConversionAfterZenzStop(
+          command, feedback_decision.reason);
     }
   }
 
@@ -9149,6 +9154,7 @@ bool Session::Suggest(const commands::Input& input) {
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
     live_conversion_suggestion_context_.reset();
+    pending_live_conversion_suggestion_context_.reset();
     return false;
   }
 
@@ -9185,6 +9191,7 @@ bool Session::AttachLiveConversionSuggestionCandidateWindow(
   // remain on live-conversion output; otherwise the renderer would show the
   // ordinary conversion candidate list without an explicit Space/Down action.
   live_conversion_suggestion_candidate_window_.Clear();
+  live_conversion_suggestion_context_.reset();
   output->clear_candidate_window();
 
   if (SuppressSuggestion(input)) {
@@ -9196,6 +9203,7 @@ bool Session::AttachLiveConversionSuggestionCandidateWindow(
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
     live_conversion_suggestion_context_.reset();
+    pending_live_conversion_suggestion_context_.reset();
     return false;
   }
 
@@ -9260,28 +9268,60 @@ bool Session::AttachCachedLiveConversionSuggestionCandidateWindow(
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
     live_conversion_suggestion_context_.reset();
+    pending_live_conversion_suggestion_context_.reset();
     return false;
   }
 
   const commands::CandidateWindow* candidate_window = nullptr;
-  if (live_conversion_suggestion_candidate_window_.has_category() &&
-      live_conversion_suggestion_candidate_window_.category() ==
-          commands::SUGGESTION &&
-      live_conversion_suggestion_candidate_window_.candidate_size() > 0 &&
-      !live_conversion_suggestion_candidate_window_.has_focused_index()) {
+  ImeContext* suggestion_context = nullptr;
+
+  if (live_conversion_active_ &&
+      IsPassiveLiveSuggestionCandidateWindow(
+          live_conversion_suggestion_candidate_window_)) {
     candidate_window = &live_conversion_suggestion_candidate_window_;
+    suggestion_context = live_conversion_suggestion_context_.get();
   } else if (
-      pending_live_conversion_suggestion_candidate_window_.has_category() &&
-      pending_live_conversion_suggestion_candidate_window_.category() ==
-          commands::SUGGESTION &&
-      pending_live_conversion_suggestion_candidate_window_.candidate_size() >
-          0 &&
-      !pending_live_conversion_suggestion_candidate_window_
-           .has_focused_index()) {
-    candidate_window = &pending_live_conversion_suggestion_candidate_window_;
+      live_conversion_pending_ &&
+      IsPassiveLiveSuggestionCandidateWindow(
+          pending_live_conversion_suggestion_candidate_window_)) {
+    candidate_window =
+        &pending_live_conversion_suggestion_candidate_window_;
+    suggestion_context =
+        pending_live_conversion_suggestion_context_.get();
   }
 
   if (candidate_window == nullptr) {
+    return false;
+  }
+
+  if (suggestion_context == nullptr ||
+      suggestion_context->composer().GetQueryForConversion() !=
+          context_->composer().GetQueryForConversion()) {
+    if (live_conversion_active_) {
+      live_conversion_suggestion_candidate_window_.Clear();
+      live_conversion_suggestion_context_.reset();
+    }
+    if (live_conversion_pending_) {
+      pending_live_conversion_suggestion_candidate_window_.Clear();
+      pending_live_conversion_suggestion_context_.reset();
+    }
+    return false;
+  }
+
+  commands::Output suggestion_snapshot;
+  suggestion_context->converter().FillOutput(
+      suggestion_context->composer(), &suggestion_snapshot);
+  if (!suggestion_snapshot.has_candidate_window() ||
+      !HaveSamePassiveSuggestionCandidates(
+          *candidate_window, suggestion_snapshot.candidate_window())) {
+    if (live_conversion_active_) {
+      live_conversion_suggestion_candidate_window_.Clear();
+      live_conversion_suggestion_context_.reset();
+    }
+    if (live_conversion_pending_) {
+      pending_live_conversion_suggestion_candidate_window_.Clear();
+      pending_live_conversion_suggestion_context_.reset();
+    }
     return false;
   }
 

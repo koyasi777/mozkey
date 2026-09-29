@@ -600,6 +600,47 @@ std::optional<int32_t> CandidateWindow::GetCandidateIdAtPoint(
   return std::nullopt;
 }
 
+std::optional<CandidateWindow::PressedSuggestionCandidateIdentity>
+CandidateWindow::GetPassiveSuggestionCandidateIdentityAtPoint(
+    const CPoint& point) const {
+  if (candidate_window_->category() != commands::SUGGESTION ||
+      candidate_window_->has_focused_index()) {
+    return std::nullopt;
+  }
+
+  for (size_t i = 0; i < candidate_window_->candidate_size(); ++i) {
+    const auto& candidate = candidate_window_->candidate(i);
+    if (!candidate.has_id()) {
+      continue;
+    }
+    const CRect rect = ToCRect(GetCandidateRect(i));
+    if (rect.PtInRect(point)) {
+      return PressedSuggestionCandidateIdentity{
+          .id = candidate.id(),
+          .value = candidate.value(),
+      };
+    }
+  }
+  return std::nullopt;
+}
+
+bool CandidateWindow::ContainsPassiveSuggestionCandidateIdentity(
+    const commands::CandidateWindow& candidate_window,
+    const PressedSuggestionCandidateIdentity& identity) {
+  if (candidate_window.category() != commands::SUGGESTION ||
+      candidate_window.has_focused_index()) {
+    return false;
+  }
+  for (const auto& candidate : candidate_window.candidate()) {
+    if (candidate.has_id() &&
+        candidate.id() == identity.id &&
+        candidate.value() == identity.value) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void CandidateWindow::SendCandidateCommand(
     commands::SessionCommand::CommandType type, int32_t candidate_id) {
   if (send_command_interface_ == nullptr) {
@@ -634,34 +675,32 @@ void CandidateWindow::OnLButtonDown(UINT nFlags, CPoint point) {
   // round-trip can complete before WM_LBUTTONUP and replace candidate_window_,
   // causing mouse-up to hit-test an unrelated conversion candidate.
   //
-  // Do not mutate the session on suggestion mouse-down.  Latch the ID that
-  // the user actually pressed and submit that same logical suggestion on
-  // mouse-up.
+  // Do not mutate the session on suggestion mouse-down. Latch both ID and
+  // value so an asynchronous renderer update cannot reuse the integer ID for
+  // a different logical suggestion before mouse-up.
   if (candidate_window_->category() == commands::SUGGESTION &&
       !candidate_window_->has_focused_index()) {
     suggestion_mouse_gesture_active_ = true;
-    pressed_suggestion_candidate_id_ = GetCandidateIdAtPoint(point);
+    pressed_suggestion_candidate_ =
+        GetPassiveSuggestionCandidateIdentityAtPoint(point);
     return;
   }
 
   suggestion_mouse_gesture_active_ = false;
-  pressed_suggestion_candidate_id_.reset();
+  pressed_suggestion_candidate_.reset();
   HandleMouseEvent(nFlags, point, false);
 }
 
 void CandidateWindow::OnLButtonUp(UINT nFlags, CPoint point) {
   if (suggestion_mouse_gesture_active_) {
     suggestion_mouse_gesture_active_ = false;
-    const std::optional<int32_t> candidate_id =
-        pressed_suggestion_candidate_id_;
-    pressed_suggestion_candidate_id_.reset();
+    const std::optional<PressedSuggestionCandidateIdentity> candidate =
+        pressed_suggestion_candidate_;
+    pressed_suggestion_candidate_.reset();
 
-    if (candidate_id.has_value()) {
-      // Suggestion has no focused candidate.  SUBMIT_CANDIDATE is the
-      // protocol command that commits that exact suggestion ID without first
-      // promoting the session to CONVERSION.
+    if (candidate.has_value()) {
       SendCandidateCommand(commands::SessionCommand::SUBMIT_CANDIDATE,
-                           *candidate_id);
+                           candidate->id);
     }
     return;
   }
@@ -684,21 +723,11 @@ void CandidateWindow::OnMouseMove(UINT nFlags, CPoint point) {
     return;
   }
 
-  // Keep suggestion clicks side-effect free until mouse-up.  If the pointer
-  // moves within the still-visible suggestion list, update the latched ID so
-  // drag-and-release continues to select the candidate under the pointer.
+  // Keep suggestion clicks side-effect free until mouse-up. Update the full
+  // logical identity as drag-and-release moves across the current list.
   if (suggestion_mouse_gesture_active_) {
-    if (candidate_window_->category() == commands::SUGGESTION &&
-        !candidate_window_->has_focused_index()) {
-      // Preserve ordinary drag-and-release semantics.  Moving outside all
-      // candidates clears the pending selection instead of retaining the ID
-      // from the original mouse-down location.
-      pressed_suggestion_candidate_id_ = GetCandidateIdAtPoint(point);
-    } else {
-      // If an unrelated asynchronous update changes the renderer state during
-      // the gesture, never fall through to a hit-test against that new list.
-      pressed_suggestion_candidate_id_.reset();
-    }
+    pressed_suggestion_candidate_ =
+        GetPassiveSuggestionCandidateIdentityAtPoint(point);
     return;
   }
 
@@ -882,6 +911,14 @@ void CandidateWindow::UpdateLayout(
     const commands::CandidateWindow& candidates,
     LayoutMode requested_layout_mode) {
   ClearBitmapCache();
+
+  if (suggestion_mouse_gesture_active_ &&
+      pressed_suggestion_candidate_.has_value() &&
+      !ContainsPassiveSuggestionCandidateIdentity(
+          candidates, *pressed_suggestion_candidate_)) {
+    pressed_suggestion_candidate_.reset();
+  }
+
   *candidate_window_ = candidates;
   layout_mode_ = LayoutMode::kHorizontal;
 
