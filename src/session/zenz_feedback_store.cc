@@ -532,7 +532,8 @@ int RejectWeightForReason(absl::string_view reason) {
   if (reason == "predict_after_zenz") {
     return kPredictAfterZenzRejectWeight;
   }
-  if (reason == "explicit_conversion_after_zenz") {
+  if (reason == "explicit_conversion_after_zenz" ||
+      reason == "cancel_visible_zenz_to_composition") {
     return kExplicitConversionRejectWeight;
   }
   return kLegacyRejectWeight;

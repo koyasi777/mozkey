@@ -814,6 +814,58 @@ class SessionTest : public testing::TestWithTempUserProfile {
     session->SetConfig(config);
   }
 
+  void SetupVisibleZenzCancelFeedbackTest(
+      Session* session,
+      SessionTestPeer* session_peer,
+      MockConverter* converter,
+      commands::Command* command) {
+    constexpr absl::string_view kKey =
+        "\xE3\x81\x8A\xE3\x81\x8A";
+    constexpr absl::string_view kZenzValue =
+        "\xE5\xA4\xA7";
+
+    InitSessionToPrecomposition(session);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_session_keymap(config::Config::MSIME);
+    config.set_use_zenz_feedback_learning(true);
+    session->SetConfig(config);
+    session->SetKeyMapManager(
+        std::make_shared<keymap::KeyMapManager>(config));
+
+    InsertCharacterString(kKey, "oo", session, command);
+    ASSERT_EQ(session->context().composer().GetQueryForConversion(), kKey);
+
+    const ConversionRequest request = CreateConversionRequest(*session);
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(kKey);
+    AddCandidate(kKey, kKey, segment);
+    FillT13Ns(request, &segments);
+
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+    command->Clear();
+    ASSERT_TRUE(session->Convert(command));
+    ASSERT_EQ(session->context().state(), ImeContext::CONVERSION);
+    Mock::VerifyAndClearExpectations(converter);
+
+    session_peer->live_conversion_active_() = true;
+    session_peer->live_conversion_key_() = std::string(kKey);
+    session_peer->live_conversion_preedit_() = std::string(kKey);
+    session_peer->live_conversion_value_() = std::string(kKey);
+    session_peer->live_conversion_preedit_output_() =
+        command->output().preedit();
+
+    session_peer->zenz_live_visible_generation_() = 1;
+    session_peer->zenz_live_key_() = std::string(kKey);
+    session_peer->zenz_live_value_() = std::string(kZenzValue);
+    session_peer->zenz_live_mozc_value_() = std::string(kKey);
+    session_peer->zenz_live_context_class_() = "empty";
+  }
+
   // TODO(matsuzakit): Set the session's state to PRECOMPOSITION.
   // Though the method name asserts "ToPrecomposition",
   // this method doesn't change session's state.
@@ -3464,6 +3516,256 @@ TEST_F(SessionTest,
   EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
   EXPECT_FALSE(session_peer.live_conversion_active_());
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+}
+
+TEST_F(SessionTest, VisibleZenzCancelArmsKeyMatchedFinalComparison) {
+#if defined(_WIN32)
+  constexpr absl::string_view kKey =
+      "\xE3\x81\x8A\xE3\x81\x8A";
+  constexpr absl::string_view kZenzValue =
+      "\xE5\xA4\xA7";
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupVisibleZenzCancelFeedbackTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl z", &session, &command));
+
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_PREEDIT(kKey, command);
+  EXPECT_FALSE(session_peer.live_conversion_active_());
+  EXPECT_TRUE(session_peer.zenz_live_key_().empty());
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().key, kKey);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().value, kZenzValue);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().reason,
+            "cancel_visible_zenz_to_composition");
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_()
+                  .require_final_committed_key_match);
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_()
+                   .has_final_committed_value);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       VisibleZenzCancelThenHiraganaCommitRecordsRejection) {
+#if defined(_WIN32)
+  constexpr absl::string_view kKey =
+      "\xE3\x81\x8A\xE3\x81\x8A";
+  constexpr absl::string_view kZenzValue =
+      "\xE5\xA4\xA7";
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupVisibleZenzCancelFeedbackTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl z", &session, &command));
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  EXPECT_CALL(*converter, FinishConversion(_, _)).Times(1);
+
+  command.Clear();
+  ASSERT_TRUE(session.Commit(&command));
+
+  ASSERT_TRUE(command.output().has_result());
+  EXPECT_EQ(command.output().result().key(), kKey);
+  EXPECT_EQ(command.output().result().value(), kKey);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_()
+                  .has_final_committed_value);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().final_committed_key,
+            kKey);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().final_committed_value,
+            kKey);
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].key, kKey);
+  EXPECT_EQ(entries[0].value, kZenzValue);
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       EditingAfterVisibleZenzCancelNeutralizesComparison) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupVisibleZenzCancelFeedbackTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl z", &session, &command));
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("i", &session, &command));
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       DirectCommitPunctuationAfterVisibleZenzCancelRecordsRejection) {
+#if defined(_WIN32)
+  constexpr absl::string_view kKey =
+      "\xE3\x81\x8A\xE3\x81\x8A";
+  constexpr absl::string_view kZenzValue =
+      "\xE5\xA4\xA7";
+  constexpr absl::string_view kCommittedValue =
+      "\xE3\x81\x8A\xE3\x81\x8A\xE3\x80\x82";
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupVisibleZenzCancelFeedbackTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl z", &session, &command));
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_auto_conversion(false);
+  config.set_use_direct_commit(true);
+  config.set_direct_commit_key(config::Config::DIRECT_COMMIT_KUTEN);
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  EXPECT_CALL(*converter, FinishConversion(_, _)).Times(1);
+
+  command.Clear();
+  InsertCharacterString("\xE3\x80\x82", ".", &session, &command);
+
+  ASSERT_TRUE(command.output().has_result());
+  EXPECT_EQ(command.output().result().value(), kCommittedValue);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_()
+                  .has_final_committed_value);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().final_committed_key,
+            kKey);
+  EXPECT_EQ(session_peer.pending_zenz_feedback_().final_committed_value,
+            kKey);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].key, kKey);
+  EXPECT_EQ(entries[0].value, kZenzValue);
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
+}
+
+TEST_F(SessionTest,
+       DirectCommitPunctuationAfterVisibleZenzCancelKeepsFeedbackUndoable) {
+#if defined(_WIN32)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupVisibleZenzCancelFeedbackTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl z", &session, &command));
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_auto_conversion(false);
+  config.set_use_direct_commit(true);
+  config.set_direct_commit_key(config::Config::DIRECT_COMMIT_KUTEN);
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  EXPECT_CALL(*converter, FinishConversion(_, _)).Times(1);
+
+  command.Clear();
+  InsertCharacterString("\xE3\x80\x82", ".", &session, &command);
+
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_()
+                  .has_final_committed_value);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl z", &session, &command));
+
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+#endif
 }
 
 TEST_F(SessionTest,
