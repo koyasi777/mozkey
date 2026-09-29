@@ -3028,15 +3028,18 @@ bool Session::TestSendKey(commands::Command* command) {
         return Revert(command);
       }
 
-      if (pending_direct_commit_learning_.pending &&
+      if ((pending_direct_commit_learning_.pending ||
+           pending_zenz_feedback_.pending) &&
           IsCancelKeyForCompositionOrConversion(key)) {
-        // A direct-commit punctuation/symbol may have already sent text to the
-        // application without creating Mozc's undo context.  In that case a
-        // cancel-like key such as Ctrl+Z should still cancel Mozkey's pending
-        // learning, while the key itself must be echoed back so that the
-        // application can decide how to undo the visible text.
+        // A direct-commit punctuation/symbol or accepted Zenz result may have
+        // already sent text to the application without creating Mozc's undo
+        // context. A cancel-like key such as Ctrl+Z should still cancel all
+        // pending learning/feedback, while the key itself is echoed back so
+        // that the application can undo the visible text.
         DiscardPendingDirectCommitLearning(
             "precomposition_cancel_key_after_direct_commit_learning");
+        DiscardPendingZenzFeedback(
+            "precomposition_cancel_key_after_pending_zenz_feedback");
         return EchoBackAndClearUndoContext(command);
       }
 
@@ -3697,15 +3700,18 @@ bool Session::SendKeyPrecompositionState(commands::Command* command) {
       return Revert(command);
     }
 
-    if (pending_direct_commit_learning_.pending &&
+    if ((pending_direct_commit_learning_.pending ||
+         pending_zenz_feedback_.pending) &&
         IsCancelKeyForCompositionOrConversion(command->input().key())) {
-      // A direct-commit punctuation/symbol may have already sent text to the
-      // application without creating Mozc's undo context.  In that case a
-      // cancel-like key such as Ctrl+Z should still cancel Mozkey's pending
-      // learning, while the key itself must be echoed back so that the
-      // application can decide how to undo the visible text.
+      // A direct-commit punctuation/symbol or accepted Zenz result may have
+      // already sent text to the application without creating Mozc's undo
+      // context. A cancel-like key such as Ctrl+Z should still cancel all
+      // pending learning/feedback, while the key itself is echoed back so
+      // that the application can undo the visible text.
       DiscardPendingDirectCommitLearning(
           "precomposition_cancel_key_after_direct_commit_learning");
+      DiscardPendingZenzFeedback(
+          "precomposition_cancel_key_after_pending_zenz_feedback");
       return EchoBackAndClearUndoContext(command);
     }
     return EchoBackAndClearUndoContext(command);
@@ -8554,8 +8560,8 @@ bool Session::InsertCharacter(commands::Command* command) {
           " suffix_chars=", Util::CharsLen(last_char)));
 
       // Direct-commit punctuation is an explicit commit path, but keep the
-      // feedback pending until the next real text input.  If the next action is
-      // Backspace/Escape, the feedback is discarded.
+      // feedback pending until the next real text input. If the next action is
+      // Backspace/Escape or a cancel-like key such as Ctrl+Z, discard it.
       SetPendingZenzFeedbackAccepted(
           zenz_key_before_edit,
           zenz_context_class_before_edit,
