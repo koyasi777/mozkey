@@ -76,6 +76,9 @@ STDMETHODIMP TipEnumDisplayAttributes::Next(
           MakeComPtr<TipDisplayAttributeConverted>().detach();
     } else if (index_ == 2) {
       attribute_array[items] =
+          MakeComPtr<TipDisplayAttributeZenzLiveCorrection>().detach();
+    } else if (index_ == 3) {
+      attribute_array[items] =
           MakeComPtr<TipDisplayAttributePendingRoman>().detach();
     } else {
       break;
@@ -97,7 +100,7 @@ STDMETHODIMP TipEnumDisplayAttributes::Reset() {
 // Implements the IEnumTfDisplayAttributeInfo::Skip() function.
 // This function skips |count| items in this enumeration list.
 STDMETHODIMP TipEnumDisplayAttributes::Skip(ULONG count) {
-  constexpr LONG kAttributeCount = 3;
+  constexpr LONG kAttributeCount = 4;
   const ULONG remaining =
       static_cast<ULONG>(kAttributeCount - index_);
 

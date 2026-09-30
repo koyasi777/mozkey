@@ -5,6 +5,45 @@
     <name>ConfigDialog</name>
     <message>
         <location filename="config_dialog.ui" line="0"/>
+        <source>未確定文字の表示色</source>
+        <translation>Preedit display colors</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>入力中の文字</source>
+        <translation>Input text</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>変換中の文節</source>
+        <translation>Converted segment</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>文字色</source>
+        <translation>Text color</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>背景色</source>
+        <translation>Background color</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>下線色</source>
+        <translation>Underline color</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>対応アプリのみ有効。Chrome/Edge等は非対応の場合あり。</source>
+        <translation>Effective only in supported applications. Chrome, Edge, and some other applications may not support these colors.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>この設定は Windows TSF の表示属性を利用します。対応アプリでのみ有効です。Chrome や Edge など、一部のアプリでは反映されない場合があります。</source>
+        <translation>This setting uses Windows TSF display attributes and works only in supported applications. Chrome, Edge, and some other applications may ignore it.</translation>
+    </message>    <message>
+        <location filename="config_dialog.ui" line="0"/>
         <source>未確定のローマ字を薄く表示する</source>
         <translation>Dim unresolved Roman input</translation>
     </message>
@@ -20,8 +59,8 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="0"/>
-        <source>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</source>
-        <translation>Higher values move unresolved Roman text closer to the sampled background color. 0% keeps high contrast and 90% is very faint. Apps where the background cannot be sampled safely use the system fallback appearance.</translation>
+        <source>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、100% は背景色と同じになり見えなくなります。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</source>
+        <translation>Higher values move unresolved Roman text closer to the sampled background color. 0% keeps high contrast and 100% matches the background and becomes invisible. Apps where the background cannot be sampled safely use the system fallback appearance.</translation>
     </message>
     <message>
         <location filename="config_dialog.ui" line="32"/>

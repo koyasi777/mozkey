@@ -68,6 +68,8 @@ constexpr TF_DISPLAYATTRIBUTE kConvertedAttribute = {
     TF_ATTR_TARGET_CONVERTED  // attribute info
 };
 
+constexpr std::wstring_view kZenzLiveCorrectionDescription =
+    L"TextService Display Attribute Zenz Live Correction";
 constexpr std::wstring_view kPendingRomanDescription =
     L"TextService Display Attribute Pending Roman";
 
@@ -233,6 +235,39 @@ TF_DISPLAYATTRIBUTE CreateConvertedAttributeFromConfig() {
   return attr;
 }
 
+TF_DISPLAYATTRIBUTE CreateZenzLiveCorrectionAttributeFromConfig() {
+  TF_DISPLAYATTRIBUTE attr = kConvertedAttribute;
+
+  const std::shared_ptr<const config::Config> config = ReloadAndGetConfig();
+  if (config == nullptr) {
+    return attr;
+  }
+
+  attr.crText =
+      config->use_custom_zenz_live_correction_text_color()
+          ? CustomColor(config->zenz_live_correction_text_color())
+          : (config->use_custom_preedit_target_text_color()
+                 ? CustomColor(config->preedit_target_text_color())
+                 : NoColor());
+
+  attr.crBk =
+      config->use_custom_zenz_live_correction_background_color()
+          ? CustomColor(config->zenz_live_correction_background_color())
+          : (config->use_custom_preedit_target_background_color()
+                 ? CustomColor(config->preedit_target_background_color())
+                 : NoColor());
+
+  attr.crLine =
+      config->use_custom_zenz_live_correction_underline_color()
+          ? CustomColor(config->zenz_live_correction_underline_color())
+          : (config->use_custom_preedit_target_underline_color()
+                 ? CustomColor(config->preedit_target_underline_color())
+                 : NoColor());
+
+  ApplyGeckoDisplayCompatibilityBackground(&attr);
+  return attr;
+}
+
 #ifdef GOOGLE_JAPANESE_INPUT_BUILD
 
 // {DDF5CDBA-C3FF-4BAF-B817-CC9210FAD27E}
@@ -248,6 +283,13 @@ constexpr GUID kDisplayAttributeConverted = {
     0x0ebb,
     0x4d29,
     {0xbd, 0x2f, 0xe4, 0x13, 0xa9, 0x44, 0xb7, 0xe4}};
+
+// {90D581F4-3D1A-411D-A11F-0ACA7CF9C783}
+constexpr GUID kDisplayAttributeZenzLiveCorrection = {
+    0x90d581f4,
+    0x3d1a,
+    0x411d,
+    {0xa1, 0x1f, 0x0a, 0xca, 0x7c, 0xf9, 0xc7, 0x83}};
 
 // {08E60AFF-F2EB-461D-A053-67C971B4D6CC}
 constexpr GUID kDisplayAttributePendingRoman = {
@@ -271,6 +313,13 @@ constexpr GUID kDisplayAttributeConverted = {
     0x2dcd,
     0x4365,
     {0xa5, 0xdc, 0x71, 0xf6, 0x7e, 0x79, 0x74, 0x37}};
+
+// {BA4E3A96-8078-41FA-A1BB-72A64C3ED494}
+constexpr GUID kDisplayAttributeZenzLiveCorrection = {
+    0xba4e3a96,
+    0x8078,
+    0x41fa,
+    {0xa1, 0xbb, 0x72, 0xa6, 0x4c, 0x3e, 0xd4, 0x94}};
 
 // {519662D0-BEF1-459D-BD03-B02F1EF8FD88}
 constexpr GUID kDisplayAttributePendingRoman = {
@@ -393,6 +442,21 @@ STDMETHODIMP TipDisplayAttributeConverted::GetAttributeInfo(
 
 const GUID& TipDisplayAttributeConverted::guid() {
   return kDisplayAttributeConverted;
+}
+
+TipDisplayAttributeZenzLiveCorrection::TipDisplayAttributeZenzLiveCorrection()
+    : TipDisplayAttribute(kDisplayAttributeZenzLiveCorrection,
+                          kConvertedAttribute,
+                          kZenzLiveCorrectionDescription) {}
+
+STDMETHODIMP TipDisplayAttributeZenzLiveCorrection::GetAttributeInfo(
+    TF_DISPLAYATTRIBUTE* absl_nullable attribute) {
+  return SaveToOutParam(
+      CreateZenzLiveCorrectionAttributeFromConfig(), attribute);
+}
+
+const GUID& TipDisplayAttributeZenzLiveCorrection::guid() {
+  return kDisplayAttributeZenzLiveCorrection;
 }
 
 TipDisplayAttributePendingRoman::TipDisplayAttributePendingRoman()

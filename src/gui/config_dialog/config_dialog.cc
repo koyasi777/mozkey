@@ -355,7 +355,7 @@ ConfigDialog::ConfigDialog()
 
   suggestionsSizeSpinBox->setRange(1, 9);
 
-  pendingRomanDimnessSpinBox->setRange(0, 90);
+  pendingRomanDimnessSpinBox->setRange(0, 100);
   pendingRomanDimnessSpinBox->setSingleStep(1);
   pendingRomanDimnessSpinBox->setSuffix(QString::fromUtf8(" %"));
 
@@ -496,7 +496,6 @@ ConfigDialog::ConfigDialog()
   // Preedit display color customization is available only on Windows TSF.
   preeditDisplayColorGroupBox->hide();
 #endif  // !_WIN32
-
 #if !defined(_WIN32) && !defined(__APPLE__)
   // Detailed renderer appearance controls are supported by the Windows and
   // macOS desktop renderers.
@@ -584,6 +583,12 @@ ConfigDialog::ConfigDialog()
                    SLOT(SelectPreeditColor()));
   QObject::connect(targetPreeditUnderlineColorButton, SIGNAL(clicked()), this,
                    SLOT(SelectPreeditColor()));
+  QObject::connect(zenzPreeditTextColorButton, SIGNAL(clicked()), this,
+                   SLOT(SelectPreeditColor()));
+  QObject::connect(zenzPreeditBackgroundColorButton, SIGNAL(clicked()), this,
+                   SLOT(SelectPreeditColor()));
+  QObject::connect(zenzPreeditUnderlineColorButton, SIGNAL(clicked()), this,
+                   SLOT(SelectPreeditColor()));
 
   QObject::connect(inputPreeditTextColorCheckBox, SIGNAL(toggled(bool)),
                    inputPreeditTextColorButton, SLOT(setEnabled(bool)));
@@ -597,6 +602,12 @@ ConfigDialog::ConfigDialog()
                    targetPreeditBackgroundColorButton, SLOT(setEnabled(bool)));
   QObject::connect(targetPreeditUnderlineColorCheckBox, SIGNAL(toggled(bool)),
                    targetPreeditUnderlineColorButton, SLOT(setEnabled(bool)));
+  QObject::connect(zenzPreeditTextColorCheckBox, SIGNAL(toggled(bool)),
+                   zenzPreeditTextColorButton, SLOT(setEnabled(bool)));
+  QObject::connect(zenzPreeditBackgroundColorCheckBox, SIGNAL(toggled(bool)),
+                   zenzPreeditBackgroundColorButton, SLOT(setEnabled(bool)));
+  QObject::connect(zenzPreeditUnderlineColorCheckBox, SIGNAL(toggled(bool)),
+                   zenzPreeditUnderlineColorButton, SLOT(setEnabled(bool)));
 
   InitializeCandidateRubyFontComboBox(candidateRubyFontComboBox);
 
@@ -755,6 +766,19 @@ void ConfigDialog::Reload() {
       config.use_custom_preedit_target_underline_color();
   initial_preedit_target_underline_color_ =
       config.preedit_target_underline_color();
+
+  initial_use_custom_zenz_live_correction_text_color_ =
+      config.use_custom_zenz_live_correction_text_color();
+  initial_zenz_live_correction_text_color_ =
+      config.zenz_live_correction_text_color();
+  initial_use_custom_zenz_live_correction_background_color_ =
+      config.use_custom_zenz_live_correction_background_color();
+  initial_zenz_live_correction_background_color_ =
+      config.zenz_live_correction_background_color();
+  initial_use_custom_zenz_live_correction_underline_color_ =
+      config.use_custom_zenz_live_correction_underline_color();
+  initial_zenz_live_correction_underline_color_ =
+      config.zenz_live_correction_underline_color();
 }
 
 #ifdef _WIN32
@@ -830,7 +854,19 @@ bool ConfigDialog::Update() {
       initial_use_custom_preedit_target_underline_color_ !=
           config.use_custom_preedit_target_underline_color() ||
       initial_preedit_target_underline_color_ !=
-          config.preedit_target_underline_color();
+          config.preedit_target_underline_color() ||
+      initial_use_custom_zenz_live_correction_text_color_ !=
+          config.use_custom_zenz_live_correction_text_color() ||
+      initial_zenz_live_correction_text_color_ !=
+          config.zenz_live_correction_text_color() ||
+      initial_use_custom_zenz_live_correction_background_color_ !=
+          config.use_custom_zenz_live_correction_background_color() ||
+      initial_zenz_live_correction_background_color_ !=
+          config.zenz_live_correction_background_color() ||
+      initial_use_custom_zenz_live_correction_underline_color_ !=
+          config.use_custom_zenz_live_correction_underline_color() ||
+      initial_zenz_live_correction_underline_color_ !=
+          config.zenz_live_correction_underline_color();
 
   if (!SetConfig(config)) {
     QMessageBox::critical(this, windowTitle(), tr("Failed to update config"));
@@ -904,6 +940,19 @@ bool ConfigDialog::Update() {
         config.use_custom_preedit_target_underline_color();
     initial_preedit_target_underline_color_ =
         config.preedit_target_underline_color();
+
+    initial_use_custom_zenz_live_correction_text_color_ =
+        config.use_custom_zenz_live_correction_text_color();
+    initial_zenz_live_correction_text_color_ =
+        config.zenz_live_correction_text_color();
+    initial_use_custom_zenz_live_correction_background_color_ =
+        config.use_custom_zenz_live_correction_background_color();
+    initial_zenz_live_correction_background_color_ =
+        config.zenz_live_correction_background_color();
+    initial_use_custom_zenz_live_correction_underline_color_ =
+        config.use_custom_zenz_live_correction_underline_color();
+    initial_zenz_live_correction_underline_color_ =
+        config.zenz_live_correction_underline_color();
   }
 #endif  // _WIN32
 
@@ -961,9 +1010,9 @@ namespace {
 
 static constexpr int kPreeditMethodSize = 2;
 
-constexpr uint32_t kDefaultPendingRomanDimnessPercent = 75;
+constexpr uint32_t kDefaultPendingRomanDimnessPercent = 85;
 constexpr uint32_t kMinPendingRomanDimnessPercent = 0;
-constexpr uint32_t kMaxPendingRomanDimnessPercent = 90;
+constexpr uint32_t kMaxPendingRomanDimnessPercent = 100;
 
 constexpr uint32_t kDefaultLiveConversionDelayMsec = 228;
 constexpr uint32_t kMaxLiveConversionDelayMsec = 1000;
@@ -972,7 +1021,7 @@ constexpr uint32_t kMinLiveConversionMinKeyLength = 1;
 constexpr uint32_t kMaxLiveConversionMinKeyLength = 20;
 constexpr uint32_t kDefaultZenzLiveCorrectionDelayMsec = 1000;
 constexpr uint32_t kMaxZenzLiveCorrectionDelayMsec = 5000;
-constexpr uint32_t kDefaultZenzDeferredPresentationTimeoutMsec = 300;
+constexpr uint32_t kDefaultZenzDeferredPresentationTimeoutMsec = 250;
 constexpr uint32_t kMinZenzDeferredPresentationTimeoutMsec = 50;
 constexpr uint32_t kMaxZenzDeferredPresentationTimeoutMsec = 3000;
 constexpr uint32_t kDefaultZenzLiveCorrectionMinKeyLength = 2;
@@ -993,6 +1042,10 @@ constexpr uint32_t kDefaultInputPreeditUnderlineColor = 0x30dcc8;
 constexpr uint32_t kDefaultTargetPreeditTextColor = 0x000000;
 constexpr uint32_t kDefaultTargetPreeditBackgroundColor = 0xddeeff;
 constexpr uint32_t kDefaultTargetPreeditUnderlineColor = 0xc1a5ab;
+
+constexpr uint32_t kDefaultZenzPreeditTextColor = 0x000000;
+constexpr uint32_t kDefaultZenzPreeditBackgroundColor = 0xddeeff;
+constexpr uint32_t kDefaultZenzPreeditUnderlineColor = 0xc4dc6c;
 
 const config::Config::WindowsModeIndicatorCustomStyle&
 GetDefaultModeIndicatorCustomStyle() {
@@ -3657,6 +3710,27 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   targetPreeditUnderlineColorButton->setEnabled(
       config.use_custom_preedit_target_underline_color());
 
+  SET_CHECKBOX(zenzPreeditTextColorCheckBox,
+                use_custom_zenz_live_correction_text_color);
+  SetColorButton(zenzPreeditTextColorButton,
+                 config.zenz_live_correction_text_color());
+  zenzPreeditTextColorButton->setEnabled(
+      config.use_custom_zenz_live_correction_text_color());
+
+  SET_CHECKBOX(zenzPreeditBackgroundColorCheckBox,
+                use_custom_zenz_live_correction_background_color);
+  SetColorButton(zenzPreeditBackgroundColorButton,
+                 config.zenz_live_correction_background_color());
+  zenzPreeditBackgroundColorButton->setEnabled(
+      config.use_custom_zenz_live_correction_background_color());
+
+  SET_CHECKBOX(zenzPreeditUnderlineColorCheckBox,
+                use_custom_zenz_live_correction_underline_color);
+  SetColorButton(zenzPreeditUnderlineColorButton,
+                 config.zenz_live_correction_underline_color());
+  zenzPreeditUnderlineColorButton->setEnabled(
+      config.use_custom_zenz_live_correction_underline_color());
+
   // tab4
   SET_CHECKBOX(historySuggestCheckBox, use_history_suggest);
   SET_CHECKBOX(dictionarySuggestCheckBox, use_dictionary_suggest);
@@ -3944,6 +4018,24 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   config->set_preedit_target_underline_color(
       GetColorButtonRgb(targetPreeditUnderlineColorButton,
                         kDefaultTargetPreeditUnderlineColor));
+
+  GET_CHECKBOX(zenzPreeditTextColorCheckBox,
+                use_custom_zenz_live_correction_text_color);
+  config->set_zenz_live_correction_text_color(
+      GetColorButtonRgb(zenzPreeditTextColorButton,
+                        kDefaultZenzPreeditTextColor));
+
+  GET_CHECKBOX(zenzPreeditBackgroundColorCheckBox,
+                use_custom_zenz_live_correction_background_color);
+  config->set_zenz_live_correction_background_color(
+      GetColorButtonRgb(zenzPreeditBackgroundColorButton,
+                        kDefaultZenzPreeditBackgroundColor));
+
+  GET_CHECKBOX(zenzPreeditUnderlineColorCheckBox,
+                use_custom_zenz_live_correction_underline_color);
+  config->set_zenz_live_correction_underline_color(
+      GetColorButtonRgb(zenzPreeditUnderlineColorButton,
+                        kDefaultZenzPreeditUnderlineColor));
 
   uint32_t auto_conversion_key = 0;
   if (kutenCheckBox->isChecked()) {

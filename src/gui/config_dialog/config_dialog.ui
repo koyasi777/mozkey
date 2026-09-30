@@ -1621,7 +1621,7 @@
                    <number>50</number>
                   </property>
                   <property name="value">
-                   <number>300</number>
+                   <number>250</number>
                   </property>
                   <property name="suffix">
                    <string> ms</string>
@@ -1755,7 +1755,7 @@
                    <number>1</number>
                   </property>
                   <property name="value">
-                   <number>24</number>
+                   <number>6</number>
                   </property>
                   <property name="suffix">
                    <string> 文字</string>
@@ -1989,7 +1989,7 @@
                    <item>
                     <widget class="QLabel" name="preeditDisplayColorSectionLabel">
                      <property name="text">
-                      <string>未確定文字の表示色（カスタム）</string>
+                      <string>未確定文字の表示色</string>
                      </property>
                     </widget>
                    </item>
@@ -2049,26 +2049,26 @@
                       <string>薄さ</string>
                      </property>
                      <property name="toolTip">
-                      <string>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</string>
+                      <string>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、100% は背景色と同じになり見えなくなります。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</string>
                      </property>
                     </widget>
                    </item>
                    <item row="1" column="2">
                     <widget class="QSpinBox" name="pendingRomanDimnessSpinBox">
                      <property name="toolTip">
-                      <string>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</string>
+                      <string>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、100% は背景色と同じになり見えなくなります。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</string>
                      </property>
                      <property name="minimum">
                       <number>0</number>
                      </property>
                      <property name="maximum">
-                      <number>90</number>
+                      <number>100</number>
                      </property>
                      <property name="singleStep">
                       <number>1</number>
                      </property>
                      <property name="value">
-                      <number>75</number>
+                      <number>85</number>
                      </property>
                      <property name="suffix">
                       <string> %</string>
@@ -2294,6 +2294,107 @@
                     </spacer>
                    </item>
                    <item row="13" column="0" colspan="3">
+                    <widget class="QLabel" name="zenzPreeditColorLabel">
+                     <property name="text">
+                      <string>Zenz ライブ補正</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="14" column="0" colspan="2">
+                    <widget class="QCheckBox" name="zenzPreeditTextColorCheckBox">
+                     <property name="text">
+                      <string>文字色</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="14" column="2">
+                    <widget class="QPushButton" name="zenzPreeditTextColorButton">
+                     <property name="minimumSize">
+                      <size>
+                       <width>80</width>
+                       <height>0</height>
+                      </size>
+                     </property>
+                     <property name="maximumSize">
+                      <size>
+                       <width>90</width>
+                       <height>16777215</height>
+                      </size>
+                     </property>
+                     <property name="text">
+                      <string>#000000</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="15" column="0" colspan="2">
+                    <widget class="QCheckBox" name="zenzPreeditBackgroundColorCheckBox">
+                     <property name="text">
+                      <string>背景色</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="15" column="2">
+                    <widget class="QPushButton" name="zenzPreeditBackgroundColorButton">
+                     <property name="minimumSize">
+                      <size>
+                       <width>80</width>
+                       <height>0</height>
+                      </size>
+                     </property>
+                     <property name="maximumSize">
+                      <size>
+                       <width>90</width>
+                       <height>16777215</height>
+                      </size>
+                     </property>
+                     <property name="text">
+                      <string>#DDEEFF</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="16" column="0" colspan="2">
+                    <widget class="QCheckBox" name="zenzPreeditUnderlineColorCheckBox">
+                     <property name="text">
+                      <string>下線色</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="16" column="2">
+                    <widget class="QPushButton" name="zenzPreeditUnderlineColorButton">
+                     <property name="minimumSize">
+                      <size>
+                       <width>80</width>
+                       <height>0</height>
+                      </size>
+                     </property>
+                     <property name="maximumSize">
+                      <size>
+                       <width>90</width>
+                       <height>16777215</height>
+                      </size>
+                     </property>
+                     <property name="text">
+                      <string>#C4DC6C</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="17" column="0" colspan="3">
+                    <spacer name="verticalSpacer_zenzPreeditDisplayColorNote">
+                     <property name="orientation">
+                      <enum>Qt::Orientation::Vertical</enum>
+                     </property>
+                     <property name="sizeType">
+                      <enum>QSizePolicy::Policy::Fixed</enum>
+                     </property>
+                     <property name="sizeHint" stdset="0">
+                      <size>
+                       <width>20</width>
+                       <height>8</height>
+                      </size>
+                     </property>
+                    </spacer>
+                   </item>
+                   <item row="18" column="0" colspan="3">
                     <widget class="QLabel" name="preeditDisplayColorNoteLabel">
                      <property name="text">
                       <string>対応アプリのみ有効。Chrome/Edge等は非対応の場合あり。</string>
@@ -3515,6 +3616,12 @@
   <tabstop>targetPreeditBackgroundColorButton</tabstop>
   <tabstop>targetPreeditUnderlineColorCheckBox</tabstop>
   <tabstop>targetPreeditUnderlineColorButton</tabstop>
+  <tabstop>zenzPreeditTextColorCheckBox</tabstop>
+  <tabstop>zenzPreeditTextColorButton</tabstop>
+  <tabstop>zenzPreeditBackgroundColorCheckBox</tabstop>
+  <tabstop>zenzPreeditBackgroundColorButton</tabstop>
+  <tabstop>zenzPreeditUnderlineColorCheckBox</tabstop>
+  <tabstop>zenzPreeditUnderlineColorButton</tabstop>
   <tabstop>historySuggestCheckBox</tabstop>
   <tabstop>clearUnusedUserPredictionButton</tabstop>
   <tabstop>clearUserPredictionButton</tabstop>
