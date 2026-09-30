@@ -101,6 +101,30 @@ bool ShouldRenderFooterText(const std::string &text) {
   return text != "Tabキーで選択";
 }
 
+// Preserve the history-deletion wording, but render that long instruction
+// slightly smaller in the native vertical footer so it does not dominate the
+// candidate window's cross-axis width. Scale relative to the configured
+// footer size so renderer style preferences remain effective.
+bool IsHistoryDeletionFooterText(const std::string &text) {
+  return text == "control+fn+deleteで履歴から削除";
+}
+
+CGFloat VerticalHistoryFooterLabelIndexGap(
+    const mozc::renderer::RendererStyle::TextStyle &style) {
+  return std::max<CGFloat>(
+      0.0, static_cast<CGFloat>(style.right_padding()) * 2.0);
+}
+
+mozc::renderer::RendererStyle::TextStyle VerticalFooterTextStyle(
+    const std::string &text,
+    const mozc::renderer::RendererStyle::TextStyle &style) {
+  auto result = style;
+  if (IsHistoryDeletionFooterText(text) && result.has_font_size()) {
+    result.set_font_size(result.font_size() * 6.0 / 7.0);
+  }
+  return result;
+}
+
 NSAttributedString *MakeVerticalAttributedString(
     const std::string &text,
     const mozc::renderer::RendererStyle::TextStyle &style) {
@@ -369,7 +393,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
 - (void)reloadStyleForCandidateWindow;
 - (void)updateStyleDependentResources;
 - (NSSize)updateVerticalLayout;
-- (NSSize)verticalFooterSize;
+- (NSSize)verticalFooterSizeForAvailableWidth:(CGFloat)availableWidth;
 - (void)drawVerticalRect:(NSRect)rect;
 - (void)drawVerticalCandidate:(int)row;
 - (void)drawVerticalFooter;
@@ -397,6 +421,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   mozc::renderer::RendererStyle style_;
   mozc::renderer::mac::WritingDirection writingDirection_;
   CGFloat cornerRadius_;
+  bool verticalFooterLogoVisible_;
 
   // The row which has focused background.
   int focusedRow_;
@@ -428,6 +453,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   if (self) {
     [self initializeDefaultStyle];
     focusedRow_ = -1;
+    verticalFooterLogoVisible_ = false;
     writingDirection_ = WritingDirection::kHorizontal;
     suggestionMouseGestureActive_ = false;
   }
@@ -685,22 +711,34 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   return MacViewUtil::ToNSSize(tableLayout_.GetTotalSize());
 }
 
-- (NSSize)verticalFooterSize {
+- (NSSize)verticalFooterSizeForAvailableWidth:(CGFloat)availableWidth {
+  verticalFooterLogoVisible_ = false;
+
   if (!candidate_window_.has_footer()) {
     return NSZeroSize;
   }
 
-  NSSize footerSize = NSZeroSize;
   const mozc::commands::Footer &footer = candidate_window_.footer();
+
+  CGFloat textWidth = 0;
+  CGFloat rightWidth = 0;
+  CGFloat footerHeight = 0;
+  bool hasOperationalText = false;
 
   if (footer.has_label() &&
       ShouldRenderFooterText(footer.label())) {
+    const auto footerLabelStyle =
+        VerticalFooterTextStyle(footer.label(), style_.footer_style());
     const NSAttributedString *footerLabel =
-        MacViewUtil::ToNSAttributedString(footer.label(), style_.footer_style());
-    const NSSize size =
-        MacViewUtil::applyTheme([footerLabel size], style_.footer_style());
-    footerSize.width += size.width;
-    footerSize.height = std::max(footerSize.height, size.height);
+        MacViewUtil::ToNSAttributedString(footer.label(), footerLabelStyle);
+    const NSSize labelSize = [footerLabel size];
+
+    textWidth = std::max<CGFloat>(
+        textWidth,
+        std::max<CGFloat>(0.0, footerLabelStyle.left_padding()) +
+            labelSize.width);
+    footerHeight = std::max(footerHeight, labelSize.height);
+    hasOperationalText = true;
   }
 
   if (footer.has_sub_label() &&
@@ -708,16 +746,15 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
     const NSAttributedString *footerSubLabel =
         MacViewUtil::ToNSAttributedString(footer.sub_label(),
                                           style_.footer_sub_label_style());
-    const NSSize size = MacViewUtil::applyTheme(
-        [footerSubLabel size], style_.footer_sub_label_style());
-    footerSize.width += size.width;
-    footerSize.height = std::max(footerSize.height, size.height);
-  }
+    const NSSize subLabelSize = [footerSubLabel size];
 
-  if (footer.logo_visible() && logoImage_) {
-    const NSSize logoSize = [logoImage_ size];
-    footerSize.width += logoSize.width;
-    footerSize.height = std::max(footerSize.height, logoSize.height);
+    textWidth = std::max<CGFloat>(
+        textWidth,
+        std::max<CGFloat>(
+            0.0, style_.footer_sub_label_style().left_padding()) +
+            subLabelSize.width);
+    footerHeight = std::max(footerHeight, subLabelSize.height);
+    hasOperationalText = true;
   }
 
   if (footer.index_visible()) {
@@ -727,16 +764,56 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
     const NSAttributedString *footerAttributedIndex =
         MacViewUtil::ToNSAttributedString([footerIndex UTF8String],
                                           style_.footer_style());
-    const NSSize size = MacViewUtil::applyTheme(
-        [footerAttributedIndex size], style_.footer_style());
-    footerSize.width += size.width;
-    footerSize.height = std::max(footerSize.height, size.height);
+    const NSSize indexSize = [footerAttributedIndex size];
+
+    rightWidth =
+        indexSize.width +
+        std::max<CGFloat>(0.0, style_.footer_style().right_padding());
+    footerHeight = std::max(footerHeight, indexSize.height);
   }
 
-  if (footerSize.height > 0) {
-    footerSize.height += style_.footer_border_colors_size();
+  CGFloat logoWidth = 0;
+  CGFloat logoHeight = 0;
+  if (footer.logo_visible() && logoImage_) {
+    const NSSize logoSize = [logoImage_ size];
+    logoWidth = logoSize.width;
+    logoHeight = logoSize.height;
   }
-  return footerSize;
+
+  // Match the actual one-line drawing footprint:
+  // [optional logo][label] ... [right-aligned index].
+  const CGFloat labelIndexGap =
+      footer.index_visible() && footer.has_label() &&
+              ShouldRenderFooterText(footer.label()) &&
+              IsHistoryDeletionFooterText(footer.label())
+          ? VerticalHistoryFooterLabelIndexGap(style_.footer_style())
+          : 0.0;
+  const CGFloat withoutLogoWidth = textWidth + labelIndexGap + rightWidth;
+  const CGFloat withLogoWidth = logoWidth + withoutLogoWidth;
+
+  if (logoWidth > 0) {
+    if (!hasOperationalText || availableWidth <= 0 ||
+        withLogoWidth <= availableWidth) {
+      verticalFooterLogoVisible_ = true;
+    } else {
+      // Operational text has priority over the decorative logo. If the logo
+      // alone would force the whole vertical window wider, reuse that slot for
+      // the label and keep the page index anchored at the right edge.
+      verticalFooterLogoVisible_ = false;
+    }
+  }
+
+  const CGFloat requiredWidth =
+      (verticalFooterLogoVisible_ ? logoWidth : 0) + withoutLogoWidth;
+
+  if (footerHeight > 0 && logoHeight > 0) {
+    footerHeight = std::max(footerHeight, logoHeight);
+  }
+  if (footerHeight > 0) {
+    footerHeight += style_.footer_border_colors_size();
+  }
+
+  return NSMakeSize(requiredWidth, footerHeight);
 }
 
 - (NSSize)updateVerticalLayout {
@@ -829,7 +906,18 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
       isPassiveSuggestion ? kVerticalSuggestionValueDescriptionGap
                           : kVerticalValueDescriptionGap;
   parameters.information_marker_gap = kVerticalInformationMarkerGap;
-  parameters.footer_size = MacViewUtil::ToSize([self verticalFooterSize]);
+
+  // Establish the candidate body's natural cross-axis width first. Footer
+  // content reuses that width before it is allowed to enlarge the window.
+  parameters.footer_size = mozc::Size();
+  verticalLayout_.Initialize(metrics, parameters);
+
+  const CGFloat naturalInnerWidth = std::max<CGFloat>(
+      0.0, verticalLayout_.GetTotalSize().width -
+               parameters.window_border * 2);
+
+  parameters.footer_size = MacViewUtil::ToSize(
+      [self verticalFooterSizeForAvailableWidth:naturalInnerWidth]);
 
   verticalLayout_.Initialize(metrics, parameters);
   candidateStringsCache_ = newCache;
@@ -1035,7 +1123,7 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
                 endingColor:MacViewUtil::ToNSColor(style_.footer_bottom_color())];
   [footerBackground drawInRect:footerRect angle:90.0];
 
-  if (footer.logo_visible() && logoImage_) {
+  if (verticalFooterLogoVisible_ && logoImage_) {
     const NSPoint logoPoint = footerRect.origin;
     const NSSize logoSize = logoImage_.size;
     const NSRect logoRect = NSMakeRect(
@@ -1052,13 +1140,44 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
 
   if (footer.has_label() &&
       ShouldRenderFooterText(footer.label())) {
+    const auto footerLabelStyle =
+        VerticalFooterTextStyle(footer.label(), style_.footer_style());
     const NSAttributedString *footerLabel =
-        MacViewUtil::ToNSAttributedString(footer.label(), style_.footer_style());
-    footerRect.origin.x += style_.footer_style().left_padding();
+        MacViewUtil::ToNSAttributedString(footer.label(), footerLabelStyle);
     const NSSize labelSize = [footerLabel size];
-    NSPoint labelPosition = footerRect.origin;
-    labelPosition.y += (footerRect.size.height - labelSize.height) / 2;
-    [footerLabel drawAtPoint:labelPosition];
+
+    if (IsHistoryDeletionFooterText(footer.label()) &&
+        footer.index_visible()) {
+      const std::string footerIndex =
+          absl::StrFormat("%d/%d", candidate_window_.focused_index() + 1,
+                          candidate_window_.size());
+      const NSAttributedString *footerAttributedIndex =
+          MacViewUtil::ToNSAttributedString(footerIndex, style_.footer_style());
+      const NSSize indexSize = [footerAttributedIndex size];
+
+      const CGFloat minimumLabelX =
+          footerRect.origin.x +
+          std::max<CGFloat>(0.0, footerLabelStyle.left_padding());
+      const CGFloat indexLeft =
+          footerRect.origin.x + footerRect.size.width - indexSize.width -
+          std::max<CGFloat>(0.0, style_.footer_style().right_padding());
+      const CGFloat preferredLabelX =
+          indexLeft -
+          VerticalHistoryFooterLabelIndexGap(style_.footer_style()) -
+          labelSize.width;
+
+      NSPoint labelPosition = footerRect.origin;
+      labelPosition.x = std::max(minimumLabelX, preferredLabelX);
+      labelPosition.y += (footerRect.size.height - labelSize.height) / 2;
+      [footerLabel drawAtPoint:labelPosition];
+    } else {
+      footerRect.origin.x += footerLabelStyle.left_padding();
+      const NSPoint labelPosition =
+          NSMakePoint(footerRect.origin.x,
+                      footerRect.origin.y +
+                          (footerRect.size.height - labelSize.height) / 2);
+      [footerLabel drawAtPoint:labelPosition];
+    }
   }
 
   if (footer.has_sub_label() &&
