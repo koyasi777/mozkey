@@ -1,0 +1,5 @@
+#!/bin/sh
+
+_BUILD_TARGETS="${_BUILD_TARGETS:-unix/fcitx5:fcitx5-mozc.so server:mozc_server gui/tool:mozc_tool}"
+
+bazel build -c opt --copt=-fPIC --config oss_linux --define server=1 "$@" $_BUILD_TARGETS
