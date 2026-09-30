@@ -247,7 +247,16 @@ class ScopedUserProfileForZenzFeedbackSessionTest {
   std::wstring profile_dir_;
 };
 
-#endif  // defined(_WIN32)
+#elif defined(__APPLE__)
+
+class ScopedUserProfileForZenzFeedbackSessionTest {
+ public:
+  // SessionTest derives from TestWithTempUserProfile, which already redirects
+  // SystemUtil::GetUserProfileDirectory() to a unique temporary directory.
+  bool ok() const { return true; }
+};
+
+#endif  // defined(_WIN32) || defined(__APPLE__)
 
 void SetSendKeyCommandWithKeyString(const absl::string_view key_string,
                                     commands::Command* command) {
@@ -1626,7 +1635,7 @@ TEST_F(SessionTest, ZenzMozcHistoryLearningIsDisabledInPasswordField) {
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackLearnsReverseProjectedChangedSegment) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -1680,14 +1689,14 @@ TEST_F(SessionTest,
   EXPECT_EQ(entries[0].key, "かれはてんてきです");
   EXPECT_EQ(entries[0].value, "彼は天敵です");
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackLearnsProjectedMultiSegmentCommit) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -1754,13 +1763,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_boundary_resized[0],
             std::vector<bool>({false, false, false}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackLearnsMozcNativeResegmentationFallback) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -1841,7 +1850,7 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_boundary_resized[0],
             std::vector<bool>({true, true}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
@@ -1849,7 +1858,7 @@ TEST_F(SessionTest,
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackDoesNotLearnUnresolvedAggregateSegment) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -1900,13 +1909,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_keys[0], "ほんむりょう");
   EXPECT_EQ(converter->learned_values[0], "本無料");
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackKeepsMoreThanFourExactProjectedFallbacks) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -1946,13 +1955,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(fallback[4],
             std::make_pair(std::string("お"), std::string("緒")));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackKeepsMoreThanFourVerifiedNativeReranks) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -1993,13 +2002,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_reranked[0],
             std::vector<bool>({true, true, true, true, true}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackKeepsNativePrefixAcrossSymbolSeparator) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2094,13 +2103,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_boundary_resized[0],
             std::vector<bool>({true, true}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackLearnsLexicalCoreBeforeAttachedParenthesis) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2186,13 +2195,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_reranked[0],
             std::vector<bool>({true}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackHardensUnchangedIslandAgainstContextLoss) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2310,14 +2319,14 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_boundary_resized[0],
             std::vector<bool>({false, false, false}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackContextLossProbePreservesTypedPrefix) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2397,13 +2406,13 @@ TEST_F(SessionTest,
   EXPECT_FALSE(projected[1].is_reranked);
   EXPECT_TRUE(projected[2].is_reranked);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackCapsContextLossProbeWork) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2457,13 +2466,13 @@ TEST_F(SessionTest,
     EXPECT_FALSE(segment.needs_native_resolution);
   }
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackResolvesChangedLexicalIslandBeforeSymbol) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2567,14 +2576,14 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_boundary_resized[0],
             std::vector<bool>({true, true}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackHardensSingleSegmentBeforeSymbol) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2633,13 +2642,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_reranked[0],
             std::vector<bool>({true}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackPrefersKnownBoundariesBeforeNativeResegmentation) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2720,13 +2729,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_boundary_resized[0],
             std::vector<bool>({false, false, false}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackKeepsExplicitChangeWhenNativeCandidateIsTop) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2782,13 +2791,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_reranked[0],
             std::vector<bool>({true}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackDoesNotTransferSignalAcrossValueRepartition) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2857,13 +2866,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learn_segments_call_count, 0);
   EXPECT_EQ(converter->learn_call_count, 1);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackLearnsNativeBoundaryJoin) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2922,13 +2931,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learned_segment_boundary_resized[0],
             std::vector<bool>({true}));
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackSkipsReverseLearningWhenAlignmentBreaks) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -2976,11 +2985,11 @@ TEST_F(SessionTest,
   EXPECT_EQ(entries[0].key, "かれはてんてきです");
   EXPECT_EQ(entries[0].value, "天敵です彼は");
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
 void SetPendingRejectedZenzFeedbackForTest(SessionTestPeer* session_peer) {
   session_peer->context_()->set_state(ImeContext::CONVERSION);
   session_peer->live_conversion_active_() = true;
@@ -2995,10 +3004,10 @@ void SetPendingRejectedZenzFeedbackForTest(SessionTestPeer* session_peer) {
   session_peer->SetPendingZenzFeedbackRejected("space_revert_zenz_to_mozc");
   session_peer->context_()->set_state(ImeContext::PRECOMPOSITION);
 }
-#endif  // defined(_WIN32)
+#endif  // defined(_WIN32) || defined(__APPLE__)
 
 TEST_F(SessionTest, PendingRejectedZenzFeedbackIsNeutralWithoutFinalCommit) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3017,12 +3026,12 @@ TEST_F(SessionTest, PendingRejectedZenzFeedbackIsNeutralWithoutFinalCommit) {
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
   EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest, PendingRejectedZenzFeedbackIsAcceptedWhenFinalCommitMatches) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3060,12 +3069,12 @@ TEST_F(SessionTest, PendingRejectedZenzFeedbackIsAcceptedWhenFinalCommitMatches)
   EXPECT_EQ(entries[0].accepted_count, 1);
   EXPECT_EQ(entries[0].rejected_count, 0);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest, PendingRejectedZenzFeedbackIsRecordedWhenFinalCommitDiffers) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3099,12 +3108,12 @@ TEST_F(SessionTest, PendingRejectedZenzFeedbackIsRecordedWhenFinalCommitDiffers)
   EXPECT_EQ(entries[0].accepted_count, 0);
   EXPECT_EQ(entries[0].rejected_count, 1);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest, PendingShadowZenzFeedbackIgnoresDifferentFinalReading) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3133,7 +3142,7 @@ TEST_F(SessionTest, PendingShadowZenzFeedbackIgnoresDifferentFinalReading) {
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
   EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
@@ -3519,7 +3528,7 @@ TEST_F(SessionTest,
 }
 
 TEST_F(SessionTest, VisibleZenzCancelArmsKeyMatchedFinalComparison) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   constexpr absl::string_view kKey =
       "\xE3\x81\x8A\xE3\x81\x8A";
   constexpr absl::string_view kZenzValue =
@@ -3557,13 +3566,13 @@ TEST_F(SessionTest, VisibleZenzCancelArmsKeyMatchedFinalComparison) {
                    .has_final_committed_value);
   EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        VisibleZenzCancelThenHiraganaCommitRecordsRejection) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   constexpr absl::string_view kKey =
       "\xE3\x81\x8A\xE3\x81\x8A";
   constexpr absl::string_view kZenzValue =
@@ -3612,13 +3621,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(entries[0].accepted_count, 0);
   EXPECT_EQ(entries[0].rejected_count, 1);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        EditingAfterVisibleZenzCancelNeutralizesComparison) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3642,13 +3651,13 @@ TEST_F(SessionTest,
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
   EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        DirectCommitPunctuationAfterVisibleZenzCancelRecordsRejection) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   constexpr absl::string_view kKey =
       "\xE3\x81\x8A\xE3\x81\x8A";
   constexpr absl::string_view kZenzValue =
@@ -3713,13 +3722,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(entries[0].accepted_count, 0);
   EXPECT_EQ(entries[0].rejected_count, 1);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        DirectCommitPunctuationAfterVisibleZenzCancelKeepsFeedbackUndoable) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3764,7 +3773,7 @@ TEST_F(SessionTest,
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
   EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
@@ -5686,7 +5695,7 @@ TEST_F(SessionTest, DeferredZenzAcceptedResultReplacesVisiblePreeditOnce) {
 }
 
 TEST_F(SessionTest, AutoBlockedZenzResultRecordsMatchingShadowCommitAsAccepted) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -5761,13 +5770,13 @@ TEST_F(SessionTest, AutoBlockedZenzResultRecordsMatchingShadowCommitAsAccepted) 
   EXPECT_EQ(entries[0].accepted_count, 1);
   EXPECT_EQ(entries[0].rejected_count, 1);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest,
        AutoBlockedZenzResultRecordsMismatchingShadowCommitAsRejected) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -5840,12 +5849,12 @@ TEST_F(SessionTest,
   EXPECT_EQ(entries[0].accepted_count, 0);
   EXPECT_EQ(entries[0].rejected_count, 2);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 
 TEST_F(SessionTest, HardRejectedZenzResultDoesNotCreateShadowFeedback) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -5905,7 +5914,7 @@ TEST_F(SessionTest, HardRejectedZenzResultDoesNotCreateShadowFeedback) {
   EXPECT_EQ(entries[0].rejected_count, 1);
   EXPECT_TRUE(entries[0].hard_rejected);
 #else
-  GTEST_SKIP() << "Zenz feedback store persists only on Windows.";
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
 }
 TEST_F(SessionTest,

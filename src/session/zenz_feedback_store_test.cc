@@ -4,7 +4,11 @@
 #include <string>
 #include <vector>
 
+#include "base/file/temp_dir.h"
+#include "base/file_util.h"
+#include "base/system_util.h"
 #include "testing/gunit.h"
+#include "testing/mozctest.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -96,8 +100,8 @@ class ScopedUserProfileForZenzFeedbackStoreTest {
     return JoinPath(mozc_dir, L"zenz_feedback.tsv");
   }
 
-  std::wstring temp_file_path(const std::wstring& name) const {
-    return JoinPath(profile_dir_, name);
+  std::wstring temp_file_path(const std::string& name) const {
+    return JoinPath(profile_dir_, std::wstring(name.begin(), name.end()));
   }
 
  private:
@@ -106,6 +110,43 @@ class ScopedUserProfileForZenzFeedbackStoreTest {
   std::wstring old_profile_;
   std::wstring profile_dir_;
 };
+
+#elif defined(__APPLE__)
+
+class ScopedUserProfileForZenzFeedbackStoreTest {
+ public:
+  ScopedUserProfileForZenzFeedbackStoreTest()
+      : old_profile_dir_(SystemUtil::GetUserProfileDirectory()),
+        profile_dir_(mozc::testing::MakeTempDirectoryOrDie()) {
+    ok_ = !profile_dir_.path().empty();
+    if (ok_) {
+      SystemUtil::SetUserProfileDirectory(profile_dir_.path());
+    }
+  }
+
+  ~ScopedUserProfileForZenzFeedbackStoreTest() {
+    SystemUtil::SetUserProfileDirectory(old_profile_dir_);
+  }
+
+  bool ok() const { return ok_; }
+
+  std::string feedback_path() const {
+    return FileUtil::JoinPath(profile_dir_.path(), "zenz_feedback.tsv");
+  }
+
+  std::string temp_file_path(const std::string& name) const {
+    return FileUtil::JoinPath(profile_dir_.path(), name);
+  }
+
+ private:
+  bool ok_ = false;
+  std::string old_profile_dir_;
+  TempDirectory profile_dir_;
+};
+
+#endif  // defined(_WIN32) || defined(__APPLE__)
+
+#if defined(_WIN32) || defined(__APPLE__)
 
 TEST(ZenzFeedbackStoreTest, GetAcceptedCandidatesAllowsSingleAcceptedAndSorts) {
   ScopedUserProfileForZenzFeedbackStoreTest profile;
@@ -754,7 +795,7 @@ TEST(ZenzFeedbackStoreTest, ExportAndImportReplacePreservesRecords) {
   store.RecordAccepted("k", "empty", "v");
   store.RecordRejected("k", "empty", "v", "explicit_reject");
 
-  const std::wstring export_path = profile.temp_file_path(L"export.tsv");
+  const auto export_path = profile.temp_file_path("export.tsv");
   ASSERT_TRUE(store.ExportToFile(export_path));
 
   ASSERT_TRUE(store.ClearAll());
@@ -783,7 +824,7 @@ TEST(ZenzFeedbackStoreTest, ImportAppendKeepsExistingRecords) {
 
   store.RecordAccepted("existing", "empty", "既存");
 
-  const std::wstring import_path = profile.temp_file_path(L"import_append.tsv");
+  const auto import_path = profile.temp_file_path("import_append.tsv");
   {
     std::ofstream file(import_path, std::ios::binary | std::ios::trunc);
     ASSERT_TRUE(file);
@@ -810,8 +851,8 @@ TEST(ZenzFeedbackStoreTest, ImportRejectsMalformedFileWithoutChangingExisting) {
 
   store.RecordAccepted("existing", "empty", "既存");
 
-  const std::wstring import_path =
-      profile.temp_file_path(L"import_malformed.tsv");
+  const auto import_path =
+      profile.temp_file_path("import_malformed.tsv");
   {
     std::ofstream file(import_path, std::ios::binary | std::ios::trunc);
     ASSERT_TRUE(file);
@@ -831,13 +872,14 @@ TEST(ZenzFeedbackStoreTest, ImportRejectsMalformedFileWithoutChangingExisting) {
   EXPECT_EQ(entries[0].rejected_count, 0);
 }
 
-#else  // defined(_WIN32)
+#else  // defined(_WIN32) || defined(__APPLE__)
 
-TEST(ZenzFeedbackStoreTest, SkippedOnNonWindows) {
-  GTEST_SKIP() << "ZenzFeedbackStore persists to LocalLow on Windows.";
+TEST(ZenzFeedbackStoreTest, SkippedOnUnsupportedPlatform) {
+  GTEST_SKIP()
+      << "ZenzFeedbackStore persistence is supported on Windows and macOS.";
 }
 
-#endif  // defined(_WIN32)
+#endif  // defined(_WIN32) || defined(__APPLE__)
 
 }  // namespace
 }  // namespace session
