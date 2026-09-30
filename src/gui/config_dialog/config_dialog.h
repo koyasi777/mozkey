@@ -142,6 +142,13 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   bool initial_use_custom_preedit_target_underline_color_;
   uint32_t initial_preedit_target_underline_color_;
 
+  bool initial_use_custom_zenz_live_correction_text_color_;
+  uint32_t initial_zenz_live_correction_text_color_;
+  bool initial_use_custom_zenz_live_correction_background_color_;
+  uint32_t initial_zenz_live_correction_background_color_;
+  bool initial_use_custom_zenz_live_correction_underline_color_;
+  uint32_t initial_zenz_live_correction_underline_color_;
+
   std::map<QString, config::Config::SessionKeymap>
       keymapname_sessionkeymap_map_;
 };

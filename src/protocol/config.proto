@@ -360,7 +360,7 @@ message Config {
   // presentation. If the deadline expires, the pending Zenz generation is
   // abandoned and the already-computed Mozc result is revealed.
   optional uint32 zenz_deferred_presentation_timeout_msec = 1028
-      [default = 300];
+      [default = 250];
 
   // Timeout in milliseconds for one zenz live correction request.
   optional uint32 zenz_live_correction_timeout_msec = 1005 [default = 180];
@@ -423,7 +423,7 @@ message Config {
   optional bool use_zenz_live_correction_right_context = 1016
       [default = true];
   optional uint32 zenz_live_correction_right_context_length = 1017
-      [default = 24];
+      [default = 6];
 
   //////////////////////////////////////////////////////////////
   //
@@ -546,8 +546,25 @@ message Config {
 
   // User-visible dimness of unresolved Roman input. 0 keeps high contrast,
   // while larger values move the text closer to the sampled background.
-  // Windows UI/runtime clamps the supported value to 0..90.
-  optional uint32 pending_roman_dimness_percent = 1032 [default = 75];
+  // Windows UI/runtime clamps the supported value to 0..100.
+  optional uint32 pending_roman_dimness_percent = 1032 [default = 85];
+
+  // Presentation colors for an applied Zenz live correction.
+  // These settings are currently consumed by Windows TSF. Color values are
+  // stored as 0xRRGGBB. When a custom flag is false, Windows preserves the
+  // existing target/live-conversion presentation for that color channel.
+  optional bool use_custom_zenz_live_correction_text_color = 1033
+      [default = false];
+  optional uint32 zenz_live_correction_text_color = 1034
+      [default = 0x000000];
+  optional bool use_custom_zenz_live_correction_background_color = 1035
+      [default = false];
+  optional uint32 zenz_live_correction_background_color = 1036
+      [default = 0xddeeff];
+  optional bool use_custom_zenz_live_correction_underline_color = 1037
+      [default = true];
+  optional uint32 zenz_live_correction_underline_color = 1038
+      [default = 0xc4dc6c];
 
   // Customize preedit display attributes on Windows TSF.
   // Color values are stored as 0xRRGGBB, not Windows COLORREF.

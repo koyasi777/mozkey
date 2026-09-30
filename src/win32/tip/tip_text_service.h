@@ -78,7 +78,10 @@ class TipTextService : public IUnknown {
   // Returns the GUID atom for the display attributes.
   virtual TfGuidAtom input_attribute() const = 0;
   virtual TfGuidAtom converted_attribute() const = 0;
-  // Default keeps existing mocks/source users compatible.
+  // Defaults keep existing mocks/source users compatible.
+  virtual TfGuidAtom zenz_live_correction_attribute() const {
+    return TF_INVALID_GUIDATOM;
+  }
   virtual TfGuidAtom pending_roman_attribute() const {
     return TF_INVALID_GUIDATOM;
   }

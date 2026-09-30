@@ -90,7 +90,7 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_use_realtime_conversion(false);
 #ifdef _WIN32
   config->set_dim_pending_roman_input(false);
-  config->set_pending_roman_dimness_percent(75);
+  config->set_pending_roman_dimness_percent(85);
   config->set_use_custom_preedit_underline_color(true);
   config->set_preedit_underline_color(0x30dcc8);
   config->set_use_custom_preedit_target_underline_color(true);
@@ -110,7 +110,7 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_TRUE(config.use_zenz_live_correction());
   EXPECT_FALSE(config.defer_live_conversion_display_until_zenz_result());
   EXPECT_EQ(config.zenz_live_correction_delay_msec(), 1000);
-  EXPECT_EQ(config.zenz_deferred_presentation_timeout_msec(), 300);
+  EXPECT_EQ(config.zenz_deferred_presentation_timeout_msec(), 250);
   EXPECT_EQ(config.zenz_live_correction_timeout_msec(), 180);
   EXPECT_EQ(config.zenz_live_correction_min_key_length(), 2);
   EXPECT_EQ(config.zenz_live_correction_left_context_length(), 24);
@@ -120,7 +120,7 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.zenz_auto_block_reject_threshold(), 1);
   EXPECT_EQ(config.zenz_auto_block_minimum_reject_percentage(), 50);
   EXPECT_TRUE(config.use_zenz_live_correction_right_context());
-  EXPECT_EQ(config.zenz_live_correction_right_context_length(), 24);
+  EXPECT_EQ(config.zenz_live_correction_right_context_length(), 6);
 
   EXPECT_EQ(config.history_learning_level(), Config::DEFAULT_HISTORY);
   EXPECT_TRUE(config.use_history_suggest());
@@ -128,11 +128,13 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_FALSE(config.use_realtime_conversion());
 #ifdef _WIN32
   EXPECT_FALSE(config.dim_pending_roman_input());
-  EXPECT_EQ(config.pending_roman_dimness_percent(), 75);
+  EXPECT_EQ(config.pending_roman_dimness_percent(), 85);
   EXPECT_TRUE(config.use_custom_preedit_underline_color());
   EXPECT_EQ(config.preedit_underline_color(), 0x30dcc8);
   EXPECT_TRUE(config.use_custom_preedit_target_underline_color());
   EXPECT_EQ(config.preedit_target_underline_color(), 0xc1a5ab);
+  EXPECT_TRUE(config.use_custom_zenz_live_correction_underline_color());
+  EXPECT_EQ(config.zenz_live_correction_underline_color(), 0xc4dc6c);
 #endif  // _WIN32
   EXPECT_EQ(config.suggestions_size(), 3);
 }

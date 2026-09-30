@@ -5,6 +5,45 @@
     <name>ConfigDialog</name>
     <message>
         <location filename="config_dialog.ui" line="0"/>
+        <source>未確定文字の表示色</source>
+        <translation>未確定文字の表示色</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>入力中の文字</source>
+        <translation>入力中の文字</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>変換中の文節</source>
+        <translation>変換中の文節</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>文字色</source>
+        <translation>文字色</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>背景色</source>
+        <translation>背景色</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>下線色</source>
+        <translation>下線色</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>対応アプリのみ有効。Chrome/Edge等は非対応の場合あり。</source>
+        <translation>対応アプリのみ有効。Chrome/Edge等は非対応の場合あり。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>この設定は Windows TSF の表示属性を利用します。対応アプリでのみ有効です。Chrome や Edge など、一部のアプリでは反映されない場合があります。</source>
+        <translation>この設定は Windows TSF の表示属性を利用します。対応アプリでのみ有効です。Chrome や Edge など、一部のアプリでは反映されない場合があります。</translation>
+    </message>    <message>
+        <location filename="config_dialog.ui" line="0"/>
         <source>未確定のローマ字を薄く表示する</source>
         <translation>未確定のローマ字を薄く表示する</translation>
     </message>
@@ -20,8 +59,8 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="0"/>
-        <source>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</source>
-        <translation>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、90% は非常に薄い表示です。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</translation>
+        <source>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、100% は背景色と同じになり見えなくなります。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</source>
+        <translation>値を大きくすると未確定のローマ字が背景色に近づき、より薄く見えます。0% は高いコントラスト、100% は背景色と同じになり見えなくなります。背景色を安全に取得できないアプリではシステム標準の薄い表示を使います。</translation>
     </message>
     <message>
         <location filename="config_dialog.ui" line="32"/>

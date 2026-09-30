@@ -35,8 +35,10 @@
 
 #include <string_view>
 
+#include "config/config_handler.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
+#include "testing/mozctest.h"
 
 namespace mozc {
 namespace win32 {
@@ -83,6 +85,9 @@ MATCHER_P(IsSameColor, color, "") {
          arg.type == color.type;
 }
 
+class TipDisplayAttributesConfigTest
+    : public testing::TestWithTempUserProfile {};
+
 TEST(TipDisplayAttributesTest, BasicTest) {
   TestableTipDisplayAttribute attribute(kTestGuid, kTestAttribute,
                                         kTestDescription);
@@ -118,6 +123,73 @@ TEST(TipDisplayAttributesTest,
   EXPECT_EQ(info.lsStyle, TF_LS_DOT);
   EXPECT_FALSE(info.fBoldLine);
   EXPECT_EQ(info.bAttr, TF_ATTR_INPUT);
+}
+
+TEST_F(TipDisplayAttributesConfigTest,
+       ZenzLiveCorrectionUsesCustomColorsAndPerChannelTargetFallback) {
+  ClearGeckoDisplayCompatibilityBackground();
+
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+
+  config.set_use_custom_preedit_target_text_color(true);
+  config.set_preedit_target_text_color(0x010203);
+  config.set_use_custom_preedit_target_background_color(true);
+  config.set_preedit_target_background_color(0x040506);
+  config.set_use_custom_preedit_target_underline_color(true);
+  config.set_preedit_target_underline_color(0x070809);
+
+  config.set_use_custom_zenz_live_correction_text_color(true);
+  config.set_zenz_live_correction_text_color(0x112233);
+  config.set_use_custom_zenz_live_correction_background_color(false);
+  config.set_use_custom_zenz_live_correction_underline_color(false);
+
+  config::ConfigHandler::SetConfig(config);
+
+  TipDisplayAttributeZenzLiveCorrection attribute;
+  TF_DISPLAYATTRIBUTE info = {};
+  ASSERT_EQ(attribute.GetAttributeInfo(&info), S_OK);
+
+  EXPECT_EQ(info.crText.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crText.cr, RGB(0x11, 0x22, 0x33));
+  EXPECT_EQ(info.crBk.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crBk.cr, RGB(0x04, 0x05, 0x06));
+  EXPECT_EQ(info.crLine.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crLine.cr, RGB(0x07, 0x08, 0x09));
+  EXPECT_EQ(info.lsStyle, TF_LS_SOLID);
+  EXPECT_TRUE(info.fBoldLine);
+  EXPECT_EQ(info.bAttr, TF_ATTR_TARGET_CONVERTED);
+
+  config.set_use_custom_zenz_live_correction_background_color(true);
+  config.set_zenz_live_correction_background_color(0x445566);
+  config.set_use_custom_zenz_live_correction_underline_color(true);
+  config.set_zenz_live_correction_underline_color(0x778899);
+  config::ConfigHandler::SetConfig(config);
+
+  ASSERT_EQ(attribute.GetAttributeInfo(&info), S_OK);
+  EXPECT_EQ(info.crText.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crText.cr, RGB(0x11, 0x22, 0x33));
+  EXPECT_EQ(info.crBk.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crBk.cr, RGB(0x44, 0x55, 0x66));
+  EXPECT_EQ(info.crLine.type, TF_CT_COLORREF);
+  EXPECT_EQ(info.crLine.cr, RGB(0x77, 0x88, 0x99));
+
+  config.set_use_custom_preedit_target_text_color(false);
+  config.set_use_custom_preedit_target_background_color(false);
+  config.set_use_custom_preedit_target_underline_color(false);
+  config.set_use_custom_zenz_live_correction_text_color(false);
+  config.set_use_custom_zenz_live_correction_background_color(false);
+  config.set_use_custom_zenz_live_correction_underline_color(false);
+  config::ConfigHandler::SetConfig(config);
+
+  ASSERT_EQ(attribute.GetAttributeInfo(&info), S_OK);
+  EXPECT_EQ(info.crText.type, TF_CT_NONE);
+  EXPECT_EQ(info.crBk.type, TF_CT_NONE);
+  EXPECT_EQ(info.crLine.type, TF_CT_NONE);
+  EXPECT_EQ(info.lsStyle, TF_LS_SOLID);
+  EXPECT_TRUE(info.fBoldLine);
+  EXPECT_EQ(info.bAttr, TF_ATTR_TARGET_CONVERTED);
+
+  ClearGeckoDisplayCompatibilityBackground();
 }
 
 TEST(TipDisplayAttributesTest, SetAttributeInfo) {

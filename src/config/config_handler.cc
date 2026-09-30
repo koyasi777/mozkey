@@ -116,7 +116,7 @@ void ApplyMozkeyProductDefaults(Config* config) {
     config->set_dim_pending_roman_input(false);
   }
   if (!config->has_pending_roman_dimness_percent()) {
-    config->set_pending_roman_dimness_percent(75);
+    config->set_pending_roman_dimness_percent(85);
   }
 
   // Default Windows TSF preedit underlines for Mozkey. Presence checks are

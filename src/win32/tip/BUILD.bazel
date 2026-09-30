@@ -950,7 +950,9 @@ mozc_cc_test(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":tip_display_attributes",
+        "//config:config_handler",
         "//testing:gunit_main",
+        "//testing:mozctest",
         "@com_microsoft_wil//:wil",
     ],
 )

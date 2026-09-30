@@ -88,6 +88,17 @@ class TipDisplayAttributeConverted : public TipDisplayAttribute {
   static const GUID& guid();
 };
 
+// Represents an applied Zenz live-correction preedit on Windows TSF.
+class TipDisplayAttributeZenzLiveCorrection : public TipDisplayAttribute {
+ public:
+  TipDisplayAttributeZenzLiveCorrection();
+
+  STDMETHODIMP
+  GetAttributeInfo(TF_DISPLAYATTRIBUTE* absl_nullable attribute) override;
+
+  static const GUID& guid();
+};
+
 // Represents the display attributes for unresolved trailing Roman input.
 class TipDisplayAttributePendingRoman : public TipDisplayAttribute {
  public:

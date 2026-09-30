@@ -96,8 +96,8 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows / macOS 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、対応するキー設定では候補・文節移動も視覚方向に合わせて操作可能
 - Windows / macOS 版では、縦書き時の連鎖候補ウィンドウを現在候補から本文の外側へ展開するよう配置し、必要に応じて反対側へフォールバック
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
-- Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能
-- Windows 版のローマ字入力で、変換規則の途中にある末尾の未確定ローマ字だけを薄く表示する opt-in 機能を追加。既定は OFF で、薄さは 0～90%（既定 75%）の範囲で調整可能
+- Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能。入力中の文字、変換中の文節、Zenz ライブ補正を個別に設定でき、Zenz ライブ補正の下線は新規・未設定プロファイルで既定 ON、既定色は `#C4DC6C`
+- Windows 版のローマ字入力で、変換規則の途中にある末尾の未確定ローマ字だけを薄く表示する opt-in 機能を追加。既定は OFF で、薄さは 0～100%（既定 85%）の範囲で調整可能。100% は背景色と同じになり不可視
 - Windows 版の IME 切り替えインジケータは、設定画面から「システムテーマに合わせる / ダーク / ライト / カスタム」を選択可能。カスタムでは入力モード別の配色とサイズ・角丸・枠線・影を調整でき、画面端付近では表示位置を自動調整
 - system dictionary 強化用の追加辞書生成パイプラインを追加
 - 日常語彙・実務語彙・外来語・英語綴り候補を小さな manual override 辞書として段階的に補強し、通常語彙は自然な第一候補、英語綴りは補助候補として扱う評価運用を追加
@@ -113,13 +113,13 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - `ほんじつ` / `みょうにち` などの日付表現を補強し、`9/27` など明示的に入力された日付表記は候補順位でも尊重
 - llama.cpp ベースのローカル Zenz live correction pipeline を追加
 - Zenz 文脈処理を共通化し、通常 Mozc の `preceding_text` / `following_text` とは分離した `zenz_preceding_text` / `zenz_following_text` を使用
-- Zenz が必要とする preceding / following の長さを Server から Client へ通知し、Windows TSF / macOS IMK では要求された方向・長さだけ surrounding text を追加取得
+- Zenz が必要とする preceding / following の長さを Server から Client へ通知し、Windows TSF / macOS IMK では要求された方向・長さだけ surrounding text を追加取得。右文脈は有効時に設定可能で、取得長の既定は 6 文字
 - Zenz の前方・後方文脈を用途に応じて独立して選択し、Unicode-aware な文字種判定と privacy filtering を共通処理として適用
 - Windows 版では、Zenz 補正を `mozc_server` から named pipe 経由で `mozc_zenz_scorer.exe` に依頼し、`llama-server.exe` の localhost endpoint でローカル推論
 - Zenz 補正開始までの遅延時間を設定画面から変更可能。デフォルトは 1000 ms
 - Zenz 補正開始の最小文字数を設定画面から変更可能
 - 「Zenz 補正結果が返るまで通常のライブ変換結果を表示しない」opt-in 設定を追加。待機中は直前まで安定して表示されていた Zenz 補正部分を可能な範囲で維持し、未解決のローマ字 suffix はその表示へ追従。Zenz が採用されない場合は現在の Mozc ライブ変換結果へフォールバック
-- deferred 表示専用の最大待機時間を設定画面から変更可能。既定は Zenz 補正要求の送信後 300 ms で、期限を超えた generation は破棄して、すでに計算済みの Mozc ライブ変換結果へフォールバック
+- deferred 表示専用の最大待機時間を設定画面から変更可能。既定は Zenz 補正要求の送信後 250 ms で、期限を超えた generation は破棄して、すでに計算済みの Mozc ライブ変換結果へフォールバック
 - deferred 表示中の Enter / Shift による英字入力では、裏側の Mozc baseline ではなく、その時点でユーザーに見えている presentation を確定。Enter 確定後の Undo でも同じ presentation を復元
 - Zenz 出力が確定済み左文脈の長い suffix を現在入力の先頭へ反復する context echo を検出して拒否し、通常の Mozc ライブ変換結果へフォールバック
 - Zenz 補正結果のローカル feedback learning を追加。設定画面から ON/OFF 可能
@@ -267,7 +267,7 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 設定画面の「Zenz 補正結果が返るまで通常のライブ変換結果を表示しない」を有効にすると、Zenz 補正を実行する入力では、新しい Mozc ライブ変換結果を応答待ちの間は先に表示しません。すでに安定して表示できている Zenz 補正部分がある場合は、その表示を可能な範囲で維持し、入力途中の未解決ローマ字 suffix はその後ろへ追従表示します。Mozc 側の再文節化だけを理由に、一度安定した Zenz 表示を不用意に細分化・巻き戻ししないように扱います。Zenz が失敗、タイムアウト、検証拒否、または Mozc と同一の結果になって採用されなかった場合は、その時点の通常 Mozc ライブ変換結果へフォールバックします。
 
-この deferred 表示には、Zenz 補正要求を実際に送信してからの最大待機時間を設定できます。既定は 300 ms です。この期限までに結果が得られなければ、その generation の Zenz 補正を中止して、すでに計算済みの Mozc ライブ変換結果を表示します。遅れて返った同じ generation の Zenz 結果は採用しません。Zenz 補正開始前のデバウンス時間はこの 300 ms には含まれません。
+この deferred 表示には、Zenz 補正要求を実際に送信してからの最大待機時間を設定できます。既定は 250 ms です。この期限までに結果が得られなければ、その generation の Zenz 補正を中止して、すでに計算済みの Mozc ライブ変換結果を表示します。遅れて返った同じ generation の Zenz 結果は採用しません。Zenz 補正開始前のデバウンス時間はこの 250 ms には含まれません。
 
 Windows 版では、Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
@@ -331,7 +331,7 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 - `topic`: `U+EE04` topic として、現在の話題を渡します。experimental なフィールドです。
 - `style`: `U+EE05` style として、文体や用途を渡します。experimental なフィールドです。
 - `settings`: `U+EE06` settings として、変換方針の短いヒントを渡します。experimental なフィールドです。
-- 右文脈: Zenz 専用のカーソル右側テキストが利用可能な場合、`U+EE07` right context として Zenzai v3.2 の prompt に含めます。
+- 右文脈: Zenz 専用のカーソル右側テキストが利用可能な場合、`U+EE07` right context として Zenzai v3.2 の prompt に含めます。右文脈の取得長は設定可能で、既定は 6 文字です。
 
 `profile`、`topic`、`style`、`settings` は空欄なら prompt に含めません。右文脈はユーザーが固定文を入力する欄ではありません。Windows TSF / macOS IMK では、Server が要求した必要量をカーソル右側から自動取得し、`zenz_following_text` として渡します。
 
@@ -568,19 +568,19 @@ macOS 版では、IMK 側で取得した writing direction をレンダラーへ
 
 Windows 版では、ローマ字入力時に「未確定のローマ字を薄く表示する」を有効にすると、変換規則の途中にある末尾の未確定ローマ字だけを通常の preedit と分けて表示できます。この機能は表示だけを変更し、入力文字列、変換用の key、確定結果は変更しません。
 
-この設定は opt-in で、設定値がまだ存在しない新規・未設定のプロファイルでは既定 OFF です。すでに明示的な ON / OFF が保存されている場合は、そのユーザー設定を維持します。薄さは 0～90% の範囲を 1% 単位で設定でき、既定値は 75% です。値を大きくすると背景色に近づいてより薄く見え、0% は高いコントラスト、90% は非常に薄い表示になります。
+この設定は opt-in で、設定値がまだ存在しない新規・未設定のプロファイルでは既定 OFF です。すでに明示的な ON / OFF が保存されている場合は、そのユーザー設定を維持します。薄さは 0～100% の範囲を 1% 単位で設定でき、既定値は 85% です。値を大きくすると背景色に近づいてより薄く見え、0% は高いコントラスト、100% は背景色と同じになって不可視になります。
 
 未確定ローマ字の表示情報は通常の入力中だけでなく、ライブ変換や Zenz 補正を表示している経路でも、元の segment の key / value を壊さず安全に保持できる範囲で引き継ぎます。表示のために key を value から合成することはせず、安全に分割できない segment は元の key / value のまま扱います。
 
 この表示は Windows TSF の専用 display attribute として適用します。Firefox などの Gecko 系ホストでは、編集面の背景を安全に取得できた場合だけ、その背景に合わせた薄い文字色を使用します。選択範囲、clipped な geometry、非均一な背景など信頼できない状態は背景色として固定せず、互換表示へフォールバックします。また、この機能が OFF のときは背景取得のための画面 sampling を行いません。
 
-あわせて、Windows 版では設定画面から入力中の文字と変換中の文節について、それぞれ以下の表示色を個別に設定できます。
+あわせて、Windows 版では設定画面から入力中の文字、変換中の文節、Zenz ライブ補正について、それぞれ以下の表示色を個別に設定できます。
 
 - 文字色
 - 背景色
 - 下線色
 
-新規・未設定のプロファイルでは、入力中の下線色は `#30DCC8`、変換中の文節の下線色は `#C1A5AB` が既定です。すでに下線色やその有効 / 無効を明示的に保存している場合は、その既存設定を維持します。
+新規・未設定のプロファイルでは、入力中の下線色は `#30DCC8`、変換中の文節の下線色は `#C1A5AB` が既定です。Zenz ライブ補正では専用の下線色が既定で有効になり、既定色は `#C4DC6C` です。Zenz 専用の文字色・背景色は既定では無効で、無効な色チャネルは変換中の文節側のカスタム色が有効ならそれを引き継ぎ、そうでなければ Windows TSF の既存表示へフォールバックします。すでに各色やその有効 / 無効を明示的に保存している場合は、その既存設定を維持します。
 
 日本語入力中・変換中の未確定文字を見やすくするための機能です。特に、視認性を高めたいユーザー向けのアクセシビリティ改善として追加しています。
 
@@ -813,8 +813,8 @@ Main features added in this fork
 - Adds vertical-writing layouts for candidate, suggestion, infolist, and live-conversion ruby displays on Windows and macOS, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
 - On Windows and macOS, places cascading candidate windows outward from the focused vertical candidate, with fallback to the opposite side when necessary
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
-- Allows customizing Windows preedit text color, background color, and underline color from the config dialog
-- Adds an opt-in Windows feature for Roman input that dims only the unresolved trailing romaji still forming an incomplete conversion-rule prefix; it defaults to OFF and the dimness can be adjusted from 0% to 90% (default 75%)
+- Allows customizing Windows preedit text color, background color, and underline color from the config dialog for input text, converting segments, and Zenz live correction separately; the Zenz live-correction underline defaults to enabled with `#C4DC6C` for new or otherwise unset profiles
+- Adds an opt-in Windows feature for Roman input that dims only the unresolved trailing romaji still forming an incomplete conversion-rule prefix; it defaults to OFF and the dimness can be adjusted from 0% to 100% (default 85%); 100% matches the background and becomes invisible
 - Allows choosing System theme, Dark, Light, or Custom for the Windows IME mode indicator, including per-mode colors and geometry/shadow customization, with automatic screen-edge repositioning
 - Adds an enhanced system dictionary generation pipeline
 - Adds a small tracked manual override dictionary for daily vocabulary, practical vocabulary, loanwords, and secondary English spelling candidates, with regression checks that keep Japanese candidates first
@@ -830,13 +830,13 @@ Main features added in this fork
 - Adds date expressions such as `ほんじつ` / `みょうにち` while preserving explicitly typed date forms such as `9/27` at the front of the candidate order
 - Adds a local Zenz live correction pipeline based on llama.cpp
 - Uses dedicated `zenz_preceding_text` / `zenz_following_text` fields for Zenz context without changing the normal Mozc `preceding_text` / `following_text` semantics
-- Lets the Server request the required preceding / following lengths and lets Windows TSF / macOS IMK acquire only the requested directions and lengths
+- Lets the Server request the required preceding / following lengths and lets Windows TSF / macOS IMK acquire only the requested directions and lengths; right-context acquisition is configurable and defaults to 6 characters when enabled
 - Selects preceding and following Zenz context independently and applies shared Unicode-aware script analysis and privacy filtering
 - On Windows, sends Zenz correction requests from `mozc_server` to `mozc_zenz_scorer.exe` through a named pipe and performs local inference through the localhost endpoint of `llama-server.exe`
 - Allows configuring the Zenz correction debounce delay from the config dialog. The default is 1000 ms
 - Allows configuring the minimum number of characters to start Zenz correction
 - Adds an opt-in `Do not show the normal live-conversion result until Zenz correction returns` mode. While waiting, Mozkey preserves the previously stable Zenz-corrected presentation when possible and appends unresolved raw-romaji suffixes to that visible presentation; if Zenz is not adopted, it falls back to the current Mozc live-conversion result
-- Adds a configurable deferred-presentation wait limit. The default is 300 ms after the Zenz correction request is submitted; when the deadline expires, that generation is discarded and Mozkey reveals the already-computed normal Mozc live-conversion result
+- Adds a configurable deferred-presentation wait limit. The default is 250 ms after the Zenz correction request is submitted; when the deadline expires, that generation is discarded and Mozkey reveals the already-computed normal Mozc live-conversion result
 - Commits the presentation that is actually visible to the user, rather than a hidden Mozc baseline, when Enter or Shift-based ASCII input ends a deferred presentation; Undo after Enter restores the same visible presentation
 - Detects and rejects likely context echo where Zenz repeats a long suffix of already committed left context at the beginning of the current output, then falls back to the normal Mozc live-conversion result
 - Adds optional local feedback learning for Zenz correction results
@@ -945,12 +945,12 @@ by validation, or produces the same value as Mozc and is therefore not adopted,
 Mozkey falls back to the current normal Mozc live-conversion result.
 
 Deferred presentation has a separate configurable wait limit measured from the
-moment the Zenz correction request is actually submitted. The default is 300
+moment the Zenz correction request is actually submitted. The default is 250
 ms. If the result is still unavailable at that deadline, Mozkey abandons that
 generation and reveals the normal Mozc live-conversion result that was already
 computed as the Zenz baseline. A late result from that generation is not
 adopted. The debounce interval before the Zenz request is submitted is not
-counted toward this 300 ms budget.
+counted toward this 250 ms budget.
 
 On Windows, the Zenz request is sent from `mozc_server` to
 `mozc_zenz_scorer.exe` through a Windows named pipe. The scorer then calls the
@@ -1175,7 +1175,7 @@ Zenz live correction can pass additional condition fields using the special-toke
 - `topic`: passed as `U+EE04` topic. This field is experimental.
 - `style`: passed as `U+EE05` style. This field is experimental.
 - `settings`: passed as `U+EE06` settings. This field is experimental.
-- Right context: when dedicated Zenz text on the right side of the caret is available, it is passed as `U+EE07` right context for Zenzai v3.2.
+- Right context: when dedicated Zenz text on the right side of the caret is available, it is passed as `U+EE07` right context for Zenzai v3.2. The acquisition length is configurable and defaults to 6 characters.
 
 Empty `profile`, `topic`, `style`, and `settings` fields are omitted from the prompt. Right context is not a fixed user-entered phrase. On Windows TSF / macOS IMK, the Server requests the required amount and the client automatically acquires text on the right side of the caret and supplies it as `zenz_following_text`.
 
@@ -1490,19 +1490,19 @@ The macOS vertical-writing implementation is separated into dedicated layout and
 
 On Windows, enabling `Dim unresolved Roman input` while using Roman input gives only the unresolved trailing romaji that is still an incomplete conversion-rule prefix a separate, subdued presentation. This is presentation metadata only: it does not change the input string, conversion key, or committed text.
 
-The feature is opt-in. For a new or otherwise unset profile, the default is OFF. If an explicit ON / OFF value has already been stored, that existing user choice is preserved. Dimness is configurable from 0% to 90% in 1% steps, with a default of 75%. Higher values move the unresolved Roman text closer to the background color; 0% keeps high contrast and 90% is very faint.
+The feature is opt-in. For a new or otherwise unset profile, the default is OFF. If an explicit ON / OFF value has already been stored, that existing user choice is preserved. Dimness is configurable from 0% to 100% in 1% steps, with a default of 85%. Higher values move the unresolved Roman text closer to the background color; 0% keeps high contrast, while 100% matches the background and becomes invisible.
 
 Pending-romaji presentation metadata is also preserved through live-conversion and Zenz-correction display paths when the original segment key/value relationship can be kept safely. Presentation-only splitting never synthesizes segment keys from displayed values; if a segment cannot be split safely, its original key/value is kept unsplit.
 
 The presentation is applied through a dedicated Windows TSF display attribute. In Gecko-based hosts such as Firefox, Mozkey uses a subdued text color matched to the editor background only when that background can be sampled safely. Selection-painted regions, clipped geometry, and non-uniform surfaces are not cached as editor backgrounds; Mozkey falls back to a compatibility presentation instead. When the feature is OFF, no screen sampling is performed for this feature.
 
-The config dialog also allows the following display colors to be configured separately for input text and the converting segment:
+The config dialog also allows the following display colors to be configured separately for input text, the converting segment, and Zenz live correction:
 
 - Text color
 - Background color
 - Underline color
 
-For new or otherwise unset profiles, the default underline color is `#30DCC8` for input text and `#C1A5AB` for the converting segment. Explicitly stored underline-color choices, including whether custom underline colors are enabled, are preserved.
+For new or otherwise unset profiles, the default underline color is `#30DCC8` for input text and `#C1A5AB` for the converting segment. Zenz live correction uses a dedicated underline color that defaults to enabled with `#C4DC6C`. Its dedicated text and background colors default to disabled; for each disabled Zenz color channel, Mozkey falls back to the corresponding custom converting-segment color when enabled, otherwise to the existing Windows TSF presentation. Explicitly stored color choices and enable/disable states are preserved.
 
 These options are intended to improve the visibility of uncommitted text, especially for users who need stronger visual contrast while composing or converting Japanese text.
 

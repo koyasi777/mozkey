@@ -395,8 +395,8 @@ bool SampleVisibleBackgroundAtRangeEnd(
   return true;
 }
 
-constexpr uint32_t kDefaultPendingRomanDimnessPercent = 75;
-constexpr uint32_t kMaxPendingRomanDimnessPercent = 90;
+constexpr uint32_t kDefaultPendingRomanDimnessPercent = 85;
+constexpr uint32_t kMaxPendingRomanDimnessPercent = 100;
 
 bool IsPendingRomanDimmingEnabled() {
   const auto current_config = config::ConfigHandler::GetSharedConfig();
@@ -859,6 +859,8 @@ HRESULT UpdateComposition(TipTextService* text_service, ITfContext* context,
     TfGuidAtom attribute = TF_INVALID_GUIDATOM;
     if (segment.is_pending_roman()) {
       attribute = text_service->pending_roman_attribute();
+    } else if (output.zenz_live_correction_applied()) {
+      attribute = text_service->zenz_live_correction_attribute();
     } else if (annotation == Preedit::Segment::UNDERLINE) {
       attribute = text_service->input_attribute();
     } else if (annotation == Preedit::Segment::HIGHLIGHT) {
