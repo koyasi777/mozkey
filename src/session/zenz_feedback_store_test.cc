@@ -107,6 +107,36 @@ class ScopedUserProfileForZenzFeedbackStoreTest {
   std::wstring profile_dir_;
 };
 
+TEST(ZenzFeedbackStoreTest,
+     DistinguishesReadingPreservedAcceptedFeedbackFromLegacyAcceptedRows) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  ZenzFeedbackStore store;
+  store.RecordAccepted("かれはてんてきです", "empty", "彼は天敵です");
+
+  std::vector<ZenzFeedbackCandidate> candidates =
+      store.GetRankedCandidates("かれはてんてきです", "empty");
+  ASSERT_EQ(candidates.size(), 1);
+  EXPECT_TRUE(candidates[0].reading_preserved);
+
+  const std::wstring import_path =
+      profile.temp_file_path(L"legacy_unvalidated.tsv");
+  {
+    std::ofstream file(import_path, std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(file);
+    file << "v2\taccepted\tかぶしき\tempty\t株式会社\treading_preserved\n";
+  }
+
+  ASSERT_TRUE(store.ImportFromFile(
+      import_path, ZenzFeedbackImportMode::kReplace));
+
+  candidates = store.GetRankedCandidates("かぶしき", "empty");
+  ASSERT_EQ(candidates.size(), 1);
+  // Import files are not trusted to assert the validation provenance marker.
+  EXPECT_FALSE(candidates[0].reading_preserved);
+}
+
 TEST(ZenzFeedbackStoreTest, GetAcceptedCandidatesAllowsSingleAcceptedAndSorts) {
   ScopedUserProfileForZenzFeedbackStoreTest profile;
   ASSERT_TRUE(profile.ok());

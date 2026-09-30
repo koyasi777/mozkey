@@ -29,6 +29,18 @@ class ZenzOutputValidator {
  public:
   ZenzValidationResult Validate(const ZenzValidationInput& input) const;
 
+  // Enforces the IME boundary between conversion and prediction.  The final
+  // adopted Zenz surface must reverse to the current typed key, to the same
+  // normalized reading obtained by reverse-converting that key, or to the same
+  // reverse reading as the trusted Mozc baseline.  The baseline fallback keeps
+  // user-dictionary / technical surfaces working when their visible spelling
+  // does not reverse back to the literal composition key.
+  static ZenzValidationResult ValidateReadingPreservation(
+      absl::string_view key,
+      absl::string_view normalized_key_reading,
+      absl::string_view mozc_reading,
+      absl::string_view zenz_reading);
+
   // Repairs Zenz output so that sentence-final or expressive punctuation stays
   // under user control. Existing punctuation style is restored first, then
   // excess punctuation in the trailing punctuation run is removed when the

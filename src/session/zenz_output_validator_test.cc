@@ -219,19 +219,87 @@ TEST(ZenzOutputValidatorTest,
   EXPECT_EQ(result.reason, "accepted_synthetic");
 }
 
-TEST(ZenzOutputValidatorTest, AllowsShortReadingAbbreviationMatchingContext) {
-  ZenzValidationInput input;
-  input.key = "かぶ";
-  input.mozc_value = "株";
-  input.zenz_value = "株式会社";
-  input.left_context = "前回は株式会社";
-  input.min_key_length = 2;
-  input.allow_synthetic_candidate = true;
+TEST(ZenzOutputValidatorTest,
+     RejectsContextDrivenExpansionBeyondTypedReading) {
+  const ZenzValidationResult result =
+      ZenzOutputValidator::ValidateReadingPreservation(
+          "かぶ", "かぶ", "かぶ", "かぶしきがいしゃ");
+  EXPECT_FALSE(result.accept);
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "reading_mismatch");
+}
 
-  const ZenzValidationResult result = ZenzOutputValidator().Validate(input);
+TEST(ZenzOutputValidatorTest,
+     RejectsPrematureCompletionBeyondTypedReading) {
+  const ZenzValidationResult result =
+      ZenzOutputValidator::ValidateReadingPreservation(
+          "どうがをだうんろ", "どうがをだうんろ",
+          "どうがをだうんろ", "どうがをだうんろーど");
+  EXPECT_FALSE(result.accept);
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "reading_mismatch");
+}
+
+TEST(ZenzOutputValidatorTest,
+     RejectsSameSurfaceLengthPredictionBeyondTypedReading) {
+  const ZenzValidationResult result =
+      ZenzOutputValidator::ValidateReadingPreservation(
+          "かぶしき", "かぶしき", "かぶしき", "かぶしきがいしゃ");
+  EXPECT_FALSE(result.accept);
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "reading_mismatch");
+}
+
+TEST(ZenzOutputValidatorTest,
+     AllowsCompanySurfaceWhenFullReadingWasTyped) {
+  const ZenzValidationResult result =
+      ZenzOutputValidator::ValidateReadingPreservation(
+          "かぶしきがいしゃ", "", "", "かぶしきがいしゃ");
   EXPECT_TRUE(result.accept);
-  EXPECT_TRUE(result.synthetic);
-  EXPECT_EQ(result.reason, "accepted_synthetic");
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "reading_preserved");
+}
+
+TEST(ZenzOutputValidatorTest,
+     AllowsTrustedMozcBaselineReadingForProtectedSurface) {
+  const ZenzValidationResult result =
+      ZenzOutputValidator::ValidateReadingPreservation(
+          "もずきーはべんり", "", "Mozkeyはべんり",
+          "Mozkeyはべんり");
+  EXPECT_TRUE(result.accept);
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "reading_preserved");
+}
+
+TEST(ZenzOutputValidatorTest,
+     AllowsReadingPreservingContextCorrection) {
+  const ZenzValidationResult result =
+      ZenzOutputValidator::ValidateReadingPreservation(
+          "かれはてんてきです", "かれはてんてきです",
+          "かれはてんてきです", "かれはてんてきです");
+  EXPECT_TRUE(result.accept);
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "reading_preserved");
+}
+
+TEST(ZenzOutputValidatorTest,
+     AllowsLiteralNumericKeyWhenReverseReadingsMatch) {
+  const ZenzValidationResult result =
+      ZenzOutputValidator::ValidateReadingPreservation(
+          "100えんではかえない", "ひゃくえんではかえない",
+          "ひゃくえんではかえない", "ひゃくえんではかえない");
+  EXPECT_TRUE(result.accept);
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "reading_preserved");
+}
+
+TEST(ZenzOutputValidatorTest, RejectsWhenReverseReadingIsUnavailable) {
+  const ZenzValidationResult result =
+      ZenzOutputValidator::ValidateReadingPreservation(
+          "かれはてんてきです", "", "", "");
+  EXPECT_FALSE(result.accept);
+  EXPECT_FALSE(result.synthetic);
+  EXPECT_EQ(result.reason, "reading_unavailable");
 }
 
 }  // namespace
