@@ -16,9 +16,15 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "base/file_stream.h"
+#include "base/file_util.h"
+#include "base/system_util.h"
 
 #if defined(_WIN32)
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace mozc {
@@ -255,6 +261,29 @@ bool EnsureDirectoryExists(const std::wstring& dir) {
 void StoreDebugOutput(absl::string_view) {}
 
 #endif
+
+#if defined(__APPLE__)
+std::string GetFeedbackDir() {
+  const std::string dir = SystemUtil::GetUserProfileDirectory();
+  if (dir.empty()) {
+    return "";
+  }
+  if (!FileUtil::DirectoryExists(dir).ok() &&
+      !FileUtil::CreateDirectory(dir).ok() &&
+      !FileUtil::DirectoryExists(dir).ok()) {
+    return "";
+  }
+  return dir;
+}
+
+std::string GetFeedbackPath() {
+  const std::string dir = GetFeedbackDir();
+  if (dir.empty()) {
+    return "";
+  }
+  return FileUtil::JoinPath(dir, "zenz_feedback.tsv");
+}
+#endif  // defined(__APPLE__)
 
 std::string EscapeTsv(absl::string_view s) {
   std::string out;
@@ -696,6 +725,55 @@ void InvalidateFeedbackRecordsCache() {
   std::lock_guard<std::mutex> lock(g_feedback_records_cache_mutex);
   g_feedback_records_cache = FeedbackRecordsCache();
 }
+#elif defined(__APPLE__)
+struct FeedbackFileStamp {
+  bool exists = false;
+  time_t last_write_seconds = 0;
+  long last_write_nanoseconds = 0;
+  uint64_t file_size = 0;
+};
+
+struct FeedbackRecordsCache {
+  bool valid = false;
+  std::string path;
+  FeedbackFileStamp stamp;
+  std::vector<ParsedFeedbackRecord> records;
+};
+
+std::mutex g_feedback_records_cache_mutex;
+FeedbackRecordsCache g_feedback_records_cache;
+
+bool SameFeedbackFileStamp(const FeedbackFileStamp& lhs,
+                           const FeedbackFileStamp& rhs) {
+  return lhs.exists == rhs.exists &&
+         lhs.file_size == rhs.file_size &&
+         lhs.last_write_seconds == rhs.last_write_seconds &&
+         lhs.last_write_nanoseconds == rhs.last_write_nanoseconds;
+}
+
+FeedbackFileStamp GetFeedbackFileStamp(absl::string_view path) {
+  FeedbackFileStamp stamp;
+  if (path.empty()) {
+    return stamp;
+  }
+
+  const std::string path_string(path);
+  struct stat info = {};
+  if (::stat(path_string.c_str(), &info) != 0) {
+    return stamp;
+  }
+
+  stamp.exists = true;
+  stamp.last_write_seconds = info.st_mtimespec.tv_sec;
+  stamp.last_write_nanoseconds = info.st_mtimespec.tv_nsec;
+  stamp.file_size = static_cast<uint64_t>(info.st_size);
+  return stamp;
+}
+
+void InvalidateFeedbackRecordsCache() {
+  std::lock_guard<std::mutex> lock(g_feedback_records_cache_mutex);
+  g_feedback_records_cache = FeedbackRecordsCache();
+}
 #else
 void InvalidateFeedbackRecordsCache() {}
 #endif
@@ -911,8 +989,51 @@ std::vector<ParsedFeedbackRecord> LoadFeedbackRecords() {
   g_feedback_records_cache.records = records;
 
   return records;
+#elif defined(__APPLE__)
+  const std::string path = GetFeedbackPath();
+  const FeedbackFileStamp stamp = GetFeedbackFileStamp(path);
+
+  std::lock_guard<std::mutex> lock(g_feedback_records_cache_mutex);
+
+  if (g_feedback_records_cache.valid &&
+      g_feedback_records_cache.path == path &&
+      SameFeedbackFileStamp(g_feedback_records_cache.stamp, stamp)) {
+    return g_feedback_records_cache.records;
+  }
+
+  std::vector<ParsedFeedbackRecord> records;
+
+  if (path.empty()) {
+    g_feedback_records_cache.valid = true;
+    g_feedback_records_cache.path = path;
+    g_feedback_records_cache.stamp = stamp;
+    g_feedback_records_cache.records.clear();
+    return records;
+  }
+
+  if (!stamp.exists) {
+    g_feedback_records_cache.valid = true;
+    g_feedback_records_cache.path = path;
+    g_feedback_records_cache.stamp = stamp;
+    g_feedback_records_cache.records.clear();
+    return records;
+  }
+
+  InputFileStream file(path, std::ios::in | std::ios::binary);
+  if (!file) {
+    return records;
+  }
+
+  LoadRecordsFromStream(&file, false, &records);
+
+  g_feedback_records_cache.valid = true;
+  g_feedback_records_cache.path = path;
+  g_feedback_records_cache.stamp = stamp;
+  g_feedback_records_cache.records = records;
+  return records;
 #else
-  StoreDebugOutput("load skipped: zenz feedback store is Windows-only");
+  StoreDebugOutput(
+      "load skipped: zenz feedback store persistence is unsupported");
   return {};
 #endif
 }
@@ -1011,10 +1132,55 @@ bool WriteFeedbackRecordsAtomically(
   InvalidateFeedbackRecordsCache();
   return true;
 }
+#elif defined(__APPLE__)
+bool WriteRecordsToPath(
+    absl::string_view path,
+    const std::vector<ParsedFeedbackRecord>& records) {
+  if (path.empty()) {
+    return false;
+  }
+  OutputFileStream file(
+      path, std::ios::out | std::ios::binary | std::ios::trunc);
+  if (!file) {
+    return false;
+  }
+  return WriteRecordsToStream(records, &file);
+}
+
+bool WriteFeedbackRecordsAtomically(
+    const std::vector<ParsedFeedbackRecord>& records) {
+  const std::string path = GetFeedbackPath();
+  if (path.empty()) {
+    return false;
+  }
+
+  if (records.empty()) {
+    if (!FileUtil::UnlinkIfExists(path).ok()) {
+      return false;
+    }
+    InvalidateFeedbackRecordsCache();
+    return true;
+  }
+
+  const std::string tmp_path =
+      absl::StrCat(path, ".tmp.", static_cast<uint64_t>(::getpid()));
+  if (!WriteRecordsToPath(tmp_path, records)) {
+    FileUtil::UnlinkOrLogError(tmp_path);
+    return false;
+  }
+  if (!FileUtil::AtomicRename(tmp_path, path).ok()) {
+    FileUtil::UnlinkOrLogError(tmp_path);
+    return false;
+  }
+
+  InvalidateFeedbackRecordsCache();
+  return true;
+}
 #else
 bool WriteFeedbackRecordsAtomically(
     const std::vector<ParsedFeedbackRecord>&) {
-  StoreDebugOutput("atomic write failed: zenz feedback store is Windows-only");
+  StoreDebugOutput(
+      "atomic write failed: zenz feedback store persistence is unsupported");
   return false;
 }
 #endif
@@ -1068,6 +1234,12 @@ void AppendRecord(absl::string_view action,
   }
 
   std::ofstream file(path_w, std::ios::binary | std::ios::app);
+#elif defined(__APPLE__)
+  const std::string path = GetFeedbackPath();
+  if (path.empty()) {
+    return;
+  }
+  OutputFileStream file(path, std::ios::out | std::ios::binary | std::ios::app);
 #else
   std::ofstream file;
 #endif
@@ -1309,6 +1481,57 @@ std::vector<ZenzFeedbackEntry> ZenzFeedbackStore::ListEntries(
             });
 
   return entries;
+}
+
+bool ZenzFeedbackStore::ExportToFile(absl::string_view path) const {
+#if defined(_WIN32)
+  return ExportToFile(Utf8ToWide(path));
+#elif defined(__APPLE__)
+  if (path.empty()) {
+    return false;
+  }
+  const std::vector<ParsedFeedbackRecord> records = LoadFeedbackRecords();
+  return WriteRecordsToPath(path, records);
+#else
+  StoreDebugOutput(
+      "export failed: zenz feedback store persistence is unsupported");
+  return false;
+#endif
+}
+
+bool ZenzFeedbackStore::ImportFromFile(
+    absl::string_view path,
+    ZenzFeedbackImportMode mode) {
+#if defined(_WIN32)
+  return ImportFromFile(Utf8ToWide(path), mode);
+#elif defined(__APPLE__)
+  if (path.empty()) {
+    return false;
+  }
+
+  InputFileStream file(path, std::ios::in | std::ios::binary);
+  if (!file) {
+    return false;
+  }
+
+  std::vector<ParsedFeedbackRecord> imported_records;
+  if (!LoadRecordsFromStream(&file, true, &imported_records)) {
+    return false;
+  }
+
+  std::vector<ParsedFeedbackRecord> new_records;
+  if (mode == ZenzFeedbackImportMode::kAppend) {
+    new_records = LoadFeedbackRecords();
+  }
+  new_records.insert(new_records.end(),
+                     imported_records.begin(),
+                     imported_records.end());
+  return WriteFeedbackRecordsAtomically(new_records);
+#else
+  StoreDebugOutput(
+      "import failed: zenz feedback store persistence is unsupported");
+  return false;
+#endif
 }
 
 bool ZenzFeedbackStore::ExportToFile(const std::wstring& path) const {

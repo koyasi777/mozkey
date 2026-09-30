@@ -55,6 +55,7 @@
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QPlainTextEdit>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <algorithm>
@@ -75,6 +76,7 @@
 #include <QColor>
 #include <QColorDialog>
 #include <QScrollArea>
+#include <QScreen>
 
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -1336,6 +1338,59 @@ void ShowJapaneseInformation(QWidget* parent,
   message_box.exec();
 }
 
+void ShowJapaneseLongInformation(QWidget* parent,
+                                 const QString& title,
+                                 const QString& text) {
+  QDialog dialog(parent);
+  dialog.setWindowTitle(title);
+  dialog.setModal(true);
+
+  QVBoxLayout* root_layout = new QVBoxLayout(&dialog);
+
+  QPlainTextEdit* text_view = new QPlainTextEdit(&dialog);
+  text_view->setPlainText(text);
+  text_view->setReadOnly(true);
+  text_view->setFrameShape(QFrame::NoFrame);
+  text_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  text_view->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  text_view->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+  root_layout->addWidget(text_view, 1);
+
+  QDialogButtonBox* button_box =
+      new QDialogButtonBox(QDialogButtonBox::Ok, &dialog);
+  if (QPushButton* ok_button = button_box->button(QDialogButtonBox::Ok)) {
+    ok_button->setText(QString::fromUtf8("OK"));
+    ok_button->setDefault(true);
+  }
+  QObject::connect(button_box, &QDialogButtonBox::accepted,
+                   &dialog, &QDialog::accept);
+  root_layout->addWidget(button_box);
+
+  int dialog_width = 960;
+  int dialog_height = 720;
+  QScreen* screen = parent != nullptr ? parent->screen() : nullptr;
+  if (screen != nullptr) {
+    const QRect available = screen->availableGeometry();
+    constexpr int kScreenMargin = 64;
+    dialog_width = std::min(
+        dialog_width, std::max(1, available.width() - kScreenMargin));
+    dialog_height = std::min(
+        dialog_height, std::max(1, available.height() - kScreenMargin));
+    dialog.setMaximumSize(
+        std::max(1, available.width() - kScreenMargin),
+        std::max(1, available.height() - kScreenMargin));
+  }
+
+  dialog.resize(dialog_width, dialog_height);
+  if (screen != nullptr) {
+    const QRect available = screen->availableGeometry();
+    dialog.move(
+        available.left() + (available.width() - dialog.width()) / 2,
+        available.top() + (available.height() - dialog.height()) / 2);
+  }
+  dialog.exec();
+}
+
 void ShowJapaneseCritical(QWidget* parent,
                           const QString& title,
                           const QString& text) {
@@ -1541,7 +1596,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
 
   QObject::connect(details_button, &QPushButton::clicked,
                    &dialog, [&]() {
-                     ShowJapaneseInformation(
+                     ShowJapaneseLongInformation(
                          &dialog, dialog.windowTitle(),
                          QString::fromUtf8(
                              "【この画面で扱うデータ】\n"
@@ -1806,7 +1861,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                        return;
                      }
 
-                     if (!store.ExportToFile(path.toStdWString())) {
+                     if (!store.ExportToFile(path.toUtf8().toStdString())) {
                        ShowJapaneseCritical(
                            &dialog, dialog.windowTitle(),
                            QString::fromUtf8(
@@ -1866,7 +1921,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                              ? session::ZenzFeedbackImportMode::kReplace
                              : session::ZenzFeedbackImportMode::kAppend;
 
-                     if (!store.ImportFromFile(path.toStdWString(),
+                     if (!store.ImportFromFile(path.toUtf8().toStdString(),
                                                import_mode)) {
                        ShowJapaneseCritical(
                            &dialog, dialog.windowTitle(),

@@ -134,11 +134,16 @@ class ZenzFeedbackStore {
   // Exports the raw feedback history as normalized v2 UTF-8 TSV.
   [[nodiscard]]
   bool ExportToFile(const std::wstring& path) const;
+  [[nodiscard]]
+  bool ExportToFile(absl::string_view path) const;
 
   // Imports normalized v2 UTF-8 TSV.  Legacy v1 rows are accepted and converted
   // to the non-reversible "legacy" context class.
   [[nodiscard]]
   bool ImportFromFile(const std::wstring& path,
+                      ZenzFeedbackImportMode mode);
+  [[nodiscard]]
+  bool ImportFromFile(absl::string_view path,
                       ZenzFeedbackImportMode mode);
 
   // Deletes all raw records matching exactly key/context_class/value.
