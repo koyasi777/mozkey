@@ -72,7 +72,7 @@ TEST(ZenzContextRequestTest, UsesProtoDefaultLengths) {
       GetZenzContextRequest(config, commands::Context::NORMAL, true);
 
   EXPECT_EQ(request.preceding_length, 24);
-  EXPECT_EQ(request.following_length, 24);
+  EXPECT_EQ(request.following_length, 6);
 }
 
 TEST(ZenzContextRequestTest, ExplicitRightContextLengthIsPreserved) {
@@ -106,7 +106,7 @@ TEST(ZenzContextRequestTest, ExplicitlyEnabledRightContextUsesProtoDefaultLength
       GetZenzContextRequest(config, commands::Context::NORMAL, true);
 
   EXPECT_EQ(request.preceding_length, 24);
-  EXPECT_EQ(request.following_length, 24);
+  EXPECT_EQ(request.following_length, 6);
 }
 
 TEST(ZenzContextRequestTest, ClampsBothDirectionsForAcquisition) {
