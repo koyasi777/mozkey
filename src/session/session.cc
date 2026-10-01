@@ -62,6 +62,7 @@
 #include "session/keymap.h"
 #include "session/vertical_writing_key_transform.h"
 #include "session/zenz_client_context.h"
+#include "session/zenz_local_correction_policy.h"
 #include "session/zenz_client_factory.h"
 #include "session/zenz_context_assembler.h"
 #include "session/zenz_prompt_builder.h"
@@ -2014,6 +2015,10 @@ bool UseZenzFeedbackLearning(const config::Config& config) {
   return config.use_zenz_feedback_learning();
 }
 
+bool UseZenzLocalCorrectionReplay(const config::Config& config) {
+  return UseZenzFeedbackLearning(config) &&
+         config.use_zenz_local_correction_replay();
+}
 ZenzFeedbackAutoBlockPolicy GetZenzFeedbackAutoBlockPolicy(
     const config::Config& config) {
   ZenzFeedbackAutoBlockPolicy policy;
@@ -3893,12 +3898,15 @@ bool Session::SendKeyConversionState(commands::Command* command) {
               ? "empty"
               : zenz_live_context_class_;
       const std::string cancelled_zenz_value = zenz_live_value_;
+      const bool cancelled_zenz_was_local_replay =
+          zenz_live_local_correction_replay_applied_;
 
       if (!ExecuteCommandSequence(command_sequence, command)) {
         return false;
       }
 
-      if (context_->state() == ImeContext::COMPOSITION &&
+      if (!cancelled_zenz_was_local_replay &&
+          context_->state() == ImeContext::COMPOSITION &&
           context_->composer().GetQueryForConversion() ==
               cancelled_zenz_key) {
         SetPendingZenzFeedbackComparison(
@@ -6450,6 +6458,20 @@ void Session::SetPendingZenzFeedbackComparison(
   pending_zenz_feedback_.require_final_committed_key_match =
       require_final_committed_key_match;
   pending_zenz_feedback_.final_committed_key.clear();
+  pending_zenz_feedback_.allow_local_correction_learning = false;
+  pending_zenz_feedback_.local_correction_baseline_segments.clear();
+
+  if (!require_final_committed_key_match &&
+      UseZenzLocalCorrectionReplay(context_->GetConfig()) &&
+      HasVisibleZenzLiveCorrection() &&
+      pending_zenz_feedback_.key == zenz_live_key_ &&
+      pending_zenz_feedback_.value == zenz_live_value_ &&
+      zenz_live_local_correction_learning_eligible_ &&
+      !zenz_live_baseline_segments_.empty()) {
+    pending_zenz_feedback_.allow_local_correction_learning = true;
+    pending_zenz_feedback_.local_correction_baseline_segments =
+        zenz_live_baseline_segments_;
+  }
   pending_zenz_feedback_.reverse_learning_segments.clear();
   pending_zenz_feedback_.reverse_projected_learning_segments.clear();
 
@@ -6465,6 +6487,13 @@ void Session::SetPendingZenzFeedbackComparison(
 
 void Session::SetPendingZenzFeedbackRejected(absl::string_view reason) {
   if (!HasVisibleZenzLiveCorrection()) {
+    return;
+  }
+
+  if (zenz_live_local_correction_replay_applied_) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-local-correction] skip full-sequence rejection feedback for "
+        "replayed presentation reason=", reason));
     return;
   }
 
@@ -6519,6 +6548,213 @@ void Session::ObservePendingZenzFeedbackCommittedResult(
       " pending_reason=", pending_zenz_feedback_.reason));
 }
 
+std::string Session::MaybeReplayZenzLocalCorrections(
+    const std::vector<ZenzBaselineSegment>& baseline_segments,
+    absl::string_view key,
+    absl::string_view zenz_value,
+    int* applied_count) {
+  if (applied_count != nullptr) {
+    *applied_count = 0;
+  }
+
+  const config::Config& config = context_->GetConfig();
+  if (!UseZenzLocalCorrectionReplay(config) ||
+      baseline_segments.empty() ||
+      key.empty() ||
+      zenz_value.empty()) {
+    return std::string(zenz_value);
+  }
+
+  const ZenzSegmentProjection projection =
+      ProjectZenzValueToMozcSegments(
+          baseline_segments, key, zenz_value);
+  if (!projection.success) {
+    return std::string(zenz_value);
+  }
+
+  std::vector<ZenzLocalCorrection> corrections;
+  corrections.reserve(projection.segments.size());
+
+  const auto try_add_correction =
+      [this, &corrections](const ZenzLocalCorrection& correction) {
+        const std::optional<ZenzLocalCorrectionEntry> stored =
+            zenz_local_correction_store_.Lookup(
+                correction.reading, correction.rejected_value,
+                correction.accepted_value);
+        if (!stored.has_value()) {
+          return false;
+        }
+
+        if (!EvaluateZenzLiveKeyPrivacy(correction.reading).allow ||
+            !EvaluateZenzLiveValuePrivacy(correction.rejected_value).allow ||
+            !EvaluateZenzLiveValuePrivacy(correction.accepted_value).allow) {
+          return false;
+        }
+
+        // Revalidate candidate provenance on every replay. Dictionary/model
+        // updates can change classification after the correction was learned.
+        if (!IsGeneratedSurfaceFallbackForZenzLocalCorrection(
+                correction.reading, correction.rejected_value)) {
+          return false;
+        }
+
+        corrections.push_back(correction);
+        return true;
+      };
+
+  for (const ZenzProjectedSegment& segment : projection.segments) {
+    if (!segment.boundary_known ||
+        !segment.changed ||
+        segment.key.empty() ||
+        segment.zenz_value.empty() ||
+        segment.mozc_value.empty()) {
+      continue;
+    }
+
+    // Prefer the smallest exact contrastive core. This lets one explicit
+    // correction generalize across attached Japanese grammatical material
+    // such as は / だ / です / でした, while the provenance gate still
+    // rejects ordinary lexical alternatives such as 期間 / 機関.
+    const std::optional<ZenzLocalCorrection> canonical =
+        CanonicalizeZenzLocalCorrectionCore(
+            segment.key, segment.zenz_value, segment.mozc_value);
+    if (canonical.has_value()) {
+      if (try_add_correction(*canonical)) {
+        continue;
+      }
+
+      // If canonicalization did not shrink the segment, the canonical lookup
+      // and the exact-segment fallback are the same query. Do not repeat the
+      // store/privacy/provenance checks. In particular, independent lexical
+      // alternatives must fail closed after exactly one provenance check.
+      if (canonical->reading == segment.key &&
+          canonical->rejected_value == segment.zenz_value &&
+          canonical->accepted_value == segment.mozc_value) {
+        continue;
+      }
+    }
+
+    // Backward-compatible exact-segment fallback for observations written by
+    // the pre-canonicalization development build. It does not generalize to a
+    // different segment and still revalidates generated-fallback provenance.
+    const ZenzLocalCorrection exact = {
+        segment.key,
+        segment.zenz_value,
+        segment.mozc_value,
+    };
+    try_add_correction(exact);
+  }
+
+  if (corrections.empty()) {
+    return std::string(zenz_value);
+  }
+
+  const ZenzLocalCorrectionReplayResult replay =
+      ReplayZenzLocalCorrections(
+          baseline_segments, key, zenz_value, corrections);
+  if (replay.applied_count <= 0 ||
+      replay.value == zenz_value) {
+    return std::string(zenz_value);
+  }
+
+  // The stored values passed privacy checks when learned, but validate the
+  // newly assembled full presentation as well.
+  if (!EvaluateZenzLiveValuePrivacy(replay.value).allow) {
+    return std::string(zenz_value);
+  }
+
+  if (applied_count != nullptr) {
+    *applied_count = replay.applied_count;
+  }
+
+  ZenzDebugOutput(absl::StrCat(
+      "[zenz-local-correction] replay applied count=",
+      replay.applied_count,
+      " ", ZenzRedactedTextStats("key", key),
+      " ", ZenzRedactedTextStats("raw_value", zenz_value),
+      " ", ZenzRedactedTextStats("replayed_value", replay.value)));
+
+  return replay.value;
+}
+bool Session::IsGeneratedSurfaceFallbackForZenzLocalCorrection(
+    absl::string_view key, absl::string_view value) {
+  if (key.empty() || value.empty()) {
+    return false;
+  }
+
+  const std::vector<ExternalConversionSegment> requested = {
+      {std::string(key), std::string(value), false, false}};
+  std::vector<ExternalConversionSegment> evaluated;
+  if (!context_->mutable_converter()->EvaluateExternalConversionSegments(
+          requested, context_->client_context(), &evaluated) ||
+      evaluated.size() != 1) {
+    return false;
+  }
+
+  const ExternalConversionSegment& candidate = evaluated.front();
+  return candidate.key == key &&
+         candidate.value == value &&
+         !candidate.boundary_resized &&
+         candidate.is_generated_surface_fallback;
+}
+
+int Session::MaybeRecordPendingZenzLocalCorrections() {
+  const config::Config& config = context_->GetConfig();
+  if (!UseZenzLocalCorrectionReplay(config) ||
+      !pending_zenz_feedback_.allow_local_correction_learning ||
+      pending_zenz_feedback_.local_correction_baseline_segments.empty() ||
+      !pending_zenz_feedback_.has_final_committed_value ||
+      pending_zenz_feedback_.final_committed_key !=
+          pending_zenz_feedback_.key) {
+    return 0;
+  }
+
+  if (!EvaluateZenzLiveValuePrivacy(
+           pending_zenz_feedback_.final_committed_value)
+           .allow) {
+    return 0;
+  }
+
+  const std::vector<ZenzLocalCorrection> corrections =
+      ExtractZenzLocalCorrections(
+          pending_zenz_feedback_.local_correction_baseline_segments,
+          pending_zenz_feedback_.key,
+          pending_zenz_feedback_.value,
+          pending_zenz_feedback_.final_committed_value);
+
+  int recorded = 0;
+  for (const ZenzLocalCorrection& correction : corrections) {
+    if (!EvaluateZenzLiveKeyPrivacy(correction.reading).allow ||
+        !EvaluateZenzLiveValuePrivacy(correction.rejected_value).allow ||
+        !EvaluateZenzLiveValuePrivacy(correction.accepted_value).allow) {
+      continue;
+    }
+
+    // Semantic-ambiguity firewall: record only when Mozc proves that the
+    // rejected surface is a generated direct-surface fallback. An independent
+    // lexical alternative such as 期間/機関 is not local replay evidence.
+    if (!IsGeneratedSurfaceFallbackForZenzLocalCorrection(
+            correction.reading, correction.rejected_value)) {
+      continue;
+    }
+
+    zenz_local_correction_store_.RecordCorrection(
+        correction.reading,
+        correction.rejected_value,
+        correction.accepted_value);
+    ++recorded;
+
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-local-correction] recorded ",
+        ZenzRedactedTextStats("key", correction.reading),
+        " ", ZenzRedactedTextStats(
+                 "rejected_value", correction.rejected_value),
+        " ", ZenzRedactedTextStats(
+                 "accepted_value", correction.accepted_value)));
+  }
+
+  return recorded;
+}
 void Session::ConfirmPendingZenzFeedback() {
   if (!pending_zenz_feedback_.pending) {
     return;
@@ -6625,6 +6861,12 @@ void Session::ConfirmPendingZenzFeedback() {
           " context_class=", pending_zenz_feedback_.context_class,
           " reason=", pending_zenz_feedback_.reason));
 
+      const int local_correction_record_count =
+          MaybeRecordPendingZenzLocalCorrections();
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-local-correction] final mismatch record_count=",
+          local_correction_record_count,
+          " reason=", pending_zenz_feedback_.reason));
       // Mismatching feedback remains full-sequence scoped and must not create
       // segment-local negative evidence.
       zenz_feedback_store_.RecordRejected(
@@ -6992,6 +7234,9 @@ void Session::ClearZenzLiveCorrectionState() {
   zenz_live_left_context_.clear();
   zenz_live_preedit_output_.Clear();
   zenz_live_stable_spans_.clear();
+  zenz_live_baseline_segments_.clear();
+  zenz_live_local_correction_learning_eligible_ = false;
+  zenz_live_local_correction_replay_applied_ = false;
 }
 
 bool Session::MaybeApplyZenzFeedbackLiveCorrection(
@@ -7190,6 +7435,9 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     zenz_live_mozc_value_ = live_conversion_value_;
     zenz_live_context_class_ = context_class;
     zenz_live_left_context_ = left_context_for_validation;
+    zenz_live_baseline_segments_ = adoption_input.baseline_segments;
+    zenz_live_local_correction_learning_eligible_ = false;
+    zenz_live_local_correction_replay_applied_ = false;
 
     ZenzDebugOutput(absl::StrCat(
         "[zenz-feedback] fast path applied ",
@@ -7950,6 +8198,32 @@ bool Session::ApplyZenzLiveCorrectionResult(
     }
   }
 
+  int local_correction_replay_count = 0;
+  const std::string raw_zenz_value_before_local_replay = zenz_value;
+  zenz_value = MaybeReplayZenzLocalCorrections(
+      pending_zenz_live_.baseline_segments,
+      pending_zenz_live_.key,
+      zenz_value,
+      &local_correction_replay_count);
+
+  const bool local_correction_replay_applied =
+      local_correction_replay_count > 0 &&
+      zenz_value != raw_zenz_value_before_local_replay;
+
+  // If local replay repairs every Zenz difference back to the exact Mozc
+  // baseline, there is no remaining Zenz presentation layer. Return the normal
+  // Mozc live conversion directly so Space/candidate semantics stay ordinary.
+  if (local_correction_replay_applied &&
+      zenz_value == pending_zenz_live_.mozc_value) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-local-correction] replay returned exact Mozc baseline count=",
+        local_correction_replay_count,
+        " ", ZenzRedactedTextStats("key", pending_zenz_live_.key)));
+
+    CancelPendingZenzLiveCorrection();
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, "local_correction_replay_to_mozc_baseline");
+  }
   ZenzDebugOutput(absl::StrCat(
       "[zenz] validation accepted ",
       ZenzRedactedTextStats("value", zenz_value),
@@ -7966,6 +8240,12 @@ bool Session::ApplyZenzLiveCorrectionResult(
   zenz_live_mozc_value_ = pending_zenz_live_.mozc_value;
   zenz_live_context_class_ = context_class.empty() ? "empty" : context_class;
   zenz_live_left_context_ = pending_zenz_live_.left_context;
+  zenz_live_baseline_segments_ = pending_zenz_live_.baseline_segments;
+  zenz_live_local_correction_replay_applied_ =
+      local_correction_replay_applied;
+  zenz_live_local_correction_learning_eligible_ =
+      !zenz_live_local_correction_replay_applied_ &&
+      !zenz_live_baseline_segments_.empty();
   pending_zenz_live_.pending = false;
 
   // Preserve previously proven reading/value boundaries across Zenz rounds.
@@ -8125,7 +8405,13 @@ bool Session::CommitZenzLiveCorrectionResult(commands::Command* command) {
       " context_class=", context_class,
       " visible_generation=", zenz_live_visible_generation_));
 
-  SetPendingZenzFeedbackAccepted(key, context_class, value);
+  if (!zenz_live_local_correction_replay_applied_) {
+    SetPendingZenzFeedbackAccepted(key, context_class, value);
+  } else {
+    ZenzDebugOutput(
+        "[zenz-local-correction] skip full-sequence acceptance feedback for "
+        "replayed presentation");
+  }
 
   ClearLiveConversionState();
   CommitStringDirectly(key, value, command);
@@ -8486,6 +8772,9 @@ bool Session::InsertCharacter(commands::Command* command) {
   // and direct-commit punctuation.
   const bool had_visible_zenz_correction =
       HasVisibleZenzLiveCorrection();
+  const bool had_visible_local_correction_replay =
+      had_visible_zenz_correction &&
+      zenz_live_local_correction_replay_applied_;
 
   const std::string zenz_key_before_edit = zenz_live_key_;
   const std::string zenz_value_before_edit = zenz_live_value_;
@@ -8642,10 +8931,16 @@ bool Session::InsertCharacter(commands::Command* command) {
       // Direct-commit punctuation is an explicit commit path, but keep the
       // feedback pending until the next real text input. If the next action is
       // Backspace/Escape or a cancel-like key such as Ctrl+Z, discard it.
-      SetPendingZenzFeedbackAccepted(
-          zenz_key_before_edit,
-          zenz_context_class_before_edit,
-          zenz_value_before_edit);
+      if (!had_visible_local_correction_replay) {
+        SetPendingZenzFeedbackAccepted(
+            zenz_key_before_edit,
+            zenz_context_class_before_edit,
+            zenz_value_before_edit);
+      } else {
+        ZenzDebugOutput(
+            "[zenz-local-correction] skip direct-commit feedback for replayed "
+            "presentation");
+      }
 
       ClearLiveConversionState();
       CommitStringDirectly(commit_key, commit_value, command);

@@ -1951,6 +1951,7 @@ void ImmutableConverter::InsertDummyCandidates(Segment* segment,
     new_candidate->wcost = last_candidate->wcost + 1;
     new_candidate->structure_cost = last_candidate->structure_cost + 1;
     new_candidate->attributes = 0;
+    new_candidate->is_generated_surface_fallback = true;
     // We cannot copy inner_segment_boundary; see b/8109381.
     new_candidate->inner_segment_boundary.clear();
     last_candidate = new_candidate;
@@ -1978,6 +1979,7 @@ void ImmutableConverter::InsertDummyCandidates(Segment* segment,
       new_candidate->structure_cost = last_candidate->structure_cost + 1;
     }
     new_candidate->attributes = 0;
+    new_candidate->is_generated_surface_fallback = true;
     last_candidate = new_candidate;
     // One character hiragana/katakana will cause side effect.
     // Type "し" and choose "シ". After that, "しました" will become "シました".
@@ -2004,6 +2006,7 @@ void ImmutableConverter::InsertDummyCandidates(Segment* segment,
     new_candidate->structure_cost = last_candidate->structure_cost + 1;
     new_candidate->lid = last_candidate->lid;
     new_candidate->rid = last_candidate->rid;
+    new_candidate->is_generated_surface_fallback = true;
     if (Util::CharsLen(new_candidate->key) <= 1) {
       new_candidate->attributes |= Attribute::CONTEXT_SENSITIVE;
     }

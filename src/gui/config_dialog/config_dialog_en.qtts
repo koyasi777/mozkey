@@ -5,6 +5,16 @@
     <name>ConfigDialog</name>
     <message>
         <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz の訂正を学習し、同じ誤変換の再発時に再適用する</source>
+        <translation>Learn Zenz corrections and replay them when the same error recurs</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Zenz の変換を取り消して通常 Mozc の表記で確定した場合、安全に局所化できる訂正だけを保存します。同じ読みで同じ Zenz 表記が再発し、現在の Mozc 基準表記も一致する場合だけ再適用します。期間/機関のような独立した語彙候補は対象外です。</source>
+        <translation>When a Zenz conversion is rejected and the normal Mozc spelling is committed, store only corrections that can be localized safely. Replay them only when the same Zenz surface recurs for the same reading and the current Mozc baseline still matches. Independent lexical alternatives such as 期間/機関 are excluded.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
         <source>未確定文字の表示色</source>
         <translation>Preedit display colors</translation>
     </message>

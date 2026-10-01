@@ -987,8 +987,11 @@ bool Converter::EvaluateExternalConversionSegments(
       return false;
     }
 
+    const Candidate& matched_candidate =
+        probe_segment.candidate(matched_index);
     evaluated.push_back(
-        {expected.key, expected.value, matched_index != 0, false});
+        {expected.key, expected.value, matched_index != 0, false,
+         matched_candidate.is_generated_surface_fallback});
   }
 
   *evaluated_segments = std::move(evaluated);

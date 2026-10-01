@@ -233,6 +233,7 @@ mozc_cc_qt_library(
         "//protocol:config_cc_proto",
         "//session:keymap",
         "//session:zenz_feedback_store",
+        "//session:zenz_local_correction_store",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:fixed_array",
         "@com_google_absl//absl/container:flat_hash_map",

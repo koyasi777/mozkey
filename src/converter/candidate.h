@@ -143,6 +143,14 @@ class Candidate {
   // defined in enum |Attribute|.
   uint32_t attributes = 0;
 
+  // True only for surface-form fallback candidates synthesized by
+  // ImmutableConverter::InsertDummyCandidates(). These are not independent
+  // lexical N-best hypotheses; they exist so users can always select a direct
+  // hiragana/katakana-style surface when the ordinary candidate set is short.
+  // Keep this separate from |attributes| because all 32 attribute bits are
+  // already assigned and this provenance is internal converter metadata.
+  bool is_generated_surface_fallback = false;
+
   Category category = DEFAULT_CATEGORY;
 
   // Candidate style. This is not a bit-field.

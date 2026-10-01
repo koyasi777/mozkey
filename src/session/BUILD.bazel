@@ -76,6 +76,59 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "zenz_local_correction_store",
+    srcs = ["zenz_local_correction_store.cc"],
+    hdrs = ["zenz_local_correction_store.h"],
+    visibility = [
+        "//gui/config_dialog:__pkg__",
+        "//session:__pkg__",
+    ],
+    deps = [
+        "//base:file_stream",
+        "//base:file_util",
+        "//base:system_util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_local_correction_store_test",
+    size = "small",
+    srcs = ["zenz_local_correction_store_test.cc"],
+    deps = [
+        ":zenz_local_correction_store",
+        "//base:file_util",
+        "//base:system_util",
+        "//base/file:temp_dir",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+    ],
+)
+
+mozc_cc_library(
+    name = "zenz_local_correction_policy",
+    srcs = ["zenz_local_correction_policy.cc"],
+    hdrs = ["zenz_local_correction_policy.h"],
+    deps = [
+        ":zenz_segment_projection",
+        "//base:util",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+mozc_cc_test(
+    name = "zenz_local_correction_policy_test",
+    size = "small",
+    srcs = ["zenz_local_correction_policy_test.cc"],
+    deps = [
+        ":zenz_local_correction_policy",
+        ":zenz_segment_projection",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "zenz_output_validator",
     srcs = ["zenz_output_validator.cc"],
     hdrs = ["zenz_output_validator.h"],
@@ -222,6 +275,8 @@ mozc_cc_library(
         ":zenz_context_assembler",
         ":zenz_context_sanitizer",
         ":zenz_feedback_store",
+        ":zenz_local_correction_policy",
+        ":zenz_local_correction_store",
         ":zenz_output_validator",
         ":zenz_prompt_builder",
         ":zenz_segment_projection",

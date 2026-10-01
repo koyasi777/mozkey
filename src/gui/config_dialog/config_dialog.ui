@@ -1775,7 +1775,16 @@
                   </property>
                  </widget>
                 </item>
-                <item row="30" column="0" colspan="8">
+                                <item row="30" column="0" colspan="8">
+                 <widget class="QCheckBox" name="zenzLocalCorrectionReplayCheckBox">
+                  <property name="toolTip">
+                   <string>Zenz の変換を取り消して通常 Mozc の表記で確定した場合、安全に局所化できる訂正だけを保存します。同じ読みで同じ Zenz 表記が再発し、現在の Mozc 基準表記も一致する場合だけ再適用します。期間/機関のような独立した語彙候補は対象外です。</string>
+                  </property>
+                  <property name="text">
+                   <string>Zenz の訂正を学習し、同じ誤変換の再発時に再適用する</string>
+                  </property>
+                 </widget>
+                </item><item row="31" column="0" colspan="8">
                  <widget class="QCheckBox" name="zenzFeedbackAutoBlockCheckBox">
                   <property name="toolTip">
                    <string>同じ読み・同じ文脈クラス・同じ Zenz 補正について、拒否回数と拒否割合の両方が設定値以上になった場合に表示を抑制します。自動ブロック中も Zenz の内部生成と最終確定との比較を続け、一致が増えて拒否割合が下がれば自動解除します。通常の Mozc 候補から削除する機能ではありません。</string>
@@ -1785,7 +1794,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="31" column="0" colspan="3">
+                <item row="32" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackAutoBlockRejectThresholdLabel">
                   <property name="toolTip">
                    <string>自動ブロック判定に必要な最低拒否回数です。拒否割合の条件も同時に満たした場合だけ自動ブロックします。設定変更は既存の Zenz 学習データにも動的に反映されます。</string>
@@ -1795,7 +1804,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="31" column="3" colspan="5">
+                <item row="32" column="3" colspan="5">
                  <widget class="QSpinBox" name="zenzFeedbackAutoBlockRejectThresholdSpinBox">
                   <property name="toolTip">
                    <string>自動ブロック判定に必要な最低拒否回数です。</string>
@@ -1817,7 +1826,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="32" column="0" colspan="3">
+                <item row="33" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackAutoBlockMinimumRejectPercentageLabel">
                   <property name="toolTip">
                    <string>採用回数と通常拒否回数の合計に占める拒否の最低割合です。最低拒否回数の条件も同時に満たした場合だけ自動ブロックします。</string>
@@ -1827,7 +1836,7 @@
                   </property>
                  </widget>
                 </item>
-                <item row="32" column="3" colspan="5">
+                <item row="33" column="3" colspan="5">
                  <widget class="QSpinBox" name="zenzFeedbackAutoBlockMinimumRejectPercentageSpinBox">
                   <property name="toolTip">
                    <string>自動ブロック判定に必要な最低拒否割合です。拒否割合は「通常拒否 ÷ (採用 + 通常拒否)」で計算します。</string>
@@ -1849,14 +1858,14 @@
                   </property>
                  </widget>
                 </item>
-                <item row="33" column="0" colspan="3">
+                <item row="34" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackDataLabel">
                   <property name="text">
                    <string>Zenz 学習データ</string>
                   </property>
                  </widget>
                 </item>
-                <item row="33" column="3" colspan="5">
+                <item row="34" column="3" colspan="5">
                  <widget class="QPushButton" name="editZenzFeedbackButton">
                   <property name="toolTip">
                    <string>保存された Zenz 学習データを確認、検索、インポート、エクスポート、削除します。通常の変換履歴に反映済みの学習は、この画面の削除対象には含まれません。</string>
@@ -3600,6 +3609,7 @@
   <tabstop>zenzLiveCorrectionRightContextCheckBox</tabstop>
   <tabstop>zenzLiveCorrectionRightContextLengthSpinBox</tabstop>
   <tabstop>zenzFeedbackLearningCheckBox</tabstop>
+  <tabstop>zenzLocalCorrectionReplayCheckBox</tabstop>
   <tabstop>zenzFeedbackAutoBlockCheckBox</tabstop>
   <tabstop>zenzFeedbackAutoBlockRejectThresholdSpinBox</tabstop>
   <tabstop>editZenzFeedbackButton</tabstop>

@@ -60,6 +60,13 @@ struct ExternalConversionSegment {
   // live Mozc conversion that the user saw. Callers must set this consistently
   // for every segment in the same sequence.
   bool boundary_resized = false;
+
+  // Evaluation-only provenance. EvaluateExternalConversionSegments() sets this
+  // when the matched immutable-converter candidate was synthesized by
+  // InsertDummyCandidates() as a direct surface fallback rather than produced
+  // as an independent lexical N-best candidate. Learning callers should leave
+  // the default false value unchanged.
+  bool is_generated_surface_fallback = false;
 };
 
 class ConverterInterface {

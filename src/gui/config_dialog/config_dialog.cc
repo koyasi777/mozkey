@@ -90,6 +90,7 @@
 #include "protocol/config.pb.h"
 #include "session/keymap.h"
 #include "session/zenz_feedback_store.h"
+#include "session/zenz_local_correction_store.h"
 
 #if defined(__ANDROID__) || defined(__wasm__)
 #error "This platform is not supported."
@@ -1606,6 +1607,292 @@ std::wstring BuildRestoreDefaultImeScript() {
 }
 #endif  // _WIN32
 
+void ShowZenzLocalCorrectionManagementDialog(QWidget* parent) {
+  QDialog dialog(parent);
+  dialog.setWindowTitle(QString::fromUtf8("Zenz 局所訂正の管理"));
+  dialog.resize(760, 420);
+
+  session::ZenzLocalCorrectionStore store;
+
+  QVBoxLayout* root_layout = new QVBoxLayout(&dialog);
+
+  QWidget* description_widget = new QWidget(&dialog);
+  QHBoxLayout* description_layout = new QHBoxLayout(description_widget);
+  description_layout->setContentsMargins(0, 0, 0, 0);
+  description_layout->setSpacing(8);
+
+  QLabel* description_label = new QLabel(
+      QString::fromUtf8(
+          "Zenz の表記を通常 Mozc の表記へ明示的に戻したときに保存された、"
+          "安全な局所訂正を管理します。"),
+      &dialog);
+  description_label->setWordWrap(true);
+
+  QPushButton* details_button =
+      new QPushButton(QString::fromUtf8("詳しく..."), &dialog);
+  details_button->setFixedWidth(84);
+
+  description_layout->addWidget(description_label, 1);
+  description_layout->addWidget(details_button, 0, Qt::AlignTop);
+  root_layout->addWidget(description_widget);
+
+  QObject::connect(details_button, &QPushButton::clicked,
+                   &dialog, [&]() {
+                     ShowJapaneseLongInformation(
+                         &dialog, dialog.windowTitle(),
+                         QString::fromUtf8(
+                             "【この画面で扱うデータ】\n"
+                             "ここでは、Zenz の補正を通常 Mozc の表記へ明示的に戻して"
+                             "確定したときに、安全に局所化できた訂正だけを扱います。\n\n"
+                             "1 件の訂正は「読み / Zenz 表記 / 採用した Mozc 表記」の"
+                             "対で保存されます。同じ読みだけを見て無条件に置き換える"
+                             "辞書ではありません。次回も同じ Zenz 表記が現れ、"
+                             "現在の Mozc 基準表記も保存時と一致し、さらに安全性の"
+                             "条件を満たす場合だけ再適用されます。\n\n"
+                             "同じ読み・同じ Zenz 表記でも、文脈によって通常 Mozc の"
+                             "基準表記が異なる場合は、採用表記まで含めた別の exact triple "
+                             "として共存できます。最後に使った表記や多数決で上書きせず、"
+                             "その時点の Mozc 基準表記と完全一致する記録だけを再適用します。"
+                             "不要になった表記は、この画面から個別に削除できます。\n\n"
+                             "現在の実装では、助詞・助動詞などが同じ文節に付いた場合も、"
+                             "3 つの表記に共通する部分を除いた contrastive core を使って"
+                             "再利用できます。古いバージョンで保存された、語尾付きの"
+                             "冗長な exact 記録は互換性のためそのまま表示されます。\n\n"
+                             "【削除の範囲】\n"
+                             "選択項目の削除は、表示されている exact triple の観測を"
+                             "すべて削除します。「すべて削除」は局所訂正 TSV だけを"
+                             "削除します。\n\n"
+                             "どちらの操作も、別管理の full-sequence Zenz 学習データや"
+                             "通常 Mozc の変換履歴は削除しません。"));
+                   });
+
+  QHBoxLayout* search_layout = new QHBoxLayout;
+  QLabel* search_label = new QLabel(QString::fromUtf8("検索:"), &dialog);
+  QLineEdit* search_edit = new QLineEdit(&dialog);
+  search_edit->setPlaceholderText(
+      QString::fromUtf8("読み、Zenz 表記、採用表記で絞り込み"));
+  search_layout->addWidget(search_label);
+  search_layout->addWidget(search_edit);
+  root_layout->addLayout(search_layout);
+
+  QTableWidget* table = new QTableWidget(&dialog);
+  table->setColumnCount(4);
+  table->setHorizontalHeaderLabels(QStringList()
+                                   << QString::fromUtf8("読み")
+                                   << QString::fromUtf8("Zenz 表記")
+                                   << QString::fromUtf8("採用表記")
+                                   << QString::fromUtf8("観測回数"));
+  table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  table->setSelectionMode(QAbstractItemView::SingleSelection);
+  table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  table->horizontalHeader()->setStretchLastSection(false);
+  table->horizontalHeader()->setSectionResizeMode(
+      0, QHeaderView::ResizeToContents);
+  table->horizontalHeader()->setSectionResizeMode(
+      1, QHeaderView::Stretch);
+  table->horizontalHeader()->setSectionResizeMode(
+      2, QHeaderView::Stretch);
+  table->horizontalHeader()->setSectionResizeMode(
+      3, QHeaderView::ResizeToContents);
+  root_layout->addWidget(table);
+
+  QLabel* status_label = new QLabel(&dialog);
+  root_layout->addWidget(status_label);
+
+  QHBoxLayout* button_layout = new QHBoxLayout;
+  QPushButton* delete_button =
+      new QPushButton(QString::fromUtf8("選択項目を削除"), &dialog);
+  QPushButton* clear_button =
+      new QPushButton(QString::fromUtf8("すべて削除"), &dialog);
+  QDialogButtonBox* close_buttons =
+      new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+
+  if (QPushButton* close_button =
+          close_buttons->button(QDialogButtonBox::Close)) {
+    close_button->setText(QString::fromUtf8("閉じる"));
+  }
+
+  button_layout->addWidget(delete_button);
+  button_layout->addWidget(clear_button);
+  button_layout->addStretch();
+  button_layout->addWidget(close_buttons);
+  root_layout->addLayout(button_layout);
+
+  auto reload_table = [&]() {
+    const QString filter = search_edit->text();
+    const std::vector<session::ZenzLocalCorrectionEntry> entries =
+        store.ListEntries();
+
+    table->setRowCount(0);
+    int visible_count = 0;
+
+    for (const session::ZenzLocalCorrectionEntry& entry : entries) {
+      const QString reading = ToQString(entry.reading);
+      const QString rejected_value = ToQString(entry.rejected_value);
+      const QString accepted_value = ToQString(entry.accepted_value);
+
+      if (!filter.isEmpty() &&
+          !reading.contains(filter, Qt::CaseInsensitive) &&
+          !rejected_value.contains(filter, Qt::CaseInsensitive) &&
+          !accepted_value.contains(filter, Qt::CaseInsensitive)) {
+        continue;
+      }
+
+      const int row = table->rowCount();
+      table->insertRow(row);
+
+      SetTableItem(table, row, 0, reading);
+      SetTableItem(table, row, 1, rejected_value);
+      SetTableItem(table, row, 2, accepted_value);
+      SetTableItem(table, row, 3, QString::number(entry.observation_count));
+
+      table->item(row, 0)->setData(Qt::UserRole, reading);
+      table->item(row, 1)->setData(Qt::UserRole, rejected_value);
+      table->item(row, 2)->setData(Qt::UserRole, accepted_value);
+      table->item(row, 3)->setData(Qt::UserRole, entry.observation_count);
+
+      ++visible_count;
+    }
+
+    status_label->setText(
+        QString::fromUtf8("表示 %1 件 / 全 %2 件")
+            .arg(visible_count)
+            .arg(static_cast<int>(entries.size())));
+
+    const bool has_entries = !entries.empty();
+    clear_button->setEnabled(has_entries);
+    delete_button->setEnabled(table->currentRow() >= 0);
+  };
+
+  QObject::connect(table, &QTableWidget::itemSelectionChanged,
+                   &dialog, [&]() {
+                     delete_button->setEnabled(table->currentRow() >= 0);
+                   });
+
+  QObject::connect(search_edit, &QLineEdit::textChanged,
+                   &dialog, [&](const QString&) {
+                     reload_table();
+                   });
+
+  QObject::connect(close_buttons, &QDialogButtonBox::rejected,
+                   &dialog, &QDialog::reject);
+
+  QObject::connect(delete_button, &QPushButton::clicked,
+                   &dialog, [&]() {
+                     const int row = table->currentRow();
+                     if (row < 0) {
+                       return;
+                     }
+
+                     QTableWidgetItem* reading_item = table->item(row, 0);
+                     QTableWidgetItem* rejected_item = table->item(row, 1);
+                     QTableWidgetItem* accepted_item = table->item(row, 2);
+                     QTableWidgetItem* count_item = table->item(row, 3);
+                     if (reading_item == nullptr ||
+                         rejected_item == nullptr ||
+                         accepted_item == nullptr ||
+                         count_item == nullptr) {
+                       return;
+                     }
+
+                     const QString reading =
+                         reading_item->data(Qt::UserRole).toString();
+                     const QString rejected_value =
+                         rejected_item->data(Qt::UserRole).toString();
+                     const QString accepted_value =
+                         accepted_item->data(Qt::UserRole).toString();
+                     const int observation_count =
+                         count_item->data(Qt::UserRole).toInt();
+
+                     QMessageBox message_box(&dialog);
+                     message_box.setWindowTitle(dialog.windowTitle());
+                     message_box.setIcon(QMessageBox::Warning);
+                     message_box.setText(
+                         QString::fromUtf8("選択した局所訂正を削除しますか？"));
+                     message_box.setInformativeText(
+                         QString::fromUtf8(
+                             "この exact triple の観測をすべて削除します。\n"
+                             "この操作は元に戻せません。\n\n"
+                             "読み: %1\n"
+                             "Zenz 表記: %2\n"
+                             "採用表記: %3\n"
+                             "観測回数: %4")
+                             .arg(reading, rejected_value, accepted_value)
+                             .arg(observation_count));
+
+                     QPushButton* delete_confirm_button =
+                         message_box.addButton(QString::fromUtf8("削除"),
+                                               QMessageBox::DestructiveRole);
+                     QPushButton* cancel_button =
+                         message_box.addButton(QString::fromUtf8("キャンセル"),
+                                               QMessageBox::RejectRole);
+
+                     message_box.setDefaultButton(cancel_button);
+                     message_box.exec();
+
+                     if (message_box.clickedButton() != delete_confirm_button) {
+                       return;
+                     }
+
+                     if (!store.DeleteEntry(
+                             reading.toUtf8().constData(),
+                             rejected_value.toUtf8().constData(),
+                             accepted_value.toUtf8().constData())) {
+                       ShowJapaneseCritical(
+                           &dialog, dialog.windowTitle(),
+                           QString::fromUtf8(
+                               "局所訂正を削除できませんでした。"
+                               "別の Mozkey プロセスで内容が変更された可能性があります。"));
+                       reload_table();
+                       return;
+                     }
+
+                     reload_table();
+                   });
+
+  QObject::connect(clear_button, &QPushButton::clicked,
+                   &dialog, [&]() {
+                     QMessageBox message_box(&dialog);
+                     message_box.setWindowTitle(dialog.windowTitle());
+                     message_box.setIcon(QMessageBox::Warning);
+                     message_box.setText(
+                         QString::fromUtf8("Zenz の局所訂正をすべて削除しますか？"));
+                     message_box.setInformativeText(
+                         QString::fromUtf8(
+                             "局所訂正 TSV の内容だけを削除します。\n"
+                             "full-sequence Zenz 学習データと通常 Mozc の"
+                             "変換履歴は削除されません。\n\n"
+                             "この操作は元に戻せません。"));
+
+                     QPushButton* clear_confirm_button =
+                         message_box.addButton(QString::fromUtf8("すべて削除"),
+                                               QMessageBox::DestructiveRole);
+                     QPushButton* cancel_button =
+                         message_box.addButton(QString::fromUtf8("キャンセル"),
+                                               QMessageBox::RejectRole);
+
+                     message_box.setDefaultButton(cancel_button);
+                     message_box.exec();
+
+                     if (message_box.clickedButton() != clear_confirm_button) {
+                       return;
+                     }
+
+                     if (!store.ClearAll()) {
+                       ShowJapaneseCritical(
+                           &dialog, dialog.windowTitle(),
+                           QString::fromUtf8(
+                               "Zenz の局所訂正を削除できませんでした。"));
+                       return;
+                     }
+
+                     reload_table();
+                   });
+
+  reload_table();
+  dialog.exec();
+}
+
 void ShowZenzFeedbackManagementDialog(QWidget* parent,
                                       const config::Config& current_config) {
   QDialog dialog(parent);
@@ -1643,9 +1930,21 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
   details_button->setToolTip(QString::fromUtf8(
       "状態ラベル、Zenz 学習の記録条件、通常の変換履歴との違いを表示します"));
 
+  QPushButton* local_corrections_button =
+      new QPushButton(QString::fromUtf8("局所訂正..."), &dialog);
+  local_corrections_button->setFixedWidth(96);
+  local_corrections_button->setToolTip(QString::fromUtf8(
+      "通常 Mozc の表記へ明示的に戻した局所訂正を確認・削除します"));
+
   description_layout->addWidget(description_label, 1);
+  description_layout->addWidget(local_corrections_button, 0, Qt::AlignTop);
   description_layout->addWidget(details_button, 0, Qt::AlignTop);
   root_layout->addWidget(description_widget);
+
+  QObject::connect(local_corrections_button, &QPushButton::clicked,
+                   &dialog, [&]() {
+                     ShowZenzLocalCorrectionManagementDialog(&dialog);
+                   });
 
   QObject::connect(details_button, &QPushButton::clicked,
                    &dialog, [&]() {
@@ -3561,6 +3860,8 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
       static_cast<int>(zenzLiveCorrectionCheckBox->isChecked()));
 
   SET_CHECKBOX(zenzFeedbackLearningCheckBox, use_zenz_feedback_learning);
+  SET_CHECKBOX(zenzLocalCorrectionReplayCheckBox,
+               use_zenz_local_correction_replay);
 
   SET_CHECKBOX(zenzFeedbackAutoBlockCheckBox,
                use_zenz_auto_block_rejected_correction);
@@ -3889,6 +4190,8 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
           zenzLiveCorrectionRightContextLengthSpinBox->value()));
 
   GET_CHECKBOX(zenzFeedbackLearningCheckBox, use_zenz_feedback_learning);
+  GET_CHECKBOX(zenzLocalCorrectionReplayCheckBox,
+               use_zenz_local_correction_replay);
   GET_CHECKBOX(zenzFeedbackAutoBlockCheckBox,
                use_zenz_auto_block_rejected_correction);
   config->set_zenz_auto_block_reject_threshold(
@@ -4935,6 +5238,7 @@ void ConfigDialog::SelectZenzFeedbackLearningSetting(int state) {
       zenzLiveCorrectionCheckBox->isChecked() &&
       static_cast<bool>(state);
 
+  zenzLocalCorrectionReplayCheckBox->setEnabled(enabled);
   zenzFeedbackAutoBlockCheckBox->setEnabled(enabled);
 
   SelectZenzFeedbackAutoBlockSetting(

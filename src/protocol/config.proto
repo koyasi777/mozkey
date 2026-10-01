@@ -390,6 +390,15 @@ message Config {
   // ConfigHandler.
   optional bool use_zenz_feedback_learning = 1011 [default = false];
 
+  // Learn an explicit local correction when the user rejects a visible Zenz
+  // surface and finally commits the corresponding Mozc baseline surface. The
+  // stored correction is contrastive (reading + rejected surface + accepted
+  // surface) and is eligible for replay only when the same rejected surface
+  // recurs and conservative runtime gates still pass. Mozkey enables this by
+  // default in ConfigHandler.
+  optional bool use_zenz_local_correction_replay = 1039 [default = false];
+
+
   // When enabled, repeated divergent commits of the same full-sequence Zenz
   // correction dynamically suppress that correction as an effective block.
   // This does not write an irreversible hard-reject record; changing the

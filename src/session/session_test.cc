@@ -100,6 +100,8 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(SetPendingZenzFeedbackRejected);
   PEER_METHOD(ObservePendingZenzFeedbackCommittedResult);
   PEER_METHOD(ConfirmPendingZenzFeedback);
+  PEER_METHOD(MaybeRecordPendingZenzLocalCorrections);
+  PEER_METHOD(MaybeReplayZenzLocalCorrections);
   PEER_METHOD(DiscardPendingZenzFeedback);
   PEER_METHOD(MaybeLearnZenzCandidateToMozcHistory);
   PEER_METHOD(MaybeLearnZenzReverseSegmentsToMozcHistory);
@@ -141,8 +143,12 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_VARIABLE(zenz_live_mozc_value_);
   PEER_VARIABLE(zenz_live_context_class_);
   PEER_VARIABLE(zenz_live_stable_spans_);
+  PEER_VARIABLE(zenz_live_baseline_segments_);
+  PEER_VARIABLE(zenz_live_local_correction_learning_eligible_);
+  PEER_VARIABLE(zenz_live_local_correction_replay_applied_);
   PEER_VARIABLE(pending_zenz_live_);
   PEER_VARIABLE(zenz_feedback_store_);
+  PEER_VARIABLE(zenz_local_correction_store_);
   PEER_VARIABLE(pending_zenz_feedback_);
   PEER_VARIABLE(pending_direct_commit_learning_);
 };
@@ -230,8 +236,12 @@ class ScopedUserProfileForZenzFeedbackSessionTest {
         JoinPathForZenzFeedbackSessionTest(local_low_dir, L"Mozc");
     const std::wstring feedback_path =
         JoinPathForZenzFeedbackSessionTest(mozc_dir, L"zenz_feedback.tsv");
+    const std::wstring local_correction_path =
+        JoinPathForZenzFeedbackSessionTest(
+            mozc_dir, L"zenz_local_corrections.tsv");
 
     ::DeleteFileW(feedback_path.c_str());
+    ::DeleteFileW(local_correction_path.c_str());
     ::RemoveDirectoryW(mozc_dir.c_str());
     ::RemoveDirectoryW(local_low_dir.c_str());
     ::RemoveDirectoryW(app_data_dir.c_str());
@@ -1329,6 +1339,11 @@ TEST_F(SessionTest, PendingZenzFeedbackIsConfirmedByNextTextInput) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+#endif
+
   Session session(engine);
   SessionTestPeer session_peer(session);
   InitSessionToPrecomposition(&session);
@@ -1550,6 +1565,659 @@ CreateRecordingExternalLearningConverter(MockEngine* mock_engine) {
   return converter;
 }
 
+TEST_F(SessionTest,
+       ZenzLocalCorrectionComparisonCapturesOnlyExplicitVisibleRejection) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "みこみっと";
+  session_peer.live_conversion_value_() = "未コミット";
+  session_peer.zenz_live_visible_generation_() = 1;
+  session_peer.zenz_live_key_() = "みこみっと";
+  session_peer.zenz_live_value_() = "ミコミット";
+  session_peer.zenz_live_mozc_value_() = "未コミット";
+  session_peer.zenz_live_baseline_segments_() = {
+      {"みこみっと", "未コミット"}};
+  session_peer.zenz_live_local_correction_learning_eligible_() = true;
+
+  // Shadow/composition-return comparisons require an exact committed-key match
+  // and must never become explicit local correction evidence.
+  session_peer.SetPendingZenzFeedbackComparison(
+      "みこみっと", "empty", "ミコミット",
+      "auto_block_shadow_compare", true);
+  EXPECT_FALSE(
+      session_peer.pending_zenz_feedback_()
+          .allow_local_correction_learning);
+  EXPECT_TRUE(
+      session_peer.pending_zenz_feedback_()
+          .local_correction_baseline_segments.empty());
+
+  // The ordinary visible-rejection path uses require_key_match=false.
+  session_peer.SetPendingZenzFeedbackComparison(
+      "みこみっと", "empty", "ミコミット",
+      "space_revert_zenz_to_mozc", false);
+  EXPECT_TRUE(
+      session_peer.pending_zenz_feedback_()
+          .allow_local_correction_learning);
+  ASSERT_EQ(
+      session_peer.pending_zenz_feedback_()
+          .local_correction_baseline_segments.size(),
+      1);
+  EXPECT_EQ(
+      session_peer.pending_zenz_feedback_()
+          .local_correction_baseline_segments[0].key,
+      "みこみっと");
+  EXPECT_EQ(
+      session_peer.pending_zenz_feedback_()
+          .local_correction_baseline_segments[0].value,
+      "未コミット");
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionRecordingStoresGeneratedFallbackCorrection) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  auto& pending = session_peer.pending_zenz_feedback_();
+  pending.key = "みこみっとだからといって";
+  pending.value = "ミコミットだからといって";
+  pending.has_final_committed_value = true;
+  pending.final_committed_value = "未コミットだからといって";
+  pending.final_committed_key = pending.key;
+  pending.allow_local_correction_learning = true;
+  pending.local_correction_baseline_segments = {
+      {"みこみっと", "未コミット"},
+      {"だからといって", "だからといって"},
+  };
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"みこみっと", "ミコミット", true, false, true},
+  };
+
+  EXPECT_EQ(session_peer.MaybeRecordPendingZenzLocalCorrections(), 1);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->last_evaluate_segments.size(), 1);
+  EXPECT_EQ(converter->last_evaluate_segments[0].key, "みこみっと");
+  EXPECT_EQ(converter->last_evaluate_segments[0].value, "ミコミット");
+
+  const auto stored =
+      session_peer.zenz_local_correction_store_().Lookup(
+          "みこみっと", "ミコミット", "未コミット");
+  ASSERT_TRUE(stored.has_value());
+  EXPECT_EQ(stored->accepted_value, "未コミット");
+  EXPECT_EQ(stored->observation_count, 1);
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionRecordingCanonicalizesAttachedAuxiliary) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  auto& pending = session_peer.pending_zenz_feedback_();
+  pending.key = "みこみっとです";
+  pending.value = "ミコミットです";
+  pending.has_final_committed_value = true;
+  pending.final_committed_value = "未コミットです";
+  pending.final_committed_key = pending.key;
+  pending.allow_local_correction_learning = true;
+  pending.local_correction_baseline_segments = {
+      {"みこみっとです", "未コミットです"},
+  };
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"みこみっと", "ミコミット", true, false, true},
+  };
+
+  EXPECT_EQ(session_peer.MaybeRecordPendingZenzLocalCorrections(), 1);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->last_evaluate_segments.size(), 1);
+  EXPECT_EQ(converter->last_evaluate_segments[0].key, "みこみっと");
+  EXPECT_EQ(converter->last_evaluate_segments[0].value, "ミコミット");
+
+  const auto canonical =
+      session_peer.zenz_local_correction_store_().Lookup(
+          "みこみっと", "ミコミット", "未コミット");
+  ASSERT_TRUE(canonical.has_value());
+  EXPECT_EQ(canonical->accepted_value, "未コミット");
+  EXPECT_FALSE(
+      session_peer.zenz_local_correction_store_()
+          .Lookup("みこみっとです", "ミコミットです",
+                  "未コミットです")
+          .has_value());
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionRecordingCanonicalizationKeepsLexicalFirewall) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  auto& pending = session_peer.pending_zenz_feedback_();
+  pending.key = "きかんです";
+  pending.value = "機関です";
+  pending.has_final_committed_value = true;
+  pending.final_committed_value = "期間です";
+  pending.final_committed_key = pending.key;
+  pending.allow_local_correction_learning = true;
+  pending.local_correction_baseline_segments = {
+      {"きかんです", "期間です"},
+  };
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"きかん", "機関", true, false, false},
+  };
+
+  EXPECT_EQ(session_peer.MaybeRecordPendingZenzLocalCorrections(), 0);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->last_evaluate_segments.size(), 1);
+  EXPECT_EQ(converter->last_evaluate_segments[0].key, "きかん");
+  EXPECT_EQ(converter->last_evaluate_segments[0].value, "機関");
+  EXPECT_FALSE(
+      session_peer.zenz_local_correction_store_()
+          .Lookup("きかん", "機関", "期間")
+          .has_value());
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionRecordingRejectsIndependentLexicalAlternative) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  auto& pending = session_peer.pending_zenz_feedback_();
+  pending.key = "きかん";
+  pending.value = "機関";
+  pending.has_final_committed_value = true;
+  pending.final_committed_value = "期間";
+  pending.final_committed_key = pending.key;
+  pending.allow_local_correction_learning = true;
+  pending.local_correction_baseline_segments = {
+      {"きかん", "期間"},
+  };
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"きかん", "機関", true, false, false},
+  };
+
+  EXPECT_EQ(session_peer.MaybeRecordPendingZenzLocalCorrections(), 0);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+  EXPECT_FALSE(
+      session_peer.zenz_local_correction_store_()
+          .Lookup("きかん", "機関", "期間")
+          .has_value());
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+TEST_F(SessionTest,
+       ZenzLocalCorrectionReplayRepairsGeneratedFallbackInLargerContext) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  session_peer.zenz_local_correction_store_().RecordCorrection(
+      "みこみっと", "ミコミット", "未コミット");
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"みこみっと", "ミコミット", true, false, true},
+  };
+
+  const std::vector<ZenzBaselineSegment> baseline = {
+      {"みこみっと", "未コミット"},
+      {"だからといって", "だからといって"},
+  };
+
+  int applied_count = 0;
+  const std::string replayed =
+      session_peer.MaybeReplayZenzLocalCorrections(
+          baseline,
+          "みこみっとだからといって",
+          "ミコミットだからといって",
+          &applied_count);
+
+  // The unchanged second segment is an exact projection anchor. Only the
+  // stored local error is repaired.
+  EXPECT_EQ(replayed, "未コミットだからといって");
+  EXPECT_EQ(applied_count, 1);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionReplayPreservesSeparatedSurroundingZenzRewrite) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  session_peer.zenz_local_correction_store_().RecordCorrection(
+      "みこみっと", "ミコミット", "未コミット");
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"みこみっと", "ミコミット", true, false, true},
+  };
+
+  const std::vector<ZenzBaselineSegment> baseline = {
+      {"みこみっと", "未コミット"},
+      {"は", "は"},
+      {"だからといって", "だからといって"},
+  };
+
+  int applied_count = 0;
+  const std::string replayed =
+      session_peer.MaybeReplayZenzLocalCorrections(
+          baseline,
+          "みこみっとはだからといって",
+          "ミコミットはだからと言って",
+          &applied_count);
+
+  // The unchanged "は" is a unique projection anchor. This proves the local
+  // correction boundary while allowing the later Zenz rewrite to survive.
+  EXPECT_EQ(replayed, "未コミットはだからと言って");
+  EXPECT_EQ(applied_count, 1);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionReplayGeneralizesAcrossAttachedAuxiliary) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  session_peer.zenz_local_correction_store_().RecordCorrection(
+      "みこみっと", "ミコミット", "未コミット");
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"みこみっと", "ミコミット", true, false, true},
+  };
+
+  const std::vector<ZenzBaselineSegment> baseline = {
+      {"みこみっとです", "未コミットです"},
+  };
+
+  int applied_count = 0;
+  const std::string replayed =
+      session_peer.MaybeReplayZenzLocalCorrections(
+          baseline,
+          "みこみっとです",
+          "ミコミットです",
+          &applied_count);
+
+  EXPECT_EQ(replayed, "未コミットです");
+  EXPECT_EQ(applied_count, 1);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->last_evaluate_segments.size(), 1);
+  EXPECT_EQ(converter->last_evaluate_segments[0].key, "みこみっと");
+  EXPECT_EQ(converter->last_evaluate_segments[0].value, "ミコミット");
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionReplayConditionsAcceptedSurfaceOnCurrentMozcBaseline) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  // These are not a last-write-wins preference conflict. Each observation was
+  // proven against a different Mozc baseline, so keep the exact triples
+  // independently and let the current baseline select which one can replay.
+  session_peer.zenz_local_correction_store_().RecordCorrection(
+      "みこみっと", "ミコミット", "未コミット");
+  session_peer.zenz_local_correction_store_().RecordCorrection(
+      "みこみっと", "ミコミット", "見コミット");
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"みこみっと", "ミコミット", true, false, true},
+  };
+
+  int applied_count = 0;
+  EXPECT_EQ(session_peer.MaybeReplayZenzLocalCorrections(
+                std::vector<ZenzBaselineSegment>{{"みこみっと", "未コミット"}},
+                "みこみっと", "ミコミット", &applied_count),
+            "未コミット");
+  EXPECT_EQ(applied_count, 1);
+
+  applied_count = 0;
+  EXPECT_EQ(session_peer.MaybeReplayZenzLocalCorrections(
+                std::vector<ZenzBaselineSegment>{{"みこみっと", "見コミット"}},
+                "みこみっと", "ミコミット", &applied_count),
+            "見コミット");
+  EXPECT_EQ(applied_count, 1);
+
+  // A Mozc baseline that has never been explicitly observed must not inherit a
+  // correction merely because reading/rejected_value match.
+  applied_count = 0;
+  EXPECT_EQ(session_peer.MaybeReplayZenzLocalCorrections(
+                std::vector<ZenzBaselineSegment>{{"みこみっと", "味コミット"}},
+                "みこみっと", "ミコミット", &applied_count),
+            "ミコミット");
+  EXPECT_EQ(applied_count, 0);
+
+  // Provenance is revalidated only for the two exact triples that exist.
+  EXPECT_EQ(converter->evaluate_segments_call_count, 2);
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionReplayCanonicalizationKeepsLexicalFirewall) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  // Even a manually seeded canonical lexical record must fail provenance.
+  session_peer.zenz_local_correction_store_().RecordCorrection(
+      "きかん", "機関", "期間");
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"きかん", "機関", true, false, false},
+  };
+
+  const std::vector<ZenzBaselineSegment> baseline = {
+      {"きかんです", "期間です"},
+  };
+
+  int applied_count = 0;
+  const std::string replayed =
+      session_peer.MaybeReplayZenzLocalCorrections(
+          baseline, "きかんです", "機関です", &applied_count);
+
+  EXPECT_EQ(replayed, "機関です");
+  EXPECT_EQ(applied_count, 0);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+  ASSERT_EQ(converter->last_evaluate_segments.size(), 1);
+  EXPECT_EQ(converter->last_evaluate_segments[0].key, "きかん");
+  EXPECT_EQ(converter->last_evaluate_segments[0].value, "機関");
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionReplayRejectsIndependentLexicalCandidateAgain) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  // Even if an old/hand-edited store somehow contains this record, runtime
+  // provenance must revalidate it and fail closed.
+  session_peer.zenz_local_correction_store_().RecordCorrection(
+      "きかん", "機関", "期間");
+
+  converter->evaluate_segments_result = true;
+  converter->evaluated_segments_result = {
+      {"きかん", "機関", true, false, false},
+  };
+
+  const std::vector<ZenzBaselineSegment> baseline = {
+      {"きかん", "期間"},
+  };
+
+  int applied_count = 0;
+  const std::string replayed =
+      session_peer.MaybeReplayZenzLocalCorrections(
+          baseline, "きかん", "機関", &applied_count);
+
+  EXPECT_EQ(replayed, "機関");
+  EXPECT_EQ(applied_count, 0);
+  EXPECT_EQ(converter->evaluate_segments_call_count, 1);
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionReplayRequiresCurrentMozcBaselineMatch) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  session_peer.zenz_local_correction_store_().RecordCorrection(
+      "みこみっと", "ミコミット", "未コミット");
+
+  const std::vector<ZenzBaselineSegment> baseline = {
+      {"みこみっと", "見コミット"},
+  };
+
+  int applied_count = 0;
+  const std::string replayed =
+      session_peer.MaybeReplayZenzLocalCorrections(
+          baseline, "みこみっと", "ミコミット", &applied_count);
+
+  EXPECT_EQ(replayed, "ミコミット");
+  EXPECT_EQ(applied_count, 0);
+  // Provenance is not even queried once the baseline no longer matches the
+  // stored accepted surface.
+  EXPECT_EQ(converter->evaluate_segments_call_count, 0);
+#else
+  GTEST_SKIP() << "Zenz local correction store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       ZenzLocalCorrectionReplayDoesNotCreateFullSequenceRejectionFeedback) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_local_correction_replay(true);
+  session.SetConfig(config);
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "みこみっと";
+  session_peer.live_conversion_value_() = "未コミット";
+  session_peer.zenz_live_visible_generation_() = 1;
+  session_peer.zenz_live_key_() = "みこみっと";
+  session_peer.zenz_live_value_() = "未コミット";
+  session_peer.zenz_live_mozc_value_() = "未コミット";
+  session_peer.zenz_live_local_correction_replay_applied_() = true;
+
+  session_peer.SetPendingZenzFeedbackRejected(
+      "space_revert_zenz_to_mozc");
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+}
 TEST_F(SessionTest, ZenzMozcHistoryLearningRequiresFeedbackLearningEnabled) {
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =

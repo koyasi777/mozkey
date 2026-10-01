@@ -77,6 +77,7 @@ MATCHER_P(EqualsCandidate, candidate, "") {
   COMPARE_FIELD(lid);
   COMPARE_FIELD(rid);
   COMPARE_FIELD(attributes);
+  COMPARE_FIELD(is_generated_surface_fallback);
   COMPARE_FIELD(category);
   COMPARE_FIELD(style);
   COMPARE_FIELD(command);

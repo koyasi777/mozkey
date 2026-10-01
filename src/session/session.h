@@ -54,6 +54,7 @@
 #include "session/zenz_context_assembler.h"
 #include "session/zenz_context_sanitizer.h"
 #include "session/zenz_feedback_store.h"
+#include "session/zenz_local_correction_store.h"
 #include "session/zenz_live_corrector.h"
 #include "session/zenz_output_validator.h"
 #include "session/zenz_segment_projection.h"
@@ -494,6 +495,12 @@ class Session {
     bool require_final_committed_key_match = false;
     std::string final_committed_key;
 
+    // Local correction replay is learned only from an explicitly visible,
+    // freshly generated Zenz result. Auto-block shadow comparisons and
+    // composition-return comparisons must never synthesize local evidence.
+    bool allow_local_correction_learning = false;
+    std::vector<ZenzBaselineSegment> local_correction_baseline_segments;
+
     // Snapshot of reverse-projected segment-local learning pairs derived from
     // the Mozc live-conversion segments that were visible when the Zenz result
     // was accepted.  These pairs are learned only through Mozc history; they
@@ -533,6 +540,12 @@ class Session {
   std::string zenz_live_left_context_;
   commands::Preedit zenz_live_preedit_output_;
 
+  // Exact Mozc baseline segmentation that existed when the currently visible
+  // fresh Zenz result was generated.
+  std::vector<ZenzBaselineSegment> zenz_live_baseline_segments_;
+  bool zenz_live_local_correction_learning_eligible_ = false;
+  bool zenz_live_local_correction_replay_applied_ = false;
+
   // Reading/value spans that were proven by an earlier Mozc presentation and
   // are still valid for the currently visible Zenz result.  Unlike the latest
   // Mozc segmentation, these spans are intentionally persistent: a later
@@ -545,6 +558,7 @@ class Session {
   ZenzOutputValidator zenz_output_validator_;
   ZenzAdoptionPolicy zenz_adoption_policy_;
   ZenzFeedbackStore zenz_feedback_store_;
+  ZenzLocalCorrectionStore zenz_local_correction_store_;
   std::unique_ptr<ZenzLiveCorrector> zenz_live_corrector_;
 
   struct PendingLiveConversionUndoState {
@@ -801,6 +815,14 @@ class Session {
       const mozc::commands::Command& command,
       absl::string_view reason);
   void ConfirmPendingZenzFeedback();
+  int MaybeRecordPendingZenzLocalCorrections();
+  std::string MaybeReplayZenzLocalCorrections(
+      const std::vector<ZenzBaselineSegment>& baseline_segments,
+      absl::string_view key,
+      absl::string_view zenz_value,
+      int* applied_count);
+  bool IsGeneratedSurfaceFallbackForZenzLocalCorrection(
+      absl::string_view key, absl::string_view value);
   void DiscardPendingZenzFeedback(absl::string_view reason);
   void HandlePendingZenzFeedbackForKeyEvent(
       const mozc::commands::KeyEvent& key);

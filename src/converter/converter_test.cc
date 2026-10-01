@@ -1828,6 +1828,34 @@ TEST_F(ConverterTest,
   EXPECT_EQ(evaluated[0].key, "ほん");
   EXPECT_EQ(evaluated[0].value, "本");
   EXPECT_FALSE(evaluated[0].boundary_resized);
+  EXPECT_FALSE(evaluated[0].is_generated_surface_fallback);
+}
+
+TEST_F(ConverterTest,
+       EvaluateExternalConversionSegmentsMarksGeneratedSurfaceFallback) {
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Engine> engine,
+                       MockDataEngineFactory::Create());
+  const std::shared_ptr<const ConverterInterface> converter =
+      engine->GetConverter();
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = false;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetOptions(std::move(options))
+          .SetKey("みこみっと")
+          .Build();
+
+  const std::vector<ExternalConversionSegment> expected = {
+      {"みこみっと", "ミコミット", false, false}};
+  std::vector<ExternalConversionSegment> evaluated;
+  ASSERT_TRUE(converter->EvaluateExternalConversionSegments(
+      request, expected, &evaluated));
+  ASSERT_EQ(evaluated.size(), 1);
+  EXPECT_EQ(evaluated[0].key, "みこみっと");
+  EXPECT_EQ(evaluated[0].value, "ミコミット");
+  EXPECT_TRUE(evaluated[0].is_generated_surface_fallback);
 }
 
 TEST_F(ConverterTest,
