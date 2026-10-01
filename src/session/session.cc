@@ -4167,9 +4167,9 @@ bool Session::Revert(commands::Command* command) {
 }
 
 bool Session::ResetContext(commands::Command* command) {
-  DiscardPendingDirectCommitLearning(
+  ConfirmPendingDirectCommitLearning(
       "reset_context_after_direct_commit_learning");
-  DiscardPendingZenzFeedback("reset_context_after_pending_feedback");
+  ConfirmPendingZenzFeedback();
 
   ClearPendingRerankedPreeditCommitAfterConvertCancel();
 
@@ -6395,8 +6395,17 @@ void Session::SetPendingZenzFeedbackAccepted(
   pending_zenz_feedback_.reverse_projected_learning_segments =
       reverse_learning_projection.projected_segments;
 
+  // An explicit commit is already authoritative positive evidence. Persist the
+  // exact full-sequence observation now. The pending state remains only as a
+  // rollback window and as a carrier for the broader Mozc-history
+  // generalization performed on confirmation.
+  zenz_feedback_store_.RecordAccepted(
+      pending_zenz_feedback_.key,
+      pending_zenz_feedback_.context_class,
+      pending_zenz_feedback_.value);
+
   ZenzDebugOutput(absl::StrCat(
-      "[zenz-feedback] pending accepted ",
+      "[zenz-feedback] accepted persisted with rollback window ",
       ZenzRedactedTextStats("key", key),
       " ", ZenzRedactedTextStats("value", value),
       " context_class=", pending_zenz_feedback_.context_class));
@@ -6537,13 +6546,9 @@ void Session::ConfirmPendingZenzFeedback() {
         " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
         " context_class=", pending_zenz_feedback_.context_class));
 
-    // Accepted feedback stored in the TSV remains full-sequence scoped.
-    // Any broader generalization is delegated to Mozc history learning below.
-    zenz_feedback_store_.RecordAccepted(
-        pending_zenz_feedback_.key,
-        pending_zenz_feedback_.context_class,
-        pending_zenz_feedback_.value);
-
+    // The exact full-sequence observation was persisted at the explicit commit
+    // point. Confirmation closes its rollback window and performs only the
+    // broader Mozc-history generalization below.
     const int projected_segment_learning_count =
         MaybeLearnZenzProjectedSegmentsToMozcHistory(
             pending_zenz_feedback_.reverse_projected_learning_segments);
@@ -6641,6 +6646,18 @@ void Session::ConfirmPendingZenzFeedback() {
 void Session::DiscardPendingZenzFeedback(absl::string_view reason) {
   if (!pending_zenz_feedback_.pending) {
     return;
+  }
+
+  // kAccepted is persisted immediately at the explicit commit point. Undo,
+  // Backspace, Escape, and other cancel paths compensate exactly that one
+  // positive observation. This is not negative feedback and must not increase
+  // rejected/auto-block counts. kCompareFinalCommit has not written an
+  // observation yet, so it needs no compensation.
+  if (pending_zenz_feedback_.action ==
+      PendingZenzFeedback::Action::kAccepted) {
+    zenz_feedback_store_.RecordAcceptedRollback(
+        pending_zenz_feedback_.key, pending_zenz_feedback_.context_class,
+        pending_zenz_feedback_.value, reason);
   }
 
   ZenzDebugOutput(absl::StrCat(
@@ -6762,10 +6779,16 @@ void Session::HandlePendingDirectCommitLearningForSessionCommand(
 
   switch (type) {
     case commands::SessionCommand::REVERT:
-    case commands::SessionCommand::RESET_CONTEXT:
     case commands::SessionCommand::UNDO:
       DiscardPendingDirectCommitLearning(
           "session_command_discard_after_direct_commit");
+      break;
+    case commands::SessionCommand::RESET_CONTEXT:
+      // Context loss commonly follows a committed search/form submission. It
+      // closes the rollback window; it is not evidence that the commit was
+      // undone.
+      ConfirmPendingDirectCommitLearning(
+          "session_command_reset_context_after_direct_commit");
       break;
     default:
       break;
@@ -6806,9 +6829,14 @@ void Session::HandlePendingZenzFeedbackForSessionCommand(
     commands::SessionCommand::CommandType type) {
   switch (type) {
     case commands::SessionCommand::REVERT:
-    case commands::SessionCommand::RESET_CONTEXT:
     case commands::SessionCommand::UNDO:
       DiscardPendingZenzFeedback("session_command_discard");
+      break;
+    case commands::SessionCommand::RESET_CONTEXT:
+      // A focus/page/context transition after commit is a confirmation, not an
+      // undo. kCompareFinalCommit without an observed final value remains
+      // neutral inside ConfirmPendingZenzFeedback().
+      ConfirmPendingZenzFeedback();
       break;
     default:
       break;
@@ -8387,9 +8415,10 @@ bool Session::InsertCharacter(commands::Command* command) {
   // text input starts. If the next key is Backspace/Escape, it is discarded.
   HandlePendingDirectCommitLearningForKeyEvent(key);
 
-  // A pending zenz feedback entry is finalized only when the next real text
-  // input starts. This prevents learning immediately on Enter/Space, while still
-  // learning once the user continues typing after the committed result.
+  // Exact kAccepted Zenz feedback is already persisted at commit time. The next
+  // real text input only closes that rollback window and performs deferred
+  // Mozc-history generalization. kCompareFinalCommit remains genuinely deferred
+  // until the user's final committed value is known.
   if (!defer_pending_zenz_comparison_for_direct_commit) {
     HandlePendingZenzFeedbackForKeyEvent(key);
   }
@@ -8639,9 +8668,10 @@ bool Session::InsertCharacter(commands::Command* command) {
           " ", ZenzRedactedTextStats("value", zenz_value_before_edit),
           " suffix_chars=", Util::CharsLen(last_char)));
 
-      // Direct-commit punctuation is an explicit commit path, but keep the
-      // feedback pending until the next real text input. If the next action is
-      // Backspace/Escape or a cancel-like key such as Ctrl+Z, discard it.
+      // Direct-commit punctuation is an explicit commit point. The exact Zenz
+      // acceptance is persisted immediately; keep only the rollback window and
+      // deferred Mozc-history generalization pending. If the next action is
+      // Backspace/Escape or a cancel-like key such as Ctrl+Z, compensate it.
       SetPendingZenzFeedbackAccepted(
           zenz_key_before_edit,
           zenz_context_class_before_edit,

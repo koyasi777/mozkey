@@ -105,6 +105,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(MaybeLearnZenzReverseSegmentsToMozcHistory);
   PEER_METHOD(MaybeLearnZenzProjectedSegmentsToMozcHistory);
   PEER_METHOD(HandlePendingZenzFeedbackForKeyEvent);
+  PEER_METHOD(HandlePendingZenzFeedbackForSessionCommand);
   PEER_METHOD(SetPendingDirectCommitLearningFromCommittedResult);
   PEER_METHOD(ConfirmPendingDirectCommitLearning);
   PEER_METHOD(DiscardPendingDirectCommitLearning);
@@ -1408,6 +1409,78 @@ TEST_F(SessionTest, PendingZenzFeedbackStoresContextClassOnly) {
   EXPECT_EQ(
       session_peer.pending_zenz_feedback_().context_class.find("hunter2"),
       std::string::npos);
+}
+
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackPersistsImmediatelyAndBackspaceRollsBack) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 0);
+
+  commands::Command command;
+  SendSpecialKey(commands::KeyEvent::BACKSPACE, &session, &command);
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  decision = session_peer.zenz_feedback_store_().Decide(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kNeutral);
+  EXPECT_EQ(decision.accepted_count, 0);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest, PendingAcceptedZenzFeedbackResetContextKeepsAcceptance) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  session_peer.HandlePendingZenzFeedbackForSessionCommand(
+      commands::SessionCommand::RESET_CONTEXT);
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  const ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
 }
 
 
@@ -8602,6 +8675,30 @@ TEST_F(SessionTest, PendingDirectCommitLearningIsDiscardedBySessionCommand) {
 
   session_peer.HandlePendingDirectCommitLearningForSessionCommand(
       commands::SessionCommand::REVERT);
+
+  EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
+}
+
+TEST_F(SessionTest,
+       PendingDirectCommitLearningResetContextClosesRollbackWindow) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  commands::Command committed_command;
+  committed_command.mutable_output()->mutable_result()->set_key("あめ");
+  committed_command.mutable_output()->mutable_result()->set_value("雨");
+
+  EXPECT_TRUE(session_peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed_command, "test_direct_commit"));
+  ASSERT_TRUE(session_peer.pending_direct_commit_learning_().pending);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  session_peer.HandlePendingDirectCommitLearningForSessionCommand(
+      commands::SessionCommand::RESET_CONTEXT);
 
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
 }
