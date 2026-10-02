@@ -4485,87 +4485,6 @@ TEST_F(SessionTest, LiveConversionAllowsSingleCharacterWhenMinKeyLengthIsOne) {
 }
 
 TEST_F(SessionTest,
-       LiveConversionKeepsPendingOverlayForTransientSokuonPrefix) {
-  MockEngine engine;
-  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
-
-  Session session(engine);
-  SessionTestPeer session_peer(session);
-  InitSessionToPrecomposition(&session);
-
-  config::Config config;
-  config::ConfigHandler::GetDefaultConfig(&config);
-  config.set_use_live_conversion(true);
-  config.set_live_conversion_delay_msec(0);
-  session.SetConfig(config);
-
-  EXPECT_CALL(*converter, StartConversion(_, _))
-      .Times(::testing::AnyNumber())
-      .WillRepeatedly(Return(false));
-
-  commands::Command command;
-  InsertCharacterString("おもっ", "aaa", &session, &command);
-
-  EXPECT_EQ(session.context().composer().GetQueryForConversion(), "おもっ");
-  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
-  EXPECT_FALSE(session_peer.live_conversion_active_());
-  EXPECT_TRUE(session_peer.live_conversion_pending_());
-  EXPECT_EQ(session_peer.pending_live_conversion_key_(), "おもっ");
-  EXPECT_TRUE(command.output().live_conversion());
-  EXPECT_TRUE(command.output().live_conversion_pending());
-  ASSERT_TRUE(command.output().has_callback());
-  ASSERT_TRUE(command.output().callback().has_session_command());
-  EXPECT_EQ(command.output().callback().session_command().type(),
-            commands::SessionCommand::APPLY_LIVE_CONVERSION);
-  const commands::SessionCommand delayed_command =
-      command.output().callback().session_command();
-  EXPECT_PREEDIT("おもっ", command);
-
-  command.Clear();
-  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
-  *command.mutable_input()->mutable_command() = delayed_command;
-
-  EXPECT_TRUE(session.SendCommand(&command));
-  EXPECT_TRUE(session_peer.live_conversion_pending_());
-  EXPECT_EQ(session_peer.pending_live_conversion_key_(), "おもっ");
-  EXPECT_TRUE(command.output().live_conversion());
-  EXPECT_TRUE(command.output().live_conversion_pending());
-  EXPECT_PREEDIT("おもっ", command);
-}
-
-TEST_F(SessionTest,
-       LiveConversionKeepsPendingOverlayForParticlePlusTransientSokuonPrefix) {
-  MockEngine engine;
-  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
-
-  Session session(engine);
-  SessionTestPeer session_peer(session);
-  InitSessionToPrecomposition(&session);
-
-  config::Config config;
-  config::ConfigHandler::GetDefaultConfig(&config);
-  config.set_use_live_conversion(true);
-  config.set_live_conversion_delay_msec(0);
-  session.SetConfig(config);
-
-  EXPECT_CALL(*converter, StartConversion(_, _))
-      .Times(::testing::AnyNumber())
-      .WillRepeatedly(Return(false));
-
-  commands::Command command;
-  InsertCharacterString("とおもっ", "aaaa", &session, &command);
-
-  EXPECT_EQ(session.context().composer().GetQueryForConversion(), "とおもっ");
-  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
-  EXPECT_FALSE(session_peer.live_conversion_active_());
-  EXPECT_TRUE(session_peer.live_conversion_pending_());
-  EXPECT_EQ(session_peer.pending_live_conversion_key_(), "とおもっ");
-  EXPECT_TRUE(command.output().live_conversion());
-  EXPECT_TRUE(command.output().live_conversion_pending());
-  EXPECT_PREEDIT("とおもっ", command);
-}
-
-TEST_F(SessionTest,
        LiveConversionDoesNotKeepPendingOverlayForShortSokuonInterjection) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -8013,9 +7932,8 @@ TEST_F(SessionTest,
   }
 }
 
-TEST_F(SessionTest, LiveConversionKeepsExpressiveKanaPrefixesAsComposition) {
+TEST_F(SessionTest, LiveConversionRunsConverterForFormerSokuonExpressivePrefixes) {
   constexpr absl::string_view kExpressivePrefixes[] = {
-      "うひ",
       "うっひ",
       "うっっひ",
 
@@ -8075,15 +7993,9 @@ TEST_F(SessionTest, LiveConversionKeepsExpressiveKanaPrefixesAsComposition) {
       "しっ",
       "しっっ",
 
-      "ちー",
-      "ちぃー",
       "ちーっ",
       "ちぃーっ",
-      "ちょ",
-      "ちょー",
       "ちょーっ",
-      "ちょり",
-      "ちょりー",
       "ちょりーっ",
   };
 
@@ -8101,23 +8013,52 @@ TEST_F(SessionTest, LiveConversionKeepsExpressiveKanaPrefixesAsComposition) {
     config.set_live_conversion_delay_msec(0);
     session.SetConfig(config);
 
-    EXPECT_CALL(*converter, StartConversion(_, _)).Times(0);
+    std::vector<absl::string_view> chars;
+    for (absl::string_view c : Utf8AsChars(expressive_prefix)) {
+      chars.push_back(c);
+    }
+    ASSERT_FALSE(chars.empty());
+
+    std::string preceding_prefix;
+    std::string preceding_key_codes;
+    for (size_t i = 0; i + 1 < chars.size(); ++i) {
+      absl::StrAppend(&preceding_prefix, chars[i]);
+      preceding_key_codes.push_back('a');
+    }
+
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(Return(false));
 
     commands::Command command;
-    const std::string dummy_key_codes(
-        Util::CharsLen(expressive_prefix), 'a');
-    InsertCharacterString(expressive_prefix, dummy_key_codes,
+    InsertCharacterString(preceding_prefix, preceding_key_codes,
                           &session, &command);
+
+    Mock::VerifyAndClearExpectations(converter.get());
+
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(std::string(expressive_prefix));
+    converter::Candidate* candidate = segment->add_candidate();
+    candidate->key = std::string(expressive_prefix);
+    candidate->content_key = std::string(expressive_prefix);
+    candidate->value = std::string(expressive_prefix);
+
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+    command.Clear();
+    InsertCharacterString(chars.back(), "a", &session, &command);
 
     EXPECT_EQ(session.context().composer().GetQueryForConversion(),
               expressive_prefix);
-    EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
-    EXPECT_PREEDIT(expressive_prefix, command);
+    EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+    EXPECT_TRUE(command.output().live_conversion());
 
     Mock::VerifyAndClearExpectations(converter.get());
   }
 }
-
 TEST_F(SessionTest,
        LiveConversionDoesNotSpecialCaseCasualSsuGreetingRomanPendingPrefixes) {
   struct TestCase {
@@ -8344,12 +8285,14 @@ TEST_F(SessionTest,
   config::ConfigHandler::GetDefaultConfig(&config);
   config.set_use_live_conversion(true);
   config.set_live_conversion_delay_msec(100);
+  config.set_live_conversion_min_key_length(2);
   session.SetConfig(config);
 
   commands::Command command;
 
   EXPECT_CALL(*converter, StartConversion(_, _)).Times(0);
-  InsertCharacterString("かき", "aa", &session, &command);
+  InsertCharacterString("\xE3\x81\x8B\xE3\x81\x8D", "aa",
+                        &session, &command);
   ASSERT_TRUE(command.output().has_callback());
   ASSERT_TRUE(command.output().callback().has_session_command());
 
@@ -8364,7 +8307,7 @@ TEST_F(SessionTest,
   EXPECT_TRUE(SendKey("Escape", &session, &command));
 
   command.Clear();
-  InsertCharacterString("やっっ", "aaa", &session, &command);
+  InsertCharacterString("\xE3\x81\x82", "a", &session, &command);
 
   command.Clear();
   command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
@@ -8373,9 +8316,8 @@ TEST_F(SessionTest,
   EXPECT_TRUE(session.SendCommand(&command));
   EXPECT_FALSE(command.output().live_conversion());
   EXPECT_FALSE(command.output().live_conversion_pending());
-  EXPECT_TRUE(EnsurePreedit("やっっ", command));
+  EXPECT_TRUE(EnsurePreedit("\xE3\x81\x82", command));
 }
-
 TEST_F(SessionTest,
        DelayedLiveConversionKeepsPendingOutputForExpressiveKanaWithPendingRomanSuffix) {
   MockEngine engine;
