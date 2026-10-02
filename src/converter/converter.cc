@@ -369,6 +369,15 @@ bool Converter::LearnExternalConversionResult(
     const ConversionRequest& request,
     absl::string_view key,
     absl::string_view value) const {
+  return LearnExternalConversionResultReversibly(
+      request, key, value, /*revert_segments=*/nullptr);
+}
+
+bool Converter::LearnExternalConversionResultReversibly(
+    const ConversionRequest& request,
+    absl::string_view key,
+    absl::string_view value,
+    Segments* revert_segments) const {
   key = absl::StripAsciiWhitespace(key);
   value = absl::StripAsciiWhitespace(value);
 
@@ -449,12 +458,23 @@ bool Converter::LearnExternalConversionResult(
   candidate->attributes |= Attribute::RERANKED;
 
   FinishConversion(request, &learning_segments);
+  if (revert_segments != nullptr) {
+    *revert_segments = learning_segments;
+  }
   return true;
 }
 
 bool Converter::LearnExternalConversionSegments(
     const ConversionRequest& request,
     absl::Span<const ExternalConversionSegment> segments) const {
+  return LearnExternalConversionSegmentsReversibly(
+      request, segments, /*revert_segments=*/nullptr);
+}
+
+bool Converter::LearnExternalConversionSegmentsReversibly(
+    const ConversionRequest& request,
+    absl::Span<const ExternalConversionSegment> segments,
+    Segments* revert_segments) const {
   constexpr size_t kMaxSegments = 16;
   constexpr size_t kMaxSegmentKeyChars = 128;
   constexpr size_t kMaxSegmentValueChars = 128;
@@ -651,6 +671,9 @@ bool Converter::LearnExternalConversionSegments(
   learning_segments.set_resized(boundary_resized);
 
   FinishConversion(request, &learning_segments);
+  if (revert_segments != nullptr) {
+    *revert_segments = learning_segments;
+  }
   return true;
 }
 
@@ -1036,6 +1059,15 @@ void Converter::RevertConversion(Segments* segments) const {
   }
   rewriter_->Revert(*segments);
   predictor_->Revert(segments->revert_id());
+  segments->set_revert_id(0);
+}
+
+void Converter::DiscardConversionRevertState(Segments* segments) const {
+  if (segments == nullptr || segments->revert_id() == 0) {
+    return;
+  }
+  rewriter_->DiscardRevert(*segments);
+  predictor_->DiscardRevert(segments->revert_id());
   segments->set_revert_id(0);
 }
 

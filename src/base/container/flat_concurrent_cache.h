@@ -100,6 +100,17 @@ class FlatConcurrentCache {
     bucket->access_clock[index] = bucket->access_clock_val;
   }
 
+  bool Erase(const Key& key) {
+    auto [hash, bucket] = GetBucket(key);
+    SpinLockHolder l(&bucket->mu);
+    const int index = bucket->FindIndex(key, hash, equal_);
+    if (index == -1) {
+      return false;
+    }
+    bucket->Erase(index);
+    return true;
+  }
+
   void Clear() {
     for (size_t i = 0; i < num_buckets_; ++i) {
       SpinLockHolder l(&buckets_[i].mu);
@@ -203,6 +214,23 @@ class FlatConcurrentCache {
         for (int i = 0; i < num; ++i) access_clock[i] >>= 1;
       }
       access_clock[index] = access_clock_val;
+    }
+
+    void Erase(int index) {
+      const int last = num - 1;
+      key.Destroy(index);
+      value.Destroy(index);
+
+      if (index != last) {
+        subhash[index] = subhash[last];
+        access_clock[index] = access_clock[last];
+        key.Construct(index, std::move(key[last]));
+        value.Construct(index, std::move(value[last]));
+        key.Destroy(last);
+        value.Destroy(last);
+      }
+
+      --num;
     }
 
     int Evict() {

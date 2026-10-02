@@ -505,6 +505,13 @@ class Session {
     // conversion commit so Mozc history can observe phrase-boundary context.
     std::vector<ZenzProjectedLearningSegment>
         reverse_projected_learning_segments;
+
+    // Phase 2: generalized Mozc history may be applied at the same explicit
+    // commit point as the Zenz acceptance. Each handle corresponds to one
+    // reversible external FinishConversion operation and must be reverted in
+    // reverse order if the commit is immediately undone.
+    bool mozc_history_learning_applied = false;
+    std::vector<uint64_t> mozc_history_revert_ids;
   };
 
   PendingZenzFeedback pending_zenz_feedback_;
@@ -765,11 +772,14 @@ class Session {
 
   bool MaybeLearnZenzCandidateToMozcHistory(
       absl::string_view key,
-      absl::string_view value);
+      absl::string_view value,
+      std::vector<uint64_t>* revert_ids = nullptr);
   int MaybeLearnZenzReverseSegmentsToMozcHistory(
-      const std::vector<std::pair<std::string, std::string>>& segments);
+      const std::vector<std::pair<std::string, std::string>>& segments,
+      std::vector<uint64_t>* revert_ids = nullptr);
   int MaybeLearnZenzProjectedSegmentsToMozcHistory(
-      const std::vector<ZenzProjectedLearningSegment>& segments);
+      const std::vector<ZenzProjectedLearningSegment>& segments,
+      std::vector<uint64_t>* revert_ids = nullptr);
 
   bool SetPendingDirectCommitLearning(
       absl::string_view key,
@@ -790,6 +800,7 @@ class Session {
       absl::string_view key,
       absl::string_view context_class,
       absl::string_view value);
+  void ApplyPendingZenzAcceptedMozcHistoryLearning();
   void SetPendingZenzFeedbackComparison(
       absl::string_view key,
       absl::string_view context_class,

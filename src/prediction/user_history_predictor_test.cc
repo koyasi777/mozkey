@@ -5553,7 +5553,8 @@ TEST_F(UserHistoryPredictorTest, PartialRevert) {
     return absl::c_find(next_fps, next_fp) != next_fps.end();
   };
 
-  auto init_predictor = [&]() {
+  auto init_predictor = [&](bool reversible_external = false,
+                            bool discard_revert = false) {
     predictor->ClearAllHistory();
     predictor->Wait();
 
@@ -5583,8 +5584,15 @@ TEST_F(UserHistoryPredictorTest, PartialRevert) {
     SegmentsProxy segments_proxy;
     request_.set_mixed_conversion(true);
     request_.set_zero_query_suggestion(true);
-    const ConversionRequest convreq =
+    const ConversionRequest base_convreq =
         SetUpInputForSuggestion("さとう", &composer_, &segments_proxy);
+    ConversionRequest::Options options = base_convreq.options();
+    options.reversible_external_learning = reversible_external;
+    const ConversionRequest convreq =
+        ConversionRequestBuilder()
+            .SetConversionRequest(base_convreq)
+            .SetOptions(std::move(options))
+            .Build();
 
     predictor->Finish(convreq, {result}, kRevertId);
 
@@ -5595,9 +5603,23 @@ TEST_F(UserHistoryPredictorTest, PartialRevert) {
     EXPECT_TRUE(has_entry("きょうとだいがく", "京都大学"));
     EXPECT_TRUE(has_entry("そつぎょうした", "卒業した"));
 
+    if (discard_revert) {
+      predictor->DiscardRevert(kRevertId);
+      predictor->Revert(kRevertId);
+
+      // Confirm consumes only rollback metadata. A later stale Revert call must
+      // not undo the already-confirmed learning.
+      EXPECT_TRUE(has_entry("さとうさんは", "佐藤さんは"));
+      EXPECT_TRUE(has_entry("さとうさん", "佐藤さん"));
+      EXPECT_TRUE(has_entry("きょうとだいがくを", "京都大学を"));
+      EXPECT_TRUE(has_entry("きょうとだいがく", "京都大学"));
+      EXPECT_TRUE(has_entry("そつぎょうした", "卒業した"));
+      return;
+    }
+
     predictor->Revert(kRevertId);
 
-    // All entries are removed with Revret.
+    // All entries are removed with Revert.
     EXPECT_FALSE(has_entry("さとうさんはきょうとだいがくをそつぎょうした",
                            "佐藤さんは京都大学を卒業した"));
     EXPECT_FALSE(has_entry("さとうさんは", "佐藤さんは"));
@@ -5785,6 +5807,28 @@ TEST_F(UserHistoryPredictorTest, PartialRevert) {
     EXPECT_FALSE(has_entry("きょうとだいがくを", "京都大学を"));
     EXPECT_FALSE(has_entry("きょうとだいがく", "京都大学"));
     EXPECT_FALSE(has_entry("そつぎょうした", "卒業した"));
+  }
+
+  // Phase 2 external rollback is final: even when the next input's left context
+  // contains almost the whole committed value, no partial-redo is allowed.
+  {
+    init_predictor(/*reversible_external=*/true);
+
+    results = suggest_with_context("さとう", "佐藤さんは京都大学を");
+    EXPECT_TRUE(results.empty());
+
+    EXPECT_FALSE(has_entry("さとうさんは", "佐藤さんは"));
+    EXPECT_FALSE(has_entry("さとうさん", "佐藤さん"));
+    EXPECT_FALSE(has_entry("きょうとだいがくを", "京都大学を"));
+    EXPECT_FALSE(has_entry("きょうとだいがく", "京都大学"));
+    EXPECT_FALSE(has_entry("そつぎょうした", "卒業した"));
+  }
+
+  // Confirmation drops only the revert snapshot. The learned entries survive a
+  // stale Revert call for the same id.
+  {
+    init_predictor(/*reversible_external=*/true,
+                   /*discard_revert=*/true);
   }
 }
 

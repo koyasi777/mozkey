@@ -141,6 +141,20 @@ class EngineConverter : public EngineConverterInterface {
       const commands::Context& context) override;
 
   [[nodiscard]]
+  uint64_t LearnExternalConversionResultReversibly(
+      absl::string_view key,
+      absl::string_view value,
+      const commands::Context& context) override;
+
+  [[nodiscard]]
+  uint64_t LearnExternalConversionSegmentsReversibly(
+      absl::Span<const ExternalConversionSegment> segments,
+      const commands::Context& context) override;
+
+  bool RevertExternalConversionLearning(uint64_t revert_id) override;
+  bool ConfirmExternalConversionLearning(uint64_t revert_id) override;
+
+  [[nodiscard]]
   bool ResolveExternalConversionSegments(
       absl::string_view key, absl::string_view value,
       const commands::Context& context,
@@ -413,7 +427,17 @@ class EngineConverter : public EngineConverterInterface {
   void SetRequestType(ConversionRequest::RequestType request_type,
                       ConversionRequest::Options& options);
 
+  // Keep exactly one reversible external FinishConversion open per session.
+  // UserSegmentHistoryRewriter intentionally has a single pending-revert slot;
+  // allowing several handles in one user rollback window would overwrite it.
+  static constexpr size_t kMaxExternalLearningRevertEntries = 1;
+
   std::shared_ptr<const ConverterInterface> converter_;
+
+  // Revert snapshots for external learning. These are deliberately separate
+  // from |segments_| so external history learning never changes visible
+  // conversion/session state.
+  std::vector<Segments> external_learning_revert_segments_;
 
   // Conversion stats used by converter_.
   Segments segments_;

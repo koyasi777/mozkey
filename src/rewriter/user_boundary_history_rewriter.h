@@ -30,11 +30,15 @@
 #ifndef MOZC_REWRITER_USER_BOUNDARY_HISTORY_REWRITER_H_
 #define MOZC_REWRITER_USER_BOUNDARY_HISTORY_REWRITER_H_
 
+#include <cstdint>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "converter/segments.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
+#include "storage/lru_cache.h"
 #include "storage/lru_storage.h"
 
 namespace mozc {
@@ -53,14 +57,25 @@ class UserBoundaryHistoryRewriter : public RewriterInterface {
 
   void Finish(const ConversionRequest& request,
               const Segments& segments) override;
+  void Revert(const Segments& segments) override;
+  void DiscardRevert(const Segments& segments) override;
   bool Sync() override;
   bool Reload() override;
   void Clear() override;
 
  private:
-  bool Insert(const ConversionRequest& request, const Segments& segments);
+  struct RevertEntry {
+    std::string key;
+    std::optional<std::string> previous_value;
+  };
+  using RevertEntries = std::vector<RevertEntry>;
+
+  bool Insert(const ConversionRequest& request,
+              const Segments& segments,
+              RevertEntries* revert_entries);
 
   storage::LruStorage storage_;
+  storage::LruCache<uint64_t, RevertEntries> revert_cache_;
 };
 
 }  // namespace mozc

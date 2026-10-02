@@ -576,7 +576,8 @@ bool UserSegmentHistoryRewriter::Replaceable(
 void UserSegmentHistoryRewriter::RememberFirstCandidate(
     const ConversionRequest& request, const Segments& segments,
     size_t segment_index, size_t value_begin, size_t value_end,
-    std::vector<RevertEntry>& revert_entries) {
+    std::vector<RevertEntry>& revert_entries,
+    std::vector<StorageRevertEntry>* external_storage_entries) {
   const Segment& seg = segments.segment(segment_index);
   const converter::Candidate& candidate = seg.candidate(0);
 
@@ -604,65 +605,51 @@ void UserSegmentHistoryRewriter::RememberFirstCandidate(
 
   FeatureKey fkey(segments, *pos_matcher_, segment_index);
 
-  Insert(fkey.LeftRight(all_key, all_value), all_value, value_begin, value_end,
-         force_insert, revert_entries);
-  Insert(fkey.LeftLeft(all_key, all_value), all_value, value_begin, value_end,
-         force_insert, revert_entries);
-  Insert(fkey.RightRight(all_key, all_value), all_value, value_begin, value_end,
-         force_insert, revert_entries);
-  Insert(fkey.Left(all_key, all_value), all_value, value_begin, value_end,
-         force_insert, revert_entries);
-  Insert(fkey.Right(all_key, all_value), all_value, value_begin, value_end,
-         force_insert, revert_entries);
-  Insert(fkey.LeftNumber(all_key, all_value), all_value, value_begin, value_end,
-         force_insert, revert_entries);
-  Insert(fkey.RightNumber(all_key, all_value), all_value, value_begin,
-         value_end, force_insert, revert_entries);
-  Insert(fkey.Single(all_key, all_value), all_value, value_begin, value_end,
-         force_insert, revert_entries);
+  auto insert = [&](absl::string_view key, absl::string_view value,
+                    size_t begin, size_t end) {
+    Insert(key, value, begin, end, force_insert, revert_entries,
+           external_storage_entries);
+  };
+
+  insert(fkey.LeftRight(all_key, all_value), all_value, value_begin, value_end);
+  insert(fkey.LeftLeft(all_key, all_value), all_value, value_begin, value_end);
+  insert(fkey.RightRight(all_key, all_value), all_value, value_begin, value_end);
+  insert(fkey.Left(all_key, all_value), all_value, value_begin, value_end);
+  insert(fkey.Right(all_key, all_value), all_value, value_begin, value_end);
+  insert(fkey.LeftNumber(all_key, all_value), all_value, value_begin, value_end);
+  insert(fkey.RightNumber(all_key, all_value), all_value, value_begin, value_end);
+  insert(fkey.Single(all_key, all_value), all_value, value_begin, value_end);
   if (!context_sensitive && is_replaceable_with_top) {
-    Insert(fkey.Current(all_key, all_value), all_value, value_begin, value_end,
-           force_insert, revert_entries);
+    insert(fkey.Current(all_key, all_value), all_value, value_begin, value_end);
   }
 
-  // Save content value separately.
   if (all_value != content_value && all_key != content_key &&
       is_replaceable_with_top) {
     const size_t content_value_begin = value_begin;
     const size_t content_value_end = value_begin + content_value.size();
 
-    Insert(fkey.LeftRight(content_key, content_value), content_value,
-           content_value_begin, content_value_end, force_insert,
-           revert_entries);
-    Insert(fkey.LeftLeft(content_key, content_value), content_value,
-           content_value_begin, content_value_end, force_insert,
-           revert_entries);
-    Insert(fkey.RightRight(content_key, content_value), content_value,
-           content_value_begin, content_value_end, force_insert,
-           revert_entries);
-    Insert(fkey.Left(content_key, content_value), content_value,
-           content_value_begin, content_value_end, force_insert,
-           revert_entries);
-    Insert(fkey.Right(content_key, content_value), content_value,
-           content_value_begin, content_value_end, force_insert,
-           revert_entries);
-    Insert(fkey.LeftNumber(content_key, content_value), content_value,
-           content_value_begin, content_value_end, force_insert,
-           revert_entries);
-    Insert(fkey.RightNumber(content_key, content_value), content_value,
-           content_value_begin, content_value_end, force_insert,
-           revert_entries);
-    Insert(fkey.Single(content_key, content_value), content_value,
-           content_value_begin, content_value_end, force_insert,
-           revert_entries);
+    insert(fkey.LeftRight(content_key, content_value), content_value,
+           content_value_begin, content_value_end);
+    insert(fkey.LeftLeft(content_key, content_value), content_value,
+           content_value_begin, content_value_end);
+    insert(fkey.RightRight(content_key, content_value), content_value,
+           content_value_begin, content_value_end);
+    insert(fkey.Left(content_key, content_value), content_value,
+           content_value_begin, content_value_end);
+    insert(fkey.Right(content_key, content_value), content_value,
+           content_value_begin, content_value_end);
+    insert(fkey.LeftNumber(content_key, content_value), content_value,
+           content_value_begin, content_value_end);
+    insert(fkey.RightNumber(content_key, content_value), content_value,
+           content_value_begin, content_value_end);
+    insert(fkey.Single(content_key, content_value), content_value,
+           content_value_begin, content_value_end);
     if (!context_sensitive) {
-      Insert(fkey.Current(content_key, content_value), content_value,
-             content_value_begin, content_value_end, force_insert,
-             revert_entries);
+      insert(fkey.Current(content_key, content_value), content_value,
+             content_value_begin, content_value_end);
     }
   }
 
-  // Learn CloseBracket when OpenBracket is fixed.
   absl::string_view close_bracket_key;
   absl::string_view close_bracket_value;
   if (Util::IsOpenBracket(content_key, &close_bracket_key) &&
@@ -671,13 +658,13 @@ void UserSegmentHistoryRewriter::RememberFirstCandidate(
     const size_t close_bracket_value_end =
         value_begin + close_bracket_value.size();
 
-    Insert(fkey.Single(close_bracket_key, close_bracket_value),
+    insert(fkey.Single(close_bracket_key, close_bracket_value),
            close_bracket_value, close_bracket_value_begin,
-           close_bracket_value_end, force_insert, revert_entries);
+           close_bracket_value_end);
     if (!context_sensitive) {
-      Insert(fkey.Current(close_bracket_key, close_bracket_value),
+      insert(fkey.Current(close_bracket_key, close_bracket_value),
              close_bracket_value, close_bracket_value_begin,
-             close_bracket_value_end, force_insert, revert_entries);
+             close_bracket_value_end);
     }
   }
 }
@@ -772,6 +759,12 @@ void UserSegmentHistoryRewriter::Finish(const ConversionRequest& request,
     return;
   }
 
+  const bool reversible_external =
+      request.options().reversible_external_learning;
+  std::vector<StorageRevertEntry> external_storage_entries;
+  std::vector<StorageRevertEntry>* external_storage_entries_ptr =
+      reversible_external ? &external_storage_entries : nullptr;
+
   const Segments target_segments =
       UseInnerSegments(request)
           ? MakeLearningSegmentsFromInnerSegments(request, segments)
@@ -797,16 +790,19 @@ void UserSegmentHistoryRewriter::Finish(const ConversionRequest& request,
       continue;
     }
 
-    InsertTriggerKey(segment);
+    InsertTriggerKey(segment, external_storage_entries_ptr);
     RememberFirstCandidate(request, target_segments, i, value_begin, value_end,
-                          revert_entries);
+                          revert_entries, external_storage_entries_ptr);
   }
 
-  if (!revert_entries.empty()) {
+  if (!revert_entries.empty() || !external_storage_entries.empty()) {
     PendingRevert revert_data;
     revert_data.entries = std::move(revert_entries);
     revert_data.committed_value = std::move(committed_value);
-    revert_cache_.Insert(segments.revert_id(), revert_data);
+    revert_data.reversible_external_learning = reversible_external;
+    revert_data.external_storage_entries =
+        std::move(external_storage_entries);
+    revert_cache_.Insert(segments.revert_id(), std::move(revert_data));
   }
 }
 
@@ -862,7 +858,9 @@ bool UserSegmentHistoryRewriter::ShouldRewrite(
   return *max_candidates_size > 0;
 }
 
-void UserSegmentHistoryRewriter::InsertTriggerKey(const Segment& segment) {
+void UserSegmentHistoryRewriter::InsertTriggerKey(
+    const Segment& segment,
+    std::vector<StorageRevertEntry>* external_storage_entries) {
   if (!(segment.candidate(0).attributes & converter::Attribute::RERANKED)) {
     MOZC_VLOG(2) << "InsertTriggerKey is skipped";
     return;
@@ -874,20 +872,23 @@ void UserSegmentHistoryRewriter::InsertTriggerKey(const Segment& segment) {
   static_assert(sizeof(uint32_t) == sizeof(v),
                 "KeyTriggerValue must be 32-bit int size.");
 
-  // TODO(taku): saving segment.candidate_size() might be too heavy and
-  // increases the chance of hash collisions.
   v.set_candidates_size(segment.candidates_size());
 
-  storage_->Insert(segment.key(), reinterpret_cast<const char*>(&v));
+  auto insert = [&](absl::string_view key) {
+    if (!PrepareExternalStorageWrite(key, external_storage_entries)) {
+      return;
+    }
+    storage_->Insert(key, reinterpret_cast<const char*>(&v));
+  };
+
+  insert(segment.key());
   if (segment.key() != segment.candidate(0).content_key) {
-    storage_->Insert(segment.candidate(0).content_key,
-                     reinterpret_cast<const char*>(&v));
+    insert(segment.candidate(0).content_key);
   }
 
   absl::string_view close_bracket_key;
   if (Util::IsOpenBracket(segment.key(), &close_bracket_key)) {
-    const std::string key{close_bracket_key.data(), close_bracket_key.size()};
-    storage_->Insert(key, reinterpret_cast<const char*>(&v));
+    insert(close_bracket_key);
   }
 }
 
@@ -997,7 +998,28 @@ void UserSegmentHistoryRewriter::Revert(const Segments& segments) {
     return;
   }
 
+  if (revert_data->reversible_external_learning) {
+    if (storage_ != nullptr) {
+      for (auto it = revert_data->external_storage_entries.rbegin();
+           it != revert_data->external_storage_entries.rend(); ++it) {
+        if (it->previous_value.has_value()) {
+          storage_->Insert(it->key, it->previous_value->data());
+        } else {
+          storage_->Delete(it->key);
+        }
+      }
+    }
+    revert_cache_.Erase(segments.revert_id());
+    return;
+  }
+
   pending_revert_ = *revert_data;
+}
+
+void UserSegmentHistoryRewriter::DiscardRevert(const Segments& segments) {
+  if (segments.revert_id() != 0) {
+    revert_cache_.Erase(segments.revert_id());
+  }
 }
 
 void UserSegmentHistoryRewriter::MaybeApplyPendingRevert(
@@ -1082,8 +1104,13 @@ UserSegmentHistoryRewriter::Score UserSegmentHistoryRewriter::Fetch(
 void UserSegmentHistoryRewriter::Insert(
     absl::string_view key, absl::string_view value,
     size_t value_begin, size_t value_end, bool force,
-    std::vector<RevertEntry>& revert_entries) {
+    std::vector<RevertEntry>& revert_entries,
+    std::vector<StorageRevertEntry>* external_storage_entries) {
   if (key.empty()) {
+    return;
+  }
+
+  if (!PrepareExternalStorageWrite(key, external_storage_entries)) {
     return;
   }
 
@@ -1121,6 +1148,41 @@ void UserSegmentHistoryRewriter::MaybeInsertRevertEntry(
   entry.value_begin = value_begin;
   entry.value_end = value_end;
   revert_entries.emplace_back(std::move(entry));
+}
+
+bool UserSegmentHistoryRewriter::PrepareExternalStorageWrite(
+    absl::string_view key,
+    std::vector<StorageRevertEntry>* external_storage_entries) {
+  if (external_storage_entries == nullptr) {
+    return true;
+  }
+  if (key.empty() || storage_ == nullptr) {
+    return false;
+  }
+
+  const auto already_recorded =
+      std::find_if(external_storage_entries->begin(),
+                   external_storage_entries->end(),
+                   [key](const StorageRevertEntry& entry) {
+                     return entry.key == key;
+                   });
+  if (already_recorded != external_storage_entries->end()) {
+    return true;
+  }
+
+  const absl::string_view previous_value = storage_->LookupAsString(key);
+  if (previous_value.empty() &&
+      storage_->used_size() >= storage_->size()) {
+    return false;
+  }
+
+  StorageRevertEntry entry;
+  entry.key = std::string(key);
+  if (!previous_value.empty()) {
+    entry.previous_value = std::string(previous_value);
+  }
+  external_storage_entries->push_back(std::move(entry));
+  return true;
 }
 
 bool UserSegmentHistoryRewriter::DeleteEntry(absl::string_view key) {

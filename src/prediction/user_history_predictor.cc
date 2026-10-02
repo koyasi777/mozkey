@@ -2107,6 +2107,8 @@ void UserHistoryPredictor::Finish(const ConversionRequest& request,
   }
 
   RevertEntries revert_entries;
+  revert_entries.reversible_external_learning =
+      request.options().reversible_external_learning;
 
   const SegmentsForLearning learning_segments =
       MakeLearningSegments(request, results);
@@ -2458,7 +2460,17 @@ void UserHistoryPredictor::Revert(uint32_t revert_id) {
     }
   }
 
-  last_committed_entries_.store(std::move(last_committed_entries));
+  if (revert_entries.reversible_external_learning) {
+    // External Zenz rollback is final for this transaction. Do not let the next
+    // input partially re-commit a surviving prefix.
+    last_committed_entries_.store(nullptr);
+  } else {
+    last_committed_entries_.store(std::move(last_committed_entries));
+  }
+}
+
+void UserHistoryPredictor::DiscardRevert(uint32_t revert_id) {
+  revert_cache_.Erase(revert_id);
 }
 
 void UserHistoryPredictor::CommitContext(

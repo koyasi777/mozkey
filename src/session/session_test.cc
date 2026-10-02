@@ -96,6 +96,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(MaybeApplyZenzFeedbackLiveCorrection);
   PEER_METHOD(ApplyZenzLiveCorrectionResult);
   PEER_METHOD(SetPendingZenzFeedbackAccepted);
+  PEER_METHOD(ApplyPendingZenzAcceptedMozcHistoryLearning);
   PEER_METHOD(SetPendingZenzFeedbackComparison);
   PEER_METHOD(SetPendingZenzFeedbackRejected);
   PEER_METHOD(ObservePendingZenzFeedbackCommittedResult);
@@ -1531,6 +1532,41 @@ class RecordingExternalLearningConverter : public MockConverter {
     return learn_segments_result;
   }
 
+  bool LearnExternalConversionResultReversibly(
+      const ConversionRequest& request,
+      absl::string_view key,
+      absl::string_view value,
+      Segments* revert_segments) const override {
+    if (!LearnExternalConversionResult(request, key, value) ||
+        revert_segments == nullptr) {
+      return false;
+    }
+    revert_segments->Clear();
+    revert_segments->set_revert_id(next_revert_id++);
+    return true;
+  }
+
+  bool LearnExternalConversionSegmentsReversibly(
+      const ConversionRequest& request,
+      absl::Span<const ExternalConversionSegment> segments,
+      Segments* revert_segments) const override {
+    if (!LearnExternalConversionSegments(request, segments) ||
+        revert_segments == nullptr) {
+      return false;
+    }
+    revert_segments->Clear();
+    revert_segments->set_revert_id(next_revert_id++);
+    return true;
+  }
+
+  void RevertConversion(Segments* segments) const override {
+    ++revert_call_count;
+    if (segments != nullptr) {
+      reverted_ids.push_back(segments->revert_id());
+      segments->set_revert_id(0);
+    }
+  }
+
   bool ResolveExternalConversionSegments(
       const ConversionRequest& request, absl::string_view key,
       absl::string_view value,
@@ -1583,6 +1619,9 @@ class RecordingExternalLearningConverter : public MockConverter {
   mutable int learn_segments_call_count = 0;
   mutable int resolve_segments_call_count = 0;
   mutable int evaluate_segments_call_count = 0;
+  mutable int revert_call_count = 0;
+  mutable uint64_t next_revert_id = 1001;
+  mutable std::vector<uint64_t> reverted_ids;
   mutable ConversionRequest::RequestType last_request_type =
       ConversionRequest::CONVERSION;
   mutable ConversionRequest::RequestType last_resolve_request_type =
@@ -1612,6 +1651,133 @@ class RecordingExternalLearningConverter : public MockConverter {
   std::vector<std::vector<ExternalConversionSegment>>
       evaluated_segments_results;
 };
+
+std::shared_ptr<RecordingExternalLearningConverter>
+CreateRecordingExternalLearningConverter(MockEngine* mock_engine);
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackImmediateMozcHistoryRollback) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(converter->learn_call_count, 0);
+
+  session_peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+
+  ASSERT_TRUE(
+      session_peer.pending_zenz_feedback_().mozc_history_learning_applied);
+  ASSERT_EQ(
+      session_peer.pending_zenz_feedback_().mozc_history_revert_ids.size(), 1);
+  EXPECT_EQ(converter->learn_call_count, 1);
+  const uint64_t revert_id =
+      session_peer.pending_zenz_feedback_().mozc_history_revert_ids[0];
+
+  session_peer.DiscardPendingZenzFeedback("phase2_test_rollback");
+
+  EXPECT_EQ(converter->revert_call_count, 1);
+  ASSERT_EQ(converter->reverted_ids.size(), 1);
+  EXPECT_EQ(converter->reverted_ids[0], revert_id);
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kNeutral);
+  EXPECT_EQ(decision.accepted_count, 0);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackImmediateMozcHistoryConfirmKeepsLearning) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  session_peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+
+  ASSERT_EQ(converter->learn_call_count, 1);
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_EQ(converter->learn_call_count, 1);
+  EXPECT_EQ(converter->revert_call_count, 0);
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackUsesSingleMozcHistoryRollbackHandle) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  auto& pending = session_peer.pending_zenz_feedback_();
+  pending.reverse_projected_learning_segments.clear();
+  pending.reverse_learning_segments = {
+      {"てんてき", "天敵"}, {"かれ", "彼"}};
+
+  session_peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+
+  // Full-sequence fallback claims the only reversible FinishConversion slot.
+  // Additional reverse-segment generalization fails closed during this rollback
+  // window instead of creating a second non-composable rewriter revert.
+  ASSERT_EQ(pending.mozc_history_revert_ids.size(), 1);
+  const uint64_t applied_id = pending.mozc_history_revert_ids[0];
+
+  session_peer.DiscardPendingZenzFeedback("phase2_test_single_handle");
+
+  ASSERT_EQ(converter->reverted_ids.size(), 1);
+  EXPECT_EQ(converter->reverted_ids[0], applied_id);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
 
 std::shared_ptr<RecordingExternalLearningConverter>
 CreateRecordingExternalLearningConverter(MockEngine* mock_engine) {

@@ -1060,6 +1060,36 @@ TEST_F(VariantsRewriterTest, Finish) {
   EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
 }
 
+TEST_F(VariantsRewriterTest,
+       ReversibleExternalFinishDoesNotLearnCharacterForm) {
+  std::unique_ptr<VariantsRewriter> rewriter(CreateVariantsRewriter());
+  CharacterFormManager* manager =
+      CharacterFormManager::GetCharacterFormManager();
+
+  manager->SetCharacterForm("0", Config::FULL_WIDTH);
+  ASSERT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
+
+  ConversionRequest::Options options;
+  options.reversible_external_learning = true;
+  const ConversionRequest request =
+      ConversionRequestBuilder().SetOptions(std::move(options)).Build();
+
+  Segments segments;
+  Segment* segment = segments.push_back_segment();
+  segment->set_key("いちにさん");
+  segment->set_segment_type(Segment::FIXED_VALUE);
+
+  converter::Candidate* cand = segment->add_candidate();
+  cand->key = "いちにさん";
+  cand->content_key = cand->key;
+  cand->value = "123";
+  cand->content_value = cand->value;
+  cand->style = NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH;
+
+  rewriter->Finish(request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
+}
+
 TEST_F(VariantsRewriterTest, RewriteTopCandidateForMixedConversionTest) {
   std::unique_ptr<VariantsRewriter> rewriter(CreateVariantsRewriter());
   CharacterFormManager* manager =

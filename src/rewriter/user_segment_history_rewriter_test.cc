@@ -29,10 +29,13 @@
 
 #include "rewriter/user_segment_history_rewriter.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/random/random.h"
@@ -70,7 +73,12 @@ namespace mozc {
 class UserSegmentHistoryRewriterTestPeer
     : public testing::TestPeer<UserSegmentHistoryRewriter> {
  public:
+  explicit UserSegmentHistoryRewriterTestPeer(
+      UserSegmentHistoryRewriter& rewriter)
+      : testing::TestPeer<UserSegmentHistoryRewriter>(rewriter) {}
+
   PEER_STATIC_METHOD(MakeLearningSegmentsFromInnerSegments);
+  PEER_VARIABLE(storage_);
 };
 
 namespace {
@@ -192,6 +200,18 @@ class UserSegmentHistoryRewriterTest : public testing::TestWithTempUserProfile {
     return ConversionRequestBuilder()
         .SetConfig(*config_)
         .SetRequest(*request_)
+        .Build();
+  }
+
+  ConversionRequest CreateReversibleExternalConversionRequest() const {
+    ConversionRequest::Options options;
+    options.request_type = ConversionRequest::CONVERSION;
+    options.enable_user_history_for_conversion = true;
+    options.reversible_external_learning = true;
+    return ConversionRequestBuilder()
+        .SetConfig(*config_)
+        .SetRequest(*request_)
+        .SetOptions(options)
         .Build();
   }
 
@@ -1915,6 +1935,109 @@ TEST_F(UserSegmentHistoryRewriterTest, Revert) {
     const ConversionRequest convreq = CreateConversionRequest();
     EXPECT_FALSE(rewriter->Rewrite(convreq, &segments));
   }
+}
+
+TEST_F(UserSegmentHistoryRewriterTest,
+       RevertExternalLearningRestoresRawStorageExactly) {
+  std::unique_ptr<UserSegmentHistoryRewriter> rewriter(
+      CreateUserSegmentHistoryRewriter());
+  const ConversionRequest normal_request = CreateConversionRequest();
+  const ConversionRequest external_request =
+      CreateReversibleExternalConversionRequest();
+
+  UserSegmentHistoryRewriterTestPeer peer(*rewriter);
+  auto snapshot_storage = [&]() {
+    storage::LruStorage* storage = peer.storage_().get();
+    CHECK(storage != nullptr);
+
+    // Compare logical segment.db state only. Timestamps and LRU ordering are
+    // intentionally ignored because restoring a previous value may touch it.
+    std::vector<std::pair<uint64_t, std::string>> snapshot;
+    snapshot.reserve(storage->used_size());
+    for (size_t i = 0; i < storage->used_size(); ++i) {
+      uint64_t fingerprint = 0;
+      std::string value;
+      uint32_t last_access_time = 0;
+      storage->Read(i, &fingerprint, &value, &last_access_time);
+      snapshot.emplace_back(fingerprint, std::move(value));
+    }
+    std::sort(snapshot.begin(), snapshot.end());
+    return snapshot;
+  };
+
+  Segments segments;
+  InitSegments(&segments, 1, 3);
+  segments.mutable_segment(0)->set_key("abc");
+  segments.mutable_segment(0)->move_candidate(1, 0);
+  segments.mutable_segment(0)->mutable_candidate(0)->attributes |=
+      converter::Attribute::RERANKED;
+  segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+  segments.set_revert_id(20);
+  rewriter->Finish(normal_request, segments);
+
+  const auto before_external = snapshot_storage();
+  ASSERT_FALSE(before_external.empty());
+
+  InitSegments(&segments, 1, 3);
+  segments.mutable_segment(0)->set_key("abc");
+  segments.mutable_segment(0)->move_candidate(2, 0);
+  segments.mutable_segment(0)->mutable_candidate(0)->attributes |=
+      converter::Attribute::RERANKED;
+  segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+  segments.set_revert_id(21);
+  rewriter->Finish(external_request, segments);
+  const Segments external_commit = segments;
+
+  const auto after_external = snapshot_storage();
+  EXPECT_NE(after_external, before_external);
+
+  rewriter->Revert(external_commit);
+
+  const auto after_revert = snapshot_storage();
+  EXPECT_EQ(after_revert, before_external);
+}
+
+TEST_F(UserSegmentHistoryRewriterTest,
+       DiscardExternalRevertKeepsLearnedRawStorage) {
+  std::unique_ptr<UserSegmentHistoryRewriter> rewriter(
+      CreateUserSegmentHistoryRewriter());
+  const ConversionRequest external_request =
+      CreateReversibleExternalConversionRequest();
+
+  UserSegmentHistoryRewriterTestPeer peer(*rewriter);
+  auto snapshot_storage = [&]() {
+    storage::LruStorage* storage = peer.storage_().get();
+    CHECK(storage != nullptr);
+    std::vector<std::pair<uint64_t, std::string>> snapshot;
+    snapshot.reserve(storage->used_size());
+    for (size_t i = 0; i < storage->used_size(); ++i) {
+      uint64_t fingerprint = 0;
+      std::string value;
+      uint32_t last_access_time = 0;
+      storage->Read(i, &fingerprint, &value, &last_access_time);
+      snapshot.emplace_back(fingerprint, std::move(value));
+    }
+    std::sort(snapshot.begin(), snapshot.end());
+    return snapshot;
+  };
+
+  Segments segments;
+  InitSegments(&segments, 1, 3);
+  segments.mutable_segment(0)->set_key("abc");
+  segments.mutable_segment(0)->move_candidate(2, 0);
+  segments.mutable_segment(0)->mutable_candidate(0)->attributes |=
+      converter::Attribute::RERANKED;
+  segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+  segments.set_revert_id(31);
+  rewriter->Finish(external_request, segments);
+
+  const auto learned = snapshot_storage();
+  ASSERT_FALSE(learned.empty());
+
+  rewriter->DiscardRevert(segments);
+  rewriter->Revert(segments);
+
+  EXPECT_EQ(snapshot_storage(), learned);
 }
 
 }  // namespace

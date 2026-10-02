@@ -161,6 +161,10 @@ void Predictor::Revert(uint32_t revert_id) {
   user_history_predictor_->Revert(revert_id);
 }
 
+void Predictor::DiscardRevert(uint32_t revert_id) {
+  user_history_predictor_->DiscardRevert(revert_id);
+}
+
 bool Predictor::ClearAllHistory() {
   return user_history_predictor_->ClearAllHistory();
 }

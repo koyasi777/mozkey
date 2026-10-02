@@ -79,6 +79,9 @@ class UserHistoryPredictor : public PredictorInterface {
   // Revert last Finish operation.
   void Revert(uint32_t revert_id) override;
 
+  // Discard rollback metadata after the caller confirms the commit.
+  void DiscardRevert(uint32_t revert_id) override;
+
   // Syncs user-modified context.
   void CommitContext(const ConversionRequest& request) const override;
 
@@ -414,6 +417,10 @@ class UserHistoryPredictor : public PredictorInterface {
   struct RevertEntries {
     // The result committed.
     Result result;
+
+    // Zenz external learning is a single rollback transaction. Unlike normal
+    // Mozc Backspace undo, it must not partially redo a surviving prefix later.
+    bool reversible_external_learning = false;
 
     // History entry (previous context).
     // The chain link from history entry to the first entries are reverted.

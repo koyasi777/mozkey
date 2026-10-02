@@ -117,6 +117,18 @@ class ConverterInterface {
     return false;
   }
 
+  // Reversible variant of LearnExternalConversionResult. On success,
+  // |revert_segments| receives the post-FinishConversion Segments carrying the
+  // revert_id and rewriter state required by RevertConversion().
+  [[nodiscard]]
+  virtual bool LearnExternalConversionResultReversibly(
+      const ConversionRequest& request,
+      absl::string_view key,
+      absl::string_view value,
+      Segments* revert_segments) const {
+    return false;
+  }
+
   // Learns externally committed segmented conversion results, such as a
   // Zenz accepted result safely projected onto Mozc live-conversion segments.
   // This represents one virtual conversion commit with phrase boundaries, not
@@ -126,6 +138,25 @@ class ConverterInterface {
       const ConversionRequest& request,
       absl::Span<const ExternalConversionSegment> segments) const {
     return false;
+  }
+
+  // Reversible variant of LearnExternalConversionSegments. On success,
+  // |revert_segments| receives the post-FinishConversion Segments carrying the
+  // revert_id and rewriter state required by RevertConversion().
+  [[nodiscard]]
+  virtual bool LearnExternalConversionSegmentsReversibly(
+      const ConversionRequest& request,
+      absl::Span<const ExternalConversionSegment> segments,
+      Segments* revert_segments) const {
+    return false;
+  }
+
+  // Confirms a reversible Finish operation by discarding only its rollback
+  // metadata. The learned history remains applied.
+  virtual void DiscardConversionRevertState(Segments* segments) const {
+    if (segments != nullptr) {
+      segments->set_revert_id(0);
+    }
   }
 
   // Resolves an accepted external full-sequence key/value pair into Mozc-native

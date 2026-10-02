@@ -5704,7 +5704,8 @@ void Session::RecordZenzLiveCorrectionAccepted(
 
 bool Session::MaybeLearnZenzCandidateToMozcHistory(
     absl::string_view key,
-    absl::string_view value) {
+    absl::string_view value,
+    std::vector<uint64_t>* revert_ids) {
   if (!UseZenzFeedbackLearning(context_->GetConfig())) {
     return false;
   }
@@ -5743,15 +5744,27 @@ bool Session::MaybeLearnZenzCandidateToMozcHistory(
     return false;
   }
 
-  return context_->mutable_converter()->LearnExternalConversionResult(
-      key, value, context_->client_context());
+  if (revert_ids == nullptr) {
+    return context_->mutable_converter()->LearnExternalConversionResult(
+        key, value, context_->client_context());
+  }
+
+  const uint64_t revert_id =
+      context_->mutable_converter()->LearnExternalConversionResultReversibly(
+          key, value, context_->client_context());
+  if (revert_id == 0) {
+    return false;
+  }
+  revert_ids->push_back(revert_id);
+  return true;
 }
 
 int Session::MaybeLearnZenzReverseSegmentsToMozcHistory(
-    const std::vector<std::pair<std::string, std::string>>& segments) {
+    const std::vector<std::pair<std::string, std::string>>& segments,
+    std::vector<uint64_t>* revert_ids) {
   int learned_count = 0;
   for (const auto& [key, value] : segments) {
-    if (MaybeLearnZenzCandidateToMozcHistory(key, value)) {
+    if (MaybeLearnZenzCandidateToMozcHistory(key, value, revert_ids)) {
       ++learned_count;
     }
   }
@@ -5759,7 +5772,8 @@ int Session::MaybeLearnZenzReverseSegmentsToMozcHistory(
 }
 
 int Session::MaybeLearnZenzProjectedSegmentsToMozcHistory(
-    const std::vector<ZenzProjectedLearningSegment>& segments) {
+    const std::vector<ZenzProjectedLearningSegment>& segments,
+    std::vector<uint64_t>* revert_ids) {
   if (!UseZenzFeedbackLearning(context_->GetConfig())) {
     return 0;
   }
@@ -5786,8 +5800,23 @@ int Session::MaybeLearnZenzProjectedSegmentsToMozcHistory(
       return;
     }
 
-    if (context_->mutable_converter()->LearnExternalConversionSegments(
-            external_span, context_->client_context())) {
+    bool learned_span = false;
+    if (revert_ids == nullptr) {
+      learned_span =
+          context_->mutable_converter()->LearnExternalConversionSegments(
+              external_span, context_->client_context());
+    } else {
+      const uint64_t revert_id =
+          context_->mutable_converter()
+              ->LearnExternalConversionSegmentsReversibly(
+                  external_span, context_->client_context());
+      if (revert_id != 0) {
+        revert_ids->push_back(revert_id);
+        learned_span = true;
+      }
+    }
+
+    if (learned_span) {
       learned_count += static_cast<int>(external_span.size());
       external_span.clear();
       return;
@@ -5798,7 +5827,8 @@ int Session::MaybeLearnZenzProjectedSegmentsToMozcHistory(
     // learning; never synthesize boundary history from a degraded span.
     for (const ExternalConversionSegment& segment : external_span) {
       if (segment.is_reranked &&
-          MaybeLearnZenzCandidateToMozcHistory(segment.key, segment.value)) {
+          MaybeLearnZenzCandidateToMozcHistory(
+              segment.key, segment.value, revert_ids)) {
         ++learned_count;
       }
     }
@@ -5865,6 +5895,48 @@ int Session::MaybeLearnZenzProjectedSegmentsToMozcHistory(
 
   flush_span();
   return learned_count;
+}
+
+void Session::ApplyPendingZenzAcceptedMozcHistoryLearning() {
+  if (!pending_zenz_feedback_.pending ||
+      pending_zenz_feedback_.action !=
+          PendingZenzFeedback::Action::kAccepted ||
+      pending_zenz_feedback_.mozc_history_learning_applied) {
+    return;
+  }
+
+  // Mark the commit point exactly once. If bounded reversible history learning
+  // cannot be applied, do not retry it later after the rollback window closes.
+  pending_zenz_feedback_.mozc_history_learning_applied = true;
+  std::vector<uint64_t>* revert_ids =
+      &pending_zenz_feedback_.mozc_history_revert_ids;
+
+  const int projected_segment_learning_count =
+      MaybeLearnZenzProjectedSegmentsToMozcHistory(
+          pending_zenz_feedback_.reverse_projected_learning_segments,
+          revert_ids);
+
+  bool learned_to_mozc_history = false;
+  int reverse_segment_learning_count = 0;
+  if (projected_segment_learning_count == 0) {
+    learned_to_mozc_history =
+        MaybeLearnZenzCandidateToMozcHistory(
+            pending_zenz_feedback_.key,
+            pending_zenz_feedback_.value,
+            revert_ids);
+    reverse_segment_learning_count =
+        MaybeLearnZenzReverseSegmentsToMozcHistory(
+            pending_zenz_feedback_.reverse_learning_segments,
+            revert_ids);
+  }
+
+  ZenzDebugOutput(absl::StrCat(
+      "[zenz-feedback] commit-point mozc history applied projected=",
+      projected_segment_learning_count,
+      " fallback_full=", ZenzBool(learned_to_mozc_history),
+      " reverse_segments=", reverse_segment_learning_count,
+      " revert_handles=", revert_ids->size(),
+      " context_class=", pending_zenz_feedback_.context_class));
 }
 
 bool Session::HasVisibleZenzLiveCorrection() const {
@@ -5939,6 +6011,8 @@ void Session::SetPendingZenzFeedbackAccepted(
   pending_zenz_feedback_.final_committed_value.clear();
   pending_zenz_feedback_.require_final_committed_key_match = false;
   pending_zenz_feedback_.final_committed_key.clear();
+  pending_zenz_feedback_.mozc_history_learning_applied = false;
+  pending_zenz_feedback_.mozc_history_revert_ids.clear();
   ZenzReverseLearningProjection reverse_learning_projection =
       BuildZenzReverseLearningSegmentsFromPreedit(
           live_conversion_preedit_output_, key, value);
@@ -6461,6 +6535,8 @@ void Session::SetPendingZenzFeedbackComparison(
   pending_zenz_feedback_.final_committed_key.clear();
   pending_zenz_feedback_.reverse_learning_segments.clear();
   pending_zenz_feedback_.reverse_projected_learning_segments.clear();
+  pending_zenz_feedback_.mozc_history_learning_applied = false;
+  pending_zenz_feedback_.mozc_history_revert_ids.clear();
 
   ZenzDebugOutput(absl::StrCat(
       "[zenz-feedback] pending final comparison ",
@@ -6534,6 +6610,11 @@ void Session::ConfirmPendingZenzFeedback() {
   }
 
   if (!UseZenzFeedbackLearning(context_->GetConfig())) {
+    for (const uint64_t revert_id :
+         pending_zenz_feedback_.mozc_history_revert_ids) {
+      context_->mutable_converter()->ConfirmExternalConversionLearning(
+          revert_id);
+    }
     pending_zenz_feedback_ = PendingZenzFeedback();
     return;
   }
@@ -6546,47 +6627,45 @@ void Session::ConfirmPendingZenzFeedback() {
         " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
         " context_class=", pending_zenz_feedback_.context_class));
 
-    // The exact full-sequence observation was persisted at the explicit commit
-    // point. Confirmation closes its rollback window and performs only the
-    // broader Mozc-history generalization below.
-    const int projected_segment_learning_count =
-        MaybeLearnZenzProjectedSegmentsToMozcHistory(
-            pending_zenz_feedback_.reverse_projected_learning_segments);
+    if (pending_zenz_feedback_.mozc_history_learning_applied) {
+      int confirmed_count = 0;
+      for (const uint64_t revert_id :
+           pending_zenz_feedback_.mozc_history_revert_ids) {
+        if (context_->mutable_converter()->ConfirmExternalConversionLearning(
+                revert_id)) {
+          ++confirmed_count;
+        }
+      }
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] confirm commit-point mozc history handles=",
+          confirmed_count,
+          " context_class=", pending_zenz_feedback_.context_class));
+    } else {
+      // Compatibility/fail-safe path for internal callers that prepare a
+      // pending acceptance without passing through a real direct commit.
+      const int projected_segment_learning_count =
+          MaybeLearnZenzProjectedSegmentsToMozcHistory(
+              pending_zenz_feedback_.reverse_projected_learning_segments);
 
-    ZenzDebugOutput(absl::StrCat(
-        "[zenz-feedback] projected segment mozc history learning count=",
-        projected_segment_learning_count,
-        " context_class=", pending_zenz_feedback_.context_class));
+      bool learned_to_mozc_history = false;
+      int reverse_segment_learning_count = 0;
+      if (projected_segment_learning_count == 0) {
+        learned_to_mozc_history =
+            MaybeLearnZenzCandidateToMozcHistory(
+                pending_zenz_feedback_.key,
+                pending_zenz_feedback_.value);
+        reverse_segment_learning_count =
+            MaybeLearnZenzReverseSegmentsToMozcHistory(
+                pending_zenz_feedback_.reverse_learning_segments);
+      }
 
-    // Prefer structured/local virtual commits.  Multi-segment commits already
-    // teach UserHistoryPredictor their concatenated span, while one-segment or
-    // punctuation-split commits intentionally prioritize reusable local
-    // evidence. ZenzFeedbackStore remains the exact full-sequence memory in
-    // either case. Keep synthetic full-sequence Mozc learning only as the
-    // fallback when no projected/local evidence could be committed.
-    bool learned_to_mozc_history = false;
-    int reverse_segment_learning_count = 0;
-    if (projected_segment_learning_count == 0) {
-      learned_to_mozc_history =
-          MaybeLearnZenzCandidateToMozcHistory(
-              pending_zenz_feedback_.key,
-              pending_zenz_feedback_.value);
-      reverse_segment_learning_count =
-          MaybeLearnZenzReverseSegmentsToMozcHistory(
-              pending_zenz_feedback_.reverse_learning_segments);
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] deferred compatibility mozc history projected=",
+          projected_segment_learning_count,
+          " fallback_full=", ZenzBool(learned_to_mozc_history),
+          " reverse_segments=", reverse_segment_learning_count,
+          " context_class=", pending_zenz_feedback_.context_class));
     }
-
-    ZenzDebugOutput(absl::StrCat(
-        "[zenz-feedback] fallback full mozc history learning ",
-        ZenzBool(learned_to_mozc_history),
-        " ", ZenzRedactedTextStats("key", pending_zenz_feedback_.key),
-        " ", ZenzRedactedTextStats("value", pending_zenz_feedback_.value),
-        " context_class=", pending_zenz_feedback_.context_class));
-
-    ZenzDebugOutput(absl::StrCat(
-        "[zenz-feedback] reverse segment mozc history learning count=",
-        reverse_segment_learning_count,
-        " context_class=", pending_zenz_feedback_.context_class));
   } else if (pending_zenz_feedback_.action ==
              PendingZenzFeedback::Action::kCompareFinalCommit) {
     if (!pending_zenz_feedback_.has_final_committed_value) {
@@ -6655,6 +6734,22 @@ void Session::DiscardPendingZenzFeedback(absl::string_view reason) {
   // observation yet, so it needs no compensation.
   if (pending_zenz_feedback_.action ==
       PendingZenzFeedback::Action::kAccepted) {
+    int reverted_mozc_history_count = 0;
+    if (pending_zenz_feedback_.mozc_history_learning_applied) {
+      for (auto it = pending_zenz_feedback_.mozc_history_revert_ids.rbegin();
+           it != pending_zenz_feedback_.mozc_history_revert_ids.rend(); ++it) {
+        if (context_->mutable_converter()->RevertExternalConversionLearning(
+                *it)) {
+          ++reverted_mozc_history_count;
+        }
+      }
+    }
+
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz-feedback] rollback commit-point mozc history handles=",
+        reverted_mozc_history_count,
+        " reason=", reason));
+
     zenz_feedback_store_.RecordAcceptedRollback(
         pending_zenz_feedback_.key, pending_zenz_feedback_.context_class,
         pending_zenz_feedback_.value, reason);
@@ -8157,6 +8252,7 @@ bool Session::CommitZenzLiveCorrectionResult(commands::Command* command) {
 
   ClearLiveConversionState();
   CommitStringDirectly(key, value, command);
+  ApplyPendingZenzAcceptedMozcHistoryLearning();
   return true;
 }
 
@@ -8415,10 +8511,10 @@ bool Session::InsertCharacter(commands::Command* command) {
   // text input starts. If the next key is Backspace/Escape, it is discarded.
   HandlePendingDirectCommitLearningForKeyEvent(key);
 
-  // Exact kAccepted Zenz feedback is already persisted at commit time. The next
-  // real text input only closes that rollback window and performs deferred
-  // Mozc-history generalization. kCompareFinalCommit remains genuinely deferred
-  // until the user's final committed value is known.
+  // Exact kAccepted Zenz feedback and reversible generalized Mozc history are
+  // already applied at commit time. The next real text input only closes that
+  // rollback window. kCompareFinalCommit remains genuinely deferred until the
+  // user's final committed value is known.
   if (!defer_pending_zenz_comparison_for_direct_commit) {
     HandlePendingZenzFeedbackForKeyEvent(key);
   }
@@ -8669,9 +8765,9 @@ bool Session::InsertCharacter(commands::Command* command) {
           " suffix_chars=", Util::CharsLen(last_char)));
 
       // Direct-commit punctuation is an explicit commit point. The exact Zenz
-      // acceptance is persisted immediately; keep only the rollback window and
-      // deferred Mozc-history generalization pending. If the next action is
-      // Backspace/Escape or a cancel-like key such as Ctrl+Z, compensate it.
+      // acceptance is persisted immediately. Generalized Mozc history is
+      // applied immediately after the direct commit and kept reversible during
+      // the same rollback window. Backspace/Escape/Ctrl+Z rolls back both.
       SetPendingZenzFeedbackAccepted(
           zenz_key_before_edit,
           zenz_context_class_before_edit,
@@ -8679,6 +8775,7 @@ bool Session::InsertCharacter(commands::Command* command) {
 
       ClearLiveConversionState();
       CommitStringDirectly(commit_key, commit_value, command);
+      ApplyPendingZenzAcceptedMozcHistoryLearning();
       return true;
     }
 

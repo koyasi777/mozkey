@@ -103,6 +103,11 @@ struct ConversionOptions {
   // Please refer to session/internal/keymap.h
   bool enable_user_history_for_conversion = true;
 
+  // Internal marker for an externally supplied conversion commit whose history
+  // learning must remain reversible until the caller closes its rollback
+  // window. Ordinary Mozc conversions leave this false.
+  bool reversible_external_learning = false;
+
   // If true, enable kana modifier insensitive conversion.
   bool kana_modifier_insensitive_conversion = true;
 

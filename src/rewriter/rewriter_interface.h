@@ -95,6 +95,9 @@ class RewriterInterface {
   // Reverts the last Finish operation.
   virtual void Revert(const Segments& segments) {}
 
+  // Discards only rollback metadata for a confirmed Finish operation.
+  virtual void DiscardRevert(const Segments& segments) {}
+
   // Delete the user history based entry corresponding to the specified
   // candidate.
   // Returns true when at least one deletion operation succeeded

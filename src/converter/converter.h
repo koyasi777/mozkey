@@ -112,9 +112,22 @@ class Converter final : public ConverterInterface {
       absl::string_view value) const override;
 
   [[nodiscard]]
+  bool LearnExternalConversionResultReversibly(
+      const ConversionRequest& request,
+      absl::string_view key,
+      absl::string_view value,
+      Segments* revert_segments) const override;
+
+  [[nodiscard]]
   bool LearnExternalConversionSegments(
       const ConversionRequest& request,
       absl::Span<const ExternalConversionSegment> segments) const override;
+
+  [[nodiscard]]
+  bool LearnExternalConversionSegmentsReversibly(
+      const ConversionRequest& request,
+      absl::Span<const ExternalConversionSegment> segments,
+      Segments* revert_segments) const override;
 
   [[nodiscard]]
   bool ResolveExternalConversionSegments(
@@ -131,6 +144,7 @@ class Converter final : public ConverterInterface {
   void CancelConversion(Segments* segments) const override;
   void ResetConversion(Segments* segments) const override;
   void RevertConversion(Segments* segments) const override;
+  void DiscardConversionRevertState(Segments* segments) const override;
 
   [[nodiscard]]
   bool DeleteCandidateFromHistory(const Segments& segments,

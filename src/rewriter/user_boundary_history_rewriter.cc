@@ -59,6 +59,7 @@ namespace {
 constexpr int kValueSize = 4;
 constexpr uint32_t kLruSize = 5000;
 constexpr uint32_t kSeedValue = 0x761fea81;
+constexpr size_t kRevertCacheSize = 16;
 
 // boundary.db stores eight segment lengths as 4-bit fields in 4 bytes.
 // A learned target segment longer than 15 characters cannot be represented
@@ -169,7 +170,10 @@ class SegmentsKey {
 
 }  // namespace
 
-UserBoundaryHistoryRewriter::UserBoundaryHistoryRewriter() { Reload(); }
+UserBoundaryHistoryRewriter::UserBoundaryHistoryRewriter()
+    : revert_cache_(kRevertCacheSize) {
+  Reload();
+}
 
 void UserBoundaryHistoryRewriter::Finish(const ConversionRequest& request,
                                          const Segments& segments) {
@@ -193,8 +197,61 @@ void UserBoundaryHistoryRewriter::Finish(const ConversionRequest& request,
     return;
   }
 
-  if (segments.resized()) {
-    Insert(request, segments);
+  if (!segments.resized()) {
+    return;
+  }
+
+  const bool reversible_external =
+      request.options().reversible_external_learning;
+  if (reversible_external && segments.revert_id() == 0) {
+    LOG(ERROR) << "Reversible boundary learning requires a nonzero revert_id";
+    return;
+  }
+
+  RevertEntries revert_entries;
+  RevertEntries* revert_entries_ptr =
+      reversible_external ? &revert_entries : nullptr;
+  const bool insert_succeeded =
+      Insert(request, segments, revert_entries_ptr);
+
+  // Even when a later storage write fails, earlier writes may already have
+  // happened. Preserve their snapshots so Revert() can still compensate them.
+  if (reversible_external && !revert_entries.empty()) {
+    revert_cache_.Insert(segments.revert_id(), std::move(revert_entries));
+  }
+
+  if (!insert_succeeded) {
+    return;
+  }
+}
+
+void UserBoundaryHistoryRewriter::Revert(const Segments& segments) {
+  if (segments.revert_id() == 0) {
+    return;
+  }
+
+  const RevertEntries* revert_entries =
+      revert_cache_.LookupWithoutInsert(segments.revert_id());
+  if (revert_entries == nullptr) {
+    return;
+  }
+
+  // The same key can be touched more than once while Insert() walks overlapping
+  // segment spans. Restore in reverse write order to reconstruct the exact
+  // pre-Finish value for every touched key.
+  for (auto it = revert_entries->rbegin(); it != revert_entries->rend(); ++it) {
+    if (it->previous_value.has_value()) {
+      storage_.Insert(it->key, it->previous_value->data());
+    } else {
+      storage_.Delete(it->key);
+    }
+  }
+  revert_cache_.Erase(segments.revert_id());
+}
+
+void UserBoundaryHistoryRewriter::DiscardRevert(const Segments& segments) {
+  if (segments.revert_id() != 0) {
+    revert_cache_.Erase(segments.revert_id());
   }
 }
 
@@ -285,6 +342,7 @@ UserBoundaryHistoryRewriter::CheckResizeSegmentsRequest(
 bool UserBoundaryHistoryRewriter::Sync() { return true; }
 
 bool UserBoundaryHistoryRewriter::Reload() {
+  revert_cache_.Clear();
   const std::string filename = ConfigFileStream::GetFileName(kFileName);
   if (!storage_.OpenOrCreate(filename.c_str(), kValueSize, kLruSize,
                              kSeedValue)) {
@@ -307,8 +365,10 @@ bool UserBoundaryHistoryRewriter::Reload() {
   return true;
 }
 
-bool UserBoundaryHistoryRewriter::Insert(const ConversionRequest& request,
-                                         const Segments& segments) {
+bool UserBoundaryHistoryRewriter::Insert(
+    const ConversionRequest& request,
+    const Segments& segments,
+    RevertEntries* revert_entries) {
   // Get the prefix of segments having FIXED_VALUE state.
   size_t target_segments_size = 0;
   for (const Segment& segment : segments.conversion_segments()) {
@@ -349,9 +409,31 @@ bool UserBoundaryHistoryRewriter::Insert(const ConversionRequest& request,
       const LengthArray length_array =
           segments_key->GetLengthArray(seg_idx, seg_size);
       MOZC_VLOG(2) << "InserteSegment key: " << key << " " << seg_idx << " "
-                   << seg_size << " "
-                   << absl::StrJoin(length_array.ToUint8Array(), " ");
-      storage_.Insert(key, reinterpret_cast<const char*>(&length_array));
+                    << seg_size << " "
+                    << absl::StrJoin(length_array.ToUint8Array(), " ");
+
+      if (revert_entries != nullptr) {
+        RevertEntry revert_entry;
+        revert_entry.key = std::string(key);
+        const absl::string_view previous_value = storage_.LookupAsString(key);
+
+        // A reversible transaction must not evict unrelated boundary history:
+        // if this is a new key and the LRU is full, skip only this enrichment.
+        if (previous_value.empty() &&
+            storage_.used_size() >= storage_.size()) {
+          continue;
+        }
+
+        if (!previous_value.empty()) {
+          revert_entry.previous_value = std::string(previous_value);
+        }
+        revert_entries->push_back(std::move(revert_entry));
+      }
+
+      if (!storage_.Insert(
+              key, reinterpret_cast<const char*>(&length_array))) {
+        return false;
+      }
     }
   }
 
@@ -360,6 +442,7 @@ bool UserBoundaryHistoryRewriter::Insert(const ConversionRequest& request,
 
 void UserBoundaryHistoryRewriter::Clear() {
   MOZC_VLOG(1) << "Clearing user segment data";
+  revert_cache_.Clear();
   storage_.Clear();
 }
 
