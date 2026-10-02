@@ -128,8 +128,8 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 同じ読み全体・同じ文脈クラス・同じ補正結果で通常却下回数が採用回数を上回る場合は、auto-block 無効時でも Zenz feedback による優先候補・保存済み feedback による即時補正としては使わず、「却下数優勢」の中立状態として扱います。これは hard block ではなく、Zenz が新しく同じ補正を返すことや通常 Mozc 候補を削除することはありません。
 - Zenz feedback は、Zenz 補正結果が表示されただけでは保存されません。Enter や句読点・記号の単打確定などで表示中の Zenz 結果が明示的に確定された時点で、accepted feedback をローカル TSV へ即時保存し、その確定に対する短い rollback window を保持します
 - rollback window 内で直後に Backspace / Escape / Revert / Undo / Ctrl+Z などの取り消し操作が入った場合は、`accepted_rollback` を追記して直前の accepted 1 件を補償します。これは rejected feedback ではなく、通常却下回数や auto-block の negative evidence を増やしません。次の実テキスト入力や確定後の context transition で window が閉じた場合は accepted を保持し、IMEOff / MakeSureIMEOff も取り消しではなく確定扱いにします
-- Zenz 補正表示後に Space や候補移動など通常変換操作へ移った場合、その Zenz 候補は rejected feedback として扱う。ただし Space などの通常操作による rejected feedback は候補を殺す hard reject ではなく、順位調整用の弱い negative signal として扱う
-- Zenz 補正表示中に Space で Mozc 通常変換結果へ戻した場合は、次の文字入力で戻した変換結果を確定してから新しい入力を開始
+- Zenz 補正表示後に Space や候補移動などで通常変換へ移った場合は、その操作だけで rejected feedback を即時確定せず、通常 Mozc 側で最終的に確定された値を確認してから判定する。最終確定値が Zenz 補正結果と異なる場合は通常却下として記録し、同じ結果を確定した場合は不要な reject を残さない。通常操作由来の rejected feedback は候補を殺す hard reject ではなく、順位調整用の弱い negative signal として扱う
+- Zenz 補正表示中に Space で Mozc 通常変換結果へ戻した場合は、次の文字入力や句読点・記号の単打確定で、戻した通常 Mozc の結果を先に最終確定値として取得する。句読点・記号の単打確定後も短い rollback window を維持し、直後の Backspace / Escape / Ctrl+Z / Revert / Undo などでは pending な Zenz reject を破棄する。次の通常入力や確定後の context transition、Windows Search などでの pass-through Enter を含む通常の pass-through 操作へ進んだ時点で rollback window を閉じ、最終確定結果に基づいて feedback を確定する
 - Zenz 学習データを設定画面から安全に管理できる UI を追加。TSV を直接編集せず、検索、インポート、エクスポート、選択項目削除、全削除が可能
 - Zenz 学習データ管理画面から、選択した Zenz 補正を明示的にブロック可能。ブロック済みの補正は再ブロックできず、解除したい場合は該当エントリを削除して必要に応じて再学習する
 - Zenz feedback を通常変換候補の ranking に利用。1 文節の通常変換では、保存済み feedback を score 化し、既存候補があれば cost を調整し、候補にない場合は synthetic candidate として候補集合の自然な位置へ追加。accepted feedback は順位を上げ、通常操作由来の rejected feedback は候補を除外せず順位を下げる
@@ -1080,9 +1080,13 @@ ordinary-reject or auto-block negative evidence. IMEOff / MakeSureIMEOff are
 treated as confirmation rather than cancellation and close the rollback window
 while keeping the acceptance. Moving from a visible Zenz correction to normal
 conversion operations, such as Space or candidate movement, is separate and
-records the Zenz result as rejected feedback. Ordinary rejected feedback from
-these operations remains a negative ranking signal rather than a hard command to
-permanently suppress the candidate.
+starts a pending final comparison instead of immediately persisting rejected
+feedback. If the final committed value differs from the Zenz correction, Mozkey
+records an ordinary rejection; if it matches the Zenz correction, Mozkey records
+an accepted observation instead. If no final commit is observed, the pending
+comparison is neutralized. Ordinary rejected feedback from these operations
+remains a negative ranking signal rather than a hard command to permanently
+suppress the candidate.
 
 Zenz feedback auto-blocking uses both an ordinary-reject count and a reject ratio.
 For the same full-sequence feedback entry, an auto-block is active only when
@@ -1145,10 +1149,20 @@ still waiting for Zenz, the first Space reveals the current normal Mozc
 conversion result without advancing to the next candidate. When Space is pressed
 while a Zenz correction is already visible, Mozkey restores the underlying Mozc
 conversion as an ordinary conversion result without opening the candidate window
-yet. If the user then types more text, the restored Mozc conversion is committed
-first and the new text starts a fresh composition. Pressing Space again follows
-the ordinary conversion path and opens the candidate window for the next
-candidate.
+yet and keeps the Zenz feedback as a pending final comparison. If the user then
+types more text, the restored Mozc conversion is committed first and the new text
+starts a fresh composition.
+
+If the next action is a direct-commit punctuation/symbol, Mozkey first captures
+the restored Mozc result as the suffix-free final comparison value and keeps the
+short rollback window open through that punctuation/symbol commit. An immediate
+Backspace, Escape, Revert, Undo, Ctrl+Z, or equivalent cancellation discards the
+pending Zenz comparison instead of leaving a rejection behind. A subsequent
+normal text input, post-commit context transition, or ordinary pass-through key
+such as the second Enter used to submit Windows Search closes the rollback window
+and confirms the feedback from the observed final commit. Pressing Space again
+instead follows the ordinary conversion path and opens the candidate window for
+the next candidate.
 
 Zenz feedback is reused differently for single-segment and multi-segment
 conversions.
