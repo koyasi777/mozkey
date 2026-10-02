@@ -662,6 +662,49 @@ TEST_F(MozcImkInputControllerTest,
 }
 
 TEST_F(MozcImkInputControllerTest,
+       PreLiveReadingKeepsRendererVisibleWhileSuggestionIsSuppressed) {
+  controller_.useLiveConversionForTest = true;
+
+  commands::Output output;
+  output.set_pre_live_conversion_reading(true);
+
+  commands::Preedit *preedit = output.mutable_preedit();
+  preedit->set_cursor(1);
+  commands::Preedit::Segment *segment = preedit->add_segment();
+  segment->set_annotation(commands::Preedit::Segment::UNDERLINE);
+  segment->set_key("あ");
+  segment->set_value("あ");
+  segment->set_value_length(1);
+
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_category(commands::SUGGESTION);
+  candidate_window->set_size(1);
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
+  candidate->set_index(0);
+  candidate->set_value("ありがとう");
+
+  mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
+  mock_client_.expectedAttributes =
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+
+  [controller_ updateCandidates:&output];
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  const commands::RendererCommand &renderer_command =
+      controller_.rendererCommand;
+  EXPECT_EQ(mock_renderer_->counter_ExecCommand(), 1);
+  EXPECT_TRUE(renderer_command.visible());
+  EXPECT_TRUE(renderer_command.output().pre_live_conversion_reading());
+  EXPECT_FALSE(renderer_command.output().live_conversion());
+  EXPECT_FALSE(renderer_command.output().has_candidate_window());
+  EXPECT_EQ(mock_client_.lastCharacterIndex, 0);
+  EXPECT_TRUE(renderer_command.has_ruby_preedit_rectangle());
+}
+
+TEST_F(MozcImkInputControllerTest,
        ShowFocusedConversionCandidateWindowWhileLiveConversionEnabled) {
   controller_.useLiveConversionForTest = true;
 

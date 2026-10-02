@@ -4447,6 +4447,7 @@ TEST_F(SessionTest, LiveConversionUsesDefaultMinKeyLength) {
   EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
   EXPECT_FALSE(command.output().live_conversion());
   EXPECT_FALSE(command.output().live_conversion_pending());
+  EXPECT_TRUE(command.output().pre_live_conversion_reading());
   EXPECT_TRUE(EnsurePreedit("あ", command));
 }
 
@@ -4481,6 +4482,7 @@ TEST_F(SessionTest, LiveConversionAllowsSingleCharacterWhenMinKeyLengthIsOne) {
 
   EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
   EXPECT_TRUE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().pre_live_conversion_reading());
   EXPECT_TRUE(EnsurePreedit("亜", command));
 }
 

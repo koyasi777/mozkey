@@ -241,6 +241,9 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   // suggestions while preserving Space/Down as normal conversion operations.
   // In that case, do not return here; let the normal candidate-window path draw
   // the non-focused suggestion window alongside the ruby overlay.
+  const bool has_live_conversion_reading =
+      output.has_preedit() &&
+      (output.live_conversion() || output.pre_live_conversion_reading());
   const bool has_passive_suggestion_window =
       output.has_candidate_window() && output.candidate_window().has_category() &&
       output.candidate_window().category() == commands::SUGGESTION &&
@@ -251,7 +254,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
       output.live_conversion() && has_passive_suggestion_window;
 
   const bool should_defer_ruby_update =
-      is_live_conversion_passive_suggestion;
+      has_live_conversion_reading && has_passive_suggestion_window;
   if (!should_defer_ruby_update) {
     ruby_window_->OnUpdate(command, *layout_manager_);
   }
@@ -330,6 +333,9 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     cascading_window_->HideWithEffects();
     main_window_->HideWithEffects();
     infolist_window_->DelayHide(0);
+    if (should_defer_ruby_update) {
+      ruby_window_->OnUpdate(command, *layout_manager_);
+    }
     return;
   }
 

@@ -253,10 +253,11 @@ bool FillVisibility(ITfUIElementMgr* ui_element_manager,
   bool candidate_window_visible = false;
   bool ruby_window_visible = false;
 
-  // Live conversion uses the renderer for the ruby overlay even when there is
-  // no candidate_window. Pending live conversion intentionally clears
-  // candidate_window, so visibility must not depend only on candidate_window.
-  if (output.live_conversion() && output.has_preedit()) {
+  // The live-conversion reading overlay can be visible before actual live
+  // conversion starts, and pending live conversion may have no candidate
+  // window.  Renderer visibility therefore cannot depend on candidate_window.
+  if ((output.live_conversion() || output.pre_live_conversion_reading()) &&
+      output.has_preedit()) {
     ruby_window_visible = true;
   }
 
@@ -562,7 +563,8 @@ bool FillCharPosition(TipPrivateContext* private_context, ITfContext* context,
   area->set_right(document_rect.right);
   area->set_bottom(document_rect.bottom);
 
-  if (output.live_conversion() && output.has_preedit()) {
+  if ((output.live_conversion() || output.pre_live_conversion_reading()) &&
+      output.has_preedit()) {
     FillRubyPreeditRectangleFromGuiCaret(target_window, text_rect,
                                          vertical_writing, command);
   }

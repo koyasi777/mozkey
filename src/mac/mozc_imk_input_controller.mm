@@ -190,10 +190,15 @@ bool CanSurroundingText(absl::string_view bundle_id) {
   return bundle_id != "com.evernote.Evernote";
 }
 
+bool HasLiveConversionReading(const Output &output) {
+  return output.has_preedit() &&
+         (output.live_conversion() || output.pre_live_conversion_reading());
+}
+
 bool ShouldDisplayRendererForOutput(const Output &output) {
   return (output.has_candidate_window() &&
           output.candidate_window().candidate_size() > 0) ||
-         (output.live_conversion() && output.has_preedit());
+         HasLiveConversionReading(output);
 }
 
 bool ShouldSuppressCandidateWindowForLiveConversion(
@@ -215,8 +220,8 @@ bool ShouldSuppressCandidateWindowForLiveConversion(
 }
 
 bool ShouldRecalculateRendererPosition(const RendererCommand &command) {
-  return !command.visible() ||
-         (command.has_output() && command.output().live_conversion());
+  return !command.visible() || (command.has_output() &&
+                                HasLiveConversionReading(command.output()));
 }
 
 int32_t GetRendererAnchorPosition(const Output &output) {
@@ -988,7 +993,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
     return;
   }
 
-  if (!rendererCommand_.output().live_conversion()) {
+  if (!HasLiveConversionReading(rendererCommand_.output())) {
     hasLiveConversionAnchorLeft_ = false;
   }
 
@@ -1025,7 +1030,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
     const NSPoint baseline = [clientData[@"IMKBaseline"] pointValue];
 
     int candidate_left = baseline.x;
-    if (output.live_conversion()) {
+    if (HasLiveConversionReading(output)) {
       if (!hasLiveConversionAnchorLeft_) {
         liveConversionAnchorLeft_ = baseline.x;
         hasLiveConversionAnchorLeft_ = true;
@@ -1039,7 +1044,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
 
     rendererCommand_.clear_ruby_preedit_rectangle();
 
-    if (output.live_conversion()) {
+    if (HasLiveConversionReading(output)) {
       if (position == 0) {
         rendererCommand_.mutable_ruby_preedit_rectangle()->CopyFrom(
             rendererCommand_.preedit_rectangle());
@@ -1075,14 +1080,23 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
     return;
   }
 
-  if (ShouldSuppressCandidateWindowForLiveConversion(
-          *output, useLiveConversion_)) {
+  const bool suppress_candidate_window =
+      ShouldSuppressCandidateWindowForLiveConversion(
+          *output, useLiveConversion_);
+  if (suppress_candidate_window &&
+      !output->pre_live_conversion_reading()) {
     [self clearCandidates];
     return;
   }
 
   rendererCommand_.set_type(RendererCommand::UPDATE);
   *rendererCommand_.mutable_output() = *output;
+  if (suppress_candidate_window) {
+    // Keep the pre-live reading output, but preserve the existing behavior of
+    // suppressing the unfocused ordinary suggestion while live conversion is
+    // enabled.
+    rendererCommand_.mutable_output()->clear_candidate_window();
+  }
 
   // Runs delayedUpdateCandidates in the next event loop.
   // This is because some applications like Google Docs with Chrome returns
