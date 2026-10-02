@@ -4113,6 +4113,15 @@ bool Session::EchoBackAndClearUndoContext(commands::Command* command) {
 
   if (IsPendingZenzFeedbackDiscardKey(key_event)) {
     DiscardPendingZenzFeedback("echo_back_discard_key");
+  } else if (!IsPureModifierKeyEvent(key_event) &&
+             !IsCancelKeyForCompositionOrConversion(key_event)) {
+    // A finalized kCompareFinalCommit may be waiting for one more normal
+    // action before it is persisted so that an immediate Undo/Backspace can
+    // still neutralize the observation.  A pass-through key such as the
+    // second Enter in a search box is that normal action.  Confirm before the
+    // key is echoed to the application; otherwise navigation can destroy the
+    // session while the comparison is still only in memory.
+    ConfirmPendingZenzFeedback();
   }
 
   if (!IsPureModifierKeyEvent(key_event)) {

@@ -3351,6 +3351,56 @@ TEST_F(SessionTest, PendingRejectedZenzFeedbackIsRecordedWhenFinalCommitDiffers)
 #endif
 }
 
+TEST_F(
+    SessionTest,
+    PendingRejectedZenzFeedbackIsConfirmedByPassThroughEnterAfterFinalCommit) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+  SetPendingRejectedZenzFeedbackForTest(&session_peer);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  commands::Command committed_command;
+  committed_command.mutable_output()->mutable_result()->set_type(
+      commands::Result::STRING);
+  committed_command.mutable_output()->mutable_result()->set_key(
+      "かれはてんてきです");
+  committed_command.mutable_output()->mutable_result()->set_value(
+      "彼は点滴です");
+
+  session_peer.ObservePendingZenzFeedbackCommittedResult(
+      committed_command, "test");
+  ASSERT_TRUE(
+      session_peer.pending_zenz_feedback_().has_final_committed_value);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  commands::Command enter_command;
+  ASSERT_TRUE(SendSpecialKey(
+      commands::KeyEvent::ENTER, &session, &enter_command));
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].key, "かれはてんてきです");
+  EXPECT_EQ(entries[0].context_class, "empty");
+  EXPECT_EQ(entries[0].value, "彼は天敵です");
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
 TEST_F(SessionTest, PendingShadowZenzFeedbackIgnoresDifferentFinalReading) {
 #if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
