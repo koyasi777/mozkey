@@ -135,6 +135,8 @@ void ZenzDebugOutput(absl::string_view message) {
 void ZenzDebugOutput(absl::string_view) {}
 #endif
 
+bool IsValidDirectCommitTriggerKey(const config::Config& config,
+                                   const commands::KeyEvent& key_event);
 std::string ZenzRedactedTextStats(absl::string_view label,
                                   absl::string_view text) {
   return absl::StrCat(
@@ -8516,6 +8518,29 @@ bool Session::InsertCharacter(commands::Command* command) {
           pending_zenz_feedback_.key &&
       CanDirectCommitPendingLiveConversionBeforeInsert(key);
 
+  // Space may have peeled a visible Zenz correction back to normal conversion.
+  // If the next inserted key is configured as a direct-commit trigger, the
+  // restored Mozc conversion is the commit produced by that same user action.
+  // Capture its final value, but keep the comparison pending until the short
+  // rollback window closes so Backspace/Escape/Ctrl+Z can still neutralize it.
+  const config::Config& config = context_->GetConfig();
+  const bool
+      defer_pending_zenz_comparison_for_conversion_direct_commit =
+          pending_zenz_feedback_.pending &&
+          pending_zenz_feedback_.action ==
+              PendingZenzFeedback::Action::kCompareFinalCommit &&
+          !pending_zenz_feedback_.has_final_committed_value &&
+          context_->state() == ImeContext::CONVERSION &&
+          config.use_direct_commit() &&
+          !config.use_auto_conversion() &&
+          key.input_style() == commands::KeyEvent::FOLLOW_MODE &&
+          key.mode() != commands::HALF_ASCII &&
+          key.mode() != commands::FULL_ASCII &&
+          context_->composer().GetLength() > 0 &&
+          context_->composer().GetLength() ==
+              context_->composer().GetCursor() &&
+          IsValidDirectCommitTriggerKey(config, key);
+
   // A pending direct-commit learning entry is finalized only when the next real
   // text input starts. If the next key is Backspace/Escape, it is discarded.
   HandlePendingDirectCommitLearningForKeyEvent(key);
@@ -8699,10 +8724,17 @@ bool Session::InsertCharacter(commands::Command* command) {
 
     // HandlePendingZenzFeedbackForKeyEvent() intentionally does not confirm
     // feedback while the session is still in CONVERSION, because conversion
-    // keys may still be part of selecting the result.  An ordinary text input
-    // that reaches this point has already committed the current conversion, so
-    // it is now the next real text input after the zenz decision.
-    ConfirmPendingZenzFeedback();
+    // keys may still be part of selecting the result. An ordinary text input
+    // normally closes the rollback window after committing the conversion.
+    //
+    // Direct-commit punctuation is different: the conversion commit and the
+    // punctuation commit are one user action, so keep kCompareFinalCommit
+    // pending through that action. Output() above has already captured the
+    // suffix-free final Mozc value. A following rollback key can therefore
+    // neutralize the observation before it is persisted as rejected feedback.
+    if (!defer_pending_zenz_comparison_for_conversion_direct_commit) {
+      ConfirmPendingZenzFeedback();
+    }
 
     if (key.input_style() == commands::KeyEvent::DIRECT_INPUT) {
       // Do ClearUndoContext() because it is a direct input.
@@ -8827,11 +8859,14 @@ bool Session::InsertCharacter(commands::Command* command) {
     return true;
   }
 
-  if (defer_pending_zenz_comparison_for_direct_commit) {
+  if (defer_pending_zenz_comparison_for_direct_commit ||
+      defer_pending_zenz_comparison_for_conversion_direct_commit) {
     // The physical key looked like a configured direct-commit trigger, but
     // insertion did not produce a direct commit (for example because a custom
-    // roman rule transformed it). This is ordinary editing, so keep the
-    // original cancel comparison neutral.
+    // roman rule transformed it). This is ordinary editing. A cancel-to-
+    // composition comparison remains neutral without a final commit, while a
+    // conversion comparison already has its final Mozc value and can now be
+    // finalized normally.
     ConfirmPendingZenzFeedback();
   }
 

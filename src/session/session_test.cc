@@ -825,6 +825,49 @@ class SessionTest : public testing::TestWithTempUserProfile {
     session->SetConfig(config);
   }
 
+  void SetupPendingZenzSpaceRevertDirectCommitPunctuationTest(
+      Session* session,
+      SessionTestPeer* session_peer,
+      MockConverter* converter,
+      commands::Command* command) {
+    InitSessionToConversionWithAiueo(session, converter);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_session_keymap(config::Config::MSIME);
+    config.set_use_zenz_feedback_learning(true);
+    config.set_use_auto_conversion(false);
+    config.set_use_direct_commit(true);
+    config.set_direct_commit_key(config::Config::DIRECT_COMMIT_KUTEN);
+    session->SetConfig(config);
+    session->SetKeyMapManager(
+        std::make_shared<keymap::KeyMapManager>(config));
+
+    session_peer->SetPendingZenzFeedbackComparison(
+        "あいうえお", "empty", "アイウエオ",
+        "space_revert_zenz_to_mozc", false);
+    ASSERT_TRUE(session_peer->pending_zenz_feedback_().pending);
+    ASSERT_EQ(session->context().state(), ImeContext::CONVERSION);
+
+    EXPECT_CALL(*converter, CommitSegmentValue(_, _, _))
+        .WillRepeatedly(Return(true));
+
+    command->Clear();
+    InsertCharacterString("。", ".", session, command);
+
+    ASSERT_TRUE(command->output().has_result());
+    EXPECT_EQ(command->output().result().value(), "あいうえお。");
+    EXPECT_EQ(session->context().state(), ImeContext::PRECOMPOSITION);
+
+    ASSERT_TRUE(session_peer->pending_zenz_feedback_().pending);
+    ASSERT_TRUE(
+        session_peer->pending_zenz_feedback_().has_final_committed_value);
+    EXPECT_EQ(session_peer->pending_zenz_feedback_().final_committed_key,
+              "あいうえお");
+    EXPECT_EQ(session_peer->pending_zenz_feedback_().final_committed_value,
+              "あいうえお");
+    EXPECT_TRUE(session_peer->zenz_feedback_store_().ListEntries().empty());
+  }
   void SetupVisibleZenzCancelFeedbackTest(
       Session* session,
       SessionTestPeer* session_peer,
@@ -3245,6 +3288,93 @@ void SetPendingRejectedZenzFeedbackForTest(SessionTestPeer* session_peer) {
 }
 #endif  // defined(_WIN32) || defined(__APPLE__)
 
+TEST_F(
+    SessionTest,
+    DirectCommitPunctuationAfterZenzSpaceRevertKeepsFeedbackUndoableByBackspace) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupPendingZenzSpaceRevertDirectCommitPunctuationTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(
+      SendSpecialKey(commands::KeyEvent::BACKSPACE, &session, &command));
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(
+    SessionTest,
+    DirectCommitPunctuationAfterZenzSpaceRevertKeepsFeedbackUndoableByCancelKey) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupPendingZenzSpaceRevertDirectCommitPunctuationTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl z", &session, &command));
+
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(
+    SessionTest,
+    DirectCommitPunctuationAfterZenzSpaceRevertConfirmsRejectionOnNextTextInput) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupPendingZenzSpaceRevertDirectCommitPunctuationTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("a", &session, &command));
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].key, "あいうえお");
+  EXPECT_EQ(entries[0].context_class, "empty");
+  EXPECT_EQ(entries[0].value, "アイウエオ");
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
 TEST_F(SessionTest, PendingRejectedZenzFeedbackIsNeutralWithoutFinalCommit) {
 #if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
