@@ -504,7 +504,9 @@ bool RubyWindow::BuildReadingText(
   }
 
   const commands::Output &output = command.output();
-  if (!output.live_conversion() || !output.has_preedit()) {
+  if ((!output.live_conversion() &&
+       !output.pre_live_conversion_reading()) ||
+      !output.has_preedit()) {
     return false;
   }
 

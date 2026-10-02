@@ -200,6 +200,24 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
     return true;
   }
 
+  if (command_.has_output() &&
+      command_.output().pre_live_conversion_reading()) {
+    candidate_window_->Hide();
+    cascading_window_->Hide();
+    infolist_window_->Hide();
+    has_candidate_rect_ = false;
+
+    const RendererStyleHandler::RubyWindowStyle ruby_style =
+        RendererStyleHandler::GetRubyWindowStyle();
+    if (ruby_style.enabled && ruby_window_->Update(command_) &&
+        AlignRubyWindow(nullptr)) {
+      ruby_window_->Show();
+    } else {
+      ruby_window_->Hide();
+    }
+    return true;
+  }
+
   ruby_window_->Hide();
 
   candidate_window_->SetCandidateWindow(command_.output().candidate_window());

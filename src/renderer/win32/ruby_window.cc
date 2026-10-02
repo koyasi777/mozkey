@@ -273,7 +273,8 @@ bool RubyWindow::BuildReadingText(
   }
 
   const commands::Output& output = command.output();
-  if (!output.live_conversion()) {
+  if (!output.live_conversion() &&
+      !output.pre_live_conversion_reading()) {
     return false;
   }
 

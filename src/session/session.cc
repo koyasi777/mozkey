@@ -852,6 +852,44 @@ size_t GetLiveConversionMinKeyLength(const config::Config& config) {
                  kMaxLiveConversionMinKeyLength));
 }
 
+bool ShouldExposePreLiveConversionReading(const ImeContext& context) {
+  const config::Config& config = context.GetConfig();
+  if (!config.use_live_conversion() ||
+      context.state() != ImeContext::COMPOSITION) {
+    return false;
+  }
+
+  if (context.composer().GetInputFieldType() == commands::Context::PASSWORD) {
+    return false;
+  }
+
+  const transliteration::TransliterationType input_mode =
+      context.composer().GetInputMode();
+  if (input_mode == transliteration::HALF_ASCII ||
+      input_mode == transliteration::FULL_ASCII) {
+    return false;
+  }
+
+  const size_t length = context.composer().GetLength();
+  if (length != context.composer().GetCursor()) {
+    return false;
+  }
+
+  const std::string key = context.composer().GetQueryForConversion();
+  const size_t configured_min_key_length =
+      GetLiveConversionMinKeyLength(config);
+
+  // This state exists only while the configured minimum length is the reason
+  // live conversion is being skipped.  If the same composition would still be
+  // skipped with the minimum supported value (1), do not expose the reading.
+  if (!ShouldSkipLiveConversionForCompositionKey(
+          key, configured_min_key_length)) {
+    return false;
+  }
+  return !ShouldSkipLiveConversionForCompositionKey(
+      key, kMinLiveConversionMinKeyLength);
+}
+
 uint32_t GetZenzLiveCorrectionDelayMsec(const config::Config& config) {
   if (!config.has_zenz_live_correction_delay_msec()) {
     return kDefaultZenzLiveCorrectionDelayMsec;
@@ -9245,6 +9283,10 @@ void Session::Output(commands::Command* command) {
         context_->composer(), command->mutable_output()->mutable_preedit());
   }
 
+  command->mutable_output()->set_pre_live_conversion_reading(
+      command->output().has_preedit() &&
+      ShouldExposePreLiveConversionReading(*context_));
+
   ObservePendingZenzFeedbackCommittedResult(*command, "output_result");
 }
 
@@ -9269,8 +9311,12 @@ void Session::OutputMode(commands::Command* command) const {
 
 void Session::OutputComposition(commands::Command* command) const {
   OutputMode(command);
+  commands::Output* output = command->mutable_output();
   context_->converter().FillPreedit(
-      context_->composer(), command->mutable_output()->mutable_preedit());
+      context_->composer(), output->mutable_preedit());
+  output->set_pre_live_conversion_reading(
+      output->has_preedit() &&
+      ShouldExposePreLiveConversionReading(*context_));
 }
 
 void Session::OutputKey(commands::Command* command) const {
