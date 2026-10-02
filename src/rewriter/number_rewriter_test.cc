@@ -1616,6 +1616,28 @@ void LearnNumberStyle(const ConversionRequest& request,
   rewriter.Finish(request, segments);
 }
 
+TEST_F(NumberRewriterTest,
+       NumberStyleLearningNotEnabledForReversibleExternalLearning) {
+  std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
+
+  ConversionRequest::Options options;
+  options.reversible_external_learning = true;
+  const ConversionRequest external_request =
+      ConversionRequestBuilder().SetOptions(std::move(options)).Build();
+
+  LearnNumberStyle(external_request, pos_matcher_, *rewriter);
+
+  Segments new_segments =
+      PrepareNumberSegments("2000", "2000", 3, pos_matcher_);
+  rewriter->Rewrite(default_request_, &new_segments);
+  ASSERT_EQ(new_segments.conversion_segments_size(), 1);
+  ASSERT_GT(new_segments.conversion_segment(0).candidates_size(), 3);
+
+  // The external reversible transaction must not leak its comma-separated
+  // number style into the global CharacterFormManager preference.
+  EXPECT_NE(new_segments.conversion_segment(0).candidate(3).value, "2,000");
+}
+
 TEST_F(NumberRewriterTest, NumberStyleLearningNotEnabledInIncognito) {
   std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
   commands::Request request;

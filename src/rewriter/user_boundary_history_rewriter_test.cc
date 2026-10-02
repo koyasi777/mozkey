@@ -103,6 +103,17 @@ class UserBoundaryHistoryRewriterTest
     return ConversionRequestBuilder().SetConfig(config_).Build();
   }
 
+  ConversionRequest CreateReversibleExternalConversionRequest() {
+    ConversionRequest::Options options;
+    options.request_type = ConversionRequest::CONVERSION;
+    options.enable_user_history_for_conversion = true;
+    options.reversible_external_learning = true;
+    return ConversionRequestBuilder()
+        .SetConfig(config_)
+        .SetOptions(options)
+        .Build();
+  }
+
   config::Config config_;
 };
 
@@ -450,6 +461,103 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoRewriteWhenAlreadyResized) {
         rewriter.CheckResizeSegmentsRequest(convreq, segments);
     EXPECT_FALSE(resize_request.has_value());
   }
+}
+
+TEST_F(UserBoundaryHistoryRewriterTest,
+       RevertExternalBoundaryLearningRemovesNewEntry) {
+  SetIncognito(false);
+  SetLearningLevel(config::Config::DEFAULT_HISTORY);
+
+  const ConversionRequest reversible_request =
+      CreateReversibleExternalConversionRequest();
+  const ConversionRequest probe_request = CreateConversionRequest();
+
+  UserBoundaryHistoryRewriter rewriter;
+  Segments learned = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
+  learned.set_resized(true);
+  learned.set_revert_id(1001);
+  rewriter.Finish(reversible_request, learned);
+
+  Segments probe = MakeSegments({"たんぽぽ"}, Segment::FREE);
+  auto resize_request =
+      rewriter.CheckResizeSegmentsRequest(probe_request, probe);
+  ASSERT_TRUE(resize_request.has_value());
+  EXPECT_THAT(resize_request->segment_sizes,
+              ElementsAre(2, 2, 0, 0, 0, 0, 0, 0));
+
+  rewriter.Revert(learned);
+
+  resize_request =
+      rewriter.CheckResizeSegmentsRequest(probe_request, probe);
+  EXPECT_FALSE(resize_request.has_value());
+}
+
+TEST_F(UserBoundaryHistoryRewriterTest,
+       RevertExternalBoundaryLearningRestoresPreviousEntry) {
+  SetIncognito(false);
+  SetLearningLevel(config::Config::DEFAULT_HISTORY);
+
+  const ConversionRequest normal_request = CreateConversionRequest();
+  const ConversionRequest reversible_request =
+      CreateReversibleExternalConversionRequest();
+
+  UserBoundaryHistoryRewriter rewriter;
+
+  Segments previous = MakeSegments({"た", "んぽぽ"}, Segment::FIXED_VALUE);
+  previous.set_resized(true);
+  rewriter.Finish(normal_request, previous);
+
+  Segments learned = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
+  learned.set_resized(true);
+  learned.set_revert_id(1002);
+  rewriter.Finish(reversible_request, learned);
+
+  Segments probe = MakeSegments({"たんぽぽ"}, Segment::FREE);
+  auto resize_request =
+      rewriter.CheckResizeSegmentsRequest(normal_request, probe);
+  ASSERT_TRUE(resize_request.has_value());
+  EXPECT_THAT(resize_request->segment_sizes,
+              ElementsAre(2, 2, 0, 0, 0, 0, 0, 0));
+
+  rewriter.Revert(learned);
+
+  resize_request =
+      rewriter.CheckResizeSegmentsRequest(normal_request, probe);
+  ASSERT_TRUE(resize_request.has_value());
+  EXPECT_THAT(resize_request->segment_sizes,
+              ElementsAre(1, 3, 0, 0, 0, 0, 0, 0));
+}
+
+TEST_F(UserBoundaryHistoryRewriterTest,
+       DiscardExternalBoundaryRevertKeepsLearning) {
+  SetIncognito(false);
+  SetLearningLevel(config::Config::DEFAULT_HISTORY);
+
+  const ConversionRequest normal_request = CreateConversionRequest();
+  const ConversionRequest reversible_request =
+      CreateReversibleExternalConversionRequest();
+
+  UserBoundaryHistoryRewriter rewriter;
+  Segments learned = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
+  learned.set_resized(true);
+  learned.set_revert_id(1003);
+  rewriter.Finish(reversible_request, learned);
+
+  Segments probe = MakeSegments({"たんぽぽ"}, Segment::FREE);
+  auto resize_request =
+      rewriter.CheckResizeSegmentsRequest(normal_request, probe);
+  ASSERT_TRUE(resize_request.has_value());
+  EXPECT_THAT(resize_request->segment_sizes,
+              ElementsAre(2, 2, 0, 0, 0, 0, 0, 0));
+
+  rewriter.DiscardRevert(learned);
+  rewriter.Revert(learned);
+
+  resize_request =
+      rewriter.CheckResizeSegmentsRequest(normal_request, probe);
+  ASSERT_TRUE(resize_request.has_value());
+  EXPECT_THAT(resize_request->segment_sizes,
+              ElementsAre(2, 2, 0, 0, 0, 0, 0, 0));
 }
 
 TEST_F(UserBoundaryHistoryRewriterTest, FailureOfSplitIsNotFatal) {

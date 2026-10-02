@@ -722,6 +722,46 @@ TEST(ZenzFeedbackStoreTest,
   EXPECT_EQ(entries[0].rejected_count, 1);
 }
 
+TEST(ZenzFeedbackStoreTest, AcceptedRollbackCancelsOnlyOneAcceptedObservation) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  ZenzFeedbackStore store;
+  store.RecordAccepted("k", "empty", "v");
+  store.RecordAccepted("k", "empty", "v");
+  store.RecordAcceptedRollback("k", "empty", "v", "undo_after_commit");
+
+  const ZenzFeedbackDecision decision = store.Decide("k", "empty", "v");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 0);
+  EXPECT_GT(decision.total_score, 0);
+}
+
+TEST(ZenzFeedbackStoreTest, AcceptedRollbackDoesNotCreateNegativeEvidence) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  ZenzFeedbackStore store;
+  store.RecordAccepted("k", "empty", "v");
+  store.RecordAcceptedRollback("k", "empty", "v", "backspace_after_commit");
+
+  const ZenzFeedbackDecision decision = store.Decide("k", "empty", "v");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kNeutral);
+  EXPECT_EQ(decision.accepted_count, 0);
+  EXPECT_EQ(decision.rejected_count, 0);
+  EXPECT_EQ(decision.total_score, 0);
+  EXPECT_TRUE(store.ListEntries().empty());
+
+  // A later real acceptance must not be consumed by an older rollback marker.
+  store.RecordAccepted("k", "empty", "v");
+  const ZenzFeedbackDecision accepted_again =
+      store.Decide("k", "empty", "v");
+  EXPECT_EQ(accepted_again.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(accepted_again.accepted_count, 1);
+  EXPECT_EQ(accepted_again.rejected_count, 0);
+}
+
 TEST(ZenzFeedbackStoreTest, DeleteEntryRemovesOnlyMatchingRawRecords) {
   ScopedUserProfileForZenzFeedbackStoreTest profile;
   ASSERT_TRUE(profile.ok());

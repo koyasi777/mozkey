@@ -161,6 +161,49 @@ TEST(FlatConcurrentCacheTest, ClearCache) {
   EXPECT_FALSE(cache.Lookup("c", &value));
 }
 
+TEST(FlatConcurrentCacheTest, EraseSingleEntry) {
+  TestCache cache(100);
+  cache.Insert("a", 1);
+  cache.Insert("b", 2);
+  cache.Insert("c", 3);
+
+  EXPECT_TRUE(cache.Erase("b"));
+  EXPECT_FALSE(cache.Erase("b"));
+  EXPECT_FALSE(cache.Erase("missing"));
+
+  int value = 0;
+  EXPECT_TRUE(cache.Lookup("a", &value));
+  EXPECT_EQ(value, 1);
+  EXPECT_FALSE(cache.Lookup("b", &value));
+  EXPECT_TRUE(cache.Lookup("c", &value));
+  EXPECT_EQ(value, 3);
+}
+
+TEST(FlatConcurrentCacheTest, EraseDestroysExactlyOneTrackedValue) {
+  InstanceCounter counter;
+  {
+    FlatConcurrentCache<int, TrackedObject, absl::Hash<int>, std::equal_to<int>,
+                        4>
+        cache(1);
+
+    cache.Insert(1, TrackedObject(100, &counter));
+    cache.Insert(2, TrackedObject(200, &counter));
+    cache.Insert(3, TrackedObject(300, &counter));
+    EXPECT_EQ(counter.active_instances(), 3);
+
+    EXPECT_TRUE(cache.Erase(2));
+    EXPECT_EQ(counter.active_instances(), 2);
+
+    TrackedObject value(0, nullptr);
+    EXPECT_TRUE(cache.Lookup(1, &value));
+    EXPECT_EQ(value.id(), 100);
+    EXPECT_TRUE(cache.Lookup(3, &value));
+    EXPECT_EQ(value.id(), 300);
+    EXPECT_FALSE(cache.Lookup(2, &value));
+  }
+  EXPECT_EQ(counter.active_instances(), 0);
+}
+
 TEST(FlatConcurrentCacheTest, ConcurrencyStressTest) {
   const int kNumThreads = 8;
   const int kOpsPerThread = 10000;

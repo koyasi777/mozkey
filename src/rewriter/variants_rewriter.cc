@@ -601,6 +601,13 @@ bool VariantsRewriter::GenerateAlternatives(
 
 void VariantsRewriter::Finish(const ConversionRequest& request,
                               const Segments& segments) {
+  if (request.options().reversible_external_learning) {
+    // Phase 2 external Zenz learning is a reversible user-history transaction.
+    // Character-form preference learning has no per-commit revert snapshot, so
+    // keep it outside this transaction.
+    return;
+  }
+
   if (request.config().history_learning_level() !=
       config::Config::DEFAULT_HISTORY) {
     MOZC_VLOG(2) << "history_learning_level is not DEFAULT_HISTORY";

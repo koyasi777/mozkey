@@ -33,6 +33,7 @@
 #define MOZC_ENGINE_SESSION_CONVERTER_INTERFACE_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -218,6 +219,33 @@ class EngineConverterInterface {
   virtual bool LearnExternalConversionSegments(
       absl::Span<const ExternalConversionSegment> segments,
       const commands::Context& context) {
+    return false;
+  }
+
+  // Applies the same external learning as the APIs above while retaining an
+  // opaque rollback handle. Zero means that no reversible learning was applied.
+  [[nodiscard]]
+  virtual uint64_t LearnExternalConversionResultReversibly(
+      absl::string_view key,
+      absl::string_view value,
+      const commands::Context& context) {
+    return 0;
+  }
+
+  [[nodiscard]]
+  virtual uint64_t LearnExternalConversionSegmentsReversibly(
+      absl::Span<const ExternalConversionSegment> segments,
+      const commands::Context& context) {
+    return 0;
+  }
+
+  // Rolls back or confirms one reversible external-learning operation.
+  // Revert must be invoked in reverse application order when several handles
+  // belong to one higher-level user transaction.
+  virtual bool RevertExternalConversionLearning(uint64_t revert_id) {
+    return false;
+  }
+  virtual bool ConfirmExternalConversionLearning(uint64_t revert_id) {
     return false;
   }
 

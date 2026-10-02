@@ -70,6 +70,10 @@ class PredictorInterface {
   // Reverts the last Finish operation.
   virtual void Revert(uint32_t revert_id) {}
 
+  // Discards only the rollback metadata for a confirmed Finish operation.
+  // Learned history itself remains unchanged.
+  virtual void DiscardRevert(uint32_t revert_id) {}
+
   // Syncs user-modified context.
   virtual void CommitContext(const ConversionRequest& request) const {}
 

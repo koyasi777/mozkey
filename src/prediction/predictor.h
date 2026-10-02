@@ -74,6 +74,9 @@ class Predictor : public PredictorInterface {
   // Reverts the last Finish operation.
   void Revert(uint32_t revert_id) override;
 
+  // Discards only rollback metadata for a confirmed Finish operation.
+  void DiscardRevert(uint32_t revert_id) override;
+
   // Clears all history data of UserHistoryPredictor.
   bool ClearAllHistory() override;
 

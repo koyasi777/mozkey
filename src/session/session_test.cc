@@ -96,6 +96,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(MaybeApplyZenzFeedbackLiveCorrection);
   PEER_METHOD(ApplyZenzLiveCorrectionResult);
   PEER_METHOD(SetPendingZenzFeedbackAccepted);
+  PEER_METHOD(ApplyPendingZenzAcceptedMozcHistoryLearning);
   PEER_METHOD(SetPendingZenzFeedbackComparison);
   PEER_METHOD(SetPendingZenzFeedbackRejected);
   PEER_METHOD(ObservePendingZenzFeedbackCommittedResult);
@@ -105,6 +106,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(MaybeLearnZenzReverseSegmentsToMozcHistory);
   PEER_METHOD(MaybeLearnZenzProjectedSegmentsToMozcHistory);
   PEER_METHOD(HandlePendingZenzFeedbackForKeyEvent);
+  PEER_METHOD(HandlePendingZenzFeedbackForSessionCommand);
   PEER_METHOD(SetPendingDirectCommitLearningFromCommittedResult);
   PEER_METHOD(ConfirmPendingDirectCommitLearning);
   PEER_METHOD(DiscardPendingDirectCommitLearning);
@@ -823,6 +825,49 @@ class SessionTest : public testing::TestWithTempUserProfile {
     session->SetConfig(config);
   }
 
+  void SetupPendingZenzSpaceRevertDirectCommitPunctuationTest(
+      Session* session,
+      SessionTestPeer* session_peer,
+      MockConverter* converter,
+      commands::Command* command) {
+    InitSessionToConversionWithAiueo(session, converter);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_session_keymap(config::Config::MSIME);
+    config.set_use_zenz_feedback_learning(true);
+    config.set_use_auto_conversion(false);
+    config.set_use_direct_commit(true);
+    config.set_direct_commit_key(config::Config::DIRECT_COMMIT_KUTEN);
+    session->SetConfig(config);
+    session->SetKeyMapManager(
+        std::make_shared<keymap::KeyMapManager>(config));
+
+    session_peer->SetPendingZenzFeedbackComparison(
+        "あいうえお", "empty", "アイウエオ",
+        "space_revert_zenz_to_mozc", false);
+    ASSERT_TRUE(session_peer->pending_zenz_feedback_().pending);
+    ASSERT_EQ(session->context().state(), ImeContext::CONVERSION);
+
+    EXPECT_CALL(*converter, CommitSegmentValue(_, _, _))
+        .WillRepeatedly(Return(true));
+
+    command->Clear();
+    InsertCharacterString("。", ".", session, command);
+
+    ASSERT_TRUE(command->output().has_result());
+    EXPECT_EQ(command->output().result().value(), "あいうえお。");
+    EXPECT_EQ(session->context().state(), ImeContext::PRECOMPOSITION);
+
+    ASSERT_TRUE(session_peer->pending_zenz_feedback_().pending);
+    ASSERT_TRUE(
+        session_peer->pending_zenz_feedback_().has_final_committed_value);
+    EXPECT_EQ(session_peer->pending_zenz_feedback_().final_committed_key,
+              "あいうえお");
+    EXPECT_EQ(session_peer->pending_zenz_feedback_().final_committed_value,
+              "あいうえお");
+    EXPECT_TRUE(session_peer->zenz_feedback_store_().ListEntries().empty());
+  }
   void SetupVisibleZenzCancelFeedbackTest(
       Session* session,
       SessionTestPeer* session_peer,
@@ -1411,6 +1456,78 @@ TEST_F(SessionTest, PendingZenzFeedbackStoresContextClassOnly) {
 }
 
 
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackPersistsImmediatelyAndBackspaceRollsBack) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 0);
+
+  commands::Command command;
+  SendSpecialKey(commands::KeyEvent::BACKSPACE, &session, &command);
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  decision = session_peer.zenz_feedback_store_().Decide(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kNeutral);
+  EXPECT_EQ(decision.accepted_count, 0);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest, PendingAcceptedZenzFeedbackResetContextKeepsAcceptance) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  session_peer.HandlePendingZenzFeedbackForSessionCommand(
+      commands::SessionCommand::RESET_CONTEXT);
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  const ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+
 class RecordingExternalLearningConverter : public MockConverter {
  public:
   bool LearnExternalConversionResult(
@@ -1456,6 +1573,41 @@ class RecordingExternalLearningConverter : public MockConverter {
     learned_segment_boundary_resized.push_back(
         std::move(boundary_resized));
     return learn_segments_result;
+  }
+
+  bool LearnExternalConversionResultReversibly(
+      const ConversionRequest& request,
+      absl::string_view key,
+      absl::string_view value,
+      Segments* revert_segments) const override {
+    if (!LearnExternalConversionResult(request, key, value) ||
+        revert_segments == nullptr) {
+      return false;
+    }
+    revert_segments->Clear();
+    revert_segments->set_revert_id(next_revert_id++);
+    return true;
+  }
+
+  bool LearnExternalConversionSegmentsReversibly(
+      const ConversionRequest& request,
+      absl::Span<const ExternalConversionSegment> segments,
+      Segments* revert_segments) const override {
+    if (!LearnExternalConversionSegments(request, segments) ||
+        revert_segments == nullptr) {
+      return false;
+    }
+    revert_segments->Clear();
+    revert_segments->set_revert_id(next_revert_id++);
+    return true;
+  }
+
+  void RevertConversion(Segments* segments) const override {
+    ++revert_call_count;
+    if (segments != nullptr) {
+      reverted_ids.push_back(segments->revert_id());
+      segments->set_revert_id(0);
+    }
   }
 
   bool ResolveExternalConversionSegments(
@@ -1510,6 +1662,9 @@ class RecordingExternalLearningConverter : public MockConverter {
   mutable int learn_segments_call_count = 0;
   mutable int resolve_segments_call_count = 0;
   mutable int evaluate_segments_call_count = 0;
+  mutable int revert_call_count = 0;
+  mutable uint64_t next_revert_id = 1001;
+  mutable std::vector<uint64_t> reverted_ids;
   mutable ConversionRequest::RequestType last_request_type =
       ConversionRequest::CONVERSION;
   mutable ConversionRequest::RequestType last_resolve_request_type =
@@ -1539,6 +1694,133 @@ class RecordingExternalLearningConverter : public MockConverter {
   std::vector<std::vector<ExternalConversionSegment>>
       evaluated_segments_results;
 };
+
+std::shared_ptr<RecordingExternalLearningConverter>
+CreateRecordingExternalLearningConverter(MockEngine* mock_engine);
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackImmediateMozcHistoryRollback) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(converter->learn_call_count, 0);
+
+  session_peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+
+  ASSERT_TRUE(
+      session_peer.pending_zenz_feedback_().mozc_history_learning_applied);
+  ASSERT_EQ(
+      session_peer.pending_zenz_feedback_().mozc_history_revert_ids.size(), 1);
+  EXPECT_EQ(converter->learn_call_count, 1);
+  const uint64_t revert_id =
+      session_peer.pending_zenz_feedback_().mozc_history_revert_ids[0];
+
+  session_peer.DiscardPendingZenzFeedback("phase2_test_rollback");
+
+  EXPECT_EQ(converter->revert_call_count, 1);
+  ASSERT_EQ(converter->reverted_ids.size(), 1);
+  EXPECT_EQ(converter->reverted_ids[0], revert_id);
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kNeutral);
+  EXPECT_EQ(decision.accepted_count, 0);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackImmediateMozcHistoryConfirmKeepsLearning) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  session_peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+
+  ASSERT_EQ(converter->learn_call_count, 1);
+  session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_EQ(converter->learn_call_count, 1);
+  EXPECT_EQ(converter->revert_call_count, 0);
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest,
+       PendingAcceptedZenzFeedbackUsesSingleMozcHistoryRollbackHandle) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  auto& pending = session_peer.pending_zenz_feedback_();
+  pending.reverse_projected_learning_segments.clear();
+  pending.reverse_learning_segments = {
+      {"てんてき", "天敵"}, {"かれ", "彼"}};
+
+  session_peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+
+  // Full-sequence fallback claims the only reversible FinishConversion slot.
+  // Additional reverse-segment generalization fails closed during this rollback
+  // window instead of creating a second non-composable rewriter revert.
+  ASSERT_EQ(pending.mozc_history_revert_ids.size(), 1);
+  const uint64_t applied_id = pending.mozc_history_revert_ids[0];
+
+  session_peer.DiscardPendingZenzFeedback("phase2_test_single_handle");
+
+  ASSERT_EQ(converter->reverted_ids.size(), 1);
+  EXPECT_EQ(converter->reverted_ids[0], applied_id);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
 
 std::shared_ptr<RecordingExternalLearningConverter>
 CreateRecordingExternalLearningConverter(MockEngine* mock_engine) {
@@ -3006,6 +3288,93 @@ void SetPendingRejectedZenzFeedbackForTest(SessionTestPeer* session_peer) {
 }
 #endif  // defined(_WIN32) || defined(__APPLE__)
 
+TEST_F(
+    SessionTest,
+    DirectCommitPunctuationAfterZenzSpaceRevertKeepsFeedbackUndoableByBackspace) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupPendingZenzSpaceRevertDirectCommitPunctuationTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(
+      SendSpecialKey(commands::KeyEvent::BACKSPACE, &session, &command));
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(
+    SessionTest,
+    DirectCommitPunctuationAfterZenzSpaceRevertKeepsFeedbackUndoableByCancelKey) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupPendingZenzSpaceRevertDirectCommitPunctuationTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("Ctrl z", &session, &command));
+
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(
+    SessionTest,
+    DirectCommitPunctuationAfterZenzSpaceRevertConfirmsRejectionOnNextTextInput) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  commands::Command command;
+  SetupPendingZenzSpaceRevertDirectCommitPunctuationTest(
+      &session, &session_peer, converter.get(), &command);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("a", &session, &command));
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].key, "あいうえお");
+  EXPECT_EQ(entries[0].context_class, "empty");
+  EXPECT_EQ(entries[0].value, "アイウエオ");
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
 TEST_F(SessionTest, PendingRejectedZenzFeedbackIsNeutralWithoutFinalCommit) {
 #if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
@@ -3096,6 +3465,56 @@ TEST_F(SessionTest, PendingRejectedZenzFeedbackIsRecordedWhenFinalCommitDiffers)
 
   session_peer.ObservePendingZenzFeedbackCommittedResult(command, "test");
   session_peer.ConfirmPendingZenzFeedback();
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].key, "かれはてんてきです");
+  EXPECT_EQ(entries[0].context_class, "empty");
+  EXPECT_EQ(entries[0].value, "彼は天敵です");
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(
+    SessionTest,
+    PendingRejectedZenzFeedbackIsConfirmedByPassThroughEnterAfterFinalCommit) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+  SetPendingRejectedZenzFeedbackForTest(&session_peer);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  commands::Command committed_command;
+  committed_command.mutable_output()->mutable_result()->set_type(
+      commands::Result::STRING);
+  committed_command.mutable_output()->mutable_result()->set_key(
+      "かれはてんてきです");
+  committed_command.mutable_output()->mutable_result()->set_value(
+      "彼は点滴です");
+
+  session_peer.ObservePendingZenzFeedbackCommittedResult(
+      committed_command, "test");
+  ASSERT_TRUE(
+      session_peer.pending_zenz_feedback_().has_final_committed_value);
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  commands::Command enter_command;
+  ASSERT_TRUE(SendSpecialKey(
+      commands::KeyEvent::ENTER, &session, &enter_command));
 
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
 
@@ -8602,6 +9021,30 @@ TEST_F(SessionTest, PendingDirectCommitLearningIsDiscardedBySessionCommand) {
 
   session_peer.HandlePendingDirectCommitLearningForSessionCommand(
       commands::SessionCommand::REVERT);
+
+  EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
+}
+
+TEST_F(SessionTest,
+       PendingDirectCommitLearningResetContextClosesRollbackWindow) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  commands::Command committed_command;
+  committed_command.mutable_output()->mutable_result()->set_key("あめ");
+  committed_command.mutable_output()->mutable_result()->set_value("雨");
+
+  EXPECT_TRUE(session_peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed_command, "test_direct_commit"));
+  ASSERT_TRUE(session_peer.pending_direct_commit_learning_().pending);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  session_peer.HandlePendingDirectCommitLearningForSessionCommand(
+      commands::SessionCommand::RESET_CONTEXT);
 
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
 }

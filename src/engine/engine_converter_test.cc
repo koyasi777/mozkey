@@ -161,6 +161,11 @@ class EngineConverterTest : public testing::TestWithTempUserProfile {
     return converter.segment_index_;
   }
 
+  static size_t GetExternalLearningRevertHandleCount(
+      const EngineConverter& converter) {
+    return converter.external_learning_revert_segments_.size();
+  }
+
   static bool IsCandidateListVisible(const EngineConverter& converter) {
     return converter.candidate_list_visible_;
   }
@@ -428,6 +433,41 @@ class EngineConverterTest : public testing::TestWithTempUserProfile {
 
 #define EXPECT_SELECTED_CANDIDATE_INDICES_EQ(converter, indices) \
   EXPECT_PRED_FORMAT2(ExpectSelectedCandidateIndices, converter, indices);
+
+TEST_F(EngineConverterTest,
+       ConfirmExternalLearningDiscardsRollbackStateAndCloneDoesNotOwnHandle) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  EXPECT_CALL(*mock_converter,
+              LearnExternalConversionResultReversibly(_, "あめ", "雨", _))
+      .WillOnce([](const ConversionRequest&, absl::string_view,
+                   absl::string_view, Segments* revert_segments) {
+        revert_segments->set_revert_id(12345);
+        return true;
+      });
+
+  const uint64_t revert_id =
+      converter.LearnExternalConversionResultReversibly(
+          "あめ", "雨", Context::default_instance());
+  ASSERT_EQ(revert_id, 12345);
+  EXPECT_EQ(GetExternalLearningRevertHandleCount(converter), 1);
+
+  std::unique_ptr<EngineConverter> cloned(converter.Clone());
+  EXPECT_EQ(GetExternalLearningRevertHandleCount(*cloned), 0);
+  EXPECT_FALSE(cloned->ConfirmExternalConversionLearning(revert_id));
+
+  EXPECT_CALL(*mock_converter, DiscardConversionRevertState(_))
+      .WillOnce([](Segments* segments) {
+        ASSERT_NE(segments, nullptr);
+        EXPECT_EQ(segments->revert_id(), 12345);
+        segments->set_revert_id(0);
+      });
+
+  EXPECT_TRUE(converter.ConfirmExternalConversionLearning(revert_id));
+  EXPECT_EQ(GetExternalLearningRevertHandleCount(converter), 0);
+  EXPECT_FALSE(converter.ConfirmExternalConversionLearning(revert_id));
+}
 
 TEST_F(EngineConverterTest, Convert) {
   auto mock_converter = std::make_shared<MockConverter>();

@@ -145,6 +145,12 @@ class MergerRewriter : public RewriterInterface {
     }
   }
 
+  void DiscardRevert(const Segments& segments) override {
+    for (const std::unique_ptr<RewriterInterface>& rewriter : rewriters_) {
+      rewriter->DiscardRevert(segments);
+    }
+  }
+
   bool ClearHistoryEntry(const Segments& segments, size_t segment_index,
                          int candidate_index) override {
     bool result = false;

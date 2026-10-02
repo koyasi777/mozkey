@@ -336,7 +336,14 @@ class RecordingFinishRewriter : public RewriterInterface {
     last_resized = segments.resized();
   }
 
+  void DiscardRevert(const Segments& segments) override {
+    ++discard_revert_count;
+    last_discard_revert_id = segments.revert_id();
+  }
+
   int finish_count = 0;
+  int discard_revert_count = 0;
+  uint64_t last_discard_revert_id = 0;
   bool last_resized = false;
 };
 
@@ -1523,6 +1530,74 @@ TEST_F(ConverterTest, LearnExternalConversionSegmentsMarksNativeResegmentation) 
   ASSERT_TRUE(converter->LearnExternalConversionSegments(request, segments));
   ASSERT_EQ(recording_rewriter->finish_count, 1);
   EXPECT_TRUE(recording_rewriter->last_resized);
+}
+
+TEST_F(ConverterTest,
+       LearnExternalConversionSegmentsReversiblyReturnsRevertState) {
+  auto rewriter = std::make_unique<RecordingFinishRewriter>();
+  std::unique_ptr<Converter> converter =
+      CreateConverter(std::move(rewriter), STUB_PREDICTOR);
+
+  config::Config config;
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetConfig(config)
+          .SetOptions(std::move(options))
+          .SetKey("あいう")
+          .Build();
+
+  const std::vector<ExternalConversionSegment> segments = {
+      {"あ", "あ", false, false},
+      {"いう", "いう", true, false}};
+
+  Segments revert_segments;
+  ASSERT_TRUE(converter->LearnExternalConversionSegmentsReversibly(
+      request, segments, &revert_segments));
+  EXPECT_NE(revert_segments.revert_id(), 0);
+
+  converter->RevertConversion(&revert_segments);
+  EXPECT_EQ(revert_segments.revert_id(), 0);
+}
+
+TEST_F(ConverterTest,
+       DiscardExternalConversionRevertStateConsumesRevertMetadata) {
+  auto rewriter = std::make_unique<RecordingFinishRewriter>();
+  RecordingFinishRewriter* recording_rewriter = rewriter.get();
+  std::unique_ptr<Converter> converter =
+      CreateConverter(std::move(rewriter), STUB_PREDICTOR);
+
+  config::Config config;
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  options.reversible_external_learning = true;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetConfig(config)
+          .SetOptions(std::move(options))
+          .SetKey("あいう")
+          .Build();
+
+  const std::vector<ExternalConversionSegment> segments = {
+      {"あ", "あ", false, false},
+      {"いう", "いう", true, false}};
+
+  Segments revert_segments;
+  ASSERT_TRUE(converter->LearnExternalConversionSegmentsReversibly(
+      request, segments, &revert_segments));
+  const uint64_t revert_id = revert_segments.revert_id();
+  ASSERT_NE(revert_id, 0);
+
+  converter->DiscardConversionRevertState(&revert_segments);
+
+  EXPECT_EQ(recording_rewriter->discard_revert_count, 1);
+  EXPECT_EQ(recording_rewriter->last_discard_revert_id, revert_id);
+  EXPECT_EQ(revert_segments.revert_id(), 0);
 }
 
 TEST_F(ConverterTest,

@@ -879,6 +879,131 @@ bool EngineConverter::LearnExternalConversionSegments(
       conversion_request, segments);
 }
 
+uint64_t EngineConverter::LearnExternalConversionResultReversibly(
+    absl::string_view key,
+    absl::string_view value,
+    const commands::Context& context) {
+  if (key.empty() || value.empty() ||
+      external_learning_revert_segments_.size() >=
+          kMaxExternalLearningRevertEntries) {
+    return 0;
+  }
+
+  DCHECK(request_);
+  DCHECK(config_);
+  if (!conversion_preferences_.use_history) {
+    return 0;
+  }
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  options.reversible_external_learning = true;
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder()
+          .SetRequestView(*request_)
+          .SetContextView(context)
+          .SetConfigView(*config_)
+          .SetOptions(std::move(options))
+          .SetKey(key)
+          .Build();
+
+  Segments revert_segments;
+  if (!converter_->LearnExternalConversionResultReversibly(
+          conversion_request, key, value, &revert_segments)) {
+    return 0;
+  }
+  const uint64_t revert_id = revert_segments.revert_id();
+  if (revert_id == 0) {
+    LOG(ERROR) << "Reversible external learning returned no revert_id";
+    return 0;
+  }
+  external_learning_revert_segments_.push_back(revert_segments);
+  return revert_id;
+}
+
+uint64_t EngineConverter::LearnExternalConversionSegmentsReversibly(
+    absl::Span<const ExternalConversionSegment> segments,
+    const commands::Context& context) {
+  if (segments.empty() ||
+      external_learning_revert_segments_.size() >=
+          kMaxExternalLearningRevertEntries) {
+    return 0;
+  }
+
+  DCHECK(request_);
+  DCHECK(config_);
+  if (!conversion_preferences_.use_history) {
+    return 0;
+  }
+
+  std::string full_key;
+  for (const ExternalConversionSegment& segment : segments) {
+    if (segment.key.empty() || segment.value.empty()) {
+      return 0;
+    }
+    absl::StrAppend(&full_key, segment.key);
+  }
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  options.reversible_external_learning = true;
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder()
+          .SetRequestView(*request_)
+          .SetContextView(context)
+          .SetConfigView(*config_)
+          .SetOptions(std::move(options))
+          .SetKey(full_key)
+          .Build();
+
+  Segments revert_segments;
+  if (!converter_->LearnExternalConversionSegmentsReversibly(
+          conversion_request, segments, &revert_segments)) {
+    return 0;
+  }
+  const uint64_t revert_id = revert_segments.revert_id();
+  if (revert_id == 0) {
+    LOG(ERROR) << "Reversible external segment learning returned no revert_id";
+    return 0;
+  }
+  external_learning_revert_segments_.push_back(revert_segments);
+  return revert_id;
+}
+
+bool EngineConverter::RevertExternalConversionLearning(uint64_t revert_id) {
+  const auto it = std::find_if(
+      external_learning_revert_segments_.begin(),
+      external_learning_revert_segments_.end(),
+      [revert_id](const Segments& segments) {
+        return segments.revert_id() == revert_id;
+      });
+  if (it == external_learning_revert_segments_.end()) {
+    return false;
+  }
+
+  converter_->RevertConversion(&*it);
+  external_learning_revert_segments_.erase(it);
+  return true;
+}
+
+bool EngineConverter::ConfirmExternalConversionLearning(uint64_t revert_id) {
+  const auto it = std::find_if(
+      external_learning_revert_segments_.begin(),
+      external_learning_revert_segments_.end(),
+      [revert_id](const Segments& segments) {
+        return segments.revert_id() == revert_id;
+      });
+  if (it == external_learning_revert_segments_.end()) {
+    return false;
+  }
+
+  converter_->DiscardConversionRevertState(&*it);
+  external_learning_revert_segments_.erase(it);
+  return true;
+}
+
 bool EngineConverter::ResolveExternalConversionSegments(
     absl::string_view key, absl::string_view value,
     const commands::Context& context,
@@ -1620,6 +1745,10 @@ EngineConverter* EngineConverter::Clone() const {
   EngineConverter* engine_converter =
       new EngineConverter(converter_, request_, config_);
   *engine_converter = *this;
+
+  // Reversible external-learning handles are transaction ownership tokens, not
+  // ordinary converter state. Snapshot clones must never duplicate ownership.
+  engine_converter->external_learning_revert_segments_.clear();
 
   if (engine_converter->CheckState(SUGGESTION | PREDICTION | CONVERSION)) {
     // UpdateCandidateList() is not simple setter and it uses some members.

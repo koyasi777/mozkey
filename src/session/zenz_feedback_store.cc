@@ -436,7 +436,9 @@ struct ParsedFeedbackRecord {
 };
 
 bool IsSafeFeedbackRecord(const ParsedFeedbackRecord& record) {
-  if (record.action != "accepted" && record.action != "rejected") {
+  if (record.action != "accepted" &&
+      record.action != "accepted_rollback" &&
+      record.action != "rejected") {
     return false;
   }
 
@@ -481,7 +483,8 @@ bool ParseFeedbackRecord(const std::vector<std::string>& fields,
   }
 
   // v2:
-  //   v2  accepted|rejected  key  context_class  value  reason
+  //   v2  accepted|accepted_rollback|rejected
+  //       key  context_class  value  reason
   //
   // The key/value fields are full-sequence reading/correction pairs.  The TSV
   // intentionally has no columns for segment-local evidence or raw left
@@ -571,6 +574,15 @@ int RejectWeightForReason(absl::string_view reason) {
 void AddAccepted(Counts* c) {
   ++c->accepted;
   c->positive_score += kAcceptedFeedbackWeight;
+}
+
+void RollbackAccepted(Counts* c) {
+  if (c->accepted <= 0) {
+    return;
+  }
+  --c->accepted;
+  c->positive_score =
+      std::max(0, c->positive_score - kAcceptedFeedbackWeight);
 }
 
 void AddRejected(absl::string_view reason, Counts* c) {
@@ -1047,8 +1059,21 @@ std::map<FeedbackKey, Counts> LoadCounts() {
 
     if (record.action == "accepted") {
       AddAccepted(&c);
+    } else if (record.action == "accepted_rollback") {
+      RollbackAccepted(&c);
     } else if (record.action == "rejected") {
       AddRejected(record.reason, &c);
+    }
+  }
+
+  // A fully compensated accepted observation has no remaining learning signal.
+  // Drop the zero-count key so ListEntries() does not expose a ghost neutral
+  // entry while Decide() still behaves as if no record existed.
+  for (auto it = counts.begin(); it != counts.end();) {
+    if (it->second.accepted == 0 && it->second.rejected == 0) {
+      it = counts.erase(it);
+    } else {
+      ++it;
     }
   }
 
@@ -1621,6 +1646,16 @@ void ZenzFeedbackStore::RecordAccepted(
   // The caller is responsible for passing the complete Zenz reading/correction
   // pair.  This store must not synthesize or persist segment-local derivatives.
   AppendRecord("accepted", key, context_class, value, "");
+}
+
+void ZenzFeedbackStore::RecordAcceptedRollback(
+    absl::string_view key,
+    absl::string_view context_class,
+    absl::string_view value,
+    absl::string_view reason) {
+  // This cancels positive evidence only. It must never be interpreted as a
+  // rejected Zenz observation.
+  AppendRecord("accepted_rollback", key, context_class, value, reason);
 }
 
 void ZenzFeedbackStore::RecordRejected(

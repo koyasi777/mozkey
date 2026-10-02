@@ -161,6 +161,14 @@ class ZenzFeedbackStore {
                       absl::string_view context_class,
                       absl::string_view value);
 
+  // Compensates one previously recorded accepted observation for the same
+  // full-sequence entry. This is an undo marker, not rejected feedback: it must
+  // not contribute negative score or auto-block evidence.
+  void RecordAcceptedRollback(absl::string_view key,
+                              absl::string_view context_class,
+                              absl::string_view value,
+                              absl::string_view reason);
+
   // Records one rejected full-sequence Zenz correction.  Ordinary rejects are
   // later interpreted as ranking signals; they are not segment-local negatives.
   void RecordRejected(absl::string_view key,

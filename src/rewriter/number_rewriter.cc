@@ -926,6 +926,13 @@ void NumberRewriter::RerankCandidates(
 
 void NumberRewriter::Finish(const ConversionRequest& request,
                             const Segments& segments) {
+  if (request.options().reversible_external_learning) {
+    // Phase 2 external Zenz learning is a reversible user-history transaction.
+    // Number style is stored as a global CharacterFormManager preference and
+    // has no per-commit rollback snapshot, so keep it outside this transaction.
+    return;
+  }
+
   if (request.incognito_mode()) {
     MOZC_VLOG(2) << "incognito_mode";
     return;
