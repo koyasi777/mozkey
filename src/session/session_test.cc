@@ -4289,6 +4289,55 @@ TEST_F(SessionTest,
 }
 
 TEST_F(SessionTest,
+       ZenzFeedbackFastPathDoesNotApplyValueThatMatchesMozcAfterAdoption) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzLiveCorrectionWithFeedbackLearning(&session);
+
+  // The learned value differs from the Mozc baseline before adoption, so the
+  // ordinary same_as_mozc validator cannot reject it. Orthography protection
+  // repairs "Tokyo" back to the existing Mozc surface "東京".
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "とうきょうに", "empty", "Tokyoに");
+  ASSERT_FALSE(session_peer.zenz_feedback_store_().ListEntries().empty());
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "とうきょうに";
+  session_peer.live_conversion_value_() = "東京に";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("とうきょう");
+  segment->set_value("東京");
+  segment->set_value_length(Util::CharsLen("東京"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("に");
+  segment->set_value("に");
+  segment->set_value_length(Util::CharsLen("に"));
+
+  commands::Command command;
+  EXPECT_FALSE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
+
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(command.output().has_preedit());
+  EXPECT_TRUE(session_peer.zenz_live_key_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_value_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_mozc_value_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_context_class_().empty());
+}
+TEST_F(SessionTest,
        ZenzFeedbackFastPathDoesNotPromoteSensitiveLikeFeedback) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -7347,6 +7396,52 @@ TEST_F(SessionTest,
   EXPECT_EQ(command.output().zenz_live_correction_debug(), "same_as_mozc");
 }
 
+TEST_F(SessionTest, ZenzPostAdoptionSameAsMozcIsSuppressed) {
+  MockEngine engine;
+  CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_live_correction(true);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+
+  // Build only the state consumed by ApplyZenzLiveCorrectionResult(). This
+  // keeps the regression focused on the post-adoption no-op boundary rather
+  // than coupling it to live-conversion scheduling or deferred presentation.
+  auto& pending = session_peer.pending_zenz_live_();
+  pending.pending = true;
+  pending.key = "とうきょうに";
+  pending.mozc_value = "東京に";
+  pending.baseline_segments = {
+      {"とうきょう", "東京"},
+      {"に", "に"},
+  };
+
+  // Raw Zenz is different, so the existing pre-adoption same_as_mozc check
+  // accepts it. Per-segment orthography adoption then repairs "Tokyo" back to
+  // the Mozc baseline "東京", making the final candidate an exact no-op.
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "Tokyoに";
+
+  commands::Command command;
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "same_as_mozc_after_adoption");
+  EXPECT_FALSE(session_peer.pending_zenz_live_().pending);
+  EXPECT_TRUE(session_peer.zenz_live_key_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_value_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_mozc_value_().empty());
+}
 TEST_F(SessionTest, LiveConversionHonorsRaisedMinKeyLength) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

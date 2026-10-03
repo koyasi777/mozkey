@@ -6210,6 +6210,23 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
 
     const std::string adopted_feedback_value = adoption.value;
 
+    // Adoption may safely repair a learned Zenz candidate back to the exact
+    // normal Mozc surface. Such a result has no presentation value and must not
+    // create visible Zenz state. Keep scanning in case a later feedback
+    // candidate still provides a meaningful correction.
+    if (adopted_feedback_value == live_conversion_value_) {
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz-feedback] fast path candidate skipped "
+          "reason=same_as_mozc_after_adoption ",
+          ZenzRedactedTextStats("key", live_conversion_key_),
+          " ", ZenzRedactedTextStats("value", adopted_feedback_value),
+          " context_class=", context_class,
+          " adoption=", adoption.reason,
+          " accepted_count=", feedback_candidate.accepted_count,
+          " rejected_count=", feedback_candidate.rejected_count));
+      continue;
+    }
+
     ++zenz_live_generation_;
     pending_zenz_live_ = PendingZenzLiveCorrection();
 
@@ -6932,6 +6949,23 @@ bool Session::ApplyZenzLiveCorrectionResult(
   }
 
   zenz_value = adoption.value;
+
+  // Validation already rejects a raw Zenz value that is identical to Mozc, but
+  // adoption can repair an initially different candidate back to the exact
+  // baseline surface. Treat that final no-op exactly like same_as_mozc: do not
+  // expose it as a Zenz correction and do not feed it into feedback learning.
+  if (zenz_value == pending_zenz_live_.mozc_value) {
+    ZenzDebugOutput(absl::StrCat(
+        "[zenz] adoption produced no-op "
+        "reason=same_as_mozc_after_adoption ",
+        ZenzRedactedTextStats("value", zenz_value),
+        " context_class=", context_class,
+        " adoption=", adoption.reason));
+
+    CancelPendingZenzLiveCorrection();
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, "same_as_mozc_after_adoption");
+  }
 
   const ZenzTextPrivacyDecision adopted_value_privacy =
       EvaluateZenzLiveValuePrivacy(zenz_value);
