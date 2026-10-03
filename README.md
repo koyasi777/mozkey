@@ -82,6 +82,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 感嘆詞・口語評価語・くだけた挨拶の入力途中ではライブ変換のちらつきを抑えつつ、完成した `うっそ`、`くっそ`、`やっば`、`すっげぇ`、`めっちゃ`、`ちっす`、`ちょりっす`、`ほえ～`、`ほぇ～`、`ほっほーん` などは生成辞書候補として自然なかな表記を救出
 - 確定済みの左文脈や直前の文節、限定的な右文脈を参照し、`mainにマージしました`、`githubには`、`彼になった`、`彼なのか`、`2名しかいない`、`追記したい`、`山梨県立美術館`、`滋賀方面` のような文脈で、助詞・複合機能語・名詞相当の左文脈に続く叙述・疑問の機能語列・機能表現・接尾的な語構成・地名接尾構成が同音漢字候補に負ける挙動を抑制
 - キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
+- 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには現在のキー設定に応じた操作キーを表示
 - 複数コマンドは `Commit|IMEOff` のような形式で保存され、設定画面では `Commit → IMEOff` のように編集可能
 - MS-IME 風キー設定では、確定済み文字列を選択した状態で Space を押すと再変換し、未選択時は従来どおり空白を入力
 - Windows 版で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を個別キーとして設定画面から割り当て可能
@@ -440,6 +441,22 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 コマンド列は左から右へ順に実行されます。途中で入力状態が変わった場合、後続コマンドはその時点の状態に合わせて解決されます。たとえば `Convert → ConvertNext` では、まず未変換状態から変換状態へ入り、その後に次候補へ移動します。
 
 設定ファイル上では、複数コマンドは `Commit|IMEOff` や `Convert|ConvertNext` のように `|` 区切りで保存されます。設定画面では `Commit → IMEOff` のように表示され、コマンドの追加、削除、並べ替えができます。
+
+### 候補の履歴削除・非表示
+
+変換中または予測候補の表示中に `DeleteSelectedCandidate` を実行すると、選択中の候補を履歴から削除するか、候補一覧から非表示にできます。標準キー設定では Prediction / Conversion の `Ctrl+Delete` にこの操作を割り当てています。
+
+操作時は、まず選択候補に対応するユーザー履歴の削除を試みます。履歴削除に成功した場合はそこで処理を終え、候補を抑制単語として登録しません。履歴削除の対象ではなく、それでも非表示可能な候補である場合だけ、読みと候補文字列の組をユーザー辞書「非表示候補」へ `SUPPRESSION_WORD` として登録します。
+
+このため、system dictionary と学習履歴の両方から同じ候補が出ている場合、最初の操作では学習履歴だけが削除され、system dictionary 由来の候補が残ることがあります。その候補にもう一度同じ操作を行うと、「非表示候補」へ登録されて候補一覧から抑制されます。
+
+ユーザー辞書由来の候補も非表示にできますが、元のユーザー辞書エントリ自体は削除しません。「非表示候補」に作成された対応する抑制単語をユーザー辞書ツールから削除すると、元の候補を再び表示できます。非表示操作によって通常候補が1件も残らなくなる場合や、コマンド候補・無効な候補など、非表示対象として扱えない候補では抑制を行いません。
+
+候補ウィンドウのフッターには、現在のキー設定に応じて `Ctrl+Deleteで履歴から削除` または `Ctrl+Deleteで候補を非表示` のように操作を表示します。`DeleteSelectedCandidate` を `Alt Delete` など別のキーへ割り当てた場合は、その実際の割り当てを表示します。該当状態に有効な割り当てがない場合は、この操作ラベルを表示しません。
+
+CUSTOM キー設定では、既存のユーザー設定を上書きしないように扱います。変換状態ですでに `DeleteSelectedCandidate` が別キーへ割り当てられている場合や、`Conversion + Ctrl Delete` が別コマンドに使われている場合は自動変更しません。どちらにも該当せず、CUSTOM テーブルが有効な場合だけ `Conversion + Ctrl Delete -> DeleteSelectedCandidate` を実際のカスタム設定として追加・保存します。
+
+設定画面の「学習履歴のクリア」直下にも、非表示にした候補がユーザー辞書「非表示候補」に抑制単語として保存されることと、再表示する場合の削除方法を案内しています。
 
 ### 選択文字列の Space 再変換（Windows / MS-IME 風キー設定）
 
@@ -804,6 +821,7 @@ Main features added in this fork
 - Suppresses live-conversion flicker for unfinished expressive kana prefixes, while completed expressive forms such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん` are rescued as generated dictionary candidates
 - Uses committed left context, previous segments, and limited right context to reduce unnatural homophone results in cases such as `mainにマージしました`, `githubには`, `彼になった`, `彼なのか`, `2名しかいない`, `追記したい`, `山梨県立美術館`, and `滋賀方面`
 - Allows assigning multiple commands to a single key binding as an ordered command sequence
+- Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows the action using the currently active key binding
 - Stores command sequences as `Commit|IMEOff` and shows them in the keymap editor as `Commit → IMEOff`
 - In the MS-IME style keymap, pressing Space while committed text is selected reconverts that selection; with no selection, Space still inserts a normal space
 - Allows assigning left/right Shift and left/right Ctrl separately on Windows
@@ -1338,6 +1356,22 @@ Examples:
 Commands are executed from left to right. If the input state changes during the sequence, the following command is resolved against the current state at that point. For example, `Convert → ConvertNext` first enters conversion from composition and then moves to the next candidate.
 
 In exported keymap files, command sequences are stored with `|`, such as `Commit|IMEOff` or `Convert|ConvertNext`. In the keymap editor UI, they are displayed with arrows, such as `Commit → IMEOff`.
+
+### Delete candidate history / hide candidate
+
+While conversion or prediction candidates are visible, `DeleteSelectedCandidate` removes the selected candidate from learned history when possible, or hides it from the candidate list. The standard keymaps bind this action to `Ctrl+Delete` in Prediction and Conversion states.
+
+The action first attempts to delete the selected candidate from user history. When that succeeds, the operation stops there and no suppression entry is created. Only when history deletion does not apply and the candidate is otherwise suppressible does Mozkey store the exact reading/value pair as a `SUPPRESSION_WORD` in the `非表示候補` user dictionary.
+
+As a result, when the same candidate is available from both learned history and the system dictionary, the first action can remove only the learned-history contribution while the system-dictionary candidate remains. Invoking the action again can then add the suppression entry and hide the remaining candidate.
+
+User-dictionary candidates can also be hidden, but hiding never deletes the original user-dictionary entry itself. Removing the corresponding suppression entry from `非表示候補` in the user dictionary tool makes the original candidate visible again. Mozkey does not add suppression when doing so would remove the only regular candidate, or for command/meta/invalid candidates that are not valid hide targets.
+
+The candidate footer reflects the effective key binding, for example `Ctrl+Deleteで履歴から削除` or `Ctrl+Deleteで候補を非表示`. If `DeleteSelectedCandidate` is assigned to another key such as `Alt Delete`, the footer shows that actual binding instead. If no applicable binding exists for the current state, the action label is omitted.
+
+CUSTOM keymaps preserve existing user assignments. Mozkey does not inject `Ctrl Delete` when Conversion already has `DeleteSelectedCandidate` on another key or when `Conversion + Ctrl Delete` is occupied by another command. Otherwise, when a non-empty CUSTOM table is active, Mozkey adds `Conversion + Ctrl Delete -> DeleteSelectedCandidate` as a real persisted custom-keymap row.
+
+The config dialog also explains below the personalization-history clear button that hidden candidates are stored as suppression words in the `非表示候補` user dictionary and can be restored by deleting the corresponding entry.
 
 ### Space reconversion for selected text (Windows / MS-IME style keymap)
 

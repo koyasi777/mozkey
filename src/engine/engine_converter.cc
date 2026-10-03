@@ -76,6 +76,23 @@ namespace {
 using ::mozc::commands::Request;
 using ::mozc::config::Config;
 
+bool IsSuppressibleCandidate(const Segment& segment, int candidate_index) {
+  // Desktop conversion requires at least one regular candidate per segment.
+  // Hiding the last regular candidate would make the next conversion invalid.
+  if (candidate_index < 0 || !segment.is_valid_index(candidate_index) ||
+      segment.candidates_size() <= 1) {
+    return false;
+  }
+  const converter::Candidate& candidate = segment.candidate(candidate_index);
+  if (candidate.key.empty() || candidate.value.empty()) {
+    return false;
+  }
+  if (candidate.attributes & converter::Attribute::COMMAND_CANDIDATE) {
+    return false;
+  }
+  return true;
+}
+
 #if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
 std::wstring Utf8ToWideForDebug(absl::string_view s) {
   if (s.empty()) {
@@ -1392,6 +1409,38 @@ bool EngineConverter::DeleteCandidateFromHistory(std::optional<int> id) {
   DCHECK(id.has_value());
   return converter_->DeleteCandidateFromHistory(
       segments_, segments_.history_segments_size() + segment_index_, *id);
+}
+
+bool EngineConverter::DeleteOrSuppressCandidate(std::optional<int> id) {
+  if (segment_index_ >= segments_.conversion_segments_size()) {
+    return false;
+  }
+
+  if (id == std::nullopt) {
+    if (!candidate_list_.focused()) {
+      return false;
+    }
+    id = candidate_list_.focused_candidate().id();
+  }
+
+  const Segment& segment = segments_.conversion_segment(segment_index_);
+  if (!segment.is_valid_index(*id)) {
+    return false;
+  }
+
+  // Preserve the existing meaning first: if this exact candidate has any
+  // deletable predictor/segment history, Ctrl+Del removes that history only.
+  // Suppression is a fallback only when no history entry could be deleted.
+  if (converter_->DeleteCandidateFromHistory(
+          segments_, segments_.history_segments_size() + segment_index_, *id)) {
+    return true;
+  }
+
+  if (!IsSuppressibleCandidate(segment, *id)) {
+    return false;
+  }
+  const converter::Candidate& candidate = segment.candidate(*id);
+  return converter_->AddSuppressionEntry(candidate.key, candidate.value);
 }
 
 void EngineConverter::SegmentFocusInternal(size_t index) {

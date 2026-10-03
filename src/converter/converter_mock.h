@@ -81,6 +81,8 @@ class StrictMockConverter : public ConverterInterface {
               (const, override));
   MOCK_METHOD(bool, DeleteCandidateFromHistory, (const Segments&, size_t, int),
               (const));
+  MOCK_METHOD(bool, AddSuppressionEntry,
+              (absl::string_view, absl::string_view), (const, override));
   MOCK_METHOD(bool, ReconstructHistory,
               (Segments * segments, absl::string_view preceding_text),
               (const, override));

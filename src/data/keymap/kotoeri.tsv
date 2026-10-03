@@ -135,6 +135,7 @@ Precomposition	OFF	IMEOff
 Precomposition	ON	IMEOn
 Precomposition	Shift Space	InsertAlternateSpace
 Precomposition	Space	InsertSpace
+Conversion	Ctrl Delete	DeleteSelectedCandidate
 Prediction	Ctrl Delete	DeleteSelectedCandidate
 Suggestion	Ctrl n	PredictAndConvert
 Suggestion	Down	PredictAndConvert

@@ -61,8 +61,31 @@ namespace mozc {
 namespace engine {
 namespace {
 
+bool HasDeletableHistory(const converter::Candidate& candidate) {
+  return candidate.attributes &
+         (converter::Attribute::USER_HISTORY_PREDICTION |
+          converter::Attribute::USER_SEGMENT_HISTORY_REWRITER);
+}
+
+bool IsSuppressibleCandidate(const Segment& segment, int candidate_index) {
+  // Keep the footer capability identical to EngineConverter: never advertise
+  // suppression if it would remove the last regular candidate.
+  if (candidate_index < 0 || !segment.is_valid_index(candidate_index) ||
+      segment.candidates_size() <= 1) {
+    return false;
+  }
+  const converter::Candidate& candidate = segment.candidate(candidate_index);
+  if (candidate.key.empty() || candidate.value.empty()) {
+    return false;
+  }
+  if (candidate.attributes & converter::Attribute::COMMAND_CANDIDATE) {
+    return false;
+  }
+  return true;
+}
+
 bool FillAnnotation(const converter::Candidate& candidate_value,
-                    commands::Annotation* annotation) {
+                    bool suppressible, commands::Annotation* annotation) {
   bool is_modified = false;
   if (!candidate_value.prefix.empty()) {
     annotation->set_prefix(candidate_value.prefix);
@@ -80,10 +103,12 @@ bool FillAnnotation(const converter::Candidate& candidate_value,
     annotation->set_a11y_description(candidate_value.a11y_description);
     is_modified = true;
   }
-  if (candidate_value.attributes &
-          converter::Attribute::USER_HISTORY_PREDICTION &&
-      !(candidate_value.attributes & converter::Attribute::NO_DELETABLE)) {
+  if (HasDeletableHistory(candidate_value)) {
     annotation->set_deletable(true);
+    is_modified = true;
+  }
+  if (suppressible) {
+    annotation->set_suppressible(true);
     is_modified = true;
   }
   if (!candidate_value.display_value.empty()) {
@@ -96,6 +121,7 @@ bool FillAnnotation(const converter::Candidate& candidate_value,
 void FillCandidateWord(const converter::Candidate& segment_candidate,
                        const int id, const int index,
                        const absl::string_view base_key,
+                       const bool suppressible,
                        commands::CandidateWord* candidate_word_proto) {
   candidate_word_proto->set_id(id);
   candidate_word_proto->set_index(index);
@@ -105,7 +131,7 @@ void FillCandidateWord(const converter::Candidate& segment_candidate,
   candidate_word_proto->set_value(segment_candidate.value);
 
   commands::Annotation annotation;
-  if (FillAnnotation(segment_candidate, &annotation)) {
+  if (FillAnnotation(segment_candidate, suppressible, &annotation)) {
     *candidate_word_proto->mutable_annotation() = annotation;
   }
 
@@ -115,9 +141,9 @@ void FillCandidateWord(const converter::Candidate& segment_candidate,
   if (segment_candidate.attributes &
       converter::Attribute::USER_HISTORY_PREDICTION) {
     candidate_word_proto->add_attributes(commands::USER_HISTORY);
-    if (!(segment_candidate.attributes & converter::Attribute::NO_DELETABLE)) {
-      candidate_word_proto->add_attributes(commands::DELETABLE);
-    }
+  }
+  if (HasDeletableHistory(segment_candidate)) {
+    candidate_word_proto->add_attributes(commands::DELETABLE);
   }
   if (segment_candidate.attributes &
       converter::Attribute::SPELLING_CORRECTION) {
@@ -170,6 +196,7 @@ void FillAllCandidateWordsInternal(
     }
     const converter::Candidate& segment_candidate = segment.candidate(id);
     FillCandidateWord(segment_candidate, id, index, segment.key(),
+                      IsSuppressibleCandidate(segment, id),
                       candidate_word_proto);
   }
 }
@@ -194,7 +221,9 @@ void FillCandidate(const Segment& segment, const Candidate& candidate,
   candidate_proto->set_id(candidate.id());
   // Set annotations
   commands::Annotation annotation;
-  if (FillAnnotation(candidate_value, &annotation)) {
+  if (FillAnnotation(candidate_value,
+                     IsSuppressibleCandidate(segment, candidate.id()),
+                     &annotation)) {
     *candidate_proto->mutable_annotation() = annotation;
   }
 
@@ -263,7 +292,8 @@ void FillRemovedCandidates(const Segment& segment,
   for (const converter::Candidate& candidate : candidates) {
     commands::CandidateWord* candidate_word_proto =
         candidate_list_proto->add_candidates();
-    FillCandidateWord(candidate, index, index, "", candidate_word_proto);
+    FillCandidateWord(candidate, index, index, "", false,
+                      candidate_word_proto);
     index++;
   }
 }
@@ -399,6 +429,19 @@ bool FillFooter(const commands::Category category,
             }
           }();
           footer->set_label(kDeleteInstruction);
+          show_build_number = false;
+        } else if (cand.has_annotation() &&
+                   cand.annotation().suppressible()) {
+          const absl::string_view kSuppressInstruction = []() {
+            if constexpr (port::IsAppleBase()) {
+              return "control+fn+deleteで候補を非表示";
+            } else if constexpr (port::IsChromeos()) {
+              return "ctrl+search+backspaceで候補を非表示";
+            } else {
+              return "Ctrl+Delで候補を非表示";
+            }
+          }();
+          footer->set_label(kSuppressInstruction);
           show_build_number = false;
         }
         break;

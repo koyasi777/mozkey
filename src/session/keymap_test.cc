@@ -1183,6 +1183,117 @@ TEST_F(KeyMapTest, Initialize) {
   }
 }
 
+TEST_F(KeyMapTest, CustomKeymapDoesNotSynthesizeMissingConversionBinding) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Prediction\tCtrl Delete\tDeleteSelectedCandidate\n");
+
+  KeyMapManager manager(config);
+  commands::KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Delete", &key_event));
+
+  ConversionState::Commands command;
+  ASSERT_TRUE(manager.GetCommandPrediction(key_event, &command));
+  EXPECT_EQ(command, ConversionState::DELETE_SELECTED_CANDIDATE);
+  EXPECT_FALSE(manager.GetCommandConversion(key_event, &command));
+}
+
+TEST_F(KeyMapTest,
+       CustomKeymapPreservesStoredAlternateBinding) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Prediction\tCtrl Delete\tDeleteSelectedCandidate\n"
+      "Conversion\tAlt Delete\tDeleteSelectedCandidate\n");
+
+  KeyMapManager manager(config);
+
+  commands::KeyEvent alt_delete;
+  ASSERT_TRUE(KeyParser::ParseKey("Alt Delete", &alt_delete));
+  ConversionState::Commands command;
+  ASSERT_TRUE(manager.GetCommandConversion(alt_delete, &command));
+  EXPECT_EQ(command, ConversionState::DELETE_SELECTED_CANDIDATE);
+
+  const std::vector<std::string> conversion_bindings =
+      manager.GetKeyBindingsForConversionCommand(
+          ConversionState::DELETE_SELECTED_CANDIDATE);
+  ASSERT_EQ(conversion_bindings.size(), 1);
+  EXPECT_EQ(conversion_bindings.front(), "Alt Delete");
+
+  commands::KeyEvent ctrl_delete;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Delete", &ctrl_delete));
+  EXPECT_FALSE(manager.GetCommandConversion(ctrl_delete, &command));
+}
+
+TEST_F(KeyMapTest,
+       CustomKeymapPreservesExplicitConversionCtrlDeleteBinding) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Prediction\tCtrl Delete\tDeleteSelectedCandidate\n"
+      "Conversion\tCtrl Delete\tCancel\n");
+
+  KeyMapManager manager(config);
+  commands::KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Delete", &key_event));
+
+  ConversionState::Commands command;
+  ASSERT_TRUE(manager.GetCommandConversion(key_event, &command));
+  EXPECT_EQ(command, ConversionState::CANCEL);
+}
+
+TEST_F(KeyMapTest,
+       CustomKeymapWithoutLegacyPredictionCtrlDeleteIsNotModified) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tCtrl g\tDelete\n");
+
+  KeyMapManager manager(config);
+  commands::KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Delete", &key_event));
+
+  ConversionState::Commands command;
+  EXPECT_FALSE(manager.GetCommandConversion(key_event, &command));
+}
+
+TEST_F(KeyMapTest, CtrlDeleteIsAvailableDuringPredictionAndConversion) {
+  commands::KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Delete", &key_event));
+
+  for (const auto keymap :
+       {config::Config::ATOK, config::Config::MSIME, config::Config::KOTOERI,
+        config::Config::CHROMEOS, config::Config::MOBILE}) {
+    KeyMapManager manager(GetDefaultConfig(keymap));
+    ConversionState::Commands command;
+
+    EXPECT_TRUE(manager.GetCommandPrediction(key_event, &command));
+    EXPECT_EQ(command, ConversionState::DELETE_SELECTED_CANDIDATE);
+
+    EXPECT_TRUE(manager.GetCommandConversion(key_event, &command));
+    EXPECT_EQ(command, ConversionState::DELETE_SELECTED_CANDIDATE);
+
+    const std::vector<std::string> prediction_bindings =
+        manager.GetKeyBindingsForPredictionCommand(
+            ConversionState::DELETE_SELECTED_CANDIDATE);
+    EXPECT_NE(std::find(prediction_bindings.begin(), prediction_bindings.end(),
+                        "Ctrl Delete"),
+              prediction_bindings.end());
+
+    const std::vector<std::string> conversion_bindings =
+        manager.GetKeyBindingsForConversionCommand(
+            ConversionState::DELETE_SELECTED_CANDIDATE);
+    EXPECT_NE(std::find(conversion_bindings.begin(), conversion_bindings.end(),
+                        "Ctrl Delete"),
+              conversion_bindings.end());
+  }
+}
+
 TEST_F(KeyMapTest, AddCommand) {
   KeyMapManager manager;
   KeyMapManagerTestPeer manager_peer(manager);

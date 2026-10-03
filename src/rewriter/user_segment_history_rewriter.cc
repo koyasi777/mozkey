@@ -1063,7 +1063,8 @@ bool UserSegmentHistoryRewriter::ClearHistoryEntry(const Segments& segments,
   DCHECK_LT(segment_index, segments.segments_size());
   const Segment& segment = segments.segment(segment_index);
   DCHECK(segment.is_valid_index(candidate_index));
-  const converter::Candidate& candidate = segment.candidate(0);
+  const converter::Candidate& candidate =
+      segment.candidate(candidate_index);
   absl::string_view key = candidate.key;
   absl::string_view value = candidate.value;
 

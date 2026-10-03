@@ -380,6 +380,52 @@ TEST_F(UserSegmentHistoryRewriterTest, DisableTest) {
   }
 }
 
+TEST_F(UserSegmentHistoryRewriterTest,
+       ClearHistoryEntryUsesSelectedCandidateIndex) {
+  Segments segments;
+  std::unique_ptr<UserSegmentHistoryRewriter> rewriter(
+      CreateUserSegmentHistoryRewriter());
+  rewriter->Clear();
+  const ConversionRequest convreq = CreateConversionRequest();
+
+  auto set_candidate_keys = [](Segments* segments) {
+    for (Segment& segment : segments->conversion_segments()) {
+      for (size_t i = 0; i < segment.candidates_size(); ++i) {
+        segment.mutable_candidate(i)->key = segment.key();
+      }
+    }
+  };
+
+  InitSegments(&segments, 1);
+  set_candidate_keys(&segments);
+  segments.mutable_segment(0)->move_candidate(2, 0);
+  segments.mutable_segment(0)->mutable_candidate(0)->attributes |=
+      converter::Attribute::RERANKED;
+  segments.mutable_segment(0)->set_segment_type(Segment::FIXED_VALUE);
+  rewriter->Finish(convreq, segments);
+
+  InitSegments(&segments, 1);
+  set_candidate_keys(&segments);
+  ASSERT_TRUE(rewriter->Rewrite(convreq, &segments));
+  ASSERT_EQ(segments.segment(0).candidate(0).value, "candidate2");
+  ASSERT_EQ(segments.segment(0).candidate(1).value, "candidate0");
+
+  // candidate1 has no learned entry. The old implementation incorrectly used
+  // candidate(0) here and would delete candidate2's history.
+  EXPECT_FALSE(rewriter->ClearHistoryEntry(segments, 0, 1));
+
+  InitSegments(&segments, 1);
+  set_candidate_keys(&segments);
+  rewriter->Rewrite(convreq, &segments);
+  EXPECT_EQ(segments.segment(0).candidate(0).value, "candidate2");
+
+  EXPECT_TRUE(rewriter->ClearHistoryEntry(segments, 0, 0));
+  InitSegments(&segments, 1);
+  set_candidate_keys(&segments);
+  rewriter->Rewrite(convreq, &segments);
+  EXPECT_EQ(segments.segment(0).candidate(0).value, "candidate0");
+}
+
 TEST_F(UserSegmentHistoryRewriterTest, BasicTest) {
   Segments segments;
   std::unique_ptr<UserSegmentHistoryRewriter> rewriter(

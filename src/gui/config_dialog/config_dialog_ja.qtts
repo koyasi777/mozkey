@@ -390,6 +390,11 @@
         <translation>未使用の履歴を削除</translation>
     </message>
     <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Hidden candidates are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</source>
+        <translation>※非表示にした候補は、ユーザー辞書の「非表示候補」に抑制単語として登録されます。再表示する場合は、ユーザー辞書から該当する単語を削除してください。</translation>
+    </message>
+    <message>
         <location filename="config_dialog.ui" line="989"/>
         <source>Use realtime conversion</source>
         <translation>リアルタイム変換を有効にする</translation>

@@ -250,6 +250,11 @@
         <translation></translation>
     </message>
     <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Hidden candidates are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</source>
+        <translation></translation>
+    </message>
+    <message>
         <location filename="config_dialog.ui" line="1083"/>
         <source>Secret mode</source>
         <translation></translation>

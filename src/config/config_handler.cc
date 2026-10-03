@@ -36,11 +36,14 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/base/no_destructor.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/log/log.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
@@ -73,6 +76,68 @@ constexpr uint32_t kMozkeyDefaultDirectCommitKey =
     Config::DIRECT_COMMIT_EXCLAMATION_MARK |
     Config::DIRECT_COMMIT_OPEN_BRACKET |
     Config::DIRECT_COMMIT_CLOSE_BRACKET;
+
+constexpr absl::string_view kCandidateHideConversionRow =
+    "Conversion\tCtrl Delete\tDeleteSelectedCandidate";
+
+bool MaybeMigrateCandidateHideCustomKeymap(Config* config) {
+  if (config->session_keymap() != Config::CUSTOM ||
+      config->custom_keymap_table().empty()) {
+    return false;
+  }
+
+  bool has_conversion_delete_selected_candidate = false;
+  bool conversion_ctrl_delete_is_occupied = false;
+
+  for (absl::string_view line :
+       absl::StrSplit(config->custom_keymap_table(), '\n')) {
+    line = absl::StripAsciiWhitespace(line);
+    if (line.empty() || line.front() == '#') {
+      continue;
+    }
+
+    const std::vector<absl::string_view> columns =
+        absl::StrSplit(line, '\t');
+    if (columns.size() != 3) {
+      continue;
+    }
+
+    const absl::string_view state = absl::StripAsciiWhitespace(columns[0]);
+    const absl::string_view key = absl::StripAsciiWhitespace(columns[1]);
+    const absl::string_view command_sequence =
+        absl::StripAsciiWhitespace(columns[2]);
+
+    if (state != "Conversion") {
+      continue;
+    }
+
+    if (key == "Ctrl Delete") {
+      conversion_ctrl_delete_is_occupied = true;
+    }
+
+    for (absl::string_view command :
+         absl::StrSplit(command_sequence, '|', absl::SkipEmpty())) {
+      has_conversion_delete_selected_candidate =
+          absl::StripAsciiWhitespace(command) == "DeleteSelectedCandidate";
+      break;
+    }
+  }
+
+  if (has_conversion_delete_selected_candidate ||
+      conversion_ctrl_delete_is_occupied) {
+    return false;
+  }
+
+  std::string table = config->custom_keymap_table();
+  if (!table.empty() && table.back() != '\n') {
+    table.push_back('\n');
+  }
+  table.append(kCandidateHideConversionRow.data(),
+               kCandidateHideConversionRow.size());
+  table.push_back('\n');
+  config->set_custom_keymap_table(std::move(table));
+  return true;
+}
 
 // Applies Mozkey-specific product defaults only to fields that have not been
 // explicitly stored.  Keep this shared by normalization and the user-facing
@@ -272,6 +337,8 @@ void ConfigHandlerImpl::SetConfigInternal(std::shared_ptr<Config> config) {
 }
 
 void ConfigHandlerImpl::SetConfig(Config config) {
+  MaybeMigrateCandidateHideCustomKeymap(&config);
+
   const uint64_t config_hash = CityFingerprint(config.SerializeAsString());
 
   // If the wire format of config is identical to the one of the previously
@@ -332,6 +399,24 @@ void ConfigHandlerImpl::Reload() {
   } else if (!input_config->ParseFromIstream(is.get())) {
     LOG(ERROR) << filename << " is broken";
     input_config->Clear();  // revert to default setting
+  }
+
+  // Close the input stream before AtomicUpdate() replaces the same file.
+  // Windows can reject the atomic rename while the old config file is open.
+  is.reset();
+
+  // Persist only the CUSTOM-keymap migration before normalization so
+  // unrelated product defaults remain represented by field absence.
+  if (MaybeMigrateCandidateHideCustomKeymap(input_config.get())) {
+    SetMetaData(input_config.get());
+    if (!ConfigFileStream::AtomicUpdate(filename,
+                                        input_config->SerializeAsString())) {
+      LOG(ERROR) << "Failed to persist CUSTOM keymap migration: " << filename;
+    } else {
+#ifdef _WIN32
+      ConfigFileStream::FixupFilePermission(filename);
+#endif  // _WIN32
+    }
   }
 
   // we set default config when file is broken
