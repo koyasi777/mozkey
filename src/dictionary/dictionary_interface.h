@@ -302,6 +302,14 @@ class UserDictionaryInterface : public DictionaryInterface {
   // Return true if the dictionary has at least one suppression entry.
   virtual bool HasSuppressedEntries() const = 0;
 
+  // Adds an exact (key, value) suppression entry to persistent user dictionary
+  // storage. Implementations that do not support persistent mutation may keep
+  // the default failure behavior.
+  virtual bool AddSuppressionEntry(absl::string_view key,
+                                   absl::string_view value) {
+    return false;
+  }
+
   // Reload dictionary data from local disk.
   virtual bool Reload() { return true; }
 

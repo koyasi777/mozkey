@@ -206,6 +206,8 @@ bool KeyMapManager::ApplyPrimarySessionKeymap(
 #endif  // NDEBUG
 
     std::istringstream ifs(custom_keymap_table);
+    // ConfigHandler persists any candidate-hide CUSTOM migration into the
+    // table itself. KeyMapManager therefore reflects the stored table exactly.
     return LoadStream(&ifs);
   }
 }
@@ -364,7 +366,8 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
       return false;
     }
 
-    keymap_direct_.AddRule(key_event, command, command_sequence);
+    keymap_direct_.AddRule(key_event, command, command_sequence,
+                           key_event_name);
     return true;
   }
 
@@ -374,7 +377,8 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
       return false;
     }
 
-    keymap_precomposition_.AddRule(key_event, command, command_sequence);
+    keymap_precomposition_.AddRule(key_event, command, command_sequence,
+                                    key_event_name);
     return true;
   }
 
@@ -384,7 +388,8 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
       return false;
     }
 
-    keymap_composition_.AddRule(key_event, command, command_sequence);
+    keymap_composition_.AddRule(key_event, command, command_sequence,
+                                 key_event_name);
     return true;
   }
 
@@ -394,7 +399,8 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
       return false;
     }
 
-    keymap_conversion_.AddRule(key_event, command, command_sequence);
+    keymap_conversion_.AddRule(key_event, command, command_sequence,
+                                key_event_name);
     return true;
   }
 
@@ -404,8 +410,8 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
       return false;
     }
 
-    keymap_zero_query_suggestion_.AddRule(key_event, command,
-                                          command_sequence);
+    keymap_zero_query_suggestion_.AddRule(
+        key_event, command, command_sequence, key_event_name);
     return true;
   }
 
@@ -415,7 +421,8 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
       return false;
     }
 
-    keymap_suggestion_.AddRule(key_event, command, command_sequence);
+    keymap_suggestion_.AddRule(key_event, command, command_sequence,
+                                key_event_name);
     return true;
   }
 
@@ -425,7 +432,8 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
       return false;
     }
 
-    keymap_prediction_.AddRule(key_event, command, command_sequence);
+    keymap_prediction_.AddRule(key_event, command, command_sequence,
+                                key_event_name);
     return true;
   }
 
@@ -864,6 +872,65 @@ bool KeyMapManager::GetCommandPrediction(
   }
   // use conversion rule
   return keymap_conversion_.GetCommand(key_event, command);
+}
+
+std::vector<std::string> KeyMapManager::GetKeyBindingsForConversionCommand(
+    ConversionState::Commands command) const {
+  std::vector<KeyMap<ConversionState>::NamedBinding> bindings;
+  keymap_conversion_.AppendNamedBindings(command, &bindings);
+
+  std::vector<std::string> result;
+  result.reserve(bindings.size());
+  for (const auto& [key, name] : bindings) {
+    result.push_back(name);
+  }
+  std::sort(result.begin(), result.end(),
+            [](const std::string& lhs, const std::string& rhs) {
+              if (lhs.size() != rhs.size()) {
+                return lhs.size() < rhs.size();
+              }
+              return lhs < rhs;
+            });
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+  return result;
+}
+
+std::vector<std::string> KeyMapManager::GetKeyBindingsForPredictionCommand(
+    ConversionState::Commands command) const {
+  std::vector<KeyMap<ConversionState>::NamedBinding> prediction_bindings;
+  keymap_prediction_.AppendNamedBindings(command, &prediction_bindings);
+  std::sort(prediction_bindings.begin(), prediction_bindings.end(),
+            [](const auto& lhs, const auto& rhs) {
+              if (lhs.second.size() != rhs.second.size()) {
+                return lhs.second.size() < rhs.second.size();
+              }
+              return lhs.second < rhs.second;
+            });
+
+  std::vector<std::string> result;
+  result.reserve(prediction_bindings.size());
+  for (const auto& [key, name] : prediction_bindings) {
+    result.push_back(name);
+  }
+
+  std::vector<KeyMap<ConversionState>::NamedBinding> conversion_bindings;
+  keymap_conversion_.AppendNamedBindings(command, &conversion_bindings);
+  std::sort(conversion_bindings.begin(), conversion_bindings.end(),
+            [](const auto& lhs, const auto& rhs) {
+              if (lhs.second.size() != rhs.second.size()) {
+                return lhs.second.size() < rhs.second.size();
+              }
+              return lhs.second < rhs.second;
+            });
+
+  for (const auto& [key, name] : conversion_bindings) {
+    if (!keymap_prediction_.HasBinding(key)) {
+      result.push_back(name);
+    }
+  }
+
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+  return result;
 }
 
 bool KeyMapManager::GetCommandSequenceDirect(

@@ -124,6 +124,9 @@ class Session {
   // composition.
   bool DeleteCandidateFromHistory(mozc::commands::Command* command);
 
+  // Handles the keymap-level DeleteSelectedCandidate action.
+  bool DeleteSelectedCandidate(mozc::commands::Command* command);
+
   // Resets the composer and clear conversion segments.
   // History segments will not be cleared.
   // Therefore if a user commits "風"(かぜ) and Revert method is called,
@@ -854,6 +857,7 @@ class Session {
   // Fill command's output according to the current state.
   void OutputFromState(mozc::commands::Command* command);
   void Output(mozc::commands::Command* command);
+  void MaybeUpdateCandidateActionFooter(mozc::commands::Output* output) const;
   void OutputMode(mozc::commands::Command* command) const;
   void OutputComposition(mozc::commands::Command* command) const;
   void OutputKey(mozc::commands::Command* command) const;

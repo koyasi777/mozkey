@@ -1086,6 +1086,11 @@ bool Converter::DeleteCandidateFromHistory(const Segments& segments,
   return result;
 }
 
+bool Converter::AddSuppressionEntry(absl::string_view key,
+                                    absl::string_view value) const {
+  return user_dictionary_.AddSuppressionEntry(key, value);
+}
+
 bool Converter::ReconstructHistory(
     Segments* segments, const absl::string_view preceding_text) const {
   segments->Clear();
@@ -1578,9 +1583,9 @@ void Converter::RewriteAndSuppressCandidates(const ConversionRequest& request,
   }
 
   // 2. Rewrite candidates in each segment.
-  if (!rewriter_->Rewrite(request, segments)) {
-    return;
-  }
+  // Suppression below is a final converter invariant and must not depend on
+  // whether the rewriter chain reports that it modified the segments.
+  rewriter_->Rewrite(request, segments);
 
   // 3. Suppress candidates in each segment.
   // Optimization for common use case: Since most of users don't use suppression

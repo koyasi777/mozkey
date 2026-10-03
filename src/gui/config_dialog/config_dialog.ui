@@ -445,6 +445,16 @@
               </property>
              </widget>
             </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QLabel" name="hiddenCandidateNoticeLabel">
+                           <property name="text">
+                            <string>Hidden candidates are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</string>
+                           </property>
+                           <property name="wordWrap">
+                            <bool>true</bool>
+                           </property>
+                          </widget>
+            </item>
             <item row="0" column="0">
              <widget class="QLabel" name="label_7">
               <property name="text">
@@ -2561,22 +2571,6 @@
                <size>
                 <width>40</width>
                 <height>20</height>
-               </size>
-              </property>
-             </spacer>
-            </item>
-            <item row="2" column="1">
-             <spacer name="verticalSpacer">
-              <property name="orientation">
-               <enum>Qt::Orientation::Vertical</enum>
-              </property>
-              <property name="sizeType">
-               <enum>QSizePolicy::Policy::Maximum</enum>
-              </property>
-              <property name="sizeHint" stdset="0">
-               <size>
-                <width>20</width>
-                <height>24</height>
                </size>
               </property>
              </spacer>

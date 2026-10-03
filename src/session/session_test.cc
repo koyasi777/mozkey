@@ -92,6 +92,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
       : testing::TestPeer<Session>(session) {}
 
   PEER_METHOD(IsFullWidthInsertSpace);
+  PEER_METHOD(MaybeUpdateCandidateActionFooter);
   PEER_METHOD(PushUndoContext);
   PEER_METHOD(MaybeApplyZenzFeedbackLiveCorrection);
   PEER_METHOD(ApplyZenzLiveCorrectionResult);
@@ -20186,6 +20187,103 @@ TEST_F(SessionTest, SuppressSuggestion) {
   session.SendKey(&command);
   EXPECT_TRUE(command.output().has_candidate_window());
 
+}
+
+TEST_F(SessionTest, CandidateActionFooterPreservesConfiguredKeyNames) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Delete\tDeleteSelectedCandidate\n",
+      &session);
+
+  commands::Output output;
+  commands::CandidateWindow* window = output.mutable_candidate_window();
+  window->set_category(commands::CONVERSION);
+  window->set_focused_index(0);
+  window->mutable_footer()->set_label("Ctrl+Delで候補を非表示");
+  commands::CandidateWindow_Candidate* candidate = window->add_candidate();
+  candidate->set_index(0);
+  candidate->mutable_annotation()->set_suppressible(true);
+
+  SessionTestPeer(session).MaybeUpdateCandidateActionFooter(&output);
+
+  ASSERT_TRUE(window->has_footer());
+  EXPECT_EQ(window->footer().label(), "Ctrl+Deleteで候補を非表示");
+}
+
+TEST_F(SessionTest, CandidateActionFooterUsesConfiguredConversionShortcut) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Conversion\tAlt Delete\tDeleteSelectedCandidate\n",
+      &session);
+
+  commands::Output output;
+  commands::CandidateWindow* window = output.mutable_candidate_window();
+  window->set_category(commands::CONVERSION);
+  window->set_focused_index(0);
+  window->mutable_footer()->set_label("Ctrl+Delで候補を非表示");
+  commands::CandidateWindow_Candidate* candidate = window->add_candidate();
+  candidate->set_index(0);
+  candidate->mutable_annotation()->set_suppressible(true);
+
+  SessionTestPeer(session).MaybeUpdateCandidateActionFooter(&output);
+
+  ASSERT_TRUE(window->has_footer());
+  EXPECT_EQ(window->footer().label(), "Alt+Deleteで候補を非表示");
+}
+
+TEST_F(SessionTest, CandidateActionFooterUsesPredictionSpecificShortcut) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Prediction\tCtrl Backspace\tDeleteSelectedCandidate\n"
+      "Conversion\tAlt Delete\tDeleteSelectedCandidate\n",
+      &session);
+
+  commands::Output output;
+  commands::CandidateWindow* window = output.mutable_candidate_window();
+  window->set_category(commands::PREDICTION);
+  window->set_focused_index(0);
+  window->mutable_footer()->set_label("Ctrl+Delで履歴から削除");
+  commands::CandidateWindow_Candidate* candidate = window->add_candidate();
+  candidate->set_index(0);
+  candidate->mutable_annotation()->set_deletable(true);
+
+  SessionTestPeer(session).MaybeUpdateCandidateActionFooter(&output);
+
+  ASSERT_TRUE(window->has_footer());
+  EXPECT_EQ(window->footer().label(), "Ctrl+Backspaceで履歴から削除");
+}
+
+TEST_F(SessionTest, CandidateActionFooterClearsLabelWithoutActionBinding) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Delete\tCancel\n",
+      &session);
+
+  commands::Output output;
+  commands::CandidateWindow* window = output.mutable_candidate_window();
+  window->set_category(commands::CONVERSION);
+  window->set_focused_index(0);
+  window->mutable_footer()->set_label("Ctrl+Delで候補を非表示");
+  commands::CandidateWindow_Candidate* candidate = window->add_candidate();
+  candidate->set_index(0);
+  candidate->mutable_annotation()->set_suppressible(true);
+
+  SessionTestPeer(session).MaybeUpdateCandidateActionFooter(&output);
+
+  ASSERT_TRUE(window->has_footer());
+  EXPECT_FALSE(window->footer().has_label());
 }
 
 TEST_F(SessionTest, DeleteHistory) {

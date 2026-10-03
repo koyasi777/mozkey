@@ -359,6 +359,14 @@ class EngineConverterInterface {
   // Returns false if the candidate was not found or deletion failed.
   virtual bool DeleteCandidateFromHistory(std::optional<int> id) = 0;
 
+  // Handles the keymap-level DeleteSelectedCandidate action.
+  // History-derived candidates lose only their history. Other suppressible
+  // regular candidates are registered as suppression words.
+  virtual bool DeleteOrSuppressCandidate(std::optional<int> id) {
+    (void)id;
+    return false;
+  }
+
   // Move the focus of segments.
   virtual void SegmentFocusRight() = 0;
   virtual void SegmentFocusLast() = 0;

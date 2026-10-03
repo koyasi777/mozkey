@@ -152,6 +152,10 @@ class Converter final : public ConverterInterface {
                                   int candidate_index) const override;
 
   [[nodiscard]]
+  bool AddSuppressionEntry(absl::string_view key,
+                           absl::string_view value) const override;
+
+  [[nodiscard]]
   bool ReconstructHistory(Segments* segments,
                           absl::string_view preceding_text) const override;
 
@@ -318,7 +322,7 @@ class Converter final : public ConverterInterface {
   std::unique_ptr<RewriterInterface> rewriter_;
 
   const dictionary::PosMatcher& pos_matcher_;
-  const dictionary::UserDictionaryInterface& user_dictionary_;
+  dictionary::UserDictionaryInterface& user_dictionary_;
   const HistoryReconstructor history_reconstructor_;
   const ReverseConverter reverse_converter_;
   const uint16_t general_noun_id_ = std::numeric_limits<uint16_t>::max();

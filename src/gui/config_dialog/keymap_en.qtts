@@ -257,7 +257,7 @@
     </message>
     <message>
         <source>DeleteSelectedCandidate</source>
-        <translation>Remove selected candidate from history</translation>
+        <translation>Remove selected candidate from history / hide candidate</translation>
     </message>
 </context>
 </TS>

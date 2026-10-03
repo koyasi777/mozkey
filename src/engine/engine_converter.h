@@ -251,6 +251,8 @@ class EngineConverter : public EngineConverterInterface {
   // Returns false if the candidate was not found or deletion failed.
   bool DeleteCandidateFromHistory(std::optional<int> id) override;
 
+  bool DeleteOrSuppressCandidate(std::optional<int> id) override;
+
   // Moves the focus of segments.
   void SegmentFocusRight() override;
   void SegmentFocusLast() override;
