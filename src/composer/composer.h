@@ -227,6 +227,16 @@ class Composer final {
   // Returns a preedit string with user's preferences.
   std::string GetStringForPreedit() const;
 
+  // Returns the number of unresolved Roman-table input characters in the
+  // trailing chunk. Unlike GetPendingRomanDisplayLength(), this is semantic
+  // input state and does not depend on the dim-pending-romaji UI setting.
+  size_t GetPendingRomanInputLength() const;
+
+  // Returns true when the unresolved Roman-table input is the initial input of
+  // the composition. Once any fixed reading exists before the pending suffix,
+  // this returns false even if the suffix itself is only one character long.
+  bool IsPendingRomanInputAtCompositionStart() const;
+
   // Returns the number of trailing preedit characters that represent
   // unresolved Roman-table input and should use the subdued presentation.
   // This is presentation metadata only; the preedit string itself is not

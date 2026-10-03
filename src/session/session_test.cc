@@ -4632,6 +4632,538 @@ TEST_F(SessionTest, LiveConversionAttachesPassiveSuggestionCandidateWindow) {
 }
 
 TEST_F(SessionTest,
+       PendingRomanSuggestionRefreshStopsAfterTwoUnresolvedCharacters) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments suggestion_l;
+  Segment* suggestion_l_segment = suggestion_l.add_segment();
+  suggestion_l_segment->set_key("l");
+  AddCandidate("l", "L suggestion", suggestion_l_segment);
+
+  Segments suggestion_lt;
+  Segment* suggestion_lt_segment = suggestion_lt.add_segment();
+  suggestion_lt_segment->set_key("lt");
+  AddCandidate("lt", "LT suggestion", suggestion_lt_segment);
+
+  Segments suggestion_resolved;
+  Segment* suggestion_resolved_segment = suggestion_resolved.add_segment();
+  suggestion_resolved_segment->set_key("っ");
+  AddCandidate("っ", "resolved suggestion", suggestion_resolved_segment);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(3)
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_l), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_lt), Return(true)))
+      .WillOnce(DoAll(
+          SetArgPointee<1>(suggestion_resolved), Return(true)));
+
+  Segments live_lt;
+  Segment* live_lt_segment = live_lt.add_segment();
+  live_lt_segment->set_key("lt");
+  AddCandidate("lt", "LT live", live_lt_segment);
+
+  Segments live_lts;
+  Segment* live_lts_segment = live_lts.add_segment();
+  live_lts_segment->set_key("lts");
+  AddCandidate("lts", "LTS live", live_lts_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(live_lt), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_lts), Return(true)));
+
+  commands::Command command;
+
+  ASSERT_TRUE(SendKey("l", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 1);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "L suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("t", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 2);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "LT suggestion");
+  const int held_id = command.output().candidate_window().candidate(0).id();
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 3);
+  EXPECT_TRUE(session_peer.live_conversion_active_());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).id(), held_id);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "LT suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("u", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 0);
+  EXPECT_EQ(session.context().composer().GetQueryForConversion(), "っ");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "resolved suggestion");
+}
+
+TEST_F(SessionTest,
+       PendingRomanSuggestionHoldsImmediatelyAfterResolvedPrefix) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments suggestion_initial;
+  Segment* suggestion_initial_segment = suggestion_initial.add_segment();
+  suggestion_initial_segment->set_key("あ");
+  AddCandidate("あ", "initial suggestion", suggestion_initial_segment);
+
+  Segments suggestion_resolved;
+  Segment* suggestion_resolved_segment = suggestion_resolved.add_segment();
+  suggestion_resolved_segment->set_key("あっ");
+  AddCandidate("あっ", "resolved suggestion", suggestion_resolved_segment);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(DoAll(
+          SetArgPointee<1>(suggestion_initial), Return(true)))
+      .WillOnce(DoAll(
+          SetArgPointee<1>(suggestion_resolved), Return(true)));
+
+  Segments live_al;
+  Segment* live_al_segment = live_al.add_segment();
+  live_al_segment->set_key("あl");
+  AddCandidate("あl", "A-L live", live_al_segment);
+
+  Segments live_alt;
+  Segment* live_alt_segment = live_alt.add_segment();
+  live_alt_segment->set_key("あlt");
+  AddCandidate("あlt", "A-LT live", live_alt_segment);
+
+  Segments live_alts;
+  Segment* live_alts_segment = live_alts.add_segment();
+  live_alts_segment->set_key("あlts");
+  AddCandidate("あlts", "A-LTS live", live_alts_segment);
+
+  Segments live_resolved;
+  Segment* live_resolved_segment = live_resolved.add_segment();
+  live_resolved_segment->set_key("あっ");
+  AddCandidate("あっ", "resolved live", live_resolved_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(4)
+      .WillOnce(DoAll(SetArgPointee<1>(live_al), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_alt), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_alts), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_resolved), Return(true)));
+
+  commands::Command command;
+
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  EXPECT_EQ(session.context().composer().GetQueryForConversion(), "あ");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "initial suggestion");
+  const int held_id = command.output().candidate_window().candidate(0).id();
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("l", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 1);
+  EXPECT_FALSE(
+      session.context().composer().IsPendingRomanInputAtCompositionStart());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).id(), held_id);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "initial suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("t", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 2);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).id(), held_id);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "initial suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 3);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).id(), held_id);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "initial suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("u", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 0);
+  EXPECT_EQ(session.context().composer().GetQueryForConversion(), "あっ");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "resolved suggestion");
+}
+
+TEST_F(SessionTest,
+       HeldPendingRomanSuggestionUsesExactDisplayedSuggestionContext) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments suggestion_l;
+  Segment* suggestion_l_segment = suggestion_l.add_segment();
+  suggestion_l_segment->set_key("l");
+  AddCandidate("l", "L suggestion", suggestion_l_segment);
+
+  Segments suggestion_lt;
+  Segment* suggestion_lt_segment = suggestion_lt.add_segment();
+  suggestion_lt_segment->set_key("lt");
+  AddCandidate("lt", "LT held suggestion", suggestion_lt_segment);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_l), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_lt), Return(true)));
+
+  Segments live_lt;
+  Segment* live_lt_segment = live_lt.add_segment();
+  live_lt_segment->set_key("lt");
+  AddCandidate("lt", "LT live", live_lt_segment);
+
+  Segments live_lts;
+  Segment* live_lts_segment = live_lts.add_segment();
+  live_lts_segment->set_key("lts");
+  AddCandidate("lts", "LTS live", live_lts_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(live_lt), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_lts), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("l", &session, &command));
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("t", &session, &command));
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  ASSERT_EQ(session.context().composer().GetPendingRomanInputLength(), 3);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  ASSERT_TRUE(command.output().candidate_window().candidate(0).has_id());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "LT held suggestion");
+  const int suggestion_id =
+      command.output().candidate_window().candidate(0).id();
+
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  Segments empty_segments;
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(empty_segments));
+
+  command.Clear();
+  SetSendCommandCommand(commands::SessionCommand::SUBMIT_CANDIDATE, &command);
+  command.mutable_input()->mutable_command()->set_id(suggestion_id);
+
+  EXPECT_TRUE(session.SendCommand(&command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("LT held suggestion", command);
+  EXPECT_FALSE(command.output().has_preedit());
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  EXPECT_FALSE(session_peer.live_conversion_active_());
+}
+
+TEST_F(SessionTest,
+       ShiftAsciiTemporaryModeRefreshesSuggestionForEveryCharacter) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(false);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  session.SetConfig(config);
+
+  // Regression for pending-Roman HOLD classification:
+  // Shift+G enters temporary HALF_ASCII mode.  The following lower-case keys
+  // remain ASCII input and must not be classified from CharChunk::pending_.
+  // In particular, "Goo" must not start HOLD merely because raw length is 3.
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(6)
+      .WillRepeatedly(Return(false));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("G", &session, &command));
+  EXPECT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HALF_ASCII);
+  EXPECT_EQ(session.context().composer().GetRawString(), "G");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("o", &session, &command));
+  EXPECT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HALF_ASCII);
+  EXPECT_EQ(session.context().composer().GetRawString(), "Go");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("o", &session, &command));
+  EXPECT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HALF_ASCII);
+  EXPECT_EQ(session.context().composer().GetRawString(), "Goo");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("g", &session, &command));
+  EXPECT_EQ(session.context().composer().GetRawString(), "Goog");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("l", &session, &command));
+  EXPECT_EQ(session.context().composer().GetRawString(), "Googl");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("e", &session, &command));
+  EXPECT_EQ(session.context().composer().GetRawString(), "Google");
+
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest,
+       HeldPendingRomanDownFocusesOrdinarySuggestionWithoutPrediction) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments suggestion_initial;
+  Segment* suggestion_segment = suggestion_initial.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "held first", suggestion_segment);
+  AddCandidate("あ", "held second", suggestion_segment);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(1)
+      .WillOnce(DoAll(
+          SetArgPointee<1>(suggestion_initial), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 2);
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("l", &session, &command));
+  ASSERT_EQ(session.context().composer().GetPendingRomanInputLength(), 1);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 2);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "held first");
+  EXPECT_EQ(command.output().candidate_window().candidate(1).value(),
+            "held second");
+
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, StartPrediction(_, _)).Times(0);
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .Times(0);
+  EXPECT_CALL(*converter, PrependCandidates(_, _, _)).Times(0);
+  EXPECT_CALL(*converter, FocusSegmentValue(_, 0, _))
+      .Times(2)
+      .WillRepeatedly(Return(true));
+
+  command.Clear();
+  EXPECT_TRUE(SendSpecialKey(commands::KeyEvent::DOWN, &session, &command));
+
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::PREDICTION);
+  ASSERT_TRUE(command.output().candidate_window().has_focused_index());
+  EXPECT_EQ(command.output().candidate_window().focused_index(), 0);
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 2);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "held first");
+  EXPECT_EQ(command.output().candidate_window().candidate(1).value(),
+            "held second");
+  EXPECT_PREEDIT("held first", command);
+
+  command.Clear();
+  EXPECT_TRUE(SendSpecialKey(commands::KeyEvent::DOWN, &session, &command));
+
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_TRUE(command.output().candidate_window().has_focused_index());
+  EXPECT_EQ(command.output().candidate_window().focused_index(), 1);
+  EXPECT_PREEDIT("held second", command);
+
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest,
+       HeldPendingRomanDownFocusesDisplayedSuggestionWithoutPrediction) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments suggestion_initial;
+  Segment* suggestion_segment = suggestion_initial.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "held first", suggestion_segment);
+  AddCandidate("あ", "held second", suggestion_segment);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(1)
+      .WillOnce(DoAll(
+          SetArgPointee<1>(suggestion_initial), Return(true)));
+
+  Segments live_al;
+  Segment* live_al_segment = live_al.add_segment();
+  live_al_segment->set_key("あl");
+  AddCandidate("あl", "A-L live", live_al_segment);
+
+  Segments live_alt;
+  Segment* live_alt_segment = live_alt.add_segment();
+  live_alt_segment->set_key("あlt");
+  AddCandidate("あlt", "A-LT live", live_alt_segment);
+
+  Segments live_alts;
+  Segment* live_alts_segment = live_alts.add_segment();
+  live_alts_segment->set_key("あlts");
+  AddCandidate("あlts", "A-LTS live", live_alts_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(3)
+      .WillOnce(DoAll(SetArgPointee<1>(live_al), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_alt), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_alts), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("l", &session, &command));
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("t", &session, &command));
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+
+  ASSERT_EQ(session.context().composer().GetPendingRomanInputLength(), 3);
+  ASSERT_TRUE(session_peer.live_conversion_active_());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 2);
+  EXPECT_FALSE(command.output().candidate_window().has_focused_index());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "held first");
+  EXPECT_EQ(command.output().candidate_window().candidate(1).value(),
+            "held second");
+
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, StartPrediction(_, _)).Times(0);
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .Times(0);
+  EXPECT_CALL(*converter, PrependCandidates(_, _, _)).Times(0);
+  EXPECT_CALL(*converter, FocusSegmentValue(_, 0, _))
+      .Times(2)
+      .WillRepeatedly(Return(true));
+
+  command.Clear();
+  EXPECT_TRUE(SendSpecialKey(commands::KeyEvent::DOWN, &session, &command));
+
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_FALSE(session_peer.live_conversion_active_());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::PREDICTION);
+  ASSERT_TRUE(command.output().candidate_window().has_focused_index());
+  EXPECT_EQ(command.output().candidate_window().focused_index(), 0);
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 2);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "held first");
+  EXPECT_EQ(command.output().candidate_window().candidate(1).value(),
+            "held second");
+  EXPECT_PREEDIT("held first", command);
+
+  command.Clear();
+  EXPECT_TRUE(SendSpecialKey(commands::KeyEvent::DOWN, &session, &command));
+
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_TRUE(command.output().candidate_window().has_focused_index());
+  EXPECT_EQ(command.output().candidate_window().focused_index(), 1);
+  EXPECT_PREEDIT("held second", command);
+
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest,
        LiveConversionPassiveSuggestionSubmitUsesDisplayedSuggestionContext) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

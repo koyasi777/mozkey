@@ -1515,6 +1515,39 @@ void EngineConverter::SegmentWidthShrink(const composer::Composer& composer) {
   ResizeSegmentWidth(composer, -1);
 }
 
+bool EngineConverter::FocusSuggestionCandidateWithoutPrediction(const int id) {
+  if (!CheckState(SUGGESTION) ||
+      segments_.conversion_segments_size() == 0) {
+    return false;
+  }
+
+  ResetResult();
+  if (!candidate_list_.MoveToId(id)) {
+    return false;
+  }
+
+  // Keep the exact displayed suggestion segments/candidate IDs.  Transition
+  // only the state needed for focused candidate navigation.
+  state_ = PREDICTION;
+  request_type_ = ConversionRequest::PREDICTION;
+  segment_index_ = 0;
+
+  // MoveToId() changes only the candidate index.  SUGGESTION deliberately
+  // keeps CandidateList::focused_ false, so explicitly mark this exact held
+  // list as focused when promoting it to PREDICTION.
+  candidate_list_.set_focused(true);
+  candidate_list_visible_ = true;
+
+  // CandidateNext() expands a prediction at the end only when
+  // previous_suggestions_ is non-empty.  Clearing it keeps navigation inside
+  // the held list and prevents a later pending-Roman prediction refresh.
+  previous_suggestions_.clear();
+
+  UpdateSelectedCandidateIndex();
+  SegmentFocus();
+  return true;
+}
+
 void EngineConverter::CandidateNext(const composer::Composer& composer) {
   DCHECK(CheckState(PREDICTION | CONVERSION));
   ResetResult();

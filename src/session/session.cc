@@ -3573,6 +3573,7 @@ void Session::CancelPendingLiveConversion() {
   pending_live_conversion_input_.Clear();
   pending_live_conversion_suggestion_candidate_window_.Clear();
   pending_live_conversion_suggestion_context_.reset();
+  pending_live_conversion_holds_passive_suggestion_ = false;
   CancelPendingZenzLiveCorrection();
 }
 
@@ -3586,8 +3587,10 @@ void Session::ClearLiveConversionState() {
   pending_live_conversion_input_.Clear();
   pending_live_conversion_suggestion_candidate_window_.Clear();
   pending_live_conversion_suggestion_context_.reset();
+  pending_live_conversion_holds_passive_suggestion_ = false;
   live_conversion_suggestion_candidate_window_.Clear();
   live_conversion_suggestion_context_.reset();
+  live_conversion_holds_passive_suggestion_ = false;
 
   live_conversion_key_.clear();
   live_conversion_preedit_.clear();
@@ -3627,6 +3630,43 @@ bool IsPassiveLiveSuggestionCandidateWindow(
          !candidate_window.has_focused_index();
 }
 
+constexpr size_t kMaxPendingRomanLengthForSuggestionRefresh = 2;
+
+bool ShouldHoldSuggestionForPendingRoman(
+    const composer::Composer& composer) {
+  const size_t pending_length = composer.GetPendingRomanInputLength();
+  if (pending_length == 0) {
+    return false;
+  }
+
+  // Only the first unresolved Roman sequence of a fresh composition is allowed
+  // to refresh suggestion, and only through two characters (e.g. "s" -> "sh",
+  // "k" -> "ky"). Once a fixed reading exists before the suffix, even the
+  // first pending character holds the previously displayed suggestion.
+  if (!composer.IsPendingRomanInputAtCompositionStart()) {
+    return true;
+  }
+
+  return pending_length > kMaxPendingRomanLengthForSuggestionRefresh;
+}
+
+bool IsPendingRomanSuggestionHoldKey(const commands::KeyEvent& key) {
+  if (!key.has_key_code() || key.has_key_string() ||
+      key.input_style() != commands::KeyEvent::FOLLOW_MODE ||
+      key.modifier_keys_size() != 0 ||
+      (key.has_modifiers() && key.modifiers() != 0)) {
+    return false;
+  }
+
+  // Only an unmodified physical lower-case Roman key is eligible.  Modifier
+  // combinations such as Ctrl+a can preserve a lower-case key_code while also
+  // carrying modifier_keys, so they must be excluded explicitly rather than
+  // inferred from key_code casing.
+  const uint32_t key_code = key.key_code();
+  return key_code >= static_cast<uint32_t>('a') &&
+         key_code <= static_cast<uint32_t>('z');
+}
+
 bool HaveSamePassiveSuggestionCandidates(
     const commands::CandidateWindow& lhs,
     const commands::CandidateWindow& rhs) {
@@ -3659,7 +3699,8 @@ bool ShouldSuppressShiftedAsciiAutoSuggestion(
 
 bool Session::MaybeStartLiveConversion(commands::Command* command) {
   return MaybeStartLiveConversionInternal(
-      command, /*allow_zenz_live_correction=*/true);
+      command, /*allow_zenz_live_correction=*/true,
+      /*held_suggestion=*/nullptr);
 }
 
 bool Session::MaybeStartLiveConversionAfterEditing(
@@ -3669,11 +3710,13 @@ bool Session::MaybeStartLiveConversionAfterEditing(
       config.use_zenz_live_correction() &&
       config.defer_live_conversion_display_until_zenz_result();
   return MaybeStartLiveConversionInternal(
-      command, /*allow_zenz_live_correction=*/!suppress_zenz_for_edit);
+      command, /*allow_zenz_live_correction=*/!suppress_zenz_for_edit,
+      /*held_suggestion=*/nullptr);
 }
 
 bool Session::MaybeStartLiveConversionInternal(
-    commands::Command* command, const bool allow_zenz_live_correction) {
+    commands::Command* command, const bool allow_zenz_live_correction,
+    PassiveSuggestionSnapshot* held_suggestion) {
   if (!context_->GetConfig().use_live_conversion()) {
     return false;
   }
@@ -3774,6 +3817,10 @@ bool Session::MaybeStartLiveConversionInternal(
       std::move(pending_live_conversion_suggestion_candidate_window_);
   std::unique_ptr<ImeContext> pending_live_conversion_suggestion_context =
       std::move(pending_live_conversion_suggestion_context_);
+  const bool should_hold_pending_roman_suggestion =
+      held_suggestion != nullptr ||
+      (live_conversion_pending_ &&
+       pending_live_conversion_holds_passive_suggestion_);
 
   live_conversion_pending_ = false;
   pending_live_conversion_generation_ = 0;
@@ -3781,6 +3828,7 @@ bool Session::MaybeStartLiveConversionInternal(
   pending_live_conversion_input_.Clear();
   pending_live_conversion_suggestion_candidate_window_.Clear();
   pending_live_conversion_suggestion_context_.reset();
+  pending_live_conversion_holds_passive_suggestion_ = false;
 
   if (!context_->mutable_converter()->Convert(context_->composer())) {
     if (ShouldKeepPendingLiveConversionForTransientSokuon(live_conversion_key) &&
@@ -3845,12 +3893,55 @@ bool Session::MaybeStartLiveConversionInternal(
       ShouldSuppressShiftedAsciiAutoSuggestion(context_->GetConfig(),
                                                context_->composer());
 
+  live_conversion_holds_passive_suggestion_ = false;
+
   if (should_suppress_shifted_ascii_suggestion) {
     live_conversion_suggestion_candidate_window_.Clear();
     pending_live_conversion_suggestion_candidate_window_.Clear();
     live_conversion_suggestion_context_.reset();
     pending_live_conversion_suggestion_context_.reset();
     command->mutable_output()->clear_candidate_window();
+  } else if (should_hold_pending_roman_suggestion) {
+    PassiveSuggestionSnapshot fallback_snapshot;
+    PassiveSuggestionSnapshot* snapshot = held_suggestion;
+
+    if ((snapshot == nullptr || snapshot->context == nullptr) &&
+        IsPassiveLiveSuggestionCandidateWindow(
+            pending_live_conversion_suggestion_candidate_window) &&
+        pending_live_conversion_suggestion_context != nullptr) {
+      fallback_snapshot.candidate_window =
+          std::move(pending_live_conversion_suggestion_candidate_window);
+      fallback_snapshot.context =
+          std::move(pending_live_conversion_suggestion_context);
+      snapshot = &fallback_snapshot;
+    }
+
+    if ((snapshot == nullptr || snapshot->context == nullptr) &&
+        IsPassiveLiveSuggestionCandidateWindow(
+            live_conversion_suggestion_candidate_window_) &&
+        live_conversion_suggestion_context_ != nullptr) {
+      fallback_snapshot.candidate_window =
+          std::move(live_conversion_suggestion_candidate_window_);
+      fallback_snapshot.context =
+          std::move(live_conversion_suggestion_context_);
+      snapshot = &fallback_snapshot;
+    }
+
+    live_conversion_suggestion_candidate_window_.Clear();
+    live_conversion_suggestion_context_.reset();
+
+    if (snapshot != nullptr &&
+        AttachPassiveSuggestionSnapshot(
+            live_conversion_suggestion_input, snapshot,
+            command->mutable_output())) {
+      live_conversion_suggestion_candidate_window_ =
+          snapshot->candidate_window;
+      live_conversion_suggestion_context_ =
+          std::move(snapshot->context);
+      live_conversion_holds_passive_suggestion_ = true;
+    } else {
+      command->mutable_output()->clear_candidate_window();
+    }
   } else if (
       !AttachLiveConversionSuggestionCandidateWindow(
           live_conversion_suggestion_input, command->mutable_output()) &&
@@ -4396,7 +4487,9 @@ void Session::AttachDelayedLiveConversionCallback(
     GetLiveConversionDelayMillisec(context_->GetConfig()));
 }
 
-bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
+bool Session::MaybeScheduleLiveConversion(
+    commands::Command* command,
+    PassiveSuggestionSnapshot* held_suggestion) {
   if (!context_->GetConfig().use_live_conversion()) {
     return false;
   }
@@ -4434,7 +4527,8 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
   const uint32_t delay_msec =
       GetLiveConversionDelayMillisec(context_->GetConfig());
   if (delay_msec == 0) {
-    return MaybeStartLiveConversion(command);
+    return MaybeStartLiveConversionInternal(
+        command, /*allow_zenz_live_correction=*/true, held_suggestion);
   }
 
   ++live_conversion_generation_;
@@ -4444,6 +4538,7 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
   pending_live_conversion_input_ = command->input();
   pending_live_conversion_suggestion_candidate_window_.Clear();
   pending_live_conversion_suggestion_context_.reset();
+  pending_live_conversion_holds_passive_suggestion_ = false;
 
   if (!OutputPendingLiveConversion(command)) {
     // Avoid showing raw hiragana fallback. If pending display cannot be built
@@ -4451,8 +4546,22 @@ bool Session::MaybeScheduleLiveConversion(commands::Command* command) {
     return MaybeStartLiveConversion(command);
   }
 
-  if (AttachLiveConversionSuggestionCandidateWindow(command->input(),
-                                                    command->mutable_output())) {
+  if (held_suggestion != nullptr) {
+    if (AttachPassiveSuggestionSnapshot(
+            command->input(), held_suggestion, command->mutable_output())) {
+      pending_live_conversion_suggestion_candidate_window_ =
+          held_suggestion->candidate_window;
+      pending_live_conversion_suggestion_context_ =
+          std::move(held_suggestion->context);
+      pending_live_conversion_holds_passive_suggestion_ = true;
+      live_conversion_suggestion_candidate_window_.Clear();
+      live_conversion_suggestion_context_.reset();
+    } else {
+      command->mutable_output()->clear_candidate_window();
+    }
+  } else if (
+      AttachLiveConversionSuggestionCandidateWindow(
+          command->input(), command->mutable_output())) {
     pending_live_conversion_suggestion_candidate_window_ =
         command->output().candidate_window();
     pending_live_conversion_suggestion_context_ =
@@ -7582,6 +7691,39 @@ bool Session::InsertCharacter(commands::Command* command) {
     return true;
   }
 
+  // Decide whether this key would extend the trailing unresolved Roman input
+  // beyond the refresh budget before live-conversion editing tears down the
+  // currently visible passive-suggestion context. Composer is copyable, so the
+  // table-aware dry run does not mutate the real composition.
+  PassiveSuggestionSnapshot held_pending_roman_suggestion;
+  bool should_hold_pending_roman_suggestion = false;
+  if ((context_->state() == ImeContext::COMPOSITION ||
+       live_conversion_active_ || live_conversion_pending_) &&
+      IsPendingRomanSuggestionHoldKey(key)) {
+    composer::Composer composer_after_insert_for_suggestion =
+        context_->composer();
+    composer_after_insert_for_suggestion.InsertCharacterKeyEvent(key);
+
+    // Shift-triggered temporary alphanumeric input also stores its raw ASCII
+    // sequence in CharChunk::pending_.  That state is not unresolved Roman
+    // input and must keep refreshing suggestion for every character.
+    const transliteration::TransliterationType input_mode_after_insert =
+        composer_after_insert_for_suggestion.GetInputMode();
+    const bool is_ascii_input_mode =
+        input_mode_after_insert == transliteration::HALF_ASCII ||
+        input_mode_after_insert == transliteration::FULL_ASCII;
+
+    if (!is_ascii_input_mode) {
+      should_hold_pending_roman_suggestion =
+          ShouldHoldSuggestionForPendingRoman(
+              composer_after_insert_for_suggestion);
+    }
+    if (should_hold_pending_roman_suggestion) {
+      CaptureVisiblePassiveSuggestionSnapshot(
+          &held_pending_roman_suggestion);
+    }
+  }
+
   // If the current conversion was started by live conversion, ordinary
   // character input should continue editing the composition. Preserve the
   // exact presentation the user saw before canceling the temporary converter
@@ -7785,7 +7927,22 @@ bool Session::InsertCharacter(commands::Command* command) {
     return Convert(command);
   }
 
-  if (MaybeScheduleLiveConversion(command)) {
+  composition_holds_passive_suggestion_ = false;
+
+  if (MaybeScheduleLiveConversion(
+          command,
+          should_hold_pending_roman_suggestion
+              ? &held_pending_roman_suggestion
+              : nullptr)) {
+    return true;
+  }
+
+  if (should_hold_pending_roman_suggestion) {
+    // Keep the converter's existing suggestion state. Output() refreshes the
+    // preedit from the current Composer while avoiding StartPrediction().
+    composition_holds_passive_suggestion_ =
+        context_->converter().CheckState(EngineConverterInterface::SUGGESTION);
+    Output(command);
     return true;
   }
 
@@ -8303,6 +8460,8 @@ bool ShouldSuppressShiftedAsciiAutoSuggestion(
 }  // namespace
 
 bool Session::Suggest(const commands::Input& input) {
+  composition_holds_passive_suggestion_ = false;
+
   if (SuppressSuggestion(input)) {
     return false;
   }
@@ -8338,6 +8497,206 @@ bool Session::Suggest(const commands::Input& input) {
 
   return context_->mutable_converter()->Suggest(context_->composer(),
                                                 input.context());
+}
+
+bool Session::CaptureVisiblePassiveSuggestionSnapshot(
+    PassiveSuggestionSnapshot* snapshot) const {
+  DCHECK(snapshot);
+
+  snapshot->candidate_window.Clear();
+  snapshot->context.reset();
+
+  auto capture_live_snapshot =
+      [&](const commands::CandidateWindow& candidate_window,
+          const ImeContext* suggestion_context) {
+        if (!IsPassiveLiveSuggestionCandidateWindow(candidate_window) ||
+            suggestion_context == nullptr ||
+            suggestion_context->composer().GetQueryForConversion() !=
+                context_->composer().GetQueryForConversion()) {
+          return false;
+        }
+
+        commands::Output suggestion_output;
+        suggestion_context->converter().FillOutput(
+            suggestion_context->composer(), &suggestion_output);
+        if (!suggestion_output.has_candidate_window() ||
+            !HaveSamePassiveSuggestionCandidates(
+                candidate_window, suggestion_output.candidate_window())) {
+          return false;
+        }
+
+        snapshot->candidate_window = candidate_window;
+        snapshot->context =
+            std::make_unique<ImeContext>(*suggestion_context);
+        return true;
+      };
+
+  if (live_conversion_active_ &&
+      capture_live_snapshot(
+          live_conversion_suggestion_candidate_window_,
+          live_conversion_suggestion_context_.get())) {
+    return true;
+  }
+
+  if (live_conversion_pending_ &&
+      capture_live_snapshot(
+          pending_live_conversion_suggestion_candidate_window_,
+          pending_live_conversion_suggestion_context_.get())) {
+    return true;
+  }
+
+  commands::Output current_output;
+  context_->converter().FillOutput(context_->composer(), &current_output);
+  if (!current_output.has_candidate_window() ||
+      !IsPassiveLiveSuggestionCandidateWindow(
+          current_output.candidate_window())) {
+    return false;
+  }
+
+  snapshot->candidate_window = current_output.candidate_window();
+  snapshot->context = std::make_unique<ImeContext>(*context_);
+  return true;
+}
+
+bool Session::AttachPassiveSuggestionSnapshot(
+    const commands::Input& input,
+    PassiveSuggestionSnapshot* snapshot,
+    commands::Output* output) {
+  DCHECK(snapshot);
+  DCHECK(output);
+
+  output->clear_candidate_window();
+
+  if (!IsPassiveLiveSuggestionCandidateWindow(snapshot->candidate_window) ||
+      snapshot->context == nullptr) {
+    return false;
+  }
+
+  if (SuppressSuggestion(input) ||
+      ShouldSuppressShiftedAsciiAutoSuggestion(
+          context_->GetConfig(), context_->composer())) {
+    snapshot->candidate_window.Clear();
+    snapshot->context.reset();
+    return false;
+  }
+
+  // The converter candidate state remains the exact state that produced the
+  // displayed IDs. Only Composer follows the user's newer unresolved Roman
+  // input. This lets FillOutput and candidate submission use the current
+  // composition without running prediction again.
+  *snapshot->context->mutable_composer() = context_->composer();
+  snapshot->context->set_state(ImeContext::COMPOSITION);
+
+  commands::Output suggestion_output;
+  snapshot->context->converter().FillOutput(
+      snapshot->context->composer(), &suggestion_output);
+  if (!suggestion_output.has_candidate_window() ||
+      !HaveSamePassiveSuggestionCandidates(
+          snapshot->candidate_window,
+          suggestion_output.candidate_window())) {
+    snapshot->candidate_window.Clear();
+    snapshot->context.reset();
+    return false;
+  }
+
+  *output->mutable_candidate_window() = snapshot->candidate_window;
+  return true;
+}
+
+bool Session::FocusHeldPassiveSuggestion(commands::Command* command) {
+  DCHECK(command);
+
+  // Ordinary (non-live) HOLD keeps the real converter in SUGGESTION state.
+  // Promote that exact list directly instead of calling Predict() with the
+  // newer pending-Roman composer.
+  if (composition_holds_passive_suggestion_ &&
+      context_->state() == ImeContext::COMPOSITION &&
+      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)) {
+    commands::Output current_output;
+    context_->converter().FillOutput(context_->composer(), &current_output);
+    if (current_output.has_candidate_window() &&
+        IsPassiveLiveSuggestionCandidateWindow(
+            current_output.candidate_window()) &&
+        current_output.candidate_window().candidate_size() > 0 &&
+        current_output.candidate_window().candidate(0).has_id()) {
+      const int first_id =
+          current_output.candidate_window().candidate(0).id();
+      if (context_->mutable_converter()
+              ->FocusSuggestionCandidateWithoutPrediction(first_id)) {
+        composition_holds_passive_suggestion_ = false;
+        command->mutable_output()->set_consumed(true);
+        SetSessionState(ImeContext::CONVERSION, context_.get());
+        Output(command);
+        return true;
+      }
+    }
+
+    // If the held state is no longer internally serviceable, fail open to the
+    // ordinary prediction path instead of repeatedly treating it as held.
+    composition_holds_passive_suggestion_ = false;
+  }
+
+  const commands::CandidateWindow* candidate_window = nullptr;
+  const ImeContext* suggestion_context = nullptr;
+
+  if (live_conversion_active_ &&
+      live_conversion_holds_passive_suggestion_ &&
+      IsPassiveLiveSuggestionCandidateWindow(
+          live_conversion_suggestion_candidate_window_)) {
+    candidate_window = &live_conversion_suggestion_candidate_window_;
+    suggestion_context = live_conversion_suggestion_context_.get();
+  } else if (
+      live_conversion_pending_ &&
+      pending_live_conversion_holds_passive_suggestion_ &&
+      IsPassiveLiveSuggestionCandidateWindow(
+          pending_live_conversion_suggestion_candidate_window_)) {
+    candidate_window =
+        &pending_live_conversion_suggestion_candidate_window_;
+    suggestion_context =
+        pending_live_conversion_suggestion_context_.get();
+  }
+
+  if (candidate_window == nullptr || suggestion_context == nullptr ||
+      candidate_window->candidate_size() == 0 ||
+      !candidate_window->candidate(0).has_id() ||
+      !suggestion_context->converter().CheckState(
+          EngineConverterInterface::SUGGESTION) ||
+      suggestion_context->composer().GetQueryForConversion() !=
+          context_->composer().GetQueryForConversion()) {
+    return false;
+  }
+
+  commands::Output snapshot_output;
+  suggestion_context->converter().FillOutput(
+      suggestion_context->composer(), &snapshot_output);
+  if (!snapshot_output.has_candidate_window() ||
+      !HaveSamePassiveSuggestionCandidates(
+          *candidate_window, snapshot_output.candidate_window())) {
+    return false;
+  }
+
+  const int first_id = candidate_window->candidate(0).id();
+  auto focused_context = std::make_unique<ImeContext>(*suggestion_context);
+  if (!focused_context->mutable_converter()
+           ->FocusSuggestionCandidateWithoutPrediction(first_id)) {
+    return false;
+  }
+
+  // AttachPassiveSuggestionSnapshot() has already advanced the snapshot
+  // Composer to the user's current composition, including the unresolved Roman
+  // suffix.  Therefore Cancel can still return to the current input rather than
+  // rolling the Composer back to the older suggestion query.
+  if (HasVisibleZenzLiveCorrection()) {
+    SetPendingZenzFeedbackRejected("predict_held_suggestion_after_zenz");
+  }
+
+  command->mutable_output()->set_consumed(true);
+  composition_holds_passive_suggestion_ = false;
+  ClearLiveConversionState();
+  context_ = std::move(focused_context);
+  SetSessionState(ImeContext::CONVERSION, context_.get());
+  Output(command);
+  return true;
 }
 
 bool Session::AttachLiveConversionSuggestionCandidateWindow(
@@ -9206,6 +9565,10 @@ bool Session::ConvertCancel(commands::Command* command) {
 bool Session::PredictAndConvertFromLiveConversion(commands::Command* command) {
   DCHECK(command);
 
+  if (FocusHeldPassiveSuggestion(command)) {
+    return true;
+  }
+
   CancelPendingLiveConversion();
   command->mutable_output()->set_consumed(true);
 
@@ -9242,6 +9605,10 @@ bool Session::PredictAndConvertFromLiveConversion(commands::Command* command) {
 }
 
 bool Session::PredictAndConvert(commands::Command* command) {
+  if (FocusHeldPassiveSuggestion(command)) {
+    return true;
+  }
+
   CancelPendingLiveConversion();
 
   if (context_->state() == ImeContext::CONVERSION) {
