@@ -7697,8 +7697,17 @@ bool Session::InsertCharacter(commands::Command* command) {
   // table-aware dry run does not mutate the real composition.
   PassiveSuggestionSnapshot held_pending_roman_suggestion;
   bool should_hold_pending_roman_suggestion = false;
+  // Special Romanji tables are software/mobile keyboard state machines
+  // (12-key, flick, mobile QWERTY, GODAN, NOTOUCH, etc.).  Their key_code
+  // streams are table commands rather than physical desktop Roman input and
+  // must retain the existing per-key suggestion/transliteration behavior.
+  const bool uses_standard_romanji_table =
+      context_->GetRequest().special_romanji_table() ==
+      commands::Request::DEFAULT_TABLE;
+
   if ((context_->state() == ImeContext::COMPOSITION ||
        live_conversion_active_ || live_conversion_pending_) &&
+      uses_standard_romanji_table &&
       IsPendingRomanSuggestionHoldKey(key)) {
     composer::Composer composer_after_insert_for_suggestion =
         context_->composer();
