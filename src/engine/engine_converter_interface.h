@@ -374,6 +374,17 @@ class EngineConverterInterface {
   virtual void CandidateNextPage() = 0;
   virtual void CandidatePrev() = 0;
   virtual void CandidatePrevPage() = 0;
+
+  // Promotes the currently displayed SUGGESTION list to PREDICTION and focuses
+  // |id| without issuing a new prediction request.  This is used when the
+  // session intentionally keeps an exact passive-suggestion snapshot visible.
+  // Lightweight implementations that do not support this transition can keep
+  // the default failure behavior.
+  virtual bool FocusSuggestionCandidateWithoutPrediction(int id) {
+    (void)id;
+    return false;
+  }
+
   // Move the focus to the candidate represented by the id.
   virtual void CandidateMoveToId(int id,
                                  const composer::Composer& composer) = 0;

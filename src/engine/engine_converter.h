@@ -266,6 +266,9 @@ class EngineConverter : public EngineConverterInterface {
   void CandidateNextPage() override;
   void CandidatePrev() override;
   void CandidatePrevPage() override;
+
+  bool FocusSuggestionCandidateWithoutPrediction(int id) override;
+
   // Moves the focus to the candidate represented by the id.
   void CandidateMoveToId(int id, const composer::Composer& composer) override;
   // Moves the focus to the index from the beginning of the current page.

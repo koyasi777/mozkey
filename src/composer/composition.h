@@ -130,6 +130,13 @@ class Composition final {
   Transliterators::Transliterator GetTransliterator(size_t position) const;
 
   size_t GetLength() const;
+  // Returns the number of unresolved input characters stored in the pending
+  // state of the trailing chunk. This is semantic composition state and is
+  // independent of how the pending input is rendered.
+  size_t GetTrailingPendingInputLength() const;
+  // Returns true when the trailing pending input is the composition's initial
+  // unresolved input, with no fixed conversion before it.
+  bool IsTrailingPendingInputAtCompositionStart() const;
   // Returns the unresolved display length of the last chunk only.
   size_t GetTrailingPendingDisplayLength() const;
   std::string GetString() const;

@@ -76,6 +76,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
+- ローマ字入力中、確定済みの読みの後ろに未解決のローマ字 suffix が残る間は、入力途中の一時的な Roman prefix ごとに passive suggestion を再計算して候補ウィンドウがちらつくのを抑えるため、直前まで表示していた候補を保持。suffix が解決した時点で更新を再開し、候補へ移動する場合も表示中の候補集合をそのまま使用
 - デフォルトでは 1 文字だけの未確定文字列で、助詞などの誤変換を避けるためライブ変換を実行しない
 - `え~`、`えー`、`ん？` のような「かな1文字 + 装飾的な末尾記号」でも、短すぎる漢字化を避けるためライブ変換を抑制
 - 感嘆詞・口語評価語・くだけた挨拶の入力途中ではライブ変換のちらつきを抑えつつ、完成した `うっそ`、`くっそ`、`やっば`、`すっげぇ`、`めっちゃ`、`ちっす`、`ちょりっす`、`ほえ～`、`ほぇ～`、`ほっほーん` などは生成辞書候補として自然なかな表記を救出
@@ -226,6 +227,10 @@ Windows 版では、追加のオフライン防御層として、インストー
 また、`え~`、`えー`、`ん？` のように、かな1文字の後ろに装飾的な記号だけが続く場合もライブ変換を抑制します。これにより、入力途中の `え~` が `絵～` のように短すぎる漢字候補へ変換される挙動を避けます。
 
 さらに、短い感嘆詞、口語的な評価語、くだけた挨拶などでは、入力途中の prefix や pending roman suffix によるライブ変換のちらつきを抑えます。一方で、完成した表現は session 側でライブ変換を止めず、converter と辞書候補に渡します。
+
+サジェストについては、入力途中の未解決ローマ字によって候補が毎キー再生成され、候補ウィンドウが頻繁に更新・ちらつくのを抑えるため、ライブ変換とは別に passive suggestion の更新を一時的に HOLD します。確定済みの読みの後ろへ未解決のローマ字 suffix が付いた場合は、直前まで表示していた候補集合をそのまま保持し、suffix が解決するまで毎キーの prediction をやり直しません。たとえば `今日は` の後で `s`、`sh` と入力している間は同じ候補集合を維持し、`shi` が `し` に解決した時点で、現在の読み `今日はし` に対する suggestion を更新します。新しい composition の先頭だけは、`s` / `sh` のような短い未解決入力でも候補を出せるよう、最初の 2 文字までは refresh を許可します。
+
+保持中に Down / Tab で候補へ入る場合は、その時点で画面に表示されていた候補集合を再 prediction せずにそのままフォーカスします。Space は通常変換のままです。Shift による一時英字入力、modifier 付き入力、software / mobile keyboard からの明示的な text input はこの HOLD の対象にしません。ライブ変換と Zenz 自体は pending suffix 中も従来どおり継続します。
 
 完成した expressive kana については、生成辞書に自然なかな候補を追加します。これにより初期状態では不自然な漢字分割に寄りにくくしつつ、ユーザーが `ウッソ`、`クッソ`、`ヤッバ`、`チッス`、`ホェ～` などのカタカナ表記を明示的に選んだ場合には、ユーザー履歴やユーザー辞書による表記選好が反映される余地を残します。
 
@@ -793,6 +798,7 @@ Main features added in this fork
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
+- Reduces candidate-window flicker caused by repeatedly recomputing passive suggestions for transient unresolved Roman prefixes after an already resolved reading; Mozkey holds the currently displayed suggestion list until the suffix resolves, then resumes refresh, and entering the list keeps the exact displayed candidates
 - By default, suppresses live conversion for one-character compositions to avoid over-converting particles
 - Suppresses live conversion for very short kana compositions with decorative trailing symbols such as `え~`, `えー`, or `ん？`
 - Suppresses live-conversion flicker for unfinished expressive kana prefixes, while completed expressive forms such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん` are rescued as generated dictionary candidates
@@ -909,6 +915,10 @@ To reduce distracting intermediate conversions, this fork applies live conversio
 Live conversion is also suppressed for very short kana compositions followed only by decorative trailing symbols, such as `え~`, `えー`, or `ん？`. This avoids noisy intermediate conversions such as `え~` becoming `絵～` while the user is still typing.
 
 For short expressive kana utterances, colloquial evaluative forms, and casual greetings, this fork suppresses live-conversion flicker only while the user is still typing an unfinished prefix or a pending roman suffix. Completed expressions are allowed to reach the normal converter.
+
+To reduce candidate-window flicker caused by repeatedly recomputing passive suggestions for transient unresolved Roman prefixes, Mozkey temporarily holds passive-suggestion refresh separately from live conversion. When an already-resolved reading is followed by unresolved trailing Roman input, the suggestion list already visible on screen is kept instead of rerunning prediction on every key. For example, after `今日は`, typing `s` and then `sh` keeps the same suggestion set; when `shi` resolves to `し`, suggestions refresh for the current reading `今日はし`. At the start of a fresh composition, the first two unresolved Roman characters may still refresh so short prefixes such as `s` / `sh` can produce useful suggestions.
+
+While the list is held, Down / Tab focuses the exact displayed candidates without running prediction again. Space keeps the ordinary conversion path. Shift-triggered temporary ASCII input, modified key events, and explicit text input from software/mobile keyboards are excluded from this hold. Live conversion and Zenz processing continue normally while the Roman suffix is pending.
 
 For completed expressive forms, the generated dictionary adds natural kana candidates such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん`. This avoids pathological kanji segmentation by default while still allowing explicit user selections, user history, and user dictionary entries such as `ウッソ`, `クッソ`, `ヤッバ`, `チッス`, or `ホェ～` to influence future ranking.
 

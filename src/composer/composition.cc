@@ -236,6 +236,22 @@ size_t Composition::GetLength() const {
   return GetPosition(Transliterators::LOCAL, chunks_.end());
 }
 
+size_t Composition::GetTrailingPendingInputLength() const {
+  if (chunks_.empty()) {
+    return 0;
+  }
+  return Util::CharsLen(chunks_.back().pending());
+}
+
+bool Composition::IsTrailingPendingInputAtCompositionStart() const {
+  if (chunks_.size() != 1) {
+    return false;
+  }
+
+  const CharChunk& chunk = chunks_.back();
+  return !chunk.pending().empty() && chunk.conversion().empty();
+}
+
 size_t Composition::GetTrailingPendingDisplayLength() const {
   if (chunks_.empty()) {
     return 0;

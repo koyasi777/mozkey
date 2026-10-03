@@ -311,7 +311,16 @@ class Session {
  private:
   friend class SessionTestPeer;
 
+  struct PassiveSuggestionSnapshot {
+    commands::CandidateWindow candidate_window;
+    std::unique_ptr<ImeContext> context;
+  };
+
   std::unique_ptr<ImeContext> context_;
+
+  // True only while ordinary composition is displaying a passive suggestion
+  // that was intentionally held across unresolved trailing Roman input.
+  bool composition_holds_passive_suggestion_ = false;
 
   // True while the current CONVERSION state was started by live conversion.
   // In this mode, ordinary character input should keep editing the underlying
@@ -343,6 +352,13 @@ class Session {
   // snapshots and must never share ownership implicitly.
   std::unique_ptr<ImeContext> pending_live_conversion_suggestion_context_;
 
+  // True when the delayed live-conversion request was scheduled from a
+  // physical lower-case Roman key whose unresolved suffix must keep the
+  // previously visible passive suggestion instead of refreshing prediction.
+  // Keep this explicit: Composer state alone cannot distinguish Roman keyboard
+  // input from key_string/mobile input that may use pending_ internally.
+  bool pending_live_conversion_holds_passive_suggestion_ = false;
+
   // Passive suggestion window currently associated with live conversion output.
   // Some delayed callbacks re-render live conversion without regenerating
   // suggestions; this cache keeps the passive suggestion window stable there.
@@ -352,6 +368,10 @@ class Session {
   // Candidate IDs in that window belong to this converter state, not to the
   // real live-conversion converter which intentionally remains in CONVERSION.
   std::unique_ptr<ImeContext> live_conversion_suggestion_context_;
+
+  // True only when the active live-conversion passive suggestion is an exact
+  // held snapshot from before the current unresolved Roman suffix.
+  bool live_conversion_holds_passive_suggestion_ = false;
 
   // The reading used for the latest successful live conversion.
   std::string live_conversion_key_;
@@ -674,11 +694,14 @@ class Session {
 
   // Live conversion.
   bool MaybeStartLiveConversion(mozc::commands::Command* command);
-  bool MaybeStartLiveConversionInternal(mozc::commands::Command* command,
-                                        bool allow_zenz_live_correction);
+  bool MaybeStartLiveConversionInternal(
+      mozc::commands::Command* command, bool allow_zenz_live_correction,
+      PassiveSuggestionSnapshot* held_suggestion);
   bool MaybeStartLiveConversionAfterEditing(
       mozc::commands::Command* command);
-  bool MaybeScheduleLiveConversion(mozc::commands::Command* command);
+  bool MaybeScheduleLiveConversion(
+      mozc::commands::Command* command,
+      PassiveSuggestionSnapshot* held_suggestion = nullptr);
   bool ApplyDelayedLiveConversion(mozc::commands::Command* command);
   bool IgnoreStaleDelayedLiveConversion(mozc::commands::Command* command);
   void CancelPendingLiveConversion();
@@ -693,6 +716,13 @@ class Session {
   // without mutating the real converter state.  This keeps live conversion as a
   // CONVERSION state for normal conversion keys while still showing passive
   // suggestions.
+  bool CaptureVisiblePassiveSuggestionSnapshot(
+      PassiveSuggestionSnapshot* snapshot) const;
+  bool AttachPassiveSuggestionSnapshot(
+      const mozc::commands::Input& input,
+      PassiveSuggestionSnapshot* snapshot,
+      mozc::commands::Output* output);
+  bool FocusHeldPassiveSuggestion(mozc::commands::Command* command);
   bool AttachLiveConversionSuggestionCandidateWindow(
       const mozc::commands::Input& input,
       mozc::commands::Output* output);

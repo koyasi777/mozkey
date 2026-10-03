@@ -1571,6 +1571,56 @@ TEST_F(ComposerTest, PendingRomanDisplayLengthIsDisabledByDefault) {
   EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
 }
 
+TEST_F(ComposerTest, PendingRomanInputLengthTracksSemanticTrailingPrefix) {
+  config_->set_preedit_method(Config::ROMAN);
+  table_->AddRule("a", "あ", "");
+  table_->AddRule("ltsu", "っ", "");
+  table_->AddRule("tt", "っ", "t");
+  composer_ = std::make_unique<Composer>(table_, request_, config_);
+  composer_->SetInputMode(transliteration::HIRAGANA);
+
+  ASSERT_TRUE(InsertKey("l", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 1);
+  EXPECT_TRUE(composer_->IsPendingRomanInputAtCompositionStart());
+  EXPECT_EQ(composer_->GetPendingRomanDisplayLength(), 0);
+
+  ASSERT_TRUE(InsertKey("t", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 2);
+  EXPECT_TRUE(composer_->IsPendingRomanInputAtCompositionStart());
+
+  ASSERT_TRUE(InsertKey("s", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 3);
+  EXPECT_TRUE(composer_->IsPendingRomanInputAtCompositionStart());
+
+  ASSERT_TRUE(InsertKey("u", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 0);
+  EXPECT_FALSE(composer_->IsPendingRomanInputAtCompositionStart());
+  EXPECT_EQ(composer_->GetStringForPreedit(), "っ");
+
+  composer_->Reset();
+  ASSERT_TRUE(InsertKey("a", composer_.get()));
+  ASSERT_TRUE(InsertKey("l", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 1);
+  EXPECT_FALSE(composer_->IsPendingRomanInputAtCompositionStart());
+
+  composer_->Reset();
+  ASSERT_TRUE(InsertKey("t", composer_.get()));
+  ASSERT_TRUE(InsertKey("t", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 1);
+  EXPECT_FALSE(composer_->IsPendingRomanInputAtCompositionStart());
+
+  composer_->Reset();
+  ASSERT_TRUE(InsertKey("l", composer_.get()));
+  composer_->MoveCursorLeft();
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 0);
+  EXPECT_FALSE(composer_->IsPendingRomanInputAtCompositionStart());
+
+  composer_->MoveCursorToEnd();
+  composer_->SetOutputMode(transliteration::HALF_ASCII);
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 0);
+  EXPECT_FALSE(composer_->IsPendingRomanInputAtCompositionStart());
+}
+
 TEST_F(ComposerTest, SetOutputMode) {
   table_->AddRule("mo", "も", "");
   table_->AddRule("zu", "ず", "");
