@@ -206,11 +206,6 @@ int ZenzFeedbackCandidateRewriter::capability(
     return RewriterInterface::NOT_AVAILABLE;
   }
 
-  if (request.config().history_learning_level() !=
-      config::Config::DEFAULT_HISTORY) {
-    return RewriterInterface::NOT_AVAILABLE;
-  }
-
   return RewriterInterface::CONVERSION;
 }
 
