@@ -308,6 +308,79 @@ class UserDictionaryTest : public testing::TestWithTempUserProfile {
   const testing::MockDataManager mock_data_manager_;
 };
 
+TEST_F(UserDictionaryTest, EmoticonPosPreservesSemanticProvenance) {
+  std::unique_ptr<UserDictionary> dic(CreateDictionary());
+  dic->WaitForReloader();
+
+  UserPos::Token emoticon;
+  emoticon.key = "えがお";
+  emoticon.value = "(^_^)";
+  emoticon.id = 100;
+  emoticon.set_pos_type(user_dictionary::UserDictionary::EMOTICON);
+
+  Token emoticon_token;
+  dic->PopulateTokenFromUserPosToken(emoticon, UserDictionary::EXACT,
+                                     &emoticon_token);
+  EXPECT_NE(emoticon_token.attributes & Token::USER_DICTIONARY, 0);
+  EXPECT_NE(emoticon_token.attributes & Token::EMOTICON, 0);
+
+  UserPos::Token symbol = emoticon;
+  symbol.set_pos_type(user_dictionary::UserDictionary::SYMBOL);
+
+  Token symbol_token;
+  dic->PopulateTokenFromUserPosToken(symbol, UserDictionary::EXACT,
+                                     &symbol_token);
+  EXPECT_NE(symbol_token.attributes & Token::USER_DICTIONARY, 0);
+  EXPECT_EQ(symbol_token.attributes & Token::EMOTICON, 0);
+}
+
+TEST_F(UserDictionaryTest,
+       EmoticonAndSymbolSameSurfacePreserveDistinctLookupProvenance) {
+  std::unique_ptr<UserDictionary> dic(CreateDictionary());
+  dic->WaitForReloader();
+
+  UserDictionaryStorage storage("");
+  EXPECT_OK(storage.CreateDictionary("semantic provenance"));
+  UserDictionaryStorage::UserDictionary* storage_dic =
+      storage.GetProto().mutable_dictionaries(0);
+
+  auto* emoticon_entry = storage_dic->add_entries();
+  emoticon_entry->set_key("えがお");
+  emoticon_entry->set_value("(^^)");
+  emoticon_entry->set_pos(user_dictionary::UserDictionary::EMOTICON);
+
+  auto* symbol_entry = storage_dic->add_entries();
+  symbol_entry->set_key("えがお");
+  symbol_entry->set_value("(^^)");
+  symbol_entry->set_pos(user_dictionary::UserDictionary::SYMBOL);
+
+  ASSERT_TRUE(dic->Load(storage.GetProto()));
+
+  int matching_tokens = 0;
+  int emoticon_tokens = 0;
+  int unconstrained_tokens = 0;
+  InlineCallback callback;
+  callback.OnToken(
+      [&](absl::string_view, absl::string_view, Token token) {
+        if (token.value != "(^^)") {
+          return DictionaryInterface::Callback::TRAVERSE_CONTINUE;
+        }
+        ++matching_tokens;
+        if (token.attributes & Token::EMOTICON) {
+          ++emoticon_tokens;
+        } else {
+          ++unconstrained_tokens;
+        }
+        return DictionaryInterface::Callback::TRAVERSE_CONTINUE;
+      });
+
+  dic->LookupExact("えがお", &callback);
+
+  EXPECT_EQ(matching_tokens, 2);
+  EXPECT_EQ(emoticon_tokens, 1);
+  EXPECT_EQ(unconstrained_tokens, 1);
+}
+
 TEST_F(UserDictionaryTest, TestLookupPredictiveCallback) {
   std::unique_ptr<UserDictionary> dic(CreateDictionaryWithMockPos());
   // Wait for async reload called from the constructor.

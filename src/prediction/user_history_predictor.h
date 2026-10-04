@@ -49,6 +49,7 @@
 #include "base/container/trie.h"
 #include "base/thread.h"
 #include "composer/query.h"
+#include "converter/attribute.h"
 #include "converter/inner_segment.h"
 #include "dictionary/dictionary_interface.h"
 #include "engine/modules.h"
@@ -122,6 +123,8 @@ class UserHistoryPredictor : public PredictorInterface {
     // This is the UserHistoryPredictor equivalent of the legacy
     // UserSegmentHistoryRewriter "LN" (Left Number) feature.
     ENTRY_FLAG_LEFT_NUMBER = 1 << 0,
+    // The committed candidate carries a hard NO_TOP ranking constraint.
+    ENTRY_FLAG_NO_TOP_RANK = 1 << 1,
   };
 
  private:
@@ -134,6 +137,7 @@ class UserHistoryPredictor : public PredictorInterface {
     absl::string_view content_key;
     absl::string_view content_value;
     absl::string_view description;
+    uint8_t ranking_constraints = converter::RankingConstraint::NONE;
   };
 
   // Fingerprint of key/value.

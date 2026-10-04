@@ -30,6 +30,7 @@
 #include "prediction/result.h"
 
 #include "converter/attribute.h"
+#include "dictionary/dictionary_token.h"
 #include "testing/gunit.h"
 
 namespace mozc {
@@ -37,6 +38,18 @@ namespace prediction {
 namespace {
 
 using ::mozc::converter::Attribute;
+using ::mozc::converter::RankingConstraint;
+using ::mozc::dictionary::Token;
+
+TEST(ResultTest, EmoticonTokenAddsNoTopRankingConstraint) {
+  Token token("えがお", "(^_^)");
+  token.attributes = Token::USER_DICTIONARY | Token::EMOTICON;
+
+  Result result;
+  result.InitializeByTokenAndTypes(token, Attribute::UNIGRAM);
+
+  EXPECT_NE(result.ranking_constraints & RankingConstraint::NO_TOP, 0);
+}
 
 TEST(ResultTest, ResultCostLessTest) {
   ResultCostLess cost_less;

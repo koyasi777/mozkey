@@ -67,6 +67,9 @@ std::optional<prediction::Result> ConversionSegmentsToResult(
     absl::StrAppend(&result.key, candidate.key);
     absl::StrAppend(&result.value, candidate.value);
     result.attributes |= candidate.attributes;
+    result.ranking_constraints |= candidate.ranking_constraints;
+    result.inner_segment_ranking_constraints.push_back(
+        candidate.ranking_constraints);
     result.wcost += candidate.wcost;
     result.cost += candidate.cost;
     builder.Add(candidate.key.size(), candidate.value.size(),
@@ -96,6 +99,9 @@ prediction::Result HistorySegmentsToResult(
     absl::StrAppend(&result.key, candidate.key);
     absl::StrAppend(&result.value, candidate.value);
     result.attributes |= candidate.attributes;
+    result.ranking_constraints |= candidate.ranking_constraints;
+    result.inner_segment_ranking_constraints.push_back(
+        candidate.ranking_constraints);
     builder.Add(candidate.key.size(), candidate.value.size(),
                 candidate.content_key.size(), candidate.content_value.size());
   }
@@ -145,6 +151,7 @@ prediction::Result CandidateToResult(const Candidate& candidate) {
   result.wcost = candidate.wcost;
   result.cost = candidate.cost;
   result.attributes = candidate.attributes;
+  result.ranking_constraints = candidate.ranking_constraints;
   result.consumed_key_size = candidate.consumed_key_size;
   result.inner_segment_boundary = candidate.inner_segment_boundary;
   if (result.inner_segment_boundary.empty()) {
@@ -152,6 +159,10 @@ prediction::Result CandidateToResult(const Candidate& candidate) {
         {{candidate.key.size(), candidate.value.size(),
           candidate.content_key.size(), candidate.content_value.size()}},
         result.key, result.value);
+  }
+  if (result.inner_segment_boundary.size() == 1) {
+    result.inner_segment_ranking_constraints = {
+        candidate.ranking_constraints};
   }
   return result;
 }
@@ -168,6 +179,7 @@ void PopulateCandidateFromResult(const prediction::Result& result,
   candidate->wcost = result.wcost;
   candidate->cost = result.cost;
   candidate->attributes = result.attributes;
+  candidate->ranking_constraints = result.ranking_constraints;
   candidate->consumed_key_size = result.consumed_key_size;
   candidate->inner_segment_boundary = result.inner_segment_boundary;
   std::tie(candidate->content_key, candidate->content_value) =
@@ -244,6 +256,19 @@ void ApplyResultToSegmentsMultiSegment(const prediction::Result& result,
   const size_t num_conversion_segments = segments.conversion_segments_size();
   const size_t num_inner_segments = inner_segs.size();
 
+  auto interval_ranking_constraints = [&](size_t begin,
+                                          size_t end) -> uint8_t {
+    if (result.inner_segment_ranking_constraints.size() !=
+        num_inner_segments) {
+      return result.ranking_constraints;
+    }
+    uint8_t constraints = RankingConstraint::NONE;
+    for (size_t i = begin; i < end; ++i) {
+      constraints |= result.inner_segment_ranking_constraints[i];
+    }
+    return constraints;
+  };
+
   // ---------------------------------------------------------------------------
   // Step 2: Two-pointer boundary synchronization walk.
   // Walk through conversion segments and inner segments simultaneously from
@@ -278,6 +303,9 @@ void ApplyResultToSegmentsMultiSegment(const prediction::Result& result,
       LOG(WARNING) << "Key lengths mismatch between segments and result";
       break;
     }
+
+    const uint8_t interval_constraints =
+        interval_ranking_constraints(start_inner, inner_idx);
 
     // -------------------------------------------------------------------------
     // Step 3: Combine inner segments covered by the synchronized interval.
@@ -338,6 +366,12 @@ void ApplyResultToSegmentsMultiSegment(const prediction::Result& result,
       cand->cost = std::min(cand->cost, result.cost);
       cand->wcost = std::min(cand->wcost, result.wcost);
       cand->attributes |= result.attributes;
+      // This is an alternative derivation of the same surface.  A hard
+      // ranking prohibition applies only when every known derivation carries
+      // it.  In particular, an explicitly non-EMOTICON user-dictionary entry
+      // must remain eligible for rank 0 even if an EMOTICON/history derivation
+      // has the same key/value.
+      cand->ranking_constraints &= interval_constraints;
       if (result.inner_segment_boundary.size() >= inner_idx) {
         cand->inner_segment_boundary.assign(
             result.inner_segment_boundary.begin() + start_inner,
@@ -362,6 +396,7 @@ void ApplyResultToSegmentsMultiSegment(const prediction::Result& result,
       cand->wcost = result.wcost;
       cand->cost = result.cost;
       cand->attributes = result.attributes;
+      cand->ranking_constraints = interval_constraints;
       cand->consumed_key_size = result.consumed_key_size;
       if (result.inner_segment_boundary.size() >= inner_idx) {
         cand->inner_segment_boundary.assign(
@@ -370,6 +405,52 @@ void ApplyResultToSegmentsMultiSegment(const prediction::Result& result,
       }
     }
   }
+}
+
+bool EnforceCandidateRankingConstraints(const ConversionRequest& request,
+                                        Segments* segments) {
+  if (segments == nullptr ||
+      request.request_type() != ConversionRequest::CONVERSION) {
+    return false;
+  }
+
+  bool modified = false;
+  for (Segment& segment : segments->conversion_segments()) {
+    if (segment.candidates_size() == 0 ||
+        !(segment.candidate(0).ranking_constraints &
+          RankingConstraint::NO_TOP)) {
+      continue;
+    }
+
+    int replacement = -1;
+    for (int i = 1; i < segment.candidates_size(); ++i) {
+      if (!(segment.candidate(i).ranking_constraints &
+            RankingConstraint::NO_TOP)) {
+        replacement = i;
+        break;
+      }
+    }
+
+    if (replacement >= 0) {
+      segment.move_candidate(replacement, 0);
+      modified = true;
+      continue;
+    }
+
+    // Normal conversion normally has transliteration meta candidates. If all
+    // regular candidates are constrained, use the first unconstrained meta
+    // candidate rather than leaving an emoticon at rank 0.
+    for (size_t i = 0; i < segment.meta_candidates_size(); ++i) {
+      if (segment.meta_candidate(i).ranking_constraints &
+          RankingConstraint::NO_TOP) {
+        continue;
+      }
+      segment.move_candidate(-static_cast<int>(i) - 1, 0);
+      modified = true;
+      break;
+    }
+  }
+  return modified;
 }
 
 std::vector<prediction::Result> MergePredictionResults(

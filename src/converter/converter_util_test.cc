@@ -66,6 +66,9 @@ TEST(ConverterUtilTest, ConversionSegmentsToResultMultiSegment) {
     c->cost = 10 * (i + 1);
     c->wcost = 5 * (i + 1);
     c->attributes = (1 << i);
+    if (i == 1) {
+      c->ranking_constraints = RankingConstraint::NO_TOP;
+    }
   }
 
   std::optional<prediction::Result> result =
@@ -78,6 +81,14 @@ TEST(ConverterUtilTest, ConversionSegmentsToResultMultiSegment) {
   EXPECT_EQ(result->cost, 10 + 20 + 30);
   EXPECT_EQ(result->wcost, 5 + 10 + 15);
   EXPECT_EQ(result->attributes, 1 | 2 | 4);
+  EXPECT_EQ(result->ranking_constraints, RankingConstraint::NO_TOP);
+  ASSERT_EQ(result->inner_segment_ranking_constraints.size(), 3);
+  EXPECT_EQ(result->inner_segment_ranking_constraints[0],
+            RankingConstraint::NONE);
+  EXPECT_EQ(result->inner_segment_ranking_constraints[1],
+            RankingConstraint::NO_TOP);
+  EXPECT_EQ(result->inner_segment_ranking_constraints[2],
+            RankingConstraint::NONE);
 
   // Verify boundary information.
   ASSERT_EQ(result->inner_segments().size(), 3);
@@ -139,6 +150,7 @@ TEST(ConverterUtilTest, CandidateAndResultRoundTripWithEmptyBoundary) {
   candidate.cost = 500;
   candidate.wcost = 300;
   candidate.attributes = 4;
+  candidate.ranking_constraints = RankingConstraint::NO_TOP;
   candidate.consumed_key_size = 5;
 
   // CandidateToResult synthesizes single-segment boundary from
@@ -151,7 +163,11 @@ TEST(ConverterUtilTest, CandidateAndResultRoundTripWithEmptyBoundary) {
   EXPECT_EQ(result.cost, 500);
   EXPECT_EQ(result.wcost, 300);
   EXPECT_EQ(result.attributes, 4);
+  EXPECT_EQ(result.ranking_constraints, RankingConstraint::NO_TOP);
   EXPECT_EQ(result.consumed_key_size, 5);
+  ASSERT_EQ(result.inner_segment_ranking_constraints.size(), 1);
+  EXPECT_EQ(result.inner_segment_ranking_constraints[0],
+            RankingConstraint::NO_TOP);
 
   ASSERT_EQ(result.inner_segments().size(), 1);
   const auto inner = *result.inner_segments().begin();
@@ -171,8 +187,147 @@ TEST(ConverterUtilTest, CandidateAndResultRoundTripWithEmptyBoundary) {
   EXPECT_EQ(new_cand.cost, candidate.cost);
   EXPECT_EQ(new_cand.wcost, candidate.wcost);
   EXPECT_EQ(new_cand.attributes, candidate.attributes);
+  EXPECT_EQ(new_cand.ranking_constraints, candidate.ranking_constraints);
   EXPECT_EQ(new_cand.consumed_key_size, candidate.consumed_key_size);
   EXPECT_EQ(new_cand.inner_segment_boundary, result.inner_segment_boundary);
+}
+
+TEST(ConverterUtilTest,
+     ApplyResultToSegmentsPreservesUnconstrainedAlternativeProvenance) {
+  {
+    // Existing non-EMOTICON derivation + constrained history derivation:
+    // the same surface must remain eligible for TOP1.
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key("えがお");
+
+    Candidate* candidate = segment->add_candidate();
+    candidate->key = "えがお";
+    candidate->content_key = "えがお";
+    candidate->value = "(^_^)";
+    candidate->content_value = "(^_^)";
+    candidate->ranking_constraints = RankingConstraint::NONE;
+
+    prediction::Result result;
+    result.key = "えがお";
+    result.value = "(^_^)";
+    result.ranking_constraints = RankingConstraint::NO_TOP;
+    result.inner_segment_boundary =
+        BuildInnerSegmentBoundary({{9, 5, 9, 5}}, result.key, result.value);
+    result.inner_segment_ranking_constraints = {RankingConstraint::NO_TOP};
+
+    ApplyResultToSegmentsMultiSegment(result, /*target_pos=*/0, segments);
+
+    ASSERT_GE(segment->candidates_size(), 1);
+    EXPECT_EQ(segment->candidate(0).value, "(^_^)");
+    EXPECT_EQ(segment->candidate(0).ranking_constraints,
+              RankingConstraint::NONE);
+  }
+
+  {
+    // Existing constrained derivation + explicitly unconstrained alternative:
+    // the unconstrained alternative must clear NO_TOP for the merged surface.
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key("えがお");
+
+    Candidate* candidate = segment->add_candidate();
+    candidate->key = "えがお";
+    candidate->content_key = "えがお";
+    candidate->value = "(^_^)";
+    candidate->content_value = "(^_^)";
+    candidate->ranking_constraints = RankingConstraint::NO_TOP;
+
+    prediction::Result result;
+    result.key = "えがお";
+    result.value = "(^_^)";
+    result.ranking_constraints = RankingConstraint::NONE;
+    result.inner_segment_boundary =
+        BuildInnerSegmentBoundary({{9, 5, 9, 5}}, result.key, result.value);
+    result.inner_segment_ranking_constraints = {RankingConstraint::NONE};
+
+    ApplyResultToSegmentsMultiSegment(result, /*target_pos=*/0, segments);
+
+    ASSERT_GE(segment->candidates_size(), 1);
+    EXPECT_EQ(segment->candidate(0).value, "(^_^)");
+    EXPECT_EQ(segment->candidate(0).ranking_constraints,
+              RankingConstraint::NONE);
+  }
+}
+
+TEST(ConverterUtilTest, EnforceCandidateRankingConstraintsPromotesNormal) {
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequestType(ConversionRequest::CONVERSION)
+          .Build();
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("えがお");
+
+  auto add_candidate = [&](absl::string_view value, uint8_t constraints) {
+    Candidate* candidate = segment->add_candidate();
+    candidate->key = "えがお";
+    candidate->content_key = "えがお";
+    candidate->value = value;
+    candidate->content_value = value;
+    candidate->ranking_constraints = constraints;
+  };
+
+  add_candidate("(^_^)", RankingConstraint::NO_TOP);
+  add_candidate("(・∀・)", RankingConstraint::NO_TOP);
+  add_candidate("笑顔", RankingConstraint::NONE);
+
+  EXPECT_TRUE(EnforceCandidateRankingConstraints(request, &segments));
+  EXPECT_EQ(segment->candidate(0).value, "笑顔");
+  EXPECT_EQ(segment->candidate(1).value, "(^_^)");
+  EXPECT_EQ(segment->candidate(2).value, "(・∀・)");
+}
+
+TEST(ConverterUtilTest, EnforceCandidateRankingConstraintsUsesMetaFallback) {
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequestType(ConversionRequest::CONVERSION)
+          .Build();
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("えがお");
+
+  Candidate* emoticon = segment->add_candidate();
+  emoticon->key = "えがお";
+  emoticon->content_key = "えがお";
+  emoticon->value = "(^_^)";
+  emoticon->content_value = "(^_^)";
+  emoticon->ranking_constraints = RankingConstraint::NO_TOP;
+
+  Candidate* meta = segment->add_meta_candidate();
+  meta->key = "えがお";
+  meta->content_key = "えがお";
+  meta->value = "えがお";
+  meta->content_value = "えがお";
+
+  EXPECT_TRUE(EnforceCandidateRankingConstraints(request, &segments));
+  EXPECT_EQ(segment->candidate(0).value, "えがお");
+  EXPECT_EQ(segment->candidate(1).value, "(^_^)");
+}
+
+TEST(ConverterUtilTest, EnforceCandidateRankingConstraintsIgnoresSuggestion) {
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  Candidate* emoticon = segment->add_candidate();
+  emoticon->value = "(^_^)";
+  emoticon->ranking_constraints = RankingConstraint::NO_TOP;
+  Candidate* normal = segment->add_candidate();
+  normal->value = "笑顔";
+
+  EXPECT_FALSE(EnforceCandidateRankingConstraints(request, &segments));
+  EXPECT_EQ(segment->candidate(0).value, "(^_^)");
 }
 
 TEST(ConverterUtilTest, CandidateAndResultRoundTripWithMultiSegmentBoundary) {

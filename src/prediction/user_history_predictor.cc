@@ -99,6 +99,50 @@ constexpr size_t kMaxNextEntriesSize = 6;
 // Uses '\t' as a key/value delimiter
 constexpr absl::string_view kDelimiter = "\t";
 constexpr absl::string_view kEmojiDescription = "絵文字";
+constexpr absl::string_view kEmoticonDescription = "顔文字";
+
+struct UserDictionaryEmoticonMatch {
+  bool has_emoticon = false;
+  bool has_unconstrained = false;
+};
+
+bool IsEmoticonDescription(absl::string_view description) {
+  return description == kEmoticonDescription ||
+         absl::StartsWith(description, "顔文字 ");
+}
+
+// Returns the semantic alternatives currently registered for exactly
+// (key, value).  USER_DICTIONARY tokens deliberately retain EMOTICON
+// provenance even though EMOTICON and SYMBOL share the same underlying
+// general-symbol POS IDs.
+UserDictionaryEmoticonMatch GetUserDictionaryEmoticonMatch(
+    const dictionary::UserDictionaryInterface& user_dictionary,
+    absl::string_view key, absl::string_view value) {
+  UserDictionaryEmoticonMatch match;
+
+  dictionary::InlineCallback callback;
+  callback.OnToken(
+      [&](absl::string_view, absl::string_view, dictionary::Token token) {
+        if (token.value != value) {
+          return dictionary::DictionaryInterface::Callback::TRAVERSE_CONTINUE;
+        }
+
+        if (token.attributes & dictionary::Token::EMOTICON) {
+          match.has_emoticon = true;
+        } else {
+          match.has_unconstrained = true;
+        }
+
+        // An unconstrained alternative is sufficient to establish the
+        // explicit escape hatch, so no later token can change the outcome.
+        return match.has_unconstrained
+                   ? dictionary::DictionaryInterface::Callback::TRAVERSE_DONE
+                   : dictionary::DictionaryInterface::Callback::
+                         TRAVERSE_CONTINUE;
+      });
+  user_dictionary.LookupExact(key, &callback);
+  return match;
+}
 
 // Spaces added as a prefix of NWP.
 constexpr absl::string_view kPrefixFullSpace = "　";  // full width
@@ -1807,6 +1851,30 @@ std::vector<Result> UserHistoryPredictor::MakeResults(
     result.value = result_entry->value();
     result.attributes |= converter::Attribute::USER_HISTORY_PREDICTION |
                          converter::Attribute::NO_VARIANTS_EXPANSION;
+
+    // v4 migration/escape semantics:
+    //  * New history entries preserve NO_TOP in entry_flags.
+    //  * Old built-in emoticon history can be recovered from the semantic
+    //    description emitted by EmoticonRewriter ("顔文字" / "顔文字 ...").
+    //  * Old user-dictionary history can be recovered while the corresponding
+    //    EMOTICON entry is still registered.
+    //  * A currently registered same-(key,value) non-EMOTICON user entry is
+    //    an explicit request to allow this surface at rank 0 and overrides
+    //    the constrained alternative provenance.
+    const UserDictionaryEmoticonMatch user_dictionary_match =
+        GetUserDictionaryEmoticonMatch(user_dictionary_, result_entry->key(),
+                                       result_entry->value());
+    const bool has_explicit_unconstrained_user_entry =
+        user_dictionary_match.has_unconstrained;
+    const bool has_emoticon_provenance =
+        (result_entry->entry_flags() & ENTRY_FLAG_NO_TOP_RANK) ||
+        IsEmoticonDescription(result_entry->description()) ||
+        user_dictionary_match.has_emoticon;
+    if (has_emoticon_provenance &&
+        !has_explicit_unconstrained_user_entry) {
+      result.ranking_constraints |= converter::RankingConstraint::NO_TOP;
+    }
+
     if ((result_entry->inner_segment_boundary_size() == 0) ||
         (result_entry->attributes() &
          Attribute::EMPTY_INNER_SEGMENT_BOUNDARY)) {
@@ -2009,9 +2077,11 @@ void UserHistoryPredictor::Insert(
   entry->set_value(value);
   entry->set_removed(false);
   entry->clear_attributes();
-  if (entry_flags != ENTRY_FLAG_NONE) {
-    entry->set_entry_flags(entry->entry_flags() | entry_flags);
-  }
+  // NO_TOP reflects the semantic provenance of the latest committed form, so
+  // unlike accumulated context flags it must also be clearable when the same
+  // key/value is later committed from an unconstrained source.
+  entry->set_entry_flags(
+      (entry->entry_flags() & ~ENTRY_FLAG_NO_TOP_RANK) | entry_flags);
 
   if (allow_partial_match) entry->set_allow_partial_match(true);
 
@@ -2147,7 +2217,11 @@ UserHistoryPredictor::MakeLearningSegments(
     // even if they have boundaries in storage. This is because
     // `result.inner_segment_boundary` is not populated for
     // `USER_HISTORY_PREDICTION` results in `MakeResults`.
-    const bool is_single_segment = result.inner_segments().size() <= 1;
+    const size_t inner_segment_count = result.inner_segments().size();
+    const bool is_single_segment = inner_segment_count <= 1;
+    const bool has_per_inner_ranking_constraints =
+        result.inner_segment_ranking_constraints.size() == inner_segment_count;
+    size_t inner_index = 0;
     // TODO(taku): result.(key|value) may start with kPrefixZeroSpace.
     // It would be better to remove them to increase the coverage
     // of bigram-prediction.
@@ -2156,10 +2230,18 @@ UserHistoryPredictor::MakeLearningSegments(
           std::distance(result.key.data(), iter.GetKey().data());
       const int value_begin =
           std::distance(result.value.data(), iter.GetValue().data());
+      const uint8_t ranking_constraints =
+          has_per_inner_ranking_constraints
+              ? result.inner_segment_ranking_constraints[inner_index]
+              : (is_single_segment
+                     ? result.ranking_constraints
+                     : converter::RankingConstraint::NONE);
       segments.push_back({key_begin, value_begin, iter.GetKey(),
                           iter.GetValue(), iter.GetContentKey(),
                           iter.GetContentValue(),
-                          is_single_segment ? GetDescription(result) : ""});
+                          is_single_segment ? GetDescription(result) : "",
+                          ranking_constraints});
+      ++inner_index;
     }
 
     return segments;
@@ -2360,10 +2442,13 @@ void UserHistoryPredictor::InsertHistoryForConversionSegments(
     const bool has_content_kv = segment.content_key != segment.key &&
                                 segment.content_value != segment.value;
 
-    const uint32_t entry_flags =
+    uint32_t entry_flags =
         (Util::GetScriptType(prev_value) == Util::NUMBER)
             ? ENTRY_FLAG_LEFT_NUMBER
             : ENTRY_FLAG_NONE;
+    if (segment.ranking_constraints & converter::RankingConstraint::NO_TOP) {
+      entry_flags |= ENTRY_FLAG_NO_TOP_RANK;
+    }
 
     converter::InnerSegmentBoundary inner_segment_boundary;
     if (has_content_kv) {

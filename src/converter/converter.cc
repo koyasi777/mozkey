@@ -1284,9 +1284,17 @@ void Converter::ApplyResultToSegments(const prediction::Result& result,
   }
 
   size_t seg_idx = 0;
+  size_t inner_idx = 0;
+  const size_t inner_segment_count = result.inner_segments().size();
   for (const auto& inner_seg : result.inner_segments()) {
     if (seg_idx >= segments->conversion_segments_size()) break;
     Segment* segment = segments->mutable_conversion_segment(seg_idx++);
+    const uint8_t ranking_constraints =
+        (result.inner_segment_ranking_constraints.size() ==
+         inner_segment_count)
+            ? result.inner_segment_ranking_constraints[inner_idx]
+            : result.ranking_constraints;
+    ++inner_idx;
 
     // Find existing candidate with matching value.
     int existing_index = -1;
@@ -1305,6 +1313,10 @@ void Converter::ApplyResultToSegments(const prediction::Result& result,
       cand->cost = std::min(cand->cost, result.cost);
       cand->wcost = std::min(cand->wcost, result.wcost);
       cand->attributes |= (result.attributes | additional_attributes);
+      // The existing candidate and `result` are alternative derivations of
+      // the same surface.  Keep NO_TOP only when both derivations require it.
+      // This preserves the explicit non-EMOTICON user-dictionary escape hatch.
+      cand->ranking_constraints &= ranking_constraints;
       if (!result.inner_segment_boundary.empty()) {
         cand->inner_segment_boundary = result.inner_segment_boundary;
       }
@@ -1320,6 +1332,7 @@ void Converter::ApplyResultToSegments(const prediction::Result& result,
       cand->wcost = result.wcost;
       cand->cost = result.cost;
       cand->attributes = (result.attributes | additional_attributes);
+      cand->ranking_constraints = ranking_constraints;
       cand->consumed_key_size = result.consumed_key_size;
       cand->inner_segment_boundary = result.inner_segment_boundary;
     }
@@ -1588,25 +1601,26 @@ void Converter::RewriteAndSuppressCandidates(const ConversionRequest& request,
   rewriter_->Rewrite(request, segments);
 
   // 3. Suppress candidates in each segment.
-  // Optimization for common use case: Since most of users don't use suppression
-  // dictionary and we can skip the subsequent check.
-  if (!user_dictionary_.HasSuppressedEntries()) {
-    return;
-  }
   // Although the suppression dictionary is applied at node-level in dictionary
   // layer, there's possibility that bad words are generated from multiple nodes
-  // and by rewriters. Hence, we need to apply it again at the last stage of
-  // converter.
-  for (Segment& segment : segments->conversion_segments()) {
-    for (size_t j = 0; j < segment.candidates_size();) {
-      const Candidate& cand = segment.candidate(j);
-      if (user_dictionary_.IsSuppressedEntry(cand.key, cand.value)) {
-        segment.erase_candidate(j);
-      } else {
-        ++j;
+  // and by rewriters. Hence, apply it again at the last stage of converter when
+  // suppression entries exist.
+  if (user_dictionary_.HasSuppressedEntries()) {
+    for (Segment& segment : segments->conversion_segments()) {
+      for (size_t j = 0; j < segment.candidates_size();) {
+        const Candidate& cand = segment.candidate(j);
+        if (user_dictionary_.IsSuppressedEntry(cand.key, cand.value)) {
+          segment.erase_candidate(j);
+        } else {
+          ++j;
+        }
       }
     }
   }
+
+  // 4. Hard final-ranking invariants must run after every ordinary rewriter,
+  // history reranking path, prediction-to-conversion merge, and suppression.
+  EnforceCandidateRankingConstraints(request, segments);
 }
 
 void Converter::TrimCandidates(const ConversionRequest& request,
