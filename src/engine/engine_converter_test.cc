@@ -2224,7 +2224,7 @@ TEST_F(EngineConverterTest, SuggestAndPredict) {
     EXPECT_TRUE(output.has_candidate_window());
     EXPECT_FALSE(output.candidate_window().footer().has_label());
     EXPECT_TRUE(output.candidate_window().footer().index_visible());
-    EXPECT_TRUE(output.candidate_window().footer().logo_visible());
+    EXPECT_FALSE(output.candidate_window().footer().logo_visible());
 
     // Check the conversion
     const commands::Preedit& conversion = output.preedit();
