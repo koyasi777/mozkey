@@ -406,8 +406,8 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="1134"/>
-        <source>Temporarily disable conversion personalization, history-based suggestions and user dictionary</source>
-        <translation>一時的に学習機能、入力履歴からのサジェスト機能、ユーザ辞書機能を無効にする</translation>
+        <source>Temporarily disable conversion personalization (including Zenz learning), history-based suggestions and user dictionary</source>
+        <translation>一時的に学習機能(Zenz学習含む)、入力履歴からのサジェスト機能、ユーザ辞書機能を無効にする</translation>
     </message>
     <message>
         <location filename="config_dialog.ui" line="1175"/>

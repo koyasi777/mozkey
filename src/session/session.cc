@@ -941,8 +941,17 @@ uint32_t GetZenzLiveCorrectionRightContextLength(
                             kMaxZenzLiveCorrectionRightContextLength);
 }
 
-bool UseZenzFeedbackLearning(const config::Config& config) {
-  return config.use_zenz_feedback_learning();
+bool UseZenzFeedbackPersonalization(const ImeContext& context) {
+  const config::Config& config = context.GetConfig();
+  if (!config.use_zenz_feedback_learning()) {
+    return false;
+  }
+
+  // Session-level Zenz feedback is persistent personalization. Incognito mode
+  // must neither read nor mutate it. ImeContext owns the session-scoped Config
+  // and Request sources that participate in ConversionRequest::incognito_mode().
+  return !config.incognito_mode() &&
+         !context.GetRequest().is_incognito_mode();
 }
 
 ZenzFeedbackAutoBlockPolicy GetZenzFeedbackAutoBlockPolicy(
@@ -4724,7 +4733,7 @@ void Session::RecordZenzLiveCorrectionAccepted(
     absl::string_view key,
     absl::string_view left_context,
     absl::string_view value) {
-  if (!UseZenzFeedbackLearning(context_->GetConfig())) {
+  if (!UseZenzFeedbackPersonalization(*context_)) {
     return;
   }
 
@@ -4776,7 +4785,7 @@ bool Session::MaybeLearnZenzCandidateToMozcHistory(
     absl::string_view key,
     absl::string_view value,
     std::vector<uint64_t>* revert_ids) {
-  if (!UseZenzFeedbackLearning(context_->GetConfig())) {
+  if (!UseZenzFeedbackPersonalization(*context_)) {
     return false;
   }
 
@@ -4844,7 +4853,7 @@ int Session::MaybeLearnZenzReverseSegmentsToMozcHistory(
 int Session::MaybeLearnZenzProjectedSegmentsToMozcHistory(
     const std::vector<ZenzProjectedLearningSegment>& segments,
     std::vector<uint64_t>* revert_ids) {
-  if (!UseZenzFeedbackLearning(context_->GetConfig())) {
+  if (!UseZenzFeedbackPersonalization(*context_)) {
     return 0;
   }
   if (context_->composer().GetInputFieldType() ==
@@ -5040,7 +5049,7 @@ void Session::SetPendingZenzFeedbackAccepted(
     absl::string_view key,
     absl::string_view context_class,
     absl::string_view value) {
-  if (!UseZenzFeedbackLearning(context_->GetConfig())) {
+  if (!UseZenzFeedbackPersonalization(*context_)) {
     return;
   }
 
@@ -5561,7 +5570,7 @@ void Session::SetPendingZenzFeedbackComparison(
     absl::string_view value,
     absl::string_view reason,
     bool require_final_committed_key_match) {
-  if (!UseZenzFeedbackLearning(context_->GetConfig())) {
+  if (!UseZenzFeedbackPersonalization(*context_)) {
     return;
   }
 
@@ -5679,7 +5688,7 @@ void Session::ConfirmPendingZenzFeedback() {
     return;
   }
 
-  if (!UseZenzFeedbackLearning(context_->GetConfig())) {
+  if (!UseZenzFeedbackPersonalization(*context_)) {
     for (const uint64_t revert_id :
          pending_zenz_feedback_.mozc_history_revert_ids) {
       context_->mutable_converter()->ConfirmExternalConversionLearning(
@@ -5820,9 +5829,11 @@ void Session::DiscardPendingZenzFeedback(absl::string_view reason) {
         reverted_mozc_history_count,
         " reason=", reason));
 
-    zenz_feedback_store_.RecordAcceptedRollback(
-        pending_zenz_feedback_.key, pending_zenz_feedback_.context_class,
-        pending_zenz_feedback_.value, reason);
+    if (UseZenzFeedbackPersonalization(*context_)) {
+      zenz_feedback_store_.RecordAcceptedRollback(
+          pending_zenz_feedback_.key, pending_zenz_feedback_.context_class,
+          pending_zenz_feedback_.value, reason);
+    }
   }
 
   ZenzDebugOutput(absl::StrCat(
@@ -6191,7 +6202,7 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     commands::Command* command) {
   const config::Config& config = context_->GetConfig();
 
-  if (!UseZenzFeedbackLearning(config)) {
+  if (!UseZenzFeedbackPersonalization(*context_)) {
     return false;
   }
 
@@ -7145,7 +7156,7 @@ bool Session::ApplyZenzLiveCorrectionResult(
 
   std::string feedback_reason = "feedback_learning_disabled";
 
-  if (UseZenzFeedbackLearning(config)) {
+  if (UseZenzFeedbackPersonalization(*context_)) {
     const ZenzFeedbackDecision feedback_decision =
         zenz_feedback_store_.Decide(
             pending_zenz_live_.key, context_class, zenz_value,

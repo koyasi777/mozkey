@@ -261,7 +261,7 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="1134"/>
-        <source>Temporarily disable conversion personalization, history-based suggestions and user dictionary</source>
+        <source>Temporarily disable conversion personalization (including Zenz learning), history-based suggestions and user dictionary</source>
         <translation></translation>
     </message>
     <message>

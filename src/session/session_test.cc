@@ -1371,6 +1371,25 @@ TEST_F(SessionTest, KeymapImeOffCommitsVisibleZenzLiveCorrection) {
 
 #endif  // defined(_WIN32)
 
+TEST_F(SessionTest,
+       ZenzFeedbackPendingAcceptedIsDisabledByRequestIncognitoMode) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+
+  commands::Request request;
+  request.set_is_incognito_mode(true);
+  InitSessionToPrecomposition(&session, request);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "あい", "empty", "亜衣");
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+}
 TEST_F(SessionTest, PendingZenzFeedbackIsConfirmedByNextTextInput) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -1457,6 +1476,48 @@ TEST_F(SessionTest, PendingZenzFeedbackStoresContextClassOnly) {
 }
 
 
+TEST_F(SessionTest,
+       ZenzFeedbackAcceptedRollbackIsDisabledAfterEnteringConfigIncognitoMode) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  ASSERT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  ZenzFeedbackDecision decision =
+      session_peer.zenz_feedback_store_().Decide(
+          "かれはてんてきです", "empty", "彼は天敵です");
+  ASSERT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  ASSERT_EQ(decision.accepted_count, 1);
+
+  config::Config config = session.context().GetConfig();
+  config.set_incognito_mode(true);
+  session.SetConfig(config);
+
+  commands::Command command;
+  SendSpecialKey(commands::KeyEvent::BACKSPACE, &session, &command);
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  decision = session_peer.zenz_feedback_store_().Decide(
+      "かれはてんてきです", "empty", "彼は天敵です");
+  EXPECT_EQ(decision.action, ZenzFeedbackAction::kPrefer);
+  EXPECT_EQ(decision.accepted_count, 1);
+  EXPECT_EQ(decision.rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
 TEST_F(SessionTest,
        PendingAcceptedZenzFeedbackPersistsImmediatelyAndBackspaceRollsBack) {
 #if defined(_WIN32) || defined(__APPLE__)
@@ -3624,6 +3685,55 @@ TEST_F(SessionTest,
   EXPECT_EQ(session_peer.zenz_live_context_class_(), "empty");
 }
 
+TEST_F(SessionTest,
+       ZenzFeedbackFastPathIsDisabledByRequestIncognitoMode) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+
+  commands::Request request;
+  request.set_is_incognito_mode(true);
+  InitSessionToPrecomposition(&session, request);
+  EnableZenzLiveCorrectionWithFeedbackLearning(&session);
+
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "かれはてんてきです",
+      "japanese_only",
+      "彼は天敵です");
+  ASSERT_FALSE(session_peer.zenz_feedback_store_().ListEntries().empty());
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "かれはてんてきです";
+  session_peer.live_conversion_value_() = "彼は点滴です";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれは");
+  segment->set_value("彼は");
+  segment->set_value_length(Util::CharsLen("彼は"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("てんてきです");
+  segment->set_value("点滴です");
+  segment->set_value_length(Util::CharsLen("点滴です"));
+
+  commands::Command command;
+  EXPECT_FALSE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
+
+  EXPECT_TRUE(session_peer.zenz_live_key_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_value_().empty());
+  EXPECT_TRUE(session_peer.zenz_live_mozc_value_().empty());
+  EXPECT_EQ(session_peer.zenz_feedback_store_().ListEntries().size(), 1);
+}
 TEST_F(SessionTest,
        ZenzFeedbackFastPathRepairsUnrequestedTrailingPunctuation) {
   MockEngine engine;
@@ -6616,6 +6726,71 @@ TEST_F(SessionTest, DeferredZenzAcceptedResultReplacesVisiblePreeditOnce) {
   EXPECT_FALSE(command.output().zenz_live_correction_pending());
 }
 
+TEST_F(SessionTest, ConfigIncognitoModeIgnoresStoredZenzFeedbackDecision) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_auto_block_rejected_correction(true);
+  config.set_zenz_auto_block_reject_threshold(1);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
+  config.set_incognito_mode(true);
+  session.SetConfig(config);
+
+  session_peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "space_revert_zenz_to_mozc");
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+
+  EXPECT_PREEDIT("亜衣", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].accepted_count, 0);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
 TEST_F(SessionTest, AutoBlockedZenzResultRecordsMatchingShadowCommitAsAccepted) {
 #if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
