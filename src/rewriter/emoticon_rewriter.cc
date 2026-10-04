@@ -120,6 +120,7 @@ void InsertCandidates(SerializedDictionary::const_iterator begin,
     c->attributes |= converter::Attribute::NO_EXTRA_DESCRIPTION;
     c->attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
     c->attributes |= converter::Attribute::CONTEXT_SENSITIVE;
+    c->ranking_constraints |= converter::RankingConstraint::NO_TOP;
     if (is_no_learning) {
       c->attributes |= converter::Attribute::NO_LEARNING;
     }

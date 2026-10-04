@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "absl/base/no_destructor.h"
 #include "absl/base/nullability.h"
@@ -158,6 +159,8 @@ struct Result {
   std::string display_value;
   // Unified attributes field.
   uint32_t attributes = ::mozc::converter::Attribute::DEFAULT_ATTRIBUTE;
+  // Hard final-ranking constraints for this whole result.
+  uint8_t ranking_constraints = ::mozc::converter::RankingConstraint::NONE;
   // Context "insensitive" candidate cost.
   int wcost = 0;
   // Context "sensitive" candidate cost.
@@ -177,6 +180,9 @@ struct Result {
   // "わたしの|なまえは|なかのです", " 私の|名前は|中野です",
   // |inner_segment_boundary| have [(4,2), (4, 3), (5, 4)].
   converter::InnerSegmentBoundary inner_segment_boundary;
+  // Optional per-inner-segment ranking metadata. When populated, its size
+  // matches inner_segment_boundary.size().
+  std::vector<uint8_t> inner_segment_ranking_constraints;
   size_t consumed_key_size = 0;
   // The total penalty added to this result.
   int penalty = 0;

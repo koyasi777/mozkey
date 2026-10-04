@@ -83,6 +83,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 確定済みの左文脈や直前の文節、限定的な右文脈を参照し、`mainにマージしました`、`githubには`、`彼になった`、`彼なのか`、`2名しかいない`、`追記したい`、`山梨県立美術館`、`滋賀方面` のような文脈で、助詞・複合機能語・名詞相当の左文脈に続く叙述・疑問の機能語列・機能表現・接尾的な語構成・地名接尾構成が同音漢字候補に負ける挙動を抑制
 - キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
 - 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには、選択中の候補の状態と現在のキー設定に応じて履歴削除または候補非表示の操作案内を表示
+- 通常変換では、Mozc が顔文字として意味的に識別できる候補（標準の顔文字候補、およびユーザー辞書で品詞「顔文字」として登録された候補）が、学習によって第1候補へ上がらないように制御。候補自体は一覧に残し、同じ表記でも「顔文字」以外の品詞として登録した候補は通常の順位付け・学習を許可。Zenz が独立して生成した表記は、文字列の見た目だけを理由に顔文字扱いしない
 - 複数コマンドは `Commit|IMEOff` のような形式で保存され、設定画面では `Commit → IMEOff` のように編集可能
 - MS-IME 風キー設定では、確定済み文字列を選択した状態で Space を押すと再変換し、未選択時は従来どおり空白を入力
 - Windows 版で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を個別キーとして設定画面から割り当て可能
@@ -456,6 +457,14 @@ CUSTOM キー設定では、既存のユーザー設定を上書きしないよ�
 
 設定画面の「学習履歴のクリア」直下にも、非表示にした候補がユーザー辞書「非表示候補」に抑制単語として保存されることと、再表示する場合の削除方法を案内しています。
 
+### 顔文字候補の第1候補抑制
+
+通常変換では、Mozc 内部で「顔文字」として意味的に識別できる候補が、ユーザーの選択履歴によって第1候補へ上がらないようにしています。標準の顔文字候補に加え、ユーザー辞書で品詞「顔文字」として登録した候補も対象です。顔文字候補そのものを削除する機能ではないため、対象候補は第2候補以下に残り、必要な場合は従来どおり選択できます。
+
+この制約は、候補の表層文字列が顔文字らしいかどうかではなく、Mozc 内部で保持している候補の意味的な由来に基づいて適用します。そのため、たとえば同じ `(^_^)` という表記でも、ユーザー辞書で「記号」など「顔文字」以外の品詞として登録した候補はこの制約の対象にならず、通常の順位付けや学習によって第1候補になることができます。
+
+一方、Zenz が独立して生成した候補については、その表層文字列だけを見て顔文字かどうかを推測し、この制約へ追加することはしません。既存の Mozc 候補が持つ意味情報はそのまま尊重しつつ、Zenz 固有の生成結果を文字列パターンだけで分類しない方針です。
+
 ### 選択文字列の Space 再変換（Windows / MS-IME 風キー設定）
 
 Windows 版の MS-IME 風キー設定では、確定済みテキストを範囲選択した状態で Space を押すと、その選択文字列を再変換します。何も選択していない場合は、従来どおり空白を入力します。
@@ -820,6 +829,7 @@ Main features added in this fork
 - Uses committed left context, previous segments, and limited right context to reduce unnatural homophone results in cases such as `mainにマージしました`, `githubには`, `彼になった`, `彼なのか`, `2名しかいない`, `追記したい`, `山梨県立美術館`, and `滋賀方面`
 - Allows assigning multiple commands to a single key binding as an ordered command sequence
 - Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows history-delete or hide guidance for the currently selected candidate using the active key binding
+- Prevents candidates that Mozc can semantically identify as emoticons—built-in emoticon candidates and user-dictionary entries registered with the `顔文字` POS—from being promoted to the first candidate in ordinary conversion through learning. The candidates remain visible, while the same surface registered under a non-emoticon POS remains eligible for normal ranking and learning. Independently generated Zenz surfaces are not classified as emoticons from string shape alone
 - Stores command sequences as `Commit|IMEOff` and shows them in the keymap editor as `Commit → IMEOff`
 - In the MS-IME style keymap, pressing Space while committed text is selected reconverts that selection; with no selection, Space still inserts a normal space
 - Allows assigning left/right Shift and left/right Ctrl separately on Windows
@@ -1368,6 +1378,14 @@ The candidate footer keeps the candidate index visible while omitting the legacy
 CUSTOM keymaps preserve existing user assignments. Mozkey does not inject `Ctrl Delete` when Conversion already has `DeleteSelectedCandidate` on another key or when `Conversion + Ctrl Delete` is occupied by another command. Otherwise, when a non-empty CUSTOM table is active, Mozkey adds `Conversion + Ctrl Delete -> DeleteSelectedCandidate` as a real persisted custom-keymap row.
 
 The config dialog also explains below the personalization-history clear button that hidden candidates are stored as suppression words in the `非表示候補` user dictionary and can be restored by deleting the corresponding entry.
+
+### Emoticon top-candidate suppression
+
+In ordinary conversion, candidates that Mozc can semantically identify as emoticons are prevented from being promoted to the first candidate by user-selection history. This applies to the built-in emoticon candidates and to user-dictionary entries registered with the `顔文字` POS. The candidates are not removed: they remain available below the first position and can still be selected normally.
+
+The restriction is based on semantic provenance carried by the candidate, not on whether the surface string merely looks like an emoticon. Therefore, the same surface such as `(^_^)` can remain eligible for ordinary ranking and learning when it is explicitly registered in the user dictionary under a non-emoticon POS such as a symbol.
+
+Independently generated Zenz candidates are not added to this restriction merely by inspecting their surface strings. Existing semantic information carried by Mozc candidates is preserved, while Zenz-specific generated output is not classified with an emoticon-shaped string heuristic.
 
 ### Space reconversion for selected text (Windows / MS-IME style keymap)
 

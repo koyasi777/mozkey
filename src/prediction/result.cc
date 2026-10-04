@@ -92,23 +92,28 @@ bool TiebreakLess(const Result& lhs, const Result& rhs) {
     return lhs_behavioral < rhs_behavioral;
   }
   // Then, use the rest of the fields.
-  return std::tie(lhs.wcost, lhs.cost, lhs.attributes, lhs.lid, lhs.rid,
+  return std::tie(lhs.wcost, lhs.cost, lhs.attributes,
+                  lhs.ranking_constraints, lhs.lid, lhs.rid,
                   lhs.consumed_key_size, lhs.penalty, lhs.cost_before_rescoring,
                   lhs.removed, lhs.typing_correction_score,
                   lhs.typing_correction_adjustment, lhs.post_correction_prob,
                   lhs.description, lhs.display_value,
-                  lhs.inner_segment_boundary) <
-         std::tie(rhs.wcost, rhs.cost, rhs.attributes, rhs.lid, rhs.rid,
+                  lhs.inner_segment_boundary,
+                  lhs.inner_segment_ranking_constraints) <
+         std::tie(rhs.wcost, rhs.cost, rhs.attributes,
+                  rhs.ranking_constraints, rhs.lid, rhs.rid,
                   rhs.consumed_key_size, rhs.penalty, rhs.cost_before_rescoring,
                   rhs.removed, rhs.typing_correction_score,
                   rhs.typing_correction_adjustment, rhs.post_correction_prob,
                   rhs.description, rhs.display_value,
-                  rhs.inner_segment_boundary);
+                  rhs.inner_segment_boundary,
+                  rhs.inner_segment_ranking_constraints);
 }
 
 }  // namespace result_internal
 
 using ::mozc::converter::Attribute;
+using ::mozc::converter::RankingConstraint;
 using ::mozc::dictionary::Token;
 
 void Result::InitializeByTokenAndTypes(Token token, PredictionTypes types) {
@@ -123,6 +128,7 @@ void Result::InitializeByTokenAndTypes(Token token, PredictionTypes types) {
 void Result::SetTypesAndTokenAttributes(PredictionTypes prediction_types,
                                         Token::AttributesBitfield token_attr) {
   attributes = prediction_types;
+  ranking_constraints = RankingConstraint::NONE;
   if (attributes & Attribute::REALTIME_TOP) {
     attributes |= Attribute::NO_VARIANTS_EXPANSION;
   }
@@ -132,6 +138,9 @@ void Result::SetTypesAndTokenAttributes(PredictionTypes prediction_types,
   if (token_attr & Token::USER_DICTIONARY) {
     attributes |= (Attribute::USER_DICTIONARY | Attribute::NO_MODIFICATION |
                    Attribute::NO_VARIANTS_EXPANSION);
+  }
+  if (token_attr & Token::EMOTICON) {
+    ranking_constraints |= RankingConstraint::NO_TOP;
   }
 }
 

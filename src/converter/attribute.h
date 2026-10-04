@@ -134,6 +134,18 @@ class Attribute {
     USER_HISTORY_EMPTY_INNER_SEGMENT_BOUNDARY = 1 << 31,
   };
 };
+
+// Constraints that must hold after normal candidate scoring and rewriters.
+// Keep these separate from Attribute because Attribute already uses all 32 bits.
+class RankingConstraint {
+ public:
+  enum {
+    NONE = 0,
+    // The candidate may be shown and learned, but must not remain at rank 0
+    // after final ranking in normal conversion.
+    NO_TOP = 1 << 0,
+  };
+};
 }  // namespace converter
 }  // namespace mozc
 

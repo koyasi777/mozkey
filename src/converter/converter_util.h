@@ -100,11 +100,19 @@ prediction::Result CandidateToResult(const Candidate& candidate);
 //   from result.inner_segments().GetMergedContentKeyAndValue().
 //
 // Note: This function only updates fields present in Result (key, value,
-// content_key/value, cost, wcost, lid, rid, attributes, consumed_key_size,
-// inner_segment_boundary, description, display_value). Pre-existing Candidate
-// metadata (such as category, command, usage_id, prefix, suffix) is preserved.
+// content_key/value, cost, wcost, lid, rid, attributes, ranking constraints,
+// consumed_key_size, inner_segment_boundary, description, display_value).
+// Pre-existing Candidate metadata (such as category, command, usage_id,
+// prefix, suffix) is preserved.
 void PopulateCandidateFromResult(const prediction::Result& result,
                                  Candidate* candidate);
+
+// Enforces hard final-ranking constraints after normal conversion ranking.
+// Currently, a NO_TOP candidate is moved away from rank 0 by promoting the
+// first unconstrained normal candidate, or an unconstrained meta candidate as
+// a fallback. Suggestion/prediction ordering is intentionally unaffected.
+bool EnforceCandidateRankingConstraints(const ConversionRequest& request,
+                                        Segments* segments);
 
 // Prepares Segments containing HISTORY segments and a new conversion segment
 // for request.key().

@@ -65,6 +65,7 @@ namespace {
 using ::mozc::converter::Attribute;
 using ::mozc::converter::Candidate;
 using ::mozc::converter::CandidateFilter;
+using ::mozc::converter::RankingConstraint;
 using ::mozc::dictionary::PosMatcher;
 using ::mozc::dictionary::UserDictionaryInterface;
 
@@ -200,6 +201,9 @@ void NBestGenerator<TConnector>::MakeCandidate(
     }
     if (node->attributes & Node::USER_DICTIONARY) {
       candidate.attributes |= Attribute::USER_DICTIONARY;
+    }
+    if (node->attributes & Node::EMOTICON) {
+      candidate.ranking_constraints |= RankingConstraint::NO_TOP;
     }
     if (node->attributes & Node::SUFFIX_DICTIONARY) {
       candidate.attributes |= Attribute::SUFFIX_DICTIONARY;

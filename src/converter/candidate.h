@@ -143,6 +143,10 @@ class Candidate {
   // defined in enum |Attribute|.
   uint32_t attributes = 0;
 
+  // Final ordering constraints. These are separate from scoring attributes so
+  // that score/history changes cannot violate hard candidate-ordering policy.
+  uint8_t ranking_constraints = RankingConstraint::NONE;
+
   Category category = DEFAULT_CATEGORY;
 
   // Candidate style. This is not a bit-field.

@@ -282,6 +282,7 @@ mozc_cc_test(
     deps = [
         ":result",
         "//converter:attribute",
+        "//dictionary:dictionary_token",
         "//testing:gunit_main",
     ],
 )

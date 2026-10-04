@@ -637,6 +637,7 @@ mozc_cc_test(
         ":emoticon_rewriter",
         ":rewriter_interface",
         "//config:config_handler",
+        "//converter:attribute",
         "//converter:segments",
         "//data_manager/testing:mock_data_manager",
         "//protocol:commands_cc_proto",

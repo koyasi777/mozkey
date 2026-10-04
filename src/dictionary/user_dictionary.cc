@@ -679,6 +679,10 @@ void UserDictionary::PopulateTokenFromUserPosToken(
   token->value = user_pos_token.value;
   token->lid = token->rid = user_pos_token.id;
   token->attributes = Token::USER_DICTIONARY;
+  if (user_pos_token.pos_type() ==
+      user_dictionary::UserDictionary::EMOTICON) {
+    token->attributes |= Token::EMOTICON;
+  }
 
   // * Overwrites POS ids.
   // Actual pos id of suggestion-only candidates are 名詞-サ変.

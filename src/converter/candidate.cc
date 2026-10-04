@@ -73,6 +73,7 @@ void Candidate::Clear() {
   rid = 0;
   usage_id = 0;
   attributes = 0;
+  ranking_constraints = RankingConstraint::NONE;
   style = NumberUtil::NumberString::DEFAULT_STYLE;
   command = DEFAULT_COMMAND;
   inner_segment_boundary.clear();

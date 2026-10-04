@@ -39,6 +39,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "config/config_handler.h"
+#include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/segments.h"
 #include "data_manager/testing/mock_data_manager.h"
@@ -119,6 +120,13 @@ TEST_F(EmoticonRewriterTest, BasicTest) {
     emoticon_rewriter.Rewrite(request, &segments);
     EXPECT_TRUE(HasEmoticon(segments));
     EXPECT_LE(GetEmoticonIndex(segments), 6);
+    {
+      const int index = GetEmoticonIndex(segments);
+      ASSERT_GE(index, 0);
+      EXPECT_NE(segments.segment(0).candidate(index).ranking_constraints &
+                    converter::RankingConstraint::NO_TOP,
+                0);
+    }
 
     InitSegment("ふくわらい", "test", &segments);
     emoticon_rewriter.Rewrite(request, &segments);

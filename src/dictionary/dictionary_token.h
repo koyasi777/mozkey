@@ -50,8 +50,11 @@ struct Token {
     // values than LABEL_SIZE!! The attributes having less values than it are
     // tightly integrated with the system dictionary codec.
 
-    // The following attribute is not stored in the system dictionary but is
-    // added by dictionary modules when looking up from user dictionary.
+    // The following attributes are not stored in the system dictionary but
+    // are added by dictionary modules at lookup time.
+    // Explicit user-dictionary POS provenance. This is intentionally distinct
+    // from generic symbols even though both currently share the same lid/rid.
+    EMOTICON = 1 << 2,
     SUFFIX_DICTIONARY = 1 << 6,
     USER_DICTIONARY = 1 << 7,
   };
