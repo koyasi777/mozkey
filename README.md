@@ -79,10 +79,10 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - ローマ字入力中、確定済みの読みの後ろに未解決のローマ字 suffix が残る間は、入力途中の一時的な Roman prefix ごとに passive suggestion を再計算して候補ウィンドウがちらつくのを抑えるため、直前まで表示していた候補を保持。suffix が解決した時点で更新を再開し、候補へ移動する場合も表示中の候補集合をそのまま使用
 - デフォルトでは 1 文字だけの未確定文字列で、助詞などの誤変換を避けるためライブ変換を実行しない
 - `え~`、`えー`、`ん？` のような「かな1文字 + 装飾的な末尾記号」でも、短すぎる漢字化を避けるためライブ変換を抑制
-- 感嘆詞・口語評価語・くだけた挨拶の入力途中ではライブ変換のちらつきを抑えつつ、完成した `うっそ`、`くっそ`、`やっば`、`すっげぇ`、`めっちゃ`、`ちっす`、`ちょりっす`、`ほえ～`、`ほぇ～`、`ほっほーん` などは生成辞書候補として自然なかな表記を救出
+- `うっそ`、`くっそ`、`やっば`、`すっげぇ`、`めっちゃ`、`ちっす`、`ちょりっす`、`ほえ～`、`ほぇ～`、`ほっほーん` などの expressive kana を生成辞書で自然なかな候補として補強
 - 確定済みの左文脈や直前の文節、限定的な右文脈を参照し、`mainにマージしました`、`githubには`、`彼になった`、`彼なのか`、`2名しかいない`、`追記したい`、`山梨県立美術館`、`滋賀方面` のような文脈で、助詞・複合機能語・名詞相当の左文脈に続く叙述・疑問の機能語列・機能表現・接尾的な語構成・地名接尾構成が同音漢字候補に負ける挙動を抑制
 - キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
-- 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには現在のキー設定に応じた操作キーを表示
+- 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには、選択中の候補の状態と現在のキー設定に応じて履歴削除または候補非表示の操作案内を表示
 - 複数コマンドは `Commit|IMEOff` のような形式で保存され、設定画面では `Commit → IMEOff` のように編集可能
 - MS-IME 風キー設定では、確定済み文字列を選択した状態で Space を押すと再変換し、未選択時は従来どおり空白を入力
 - Windows 版で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を個別キーとして設定画面から割り当て可能
@@ -226,8 +226,6 @@ Windows 版では、追加のオフライン防御層として、インストー
 入力途中の不要な中間変換表示を抑えるため、この fork では文字入力後に短い設定可能なデバウンス時間を挟んでからライブ変換を実行します。`に`、`を`、`が` のような助詞として使われやすい入力を誤って漢字化しないように、デフォルトでは 1 文字だけの未確定文字列ではライブ変換を行いません。ライブ変換を開始する最小文字数は設定画面から変更できます。
 
 また、`え~`、`えー`、`ん？` のように、かな1文字の後ろに装飾的な記号だけが続く場合もライブ変換を抑制します。これにより、入力途中の `え~` が `絵～` のように短すぎる漢字候補へ変換される挙動を避けます。
-
-さらに、短い感嘆詞、口語的な評価語、くだけた挨拶などでは、入力途中の prefix や pending roman suffix によるライブ変換のちらつきを抑えます。一方で、完成した表現は session 側でライブ変換を止めず、converter と辞書候補に渡します。
 
 サジェストについては、入力途中の未解決ローマ字によって候補が毎キー再生成され、候補ウィンドウが頻繁に更新・ちらつくのを抑えるため、ライブ変換とは別に passive suggestion の更新を一時的に HOLD します。確定済みの読みの後ろへ未解決のローマ字 suffix が付いた場合は、直前まで表示していた候補集合をそのまま保持し、suffix が解決するまで毎キーの prediction をやり直しません。たとえば `今日は` の後で `s`、`sh` と入力している間は同じ候補集合を維持し、`shi` が `し` に解決した時点で、現在の読み `今日はし` に対する suggestion を更新します。新しい composition の先頭だけは、`s` / `sh` のような短い未解決入力でも候補を出せるよう、最初の 2 文字までは refresh を許可します。
 
@@ -452,7 +450,7 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 
 ユーザー辞書由来の候補も非表示にできますが、元のユーザー辞書エントリ自体は削除しません。「非表示候補」に作成された対応する抑制単語をユーザー辞書ツールから削除すると、元の候補を再び表示できます。非表示操作によって通常候補が1件も残らなくなる場合や、コマンド候補・無効な候補など、非表示対象として扱えない候補では抑制を行いません。
 
-候補ウィンドウのフッターには、現在のキー設定に応じて `Ctrl+Deleteで履歴から削除` または `Ctrl+Deleteで候補を非表示` のように操作を表示します。`DeleteSelectedCandidate` を `Alt Delete` など別のキーへ割り当てた場合は、その実際の割り当てを表示します。該当状態に有効な割り当てがない場合は、この操作ラベルを表示しません。
+候補ウィンドウのフッターでは、候補番号を維持したまま従来のロゴ表示を省略し、選択中の候補の状態と現在のキー設定に応じて操作案内を表示します。標準の `Ctrl Delete` 割り当てでは、履歴削除可能な候補に `Ctrl+Delで履歴削除`、履歴削除の対象ではないが非表示可能な候補に `Ctrl+Delで候補非表示` と表示します。`DeleteSelectedCandidate` を別のキーへ割り当てた場合は、その実際の割り当てを短縮表記して使用し、たとえば `Alt Delete` なら `Alt+Delで候補非表示`、Prediction で `Ctrl Backspace` に割り当てた場合は `Ctrl+Bkspで履歴削除` のように表示します。現在の候補カテゴリに有効な `DeleteSelectedCandidate` の割り当てがない場合は、この操作ラベルを表示しません。
 
 CUSTOM キー設定では、既存のユーザー設定を上書きしないように扱います。変換状態ですでに `DeleteSelectedCandidate` が別キーへ割り当てられている場合や、`Conversion + Ctrl Delete` が別コマンドに使われている場合は自動変更しません。どちらにも該当せず、CUSTOM テーブルが有効な場合だけ `Conversion + Ctrl Delete -> DeleteSelectedCandidate` を実際のカスタム設定として追加・保存します。
 
@@ -818,10 +816,10 @@ Main features added in this fork
 - Reduces candidate-window flicker caused by repeatedly recomputing passive suggestions for transient unresolved Roman prefixes after an already resolved reading; Mozkey holds the currently displayed suggestion list until the suffix resolves, then resumes refresh, and entering the list keeps the exact displayed candidates
 - By default, suppresses live conversion for one-character compositions to avoid over-converting particles
 - Suppresses live conversion for very short kana compositions with decorative trailing symbols such as `え~`, `えー`, or `ん？`
-- Suppresses live-conversion flicker for unfinished expressive kana prefixes, while completed expressive forms such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん` are rescued as generated dictionary candidates
+- Reinforces expressive kana forms such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん` with natural-kana generated dictionary candidates
 - Uses committed left context, previous segments, and limited right context to reduce unnatural homophone results in cases such as `mainにマージしました`, `githubには`, `彼になった`, `彼なのか`, `2名しかいない`, `追記したい`, `山梨県立美術館`, and `滋賀方面`
 - Allows assigning multiple commands to a single key binding as an ordered command sequence
-- Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows the action using the currently active key binding
+- Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows history-delete or hide guidance for the currently selected candidate using the active key binding
 - Stores command sequences as `Commit|IMEOff` and shows them in the keymap editor as `Commit → IMEOff`
 - In the MS-IME style keymap, pressing Space while committed text is selected reconverts that selection; with no selection, Space still inserts a normal space
 - Allows assigning left/right Shift and left/right Ctrl separately on Windows
@@ -931,8 +929,6 @@ With live conversion enabled, Mozc automatically converts the current compositio
 To reduce distracting intermediate conversions, this fork applies live conversion after a short configurable debounce delay instead of converting every character immediately. By default, single-character compositions are not live-converted, because they are often particles such as `に`, `を`, or `が`. The minimum number of characters required to start live conversion can be changed from the config dialog.
 
 Live conversion is also suppressed for very short kana compositions followed only by decorative trailing symbols, such as `え~`, `えー`, or `ん？`. This avoids noisy intermediate conversions such as `え~` becoming `絵～` while the user is still typing.
-
-For short expressive kana utterances, colloquial evaluative forms, and casual greetings, this fork suppresses live-conversion flicker only while the user is still typing an unfinished prefix or a pending roman suffix. Completed expressions are allowed to reach the normal converter.
 
 To reduce candidate-window flicker caused by repeatedly recomputing passive suggestions for transient unresolved Roman prefixes, Mozkey temporarily holds passive-suggestion refresh separately from live conversion. When an already-resolved reading is followed by unresolved trailing Roman input, the suggestion list already visible on screen is kept instead of rerunning prediction on every key. For example, after `今日は`, typing `s` and then `sh` keeps the same suggestion set; when `shi` resolves to `し`, suggestions refresh for the current reading `今日はし`. At the start of a fresh composition, the first two unresolved Roman characters may still refresh so short prefixes such as `s` / `sh` can produce useful suggestions.
 
@@ -1367,7 +1363,7 @@ As a result, when the same candidate is available from both learned history and 
 
 User-dictionary candidates can also be hidden, but hiding never deletes the original user-dictionary entry itself. Removing the corresponding suppression entry from `非表示候補` in the user dictionary tool makes the original candidate visible again. Mozkey does not add suppression when doing so would remove the only regular candidate, or for command/meta/invalid candidates that are not valid hide targets.
 
-The candidate footer reflects the effective key binding, for example `Ctrl+Deleteで履歴から削除` or `Ctrl+Deleteで候補を非表示`. If `DeleteSelectedCandidate` is assigned to another key such as `Alt Delete`, the footer shows that actual binding instead. If no applicable binding exists for the current state, the action label is omitted.
+The candidate footer keeps the candidate index visible while omitting the legacy logo area, and derives its action text from the active key binding for the current candidate category. With the standard `Ctrl Delete` binding it shows `Ctrl+Delで履歴削除` for a history-deletable candidate or `Ctrl+Delで候補非表示` for a suppressible candidate. Custom bindings are reflected using compact key names: for example, `Alt Delete` becomes `Alt+Delで候補非表示`, while a Prediction binding of `Ctrl Backspace` becomes `Ctrl+Bkspで履歴削除`. If `DeleteSelectedCandidate` has no applicable binding for the current candidate category, the action label is omitted.
 
 CUSTOM keymaps preserve existing user assignments. Mozkey does not inject `Ctrl Delete` when Conversion already has `DeleteSelectedCandidate` on another key or when `Conversion + Ctrl Delete` is occupied by another command. Otherwise, when a non-empty CUSTOM table is active, Mozkey adds `Conversion + Ctrl Delete -> DeleteSelectedCandidate` as a real persisted custom-keymap row.
 
