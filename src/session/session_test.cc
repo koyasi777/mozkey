@@ -20189,7 +20189,7 @@ TEST_F(SessionTest, SuppressSuggestion) {
 
 }
 
-TEST_F(SessionTest, CandidateActionFooterPreservesConfiguredKeyNames) {
+TEST_F(SessionTest, CandidateActionFooterUsesCompactConfiguredKeyNames) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
   Session session(engine);
@@ -20202,7 +20202,7 @@ TEST_F(SessionTest, CandidateActionFooterPreservesConfiguredKeyNames) {
   commands::CandidateWindow* window = output.mutable_candidate_window();
   window->set_category(commands::CONVERSION);
   window->set_focused_index(0);
-  window->mutable_footer()->set_label("Ctrl+Delで候補を非表示");
+  window->mutable_footer()->set_label("Ctrl+Delで候補非表示");
   commands::CandidateWindow_Candidate* candidate = window->add_candidate();
   candidate->set_index(0);
   candidate->mutable_annotation()->set_suppressible(true);
@@ -20210,7 +20210,8 @@ TEST_F(SessionTest, CandidateActionFooterPreservesConfiguredKeyNames) {
   SessionTestPeer(session).MaybeUpdateCandidateActionFooter(&output);
 
   ASSERT_TRUE(window->has_footer());
-  EXPECT_EQ(window->footer().label(), "Ctrl+Deleteで候補を非表示");
+  EXPECT_EQ(window->footer().label(), "Ctrl+Delで候補非表示");
+  EXPECT_FALSE(window->footer().logo_visible());
 }
 
 TEST_F(SessionTest, CandidateActionFooterUsesConfiguredConversionShortcut) {
@@ -20226,7 +20227,7 @@ TEST_F(SessionTest, CandidateActionFooterUsesConfiguredConversionShortcut) {
   commands::CandidateWindow* window = output.mutable_candidate_window();
   window->set_category(commands::CONVERSION);
   window->set_focused_index(0);
-  window->mutable_footer()->set_label("Ctrl+Delで候補を非表示");
+  window->mutable_footer()->set_label("Ctrl+Delで候補非表示");
   commands::CandidateWindow_Candidate* candidate = window->add_candidate();
   candidate->set_index(0);
   candidate->mutable_annotation()->set_suppressible(true);
@@ -20234,7 +20235,8 @@ TEST_F(SessionTest, CandidateActionFooterUsesConfiguredConversionShortcut) {
   SessionTestPeer(session).MaybeUpdateCandidateActionFooter(&output);
 
   ASSERT_TRUE(window->has_footer());
-  EXPECT_EQ(window->footer().label(), "Alt+Deleteで候補を非表示");
+  EXPECT_EQ(window->footer().label(), "Alt+Delで候補非表示");
+  EXPECT_FALSE(window->footer().logo_visible());
 }
 
 TEST_F(SessionTest, CandidateActionFooterUsesPredictionSpecificShortcut) {
@@ -20251,7 +20253,7 @@ TEST_F(SessionTest, CandidateActionFooterUsesPredictionSpecificShortcut) {
   commands::CandidateWindow* window = output.mutable_candidate_window();
   window->set_category(commands::PREDICTION);
   window->set_focused_index(0);
-  window->mutable_footer()->set_label("Ctrl+Delで履歴から削除");
+  window->mutable_footer()->set_label("Ctrl+Delで履歴削除");
   commands::CandidateWindow_Candidate* candidate = window->add_candidate();
   candidate->set_index(0);
   candidate->mutable_annotation()->set_deletable(true);
@@ -20259,7 +20261,8 @@ TEST_F(SessionTest, CandidateActionFooterUsesPredictionSpecificShortcut) {
   SessionTestPeer(session).MaybeUpdateCandidateActionFooter(&output);
 
   ASSERT_TRUE(window->has_footer());
-  EXPECT_EQ(window->footer().label(), "Ctrl+Backspaceで履歴から削除");
+  EXPECT_EQ(window->footer().label(), "Ctrl+Bkspで履歴削除");
+  EXPECT_FALSE(window->footer().logo_visible());
 }
 
 TEST_F(SessionTest, CandidateActionFooterClearsLabelWithoutActionBinding) {
@@ -20275,7 +20278,7 @@ TEST_F(SessionTest, CandidateActionFooterClearsLabelWithoutActionBinding) {
   commands::CandidateWindow* window = output.mutable_candidate_window();
   window->set_category(commands::CONVERSION);
   window->set_focused_index(0);
-  window->mutable_footer()->set_label("Ctrl+Delで候補を非表示");
+  window->mutable_footer()->set_label("Ctrl+Delで候補非表示");
   commands::CandidateWindow_Candidate* candidate = window->add_candidate();
   candidate->set_index(0);
   candidate->mutable_annotation()->set_suppressible(true);
@@ -20284,6 +20287,7 @@ TEST_F(SessionTest, CandidateActionFooterClearsLabelWithoutActionBinding) {
 
   ASSERT_TRUE(window->has_footer());
   EXPECT_FALSE(window->footer().has_label());
+  EXPECT_FALSE(window->footer().logo_visible());
 }
 
 TEST_F(SessionTest, DeleteHistory) {

@@ -778,14 +778,14 @@ TEST(EngineOutputTest, FillFooter) {
   EXPECT_TRUE(candidate_window.has_footer());
   EXPECT_FALSE(candidate_window.footer().has_label());
   EXPECT_TRUE(candidate_window.footer().index_visible());
-  EXPECT_TRUE(candidate_window.footer().logo_visible());
+  EXPECT_FALSE(candidate_window.footer().logo_visible());
 
   candidate_window.Clear();
   EXPECT_TRUE(output::FillFooter(commands::CONVERSION, &candidate_window));
   EXPECT_TRUE(candidate_window.has_footer());
   EXPECT_FALSE(candidate_window.footer().has_label());
   EXPECT_TRUE(candidate_window.footer().index_visible());
-  EXPECT_TRUE(candidate_window.footer().logo_visible());
+  EXPECT_FALSE(candidate_window.footer().logo_visible());
 
   candidate_window.Clear();
   EXPECT_FALSE(
@@ -813,22 +813,23 @@ TEST(EngineOutputTest, FillFooter) {
     EXPECT_TRUE(output::FillFooter(commands::PREDICTION, &candidate_window));
     ASSERT_TRUE(candidate_window.has_footer());
     ASSERT_TRUE(candidate_window.footer().has_label());
+    EXPECT_FALSE(candidate_window.footer().logo_visible());
     if (i % 2 == 0) {
 #if defined(__APPLE__)
-      constexpr char kInstruction[] = "control+fn+deleteで履歴から削除";
+      constexpr char kInstruction[] = "control+fn+deleteで履歴削除";
 #elif defined(OS_CHROMEOS)
-      constexpr char kInstruction[] = "ctrl+alt+backspaceで履歴から削除";
+      constexpr char kInstruction[] = "ctrl+alt+backspaceで履歴削除";
 #else   // !__APPLE__ && !OS_CHROMEOS
-      constexpr char kInstruction[] = "Ctrl+Delで履歴から削除";
+      constexpr char kInstruction[] = "Ctrl+Delで履歴削除";
 #endif  // __APPLE__ || OS_CHROMEOS
       EXPECT_EQ(candidate_window.footer().label(), kInstruction);
     } else {
 #if defined(__APPLE__)
-      constexpr char kInstruction[] = "control+fn+deleteで候補を非表示";
+      constexpr char kInstruction[] = "control+fn+deleteで候補非表示";
 #elif defined(OS_CHROMEOS)
-      constexpr char kInstruction[] = "ctrl+alt+backspaceで候補を非表示";
+      constexpr char kInstruction[] = "ctrl+alt+backspaceで候補非表示";
 #else   // !__APPLE__ && !OS_CHROMEOS
-      constexpr char kInstruction[] = "Ctrl+Delで候補を非表示";
+      constexpr char kInstruction[] = "Ctrl+Delで候補非表示";
 #endif  // __APPLE__ || OS_CHROMEOS
       EXPECT_EQ(candidate_window.footer().label(), kInstruction);
     }

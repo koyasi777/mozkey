@@ -406,7 +406,9 @@ bool FillFooter(const commands::Category category,
   } else {
     // category is commands::PREDICTION or commands::CONVERSION.
     footer->set_index_visible(true);
-    footer->set_logo_visible(true);
+    // Mozkey keeps the footer compact. The candidate index remains visible,
+    // but the legacy product-logo area is intentionally omitted.
+    footer->set_logo_visible(false);
 
     // If the selected candidate is a user prediction history, tell the user
     // that it can be removed by Ctrl-Delete.
@@ -421,11 +423,11 @@ bool FillFooter(const commands::Category category,
           // TODO(noriyukit): Change the message depending on user's keymap.
           const absl::string_view kDeleteInstruction = []() {
             if constexpr (port::IsAppleBase()) {
-              return "control+fn+deleteで履歴から削除";
+              return "control+fn+deleteで履歴削除";
             } else if constexpr (port::IsChromeos()) {
-              return "ctrl+search+backspaceで履歴から削除";
+              return "ctrl+search+backspaceで履歴削除";
             } else {
-              return "Ctrl+Delで履歴から削除";
+              return "Ctrl+Delで履歴削除";
             }
           }();
           footer->set_label(kDeleteInstruction);
@@ -434,11 +436,11 @@ bool FillFooter(const commands::Category category,
                    cand.annotation().suppressible()) {
           const absl::string_view kSuppressInstruction = []() {
             if constexpr (port::IsAppleBase()) {
-              return "control+fn+deleteで候補を非表示";
+              return "control+fn+deleteで候補非表示";
             } else if constexpr (port::IsChromeos()) {
-              return "ctrl+search+backspaceで候補を非表示";
+              return "ctrl+search+backspaceで候補非表示";
             } else {
-              return "Ctrl+Delで候補を非表示";
+              return "Ctrl+Delで候補非表示";
             }
           }();
           footer->set_label(kSuppressInstruction);

@@ -267,10 +267,30 @@ namespace {
       }
 
       case TextRenderer::FONTSET_FOOTER_INDEX:
-      case TextRenderer::FONTSET_FOOTER_LABEL:
         if (style.footer_style().has_font_size()) {
           font.lfHeight =
               ToDpiScaledFontHeight(style.footer_style().font_size(), dpi);
+        }
+        ApplyFontNameFromTextStyle(&style.footer_style(), &font);
+        font.lfWeight = FW_NORMAL;
+        return font;
+
+      case TextRenderer::FONTSET_FOOTER_LABEL:
+        // Keep the page/index guide at its existing size, but make the
+        // candidate-action instruction slightly smaller so it fits comfortably
+        // in the narrow footer.
+        if (style.footer_style().has_font_size()) {
+          constexpr double kFooterLabelFontScale = 0.80;
+          font.lfHeight = ToDpiScaledFontHeight(
+              style.footer_style().font_size() * kFooterLabelFontScale, dpi);
+        } else {
+          constexpr double kFooterLabelFontScale = 0.80;
+          const int scaled_height = static_cast<int>(
+              std::lround(static_cast<double>(font.lfHeight) *
+                          kFooterLabelFontScale));
+          font.lfHeight =
+              (scaled_height == 0) ? (font.lfHeight < 0 ? -1 : 1)
+                                   : scaled_height;
         }
         ApplyFontNameFromTextStyle(&style.footer_style(), &font);
         font.lfWeight = FW_NORMAL;
@@ -346,7 +366,7 @@ DWORD GetGdiDrawTextStyle(TextRenderer::FONT_TYPE type) {
     case TextRenderer::FONTSET_FOOTER_INDEX:
       return DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
     case TextRenderer::FONTSET_FOOTER_LABEL:
-      return DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
+      return DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
     case TextRenderer::FONTSET_FOOTER_SUBLABEL:
       return DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
     case TextRenderer::FONTSET_SHORTCUT:

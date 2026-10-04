@@ -1563,12 +1563,54 @@ ImeContext::State GetEffectiveStateForTestSendKey(const commands::KeyEvent& key,
   return state;
 }
 
+std::string AbbreviateCandidateActionKeyToken(absl::string_view token) {
+  if (token == "Control" || token == "control" || token == "Ctrl" ||
+      token == "ctrl") {
+    return "Ctrl";
+  }
+  if (token == "Delete" || token == "delete") {
+    return "Del";
+  }
+  if (token == "Backspace" || token == "backspace") {
+    return "Bksp";
+  }
+  if (token == "Escape" || token == "escape") {
+    return "Esc";
+  }
+  if (token == "Insert" || token == "insert") {
+    return "Ins";
+  }
+  if (token == "PageUp" || token == "pageup") {
+    return "PgUp";
+  }
+  if (token == "PageDown" || token == "pagedown") {
+    return "PgDn";
+  }
+  return std::string(token);
+}
+
 std::string FormatCandidateActionKeyLabel(absl::string_view key_name) {
-  std::string result(key_name);
-  for (char& c : result) {
-    if (c == ' ') {
-      c = '+';
+  std::string result;
+  size_t begin = 0;
+  while (begin < key_name.size()) {
+    while (begin < key_name.size() && key_name[begin] == ' ') {
+      ++begin;
     }
+    if (begin == key_name.size()) {
+      break;
+    }
+
+    size_t end = key_name.find(' ', begin);
+    if (end == absl::string_view::npos) {
+      end = key_name.size();
+    }
+
+    if (!result.empty()) {
+      result.push_back('+');
+    }
+    result.append(
+        AbbreviateCandidateActionKeyToken(key_name.substr(begin, end - begin)));
+    begin = end + 1;
   }
   return result;
 }
@@ -9771,6 +9813,8 @@ void Session::MaybeUpdateCandidateActionFooter(
   }
 
   commands::Footer* footer = candidate_window->mutable_footer();
+  // Keep the compact action footer free of the legacy logo area.
+  footer->set_logo_visible(false);
   if (bindings.empty()) {
     // EngineOutput historically emits a fixed Ctrl+Del instruction.  The
     // final Session output must not advertise an action that is unreachable
@@ -9783,7 +9827,7 @@ void Session::MaybeUpdateCandidateActionFooter(
       FormatCandidateActionKeyLabel(bindings.front());
   footer->set_label(
       absl::StrCat(key_label,
-                   deletable ? "で履歴から削除" : "で候補を非表示"));
+                   deletable ? "で履歴削除" : "で候補非表示"));
 }
 
 void Session::OutputMode(commands::Command* command) const {
