@@ -87,6 +87,11 @@ class UserDictionary : public UserDictionaryInterface {
 
   bool HasSuppressedEntries() const override;
 
+  // Adds an exact suppression entry to the auto-managed hidden-candidate
+  // dictionary and immediately updates the in-memory dictionary.
+  bool AddSuppressionEntry(absl::string_view key,
+                           absl::string_view value) override;
+
   // Loads dictionary from UserDictionaryStorage.
   // mainly for unit testing
   bool Load(const user_dictionary::UserDictionaryStorage& storage) override;

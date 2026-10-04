@@ -73,6 +73,9 @@ namespace mozc {
 namespace dictionary {
 namespace {
 
+constexpr absl::string_view kHiddenCandidateDictionaryName =
+    "非表示候補";
+
 struct OrderByKey {
   bool operator()(const UserPos::Token& token, absl::string_view key) const {
     return token.key < key;
@@ -533,6 +536,107 @@ bool UserDictionary::IsSuppressedEntry(absl::string_view key,
 
 bool UserDictionary::HasSuppressedEntries() const {
   return GetTokens()->HasSuppressedEntries();
+}
+
+bool UserDictionary::AddSuppressionEntry(absl::string_view key,
+                                         absl::string_view value) {
+  if (key.empty() || value.empty()) {
+    LOG(WARNING) << "Suppression key and value must not be empty";
+    return false;
+  }
+
+  const std::string normalized_key = japanese::NormalizeVoicedSoundMark(
+      user_dictionary::NormalizeReading(key));
+
+  UserDictionaryStorage::UserDictionaryEntry new_entry;
+  new_entry.set_key(normalized_key);
+  new_entry.set_value(value);
+  new_entry.set_pos(user_dictionary::UserDictionary::SUPPRESSION_WORD);
+  if (const absl::Status status = user_dictionary::ValidateEntry(new_entry);
+      !status.ok()) {
+    LOG(ERROR) << "Invalid suppression entry: " << status;
+    return false;
+  }
+
+  WaitForReloader();
+
+  UserDictionaryStorage storage(filename_);
+  if (!storage.Lock()) {
+    LOG(ERROR) << "Failed to lock user dictionary storage";
+    return false;
+  }
+
+  const auto unlock = [&storage]() {
+    if (!storage.UnLock()) {
+      LOG(ERROR) << "Failed to unlock user dictionary storage";
+    }
+  };
+
+  const absl::Status load_status = storage.Load();
+  if (!load_status.ok() && load_status.code() != absl::StatusCode::kNotFound) {
+    LOG(ERROR) << "Failed to load user dictionary storage: " << load_status;
+    unlock();
+    return false;
+  }
+
+  auto dictionary_id =
+      storage.GetUserDictionaryId(kHiddenCandidateDictionaryName);
+  if (!dictionary_id.ok()) {
+    if (dictionary_id.status().code() != absl::StatusCode::kNotFound) {
+      LOG(ERROR) << "Failed to find hidden-candidate dictionary: "
+                 << dictionary_id.status();
+      unlock();
+      return false;
+    }
+    dictionary_id = storage.CreateDictionary(kHiddenCandidateDictionaryName);
+    if (!dictionary_id.ok()) {
+      LOG(ERROR) << "Failed to create hidden-candidate dictionary: "
+                 << dictionary_id.status();
+      unlock();
+      return false;
+    }
+  }
+
+  UserDictionaryStorage::UserDictionary* dictionary =
+      storage.GetUserDictionary(*dictionary_id);
+  if (dictionary == nullptr) {
+    LOG(ERROR) << "Hidden-candidate dictionary disappeared";
+    unlock();
+    return false;
+  }
+
+  for (const UserDictionaryStorage::UserDictionaryEntry& entry :
+       dictionary->entries()) {
+    if (entry.pos() != user_dictionary::UserDictionary::SUPPRESSION_WORD ||
+        entry.value() != value) {
+      continue;
+    }
+    const std::string existing_key = japanese::NormalizeVoicedSoundMark(
+        user_dictionary::NormalizeReading(entry.key()));
+    if (existing_key == normalized_key) {
+      const bool loaded = Load(storage.GetProto());
+      unlock();
+      return loaded;
+    }
+  }
+
+  if (UserDictionaryStorage::IsDictionaryFull(*dictionary)) {
+    LOG(ERROR) << "Hidden-candidate dictionary is full";
+    unlock();
+    return false;
+  }
+
+  *dictionary->add_entries() = new_entry;
+
+  if (const absl::Status save_status = storage.Save(); !save_status.ok()) {
+    LOG(ERROR) << "Failed to save suppression entry: " << save_status;
+    unlock();
+    return false;
+  }
+
+  const bool loaded = Load(storage.GetProto());
+  unlock();
+  return loaded;
 }
 
 bool UserDictionary::Reload() {

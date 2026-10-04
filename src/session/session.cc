@@ -1563,6 +1563,58 @@ ImeContext::State GetEffectiveStateForTestSendKey(const commands::KeyEvent& key,
   return state;
 }
 
+std::string AbbreviateCandidateActionKeyToken(absl::string_view token) {
+  if (token == "Control" || token == "control" || token == "Ctrl" ||
+      token == "ctrl") {
+    return "Ctrl";
+  }
+  if (token == "Delete" || token == "delete") {
+    return "Del";
+  }
+  if (token == "Backspace" || token == "backspace") {
+    return "Bksp";
+  }
+  if (token == "Escape" || token == "escape") {
+    return "Esc";
+  }
+  if (token == "Insert" || token == "insert") {
+    return "Ins";
+  }
+  if (token == "PageUp" || token == "pageup") {
+    return "PgUp";
+  }
+  if (token == "PageDown" || token == "pagedown") {
+    return "PgDn";
+  }
+  return std::string(token);
+}
+
+std::string FormatCandidateActionKeyLabel(absl::string_view key_name) {
+  std::string result;
+  size_t begin = 0;
+  while (begin < key_name.size()) {
+    while (begin < key_name.size() && key_name[begin] == ' ') {
+      ++begin;
+    }
+    if (begin == key_name.size()) {
+      break;
+    }
+
+    size_t end = key_name.find(' ', begin);
+    if (end == absl::string_view::npos) {
+      end = key_name.size();
+    }
+
+    if (!result.empty()) {
+      result.push_back('+');
+    }
+    result.append(
+        AbbreviateCandidateActionKeyToken(key_name.substr(begin, end - begin)));
+    begin = end + 1;
+  }
+  return result;
+}
+
 void MergeCommandResult(const commands::Result& step_result,
                         commands::Result* accumulated_result) {
   if (!accumulated_result->has_key() && !accumulated_result->has_value()) {
@@ -2602,7 +2654,7 @@ bool Session::ExecuteConversionCommand(
       return ReportBug(command);
 
     case keymap::ConversionState::DELETE_SELECTED_CANDIDATE:
-      return DeleteCandidateFromHistory(command);
+      return DeleteSelectedCandidate(command);
 
     case keymap::ConversionState::NONE:
       return DoNothing(command);
@@ -9219,6 +9271,17 @@ bool Session::DeleteCandidateFromHistory(commands::Command* command) {
   return ConvertCancel(command);
 }
 
+bool Session::DeleteSelectedCandidate(commands::Command* command) {
+  std::optional<int> id = std::nullopt;
+  if (command->input().has_command() && command->input().command().has_id()) {
+    id = command->input().command().id();
+  }
+  if (!context_->mutable_converter()->DeleteOrSuppressCandidate(id)) {
+    return DoNothing(command);
+  }
+  return ConvertCancel(command);
+}
+
 bool Session::Convert(commands::Command* command) {
   CancelPendingLiveConversion();
   command->mutable_output()->set_consumed(true);
@@ -9681,6 +9744,7 @@ void Session::Output(commands::Command* command) {
   OutputMode(command);
   context_->mutable_converter()->PopOutput(context_->composer(),
                                            command->mutable_output());
+  MaybeUpdateCandidateActionFooter(command->mutable_output());
 
   // Once live conversion materializes, EngineConverter::FillConversion()
   // rebuilds the preedit from converter segments and therefore no longer passes
@@ -9698,6 +9762,72 @@ void Session::Output(commands::Command* command) {
       ShouldExposePreLiveConversionReading(*context_));
 
   ObservePendingZenzFeedbackCommittedResult(*command, "output_result");
+}
+
+void Session::MaybeUpdateCandidateActionFooter(
+    commands::Output* output) const {
+  if (output == nullptr || !output->has_candidate_window()) {
+    return;
+  }
+
+  commands::CandidateWindow* candidate_window =
+      output->mutable_candidate_window();
+  if (!candidate_window->has_focused_index()) {
+    return;
+  }
+
+  const commands::CandidateWindow_Candidate* focused_candidate = nullptr;
+  for (const commands::CandidateWindow_Candidate& candidate :
+       candidate_window->candidate()) {
+    if (candidate.index() == candidate_window->focused_index()) {
+      focused_candidate = &candidate;
+      break;
+    }
+  }
+  if (focused_candidate == nullptr || !focused_candidate->has_annotation()) {
+    return;
+  }
+
+  const commands::Annotation& annotation = focused_candidate->annotation();
+  const bool deletable = annotation.deletable();
+  const bool suppressible = annotation.suppressible();
+  if (!deletable && !suppressible) {
+    return;
+  }
+
+  const keymap::KeyMapManager& keymap = context_->GetKeyMapManager();
+  constexpr keymap::ConversionState::Commands kCommand =
+      keymap::ConversionState::DELETE_SELECTED_CANDIDATE;
+
+  std::vector<std::string> bindings;
+  switch (candidate_window->category()) {
+    case commands::PREDICTION:
+      bindings = keymap.GetKeyBindingsForPredictionCommand(kCommand);
+      break;
+    case commands::CONVERSION:
+      bindings = keymap.GetKeyBindingsForConversionCommand(kCommand);
+      break;
+    default:
+      bindings.clear();
+      break;
+  }
+
+  commands::Footer* footer = candidate_window->mutable_footer();
+  // Keep the compact action footer free of the legacy logo area.
+  footer->set_logo_visible(false);
+  if (bindings.empty()) {
+    // EngineOutput historically emits a fixed Ctrl+Del instruction.  The
+    // final Session output must not advertise an action that is unreachable
+    // in the active keymap.
+    footer->clear_label();
+    return;
+  }
+
+  const std::string key_label =
+      FormatCandidateActionKeyLabel(bindings.front());
+  footer->set_label(
+      absl::StrCat(key_label,
+                   deletable ? "で履歴削除" : "で候補非表示"));
 }
 
 void Session::OutputMode(commands::Command* command) const {

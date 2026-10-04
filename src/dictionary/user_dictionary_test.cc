@@ -760,6 +760,46 @@ TEST_F(UserDictionaryTest, AsyncLoadTest) {
   }
 }
 
+TEST_F(UserDictionaryTest, AddSuppressionEntryPersistsInDedicatedDictionary) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string filename =
+      FileUtil::JoinPath(temp_dir.path(), "add_suppression_test.db");
+
+  std::unique_ptr<UserDictionary> user_dic(
+      CreateDictionaryWithFilename(filename));
+  user_dic->WaitForReloader();
+
+  EXPECT_TRUE(user_dic->AddSuppressionEntry("グーグル", "グーグル"));
+  EXPECT_TRUE(user_dic->IsSuppressedEntry("ぐーぐる", "グーグル"));
+
+  {
+    UserDictionaryStorage storage(filename);
+    EXPECT_OK(storage.Load());
+    const auto id = storage.GetUserDictionaryId("非表示候補");
+    ASSERT_OK(id);
+    const UserDictionaryStorage::UserDictionary* dictionary =
+        storage.GetUserDictionary(*id);
+    ASSERT_NE(dictionary, nullptr);
+    ASSERT_EQ(dictionary->entries_size(), 1);
+    EXPECT_EQ(dictionary->entries(0).key(), "ぐーぐる");
+    EXPECT_EQ(dictionary->entries(0).value(), "グーグル");
+    EXPECT_EQ(dictionary->entries(0).pos(),
+              user_dictionary::UserDictionary::SUPPRESSION_WORD);
+  }
+
+  EXPECT_TRUE(user_dic->AddSuppressionEntry("ぐーぐる", "グーグル"));
+  {
+    UserDictionaryStorage storage(filename);
+    EXPECT_OK(storage.Load());
+    const auto id = storage.GetUserDictionaryId("非表示候補");
+    ASSERT_OK(id);
+    const UserDictionaryStorage::UserDictionary* dictionary =
+        storage.GetUserDictionary(*id);
+    ASSERT_NE(dictionary, nullptr);
+    EXPECT_EQ(dictionary->entries_size(), 1);
+  }
+}
+
 TEST_F(UserDictionaryTest, TestSuppressionDictionary) {
   std::unique_ptr<UserDictionary> user_dic(CreateDictionaryWithMockPos());
   user_dic->WaitForReloader();

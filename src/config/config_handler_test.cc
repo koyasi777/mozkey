@@ -31,6 +31,8 @@
 
 #include <array>
 #include <cstddef>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -185,6 +187,127 @@ TEST_F(ConfigHandlerTest, SetConfig) {
   output2.clear_general_config();
   EXPECT_EQ(absl::StrCat(output), absl::StrCat(expected));
   EXPECT_EQ(absl::StrCat(output2), absl::StrCat(expected));
+}
+
+TEST_F(ConfigHandlerTest, CustomKeymapAddsCandidateHideBindingWhenFree) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "custom_keymap_migration.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config input;
+  input.set_session_keymap(Config::CUSTOM);
+  input.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Prediction\tCtrl Delete\tDeleteSelectedCandidate\n");
+
+  ConfigHandler::SetConfig(input);
+  const Config output = ConfigHandler::GetCopiedConfig();
+  constexpr absl::string_view kMigrationRow =
+      "Conversion\tCtrl Delete\tDeleteSelectedCandidate";
+  const size_t first = output.custom_keymap_table().find(kMigrationRow);
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(output.custom_keymap_table().find(kMigrationRow, first + 1),
+            std::string::npos);
+
+  // Applying the already-migrated config again must not duplicate the row.
+  ConfigHandler::SetConfig(output);
+  const Config output2 = ConfigHandler::GetCopiedConfig();
+  const size_t first2 = output2.custom_keymap_table().find(kMigrationRow);
+  ASSERT_NE(first2, std::string::npos);
+  EXPECT_EQ(output2.custom_keymap_table().find(kMigrationRow, first2 + 1),
+            std::string::npos);
+
+  std::ifstream ifs(config_file, std::ios::binary);
+  ASSERT_TRUE(ifs);
+  const std::string stored((std::istreambuf_iterator<char>(ifs)),
+                           std::istreambuf_iterator<char>());
+  EXPECT_NE(stored.find("Conversion\tCtrl Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
+}
+
+TEST_F(ConfigHandlerTest, CustomKeymapMigrationPersistsOnReload) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "custom_keymap_reload_migration.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config legacy;
+  legacy.set_session_keymap(Config::CUSTOM);
+  legacy.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Prediction\tCtrl Delete\tDeleteSelectedCandidate\n");
+
+  {
+    std::ofstream ofs(config_file, std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(ofs);
+    const std::string serialized = legacy.SerializeAsString();
+    ofs.write(serialized.data(), serialized.size());
+    ASSERT_TRUE(ofs);
+  }
+
+  ConfigHandler::Reload();
+  const Config output = ConfigHandler::GetCopiedConfig();
+  EXPECT_NE(output.custom_keymap_table().find(
+                "Conversion\tCtrl Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
+
+  std::ifstream ifs(config_file, std::ios::binary);
+  ASSERT_TRUE(ifs);
+  Config stored;
+  ASSERT_TRUE(stored.ParseFromIstream(&ifs));
+  EXPECT_NE(stored.custom_keymap_table().find(
+                "Conversion\tCtrl Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
+}
+
+TEST_F(ConfigHandlerTest,
+       CustomKeymapMigrationPreservesExistingAlternateDeleteBinding) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "custom_keymap_alternate.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config input;
+  input.set_session_keymap(Config::CUSTOM);
+  input.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tAlt Delete\tDeleteSelectedCandidate\n");
+
+  ConfigHandler::SetConfig(input);
+  const Config output = ConfigHandler::GetCopiedConfig();
+  EXPECT_NE(output.custom_keymap_table().find(
+                "Conversion\tAlt Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
+  EXPECT_EQ(output.custom_keymap_table().find(
+                "Conversion\tCtrl Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
+}
+
+TEST_F(ConfigHandlerTest, CustomKeymapMigrationPreservesOccupiedCtrlDelete) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "custom_keymap_ctrl_delete_busy.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config input;
+  input.set_session_keymap(Config::CUSTOM);
+  input.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Delete\tCancel\n");
+
+  ConfigHandler::SetConfig(input);
+  const Config output = ConfigHandler::GetCopiedConfig();
+  EXPECT_NE(output.custom_keymap_table().find(
+                "Conversion\tCtrl Delete\tCancel"),
+            std::string::npos);
+  EXPECT_EQ(output.custom_keymap_table().find(
+                "Conversion\tCtrl Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
 }
 
 TEST_F(ConfigHandlerTest, MissingConfigUsesMozkeyProductDefaults) {

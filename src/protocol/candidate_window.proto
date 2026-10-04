@@ -101,6 +101,9 @@ message Annotation {
   // Actual value to be displayed. Uses it to encode meta information
   // in the value. e.g., puts "_" to clarify the unrecognizable white spaces.
   optional string display_value = 7;
+  // Set to true if this candidate can be hidden by registering a suppression
+  // word in the user dictionary.
+  optional bool suppressible = 8 [default = false];
 }
 
 // Additional information to a candidate word.  This message is

@@ -218,6 +218,13 @@ class ConverterInterface {
                                           size_t segment_index,
                                           int candidate_index) const = 0;
 
+  // Adds an exact suppression entry to the persistent user dictionary.
+  [[nodiscard]]
+  virtual bool AddSuppressionEntry(absl::string_view key,
+                                   absl::string_view value) const {
+    return false;
+  }
+
   // Reconstruct history segments from given preceding text.
   [[nodiscard]]
   virtual bool ReconstructHistory(Segments* segments,

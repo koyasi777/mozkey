@@ -122,6 +122,9 @@ TEST(EngineOutputTest, FillCandidate) {
   segment.mutable_candidate(42)->suffix = kSuffix42;
   segment.mutable_candidate(42)->description = kDescription42;
   segment.mutable_candidate(42)->display_value = kDisplayValue42;
+  segment.mutable_candidate(42)->key = "key42";
+  segment.mutable_candidate(42)->attributes |=
+      converter::Attribute::USER_DICTIONARY;
 
   candidate.set_id(13);
   output::FillCandidate(segment, candidate, &candidate_proto);
@@ -140,6 +143,7 @@ TEST(EngineOutputTest, FillCandidate) {
   EXPECT_EQ(candidate_proto.annotation().suffix(), kSuffix42);
   EXPECT_EQ(candidate_proto.annotation().description(), kDescription42);
   EXPECT_EQ(candidate_proto.annotation().display_value(), kDisplayValue42);
+  EXPECT_TRUE(candidate_proto.annotation().suppressible());
 
   candidate.Clear();
   candidate_proto.Clear();
@@ -458,9 +462,11 @@ TEST(EngineOutputTest, FillAllCandidateWords_Attributes) {
   EXPECT_EQ(candidates_proto.candidates(4).attributes(0),
             commands::CandidateAttribute::TYPING_CORRECTION);
 
-  EXPECT_EQ(1, candidates_proto.candidates(5).attributes_size());
+  EXPECT_EQ(2, candidates_proto.candidates(5).attributes_size());
   EXPECT_EQ(candidates_proto.candidates(5).attributes(0),
             commands::CandidateAttribute::USER_HISTORY);
+  EXPECT_EQ(candidates_proto.candidates(5).attributes(1),
+            commands::CandidateAttribute::DELETABLE);
 }
 
 TEST(EngineOutputTest, ShouldShowUsages) {
@@ -772,14 +778,14 @@ TEST(EngineOutputTest, FillFooter) {
   EXPECT_TRUE(candidate_window.has_footer());
   EXPECT_FALSE(candidate_window.footer().has_label());
   EXPECT_TRUE(candidate_window.footer().index_visible());
-  EXPECT_TRUE(candidate_window.footer().logo_visible());
+  EXPECT_FALSE(candidate_window.footer().logo_visible());
 
   candidate_window.Clear();
   EXPECT_TRUE(output::FillFooter(commands::CONVERSION, &candidate_window));
   EXPECT_TRUE(candidate_window.has_footer());
   EXPECT_FALSE(candidate_window.footer().has_label());
   EXPECT_TRUE(candidate_window.footer().index_visible());
-  EXPECT_TRUE(candidate_window.footer().logo_visible());
+  EXPECT_FALSE(candidate_window.footer().logo_visible());
 
   candidate_window.Clear();
   EXPECT_FALSE(
@@ -796,30 +802,36 @@ TEST(EngineOutputTest, FillFooter) {
     c->set_index(i);
     c->set_value("dummy");
     c->set_id(i);
-    // Candidates with even Id can be deleted.
+    // Even candidates represent history deletion. Odd candidates
+    // represent ordinary suppressible candidates.
     c->mutable_annotation()->set_deletable(i % 2 == 0);
+    c->mutable_annotation()->set_suppressible(true);
   }
   for (int i = 0; i < 20; ++i) {
     candidate_window.clear_footer();
     candidate_window.set_focused_index(i);
     EXPECT_TRUE(output::FillFooter(commands::PREDICTION, &candidate_window));
+    ASSERT_TRUE(candidate_window.has_footer());
+    ASSERT_TRUE(candidate_window.footer().has_label());
+    EXPECT_FALSE(candidate_window.footer().logo_visible());
     if (i % 2 == 0) {
-      ASSERT_TRUE(candidate_window.has_footer());
-      ASSERT_TRUE(candidate_window.footer().has_label());
 #if defined(__APPLE__)
-      constexpr char kDeleteInstruction[] = "control+fn+deleteで履歴から削除";
+      constexpr char kInstruction[] = "control+fn+deleteで履歴削除";
 #elif defined(OS_CHROMEOS)
-      constexpr char kDeleteInstruction[] = "ctrl+alt+backspaceで履歴から削除";
+      constexpr char kInstruction[] = "ctrl+alt+backspaceで履歴削除";
 #else   // !__APPLE__ && !OS_CHROMEOS
-      constexpr char kDeleteInstruction[] = "Ctrl+Delで履歴から削除";
+      constexpr char kInstruction[] = "Ctrl+Delで履歴削除";
 #endif  // __APPLE__ || OS_CHROMEOS
-      EXPECT_EQ(candidate_window.footer().label(), kDeleteInstruction);
-#if defined(CHANNEL_DEV) && defined(GOOGLE_JAPANESE_INPUT_BUILD)
+      EXPECT_EQ(candidate_window.footer().label(), kInstruction);
     } else {
-      EXPECT_FALSE(candidate_window.footer().has_label());
-      EXPECT_TRUE(candidate_window.footer().has_sub_label());
-      EXPECT_EQ(candidate_window.footer().sub_label().find("build "), 0);
-#endif  // CHANNEL_DEV && GOOGLE_JAPANESE_INPUT_BUILD
+#if defined(__APPLE__)
+      constexpr char kInstruction[] = "control+fn+deleteで候補非表示";
+#elif defined(OS_CHROMEOS)
+      constexpr char kInstruction[] = "ctrl+alt+backspaceで候補非表示";
+#else   // !__APPLE__ && !OS_CHROMEOS
+      constexpr char kInstruction[] = "Ctrl+Delで候補非表示";
+#endif  // __APPLE__ || OS_CHROMEOS
+      EXPECT_EQ(candidate_window.footer().label(), kInstruction);
     }
   }
 }

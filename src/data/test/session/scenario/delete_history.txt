@@ -245,7 +245,7 @@ EXPECT_NOT_IN_ALL_CANDIDATE_WORDS	今日は晴れの感じです
 SEND_KEY	TAB
 EXPECT_PREEDIT	今日は晴れ
 
-# SCENARIO 5 (Deletion of non-history candidate)
+# SCENARIO 5 (Suppression fallback after history deletion fails)
 
 # Reset.
 CLEAR_USER_PREDICTION
@@ -262,26 +262,27 @@ SEND_KEY	SPACE
 EXPECT_PREEDIT	平面図
 SEND_KEY	ENTER
 
-# Typing hei
+# Typing hei.
 SEND_KEYS	heime
 EXPECT_PREEDIT	へいめ
 EXPECT_IN_ALL_CANDIDATE_WORDS	平面図
 EXPECT_IN_ALL_CANDIDATE_WORDS	経い目
 
-# Select non-history candidate.
+# Select a non-history candidate.
 SEND_KEY	TAB
 EXPECT_PREEDIT	平面図
 SEND_KEY	TAB
 EXPECT_PREEDIT	経い目
 
-# Try deleting it. Nothing should happen.
+# History deletion does not apply to 経い目, so Ctrl-Delete falls back to
+# suppression. Successful deletion/hiding cancels conversion and restores the
+# original composition.
 SEND_KEY	CTRL DELETE
+EXPECT_PREEDIT	へいめ
+EXPECT_NOT_IN_ALL_CANDIDATE_WORDS	経い目
+EXPECT_IN_ALL_CANDIDATE_WORDS	平面図
 
-# After hitting Ctrl-Del, nothing happend and preedit is kept as before.
-EXPECT_PREEDIT	経い目
-
-# Next commit 平面図 and delete it
-SEND_KEY	ESC
+# Commit 平面図, then delete its learned-history contribution.
 SEND_KEY	TAB
 EXPECT_PREEDIT	平面図
 SEND_KEY	ENTER
@@ -292,15 +293,18 @@ EXPECT_PREEDIT	平面図
 SEND_KEY	CTRL DELETE
 EXPECT_PREEDIT	へいめ
 
-# Back to precomposition
+# Back to precomposition.
 SEND_KEY	ESC
 
-# Even if the history is deleted, realtime conversion appears.
+# Deleting history alone must not suppress the system-dictionary candidate.
 SEND_KEYS	heimenzu
 EXPECT_PREEDIT	へいめんず
 SEND_KEY	TAB
 EXPECT_PREEDIT	平面図
 
-# Try deleting it. Nothing should happen for the already deleted history.
+# The learned-history contribution has already been deleted, but only one
+# regular candidate remains. Suppression of the last regular candidate is
+# intentionally blocked, so Ctrl-Delete is a no-op here.
 SEND_KEY	CTRL DELETE
 EXPECT_PREEDIT	平面図
+EXPECT_IN_ALL_CANDIDATE_WORDS	平面図

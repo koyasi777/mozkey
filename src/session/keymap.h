@@ -220,6 +220,16 @@ class KeyMap {
   bool AddRule(const commands::KeyEvent& key_event, CommandsType command,
                CommandSequence command_sequence);
 
+  using NamedBinding = std::pair<KeyInformation, std::string>;
+
+  bool AddRule(const commands::KeyEvent& key_event, CommandsType command,
+               CommandSequence command_sequence, std::string key_name);
+
+  void AppendNamedBindings(CommandsType command,
+                           std::vector<NamedBinding>* bindings) const;
+
+  bool HasBinding(KeyInformation key) const;
+
   void Clear();
 
  private:
@@ -229,6 +239,7 @@ class KeyMap {
 
   KeyToCommandMap keymap_;
   KeyToCommandSequenceMap sequence_keymap_;
+  absl::flat_hash_map<KeyInformation, std::string> key_name_map_;
 };
 
 // A manager of key mapping rule for a Config.
@@ -265,6 +276,14 @@ class KeyMapManager {
 
   bool GetCommandPrediction(const commands::KeyEvent& key_event,
                             ConversionState::Commands* command) const;
+
+  // Returns the effective user-visible key names bound to |command|.
+  // Prediction bindings include Conversion fallback rules that are not
+  // shadowed by an explicit Prediction rule.
+  std::vector<std::string> GetKeyBindingsForConversionCommand(
+      ConversionState::Commands command) const;
+  std::vector<std::string> GetKeyBindingsForPredictionCommand(
+      ConversionState::Commands command) const;
 
   bool GetCommandSequenceDirect(const commands::KeyEvent& key_event,
                                 CommandSequence* commands) const;
@@ -528,6 +547,7 @@ bool KeyMap<T>::AddRule(const commands::KeyEvent& key_event,
 
   keymap_[key] = command;
   sequence_keymap_.erase(key);
+  key_name_map_.erase(key);
   return true;
 }
 
@@ -535,6 +555,14 @@ template <typename T>
 bool KeyMap<T>::AddRule(const commands::KeyEvent& key_event,
                         CommandsType command,
                         CommandSequence command_sequence) {
+  return AddRule(key_event, command, std::move(command_sequence), "");
+}
+
+template <typename T>
+bool KeyMap<T>::AddRule(const commands::KeyEvent& key_event,
+                        CommandsType command,
+                        CommandSequence command_sequence,
+                        std::string key_name) {
   if (command_sequence.empty()) {
     return false;
   }
@@ -546,13 +574,38 @@ bool KeyMap<T>::AddRule(const commands::KeyEvent& key_event,
 
   keymap_[key] = command;
   sequence_keymap_[key] = std::move(command_sequence);
+  if (key_name.empty()) {
+    key_name_map_.erase(key);
+  } else {
+    key_name_map_[key] = std::move(key_name);
+  }
   return true;
+}
+
+template <typename T>
+void KeyMap<T>::AppendNamedBindings(
+    CommandsType command, std::vector<NamedBinding>* bindings) const {
+  for (const auto& [key, bound_command] : keymap_) {
+    if (bound_command != command) {
+      continue;
+    }
+    const auto name_it = key_name_map_.find(key);
+    if (name_it != key_name_map_.end() && !name_it->second.empty()) {
+      bindings->emplace_back(key, name_it->second);
+    }
+  }
+}
+
+template <typename T>
+bool KeyMap<T>::HasBinding(KeyInformation key) const {
+  return keymap_.contains(key);
 }
 
 template <typename T>
 void KeyMap<T>::Clear() {
   keymap_.clear();
   sequence_keymap_.clear();
+  key_name_map_.clear();
 }
 
 }  // namespace keymap

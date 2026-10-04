@@ -365,6 +365,25 @@ class InsertPlaceholderWordsRewriter : public RewriterInterface {
   }
 };
 
+class InsertPlaceholderWordsWithoutModifiedFlagRewriter
+    : public RewriterInterface {
+  bool Rewrite(const ConversionRequest&, Segments* segments) const override {
+    for (Segment& segment : segments->conversion_segments()) {
+      {
+        Candidate* cand = segment.add_candidate();
+        cand->key = "tobefiltered";
+        cand->value = "ToBeFiltered";
+      }
+      {
+        Candidate* cand = segment.add_candidate();
+        cand->key = "nottobefiltered";
+        cand->value = "NotToBeFiltered";
+      }
+    }
+    return false;
+  }
+};
+
 class ResizeSegmentsRewriter : public RewriterInterface {
  public:
   ResizeSegmentsRewriter(size_t segment_index,
@@ -1488,6 +1507,41 @@ TEST_F(ConverterTest, SuppressionDictionaryForRewriter) {
 
   // Verify that words inserted by the rewriter is suppressed if its in the
   // suppression_dictionary.
+  for (const Segment& segment : segments.conversion_segments()) {
+    EXPECT_FALSE(FindCandidateByValue("ToBeFiltered", segment));
+    EXPECT_TRUE(FindCandidateByValue("NotToBeFiltered", segment));
+  }
+}
+
+TEST_F(ConverterTest,
+       SuppressionDictionaryRunsWhenRewriterReportsNoModification) {
+  std::unique_ptr<Converter> converter = CreateConverter(
+      std::make_unique<InsertPlaceholderWordsWithoutModifiedFlagRewriter>(),
+      STUB_PREDICTOR);
+
+  engine::Modules& modules = converter->modules();
+
+  user_dictionary::UserDictionaryStorage storage;
+  UserEntry* entry = storage.add_dictionaries()->add_entries();
+  entry->set_key("tobefiltered");
+  entry->set_value("ToBeFiltered");
+  entry->set_pos(user_dictionary::UserDictionary::SUPPRESSION_WORD);
+  modules.GetUserDictionary().Load(storage);
+  ASSERT_TRUE(modules.GetUserDictionary().HasSuppressedEntries());
+
+  auto table = std::make_shared<composer::Table>();
+  config::Config config;
+  composer::Composer composer(table, default_request(), config);
+  composer.InsertCharacter("placeholder");
+  Segments segments;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetComposer(composer)
+          .SetHistoryResult(HistorySegmentsToResult(segments))
+          .SetConfig(config)
+          .Build();
+
+  EXPECT_TRUE(converter->StartConversion(request, &segments));
   for (const Segment& segment : segments.conversion_segments()) {
     EXPECT_FALSE(FindCandidateByValue("ToBeFiltered", segment));
     EXPECT_TRUE(FindCandidateByValue("NotToBeFiltered", segment));

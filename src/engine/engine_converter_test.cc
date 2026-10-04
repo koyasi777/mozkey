@@ -469,6 +469,86 @@ TEST_F(EngineConverterTest,
   EXPECT_FALSE(converter.ConfirmExternalConversionLearning(revert_id));
 }
 
+TEST_F(EngineConverterTest, DeleteOrSuppressCandidateKeepsMeaningsSeparate) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("こうしょう");
+
+  converter::Candidate* history_candidate = segment->add_candidate();
+  history_candidate->key = "こうしょう";
+  history_candidate->content_key = "こうしょう";
+  history_candidate->value = "交渉";
+  history_candidate->content_value = "交渉";
+  history_candidate->attributes |=
+      converter::Attribute::USER_SEGMENT_HISTORY_REWRITER;
+
+  converter::Candidate* system_candidate = segment->add_candidate();
+  system_candidate->key = "こうしょう";
+  system_candidate->content_key = "こうしょう";
+  system_candidate->value = "公称";
+  system_candidate->content_value = "公称";
+
+  converter::Candidate* user_dictionary_candidate = segment->add_candidate();
+  user_dictionary_candidate->key = "こうしょう";
+  user_dictionary_candidate->content_key = "こうしょう";
+  user_dictionary_candidate->value = "ユーザー辞書";
+  user_dictionary_candidate->content_value = "ユーザー辞書";
+  user_dictionary_candidate->attributes |= converter::Attribute::USER_DICTIONARY;
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  composer_->InsertCharacterPreedit("こうしょう");
+  ASSERT_TRUE(converter.Convert(*composer_));
+
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry(_, _)).Times(0);
+  EXPECT_TRUE(converter.DeleteOrSuppressCandidate(0));
+  Mock::VerifyAndClearExpectations(&mock_converter);
+
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 1))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry("こうしょう", "公称"))
+      .WillOnce(Return(true));
+  EXPECT_TRUE(converter.DeleteOrSuppressCandidate(1));
+  Mock::VerifyAndClearExpectations(&mock_converter);
+
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 2))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter,
+              AddSuppressionEntry("こうしょう", "ユーザー辞書"))
+      .WillOnce(Return(true));
+  EXPECT_TRUE(converter.DeleteOrSuppressCandidate(2));
+}
+
+TEST_F(EngineConverterTest,
+       DeleteOrSuppressCandidateRefusesLastRegularCandidate) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("ただひとつ");
+  converter::Candidate* candidate = segment->add_candidate();
+  candidate->key = "ただひとつ";
+  candidate->content_key = "ただひとつ";
+  candidate->value = "唯一";
+  candidate->content_value = "唯一";
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  composer_->InsertCharacterPreedit("ただひとつ");
+  ASSERT_TRUE(converter.Convert(*composer_));
+
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry(_, _)).Times(0);
+  EXPECT_FALSE(converter.DeleteOrSuppressCandidate(0));
+}
+
 TEST_F(EngineConverterTest, Convert) {
   auto mock_converter = std::make_shared<MockConverter>();
   EngineConverter converter(mock_converter, request_, config_);
@@ -2144,7 +2224,7 @@ TEST_F(EngineConverterTest, SuggestAndPredict) {
     EXPECT_TRUE(output.has_candidate_window());
     EXPECT_FALSE(output.candidate_window().footer().has_label());
     EXPECT_TRUE(output.candidate_window().footer().index_visible());
-    EXPECT_TRUE(output.candidate_window().footer().logo_visible());
+    EXPECT_FALSE(output.candidate_window().footer().logo_visible());
 
     // Check the conversion
     const commands::Preedit& conversion = output.preedit();
