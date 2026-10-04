@@ -2792,7 +2792,7 @@
                </sizepolicy>
               </property>
               <property name="text">
-               <string>Temporarily disable conversion personalization, history-based suggestions and user dictionary</string>
+               <string>Temporarily disable conversion personalization (including Zenz learning), history-based suggestions and user dictionary</string>
               </property>
               <property name="wordWrap">
                <bool>true</bool>

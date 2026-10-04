@@ -126,6 +126,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - deferred 表示中の Enter / Shift による英字入力では、裏側の Mozc baseline ではなく、その時点でユーザーに見えている presentation を確定。Enter 確定後の Undo でも同じ presentation を復元
 - Zenz 出力が確定済み左文脈の長い suffix を現在入力の先頭へ反復する context echo を検出して拒否し、通常の Mozc ライブ変換結果へフォールバック
 - Zenz 補正結果のローカル feedback learning を追加。設定画面から ON/OFF 可能
+- シークレットモードでは Zenz のローカル推論を継続したまま Zenz feedback personalization（学習・保存済み feedback の再利用）を無効化。新しい feedback は保存せず、既存 feedback 自体は削除しない
 - Zenz feedback の自動ブロック設定を追加。同じ読み全体・同じ文脈クラス・同じ補正結果について、通常却下回数が「最低拒否回数」と「採用回数 + 通常却下回数に占める最低拒否割合」の両方に達した場合だけ自動ブロックする。未保存の設定では既定で有効、最低拒否回数は 1 回、最低拒否割合は 50%。自動ブロックは TSV に hard reject を固定保存せず、現在の設定と既存 feedback から動的に再評価する
 - 自動ブロック中も Zenz 推論は shadow observation として継続する。同じ読みで非表示の Zenz 結果と最終確定値が一致すれば accepted feedback を加算して自己回復でき、拒否割合がしきい値を下回れば自動的にブロックを解除する。同じ読みで異なる値が確定した場合は通常却下を加算し、入力継続などで最終的な読みが変わった場合は neutral として扱う。明示的な hard reject はこの自己回復の対象外
 - 同じ読み全体・同じ文脈クラス・同じ補正結果で通常却下回数が採用回数を上回る場合は、auto-block 無効時でも Zenz feedback による優先候補・保存済み feedback による即時補正としては使わず、「却下数優勢」の中立状態として扱います。これは hard block ではなく、Zenz が新しく同じ補正を返すことや通常 Mozc 候補を削除することはありません。
@@ -173,6 +174,8 @@ Windows 向け Zenz 同梱構成では、`llama-server.exe` を `127.0.0.1` の�
 Zenz の localhost 通信は、固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
 Zenz feedback learning は、完全な読み、完全な候補、粗い文脈クラス、採用/却下回数、理由 marker などの full-sequence 単位のローカル学習情報だけを保存します。生の左文脈は保存しません。feedback に使う文脈は、`empty`、`japanese_only`、`japanese_with_punctuation`、`mixed_japanese_ascii`、`sensitive_like` などの非可逆な context class に落とします。segment-local や lexical-unit の学習は Zenz feedback TSV には保存せず、安全な局所学習は Mozc history 側の責務として扱います。
+
+シークレットモードでは、Zenz のローカル推論自体は継続しますが、Zenz feedback personalization は無効になります。保存済み feedback は候補 ranking、session-level fast path、feedback decision に参照せず、新しい `accepted` / `rejected` / `accepted_rollback` feedback も保存しません。既存の feedback TSV は削除せず、シークレットモードを終了すると再び利用できます。
 
 さらに、リリース時には Mozc core runtime binaries にテレメトリ、アップデータ、クラッシュアップロード、使用統計関連の危険な marker が含まれないことを確認します。
 
@@ -305,6 +308,8 @@ Zenz ライブ補正は password field では実行されません。また、�
 Windows TSF の password input scope と macOS の Secure Event Input では、application の surrounding text を Zenz 用に取得せず、Zenz extended context acquisition も実行しません。
 
 Zenz feedback learning は任意機能です。有効な場合でも、Zenz 補正結果が表示されただけでは保存されません。Enter や句読点・記号の単打確定などで、表示中の Zenz 結果が明示的に確定された時点で、その full-sequence accepted feedback をローカル TSV に即時保存します。
+
+シークレットモード中は例外で、Zenz 推論は通常どおり利用できますが、Zenz feedback personalization の読み取り・書き込みを停止します。保存済み feedback による candidate ranking、複数文節 live correction の fast path、auto-block を含む feedback decision は適用せず、新しい feedback record も保存しません。シークレットモードを解除すると、削除せず保持していた既存 feedback を再び利用します。
 
 明示的確定後は、その accepted に対する短い rollback window を session 内に保持します。次の実テキスト入力や確定後の context transition で window が閉じる前に Backspace、Escape、Revert、Undo、Ctrl+Z などの修正操作が入った場合は、保存済み accepted を削除・上書きする代わりに `accepted_rollback` を append し、直前の accepted 1 件を補償します。`accepted_rollback` は rejected feedback ではないため、通常却下回数や auto-block の negative evidence を増やしません。IMEOff / MakeSureIMEOff は取り消しではなく確定後のモード変更として扱い、accepted を保持したまま rollback window を閉じます。表示中の Zenz 補正から Space や候補移動などの通常変換操作へ移った場合は別で、その Zenz 結果を rejected feedback として扱います。ただし Space などの通常操作由来の rejected feedback は、候補を永久に抑止する hard reject ではなく、以後の candidate ranking で順位を下げるための negative signal として扱います。
 
@@ -751,6 +756,13 @@ Context used for feedback is reduced to a non-reversible class such as `empty`,
 `sensitive_like`. Segment-local or lexical-unit learning is intentionally not
 stored in the Zenz feedback TSV; safe local learning belongs to Mozc history.
 
+In Secret / Incognito mode, local Zenz inference remains enabled, but Zenz
+feedback personalization is disabled. Stored feedback is not consulted for
+candidate ranking, session-level fast-path reuse, or feedback decisions, and
+no new `accepted`, `rejected`, or `accepted_rollback` feedback is persisted.
+Existing feedback is left intact and becomes available again after leaving
+Incognito mode.
+
 Additional release checks verify that Mozc core runtime binaries do not contain
 hard-deny telemetry, updater, crash-upload, or usage-statistics markers.
 
@@ -872,6 +884,7 @@ Main features added in this fork
 - Commits the presentation that is actually visible to the user, rather than a hidden Mozc baseline, when Enter or Shift-based ASCII input ends a deferred presentation; Undo after Enter restores the same visible presentation
 - Detects and rejects likely context echo where Zenz repeats a long suffix of already committed left context at the beginning of the current output, then falls back to the normal Mozc live-conversion result
 - Adds optional local feedback learning for Zenz correction results
+- In Secret / Incognito mode, keeps local Zenz inference enabled while disabling Zenz feedback personalization; stored feedback is not reused or consulted for decisions, no new feedback is persisted, and existing feedback is left intact
 - Adds adaptive Zenz feedback auto-blocking. For the same full reading, context class, and correction value, auto-blocking activates only when both the minimum ordinary-reject count and the minimum reject percentage over accepted plus ordinary-rejected observations are met. For configurations without a saved value, auto-blocking defaults to enabled with a minimum of 1 rejection and 50%. Auto-blocking does not persist irreversible hard-reject rows; it is re-evaluated dynamically from the current settings and stored feedback.
 - Keeps evaluating an auto-blocked Zenz result as a hidden shadow observation. If the final committed value for the same reading matches that hidden Zenz value, accepted feedback is added so the entry can recover automatically once its reject percentage falls below the threshold. A different final value for the same reading adds an ordinary rejection; a changed final reading is neutral. Explicit hard rejects are not eligible for shadow recovery.
 - Stops reusing a Zenz feedback entry as a preferred candidate or live-correction fast path when ordinary rejected observations outnumber accepted observations for the same full reading, context class, and correction value. This is a neutral reject-count-dominant state, not a hard block, so it does not delete ordinary Mozc candidates or prevent newly produced Zenz corrections by itself.
@@ -1103,6 +1116,13 @@ stored just because it was shown. When the user explicitly commits the visible
 Zenz result, such as by pressing Enter or by using a direct-commit
 punctuation/symbol, Mozkey immediately appends the accepted full-sequence
 feedback to the local TSV.
+
+Secret / Incognito mode is an exception: local Zenz inference remains active,
+but Zenz feedback personalization stops both reading and writing. Stored
+feedback is not applied to candidate ranking, the multi-segment live-correction
+fast path, or feedback decisions including auto-blocking, and no new feedback
+record is persisted. Leaving Incognito mode makes the existing, unmodified
+feedback available again.
 
 After that explicit commit, the session keeps a short rollback window for the
 accepted observation. If Backspace, Escape, Revert, Undo, Ctrl+Z, or a similar
