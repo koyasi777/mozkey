@@ -4765,9 +4765,12 @@ void ConfigDialog::ClearUserHistory() {
   if (QMessageBox::Ok !=
       QMessageBox::question(
           this, windowTitle(),
-          tr("Do you want to clear personalization data? "
-             "Input history is not reset with this operation. "
-             "Please open \"suggestion\" tab to remove input history data."),
+          tr("This operation clears Mozc conversion learning, including "
+             "learning reflected from accepted Zenz results. Input history "
+             "data and Zenz learning data itself are not cleared. To remove "
+             "input history data, use \"Suggestion\" -> \"Clear all history\". "
+             "To manage Zenz learning data, use "
+             "\"Advanced\" -> \"Zenz Learning\". Do you want to continue?"),
           QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel)) {
     return;
   }

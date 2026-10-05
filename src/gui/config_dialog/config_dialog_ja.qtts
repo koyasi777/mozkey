@@ -391,8 +391,13 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="0"/>
-        <source>Hidden candidates are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</source>
-        <translation>※非表示にした候補は、ユーザー辞書の「非表示候補」に抑制単語として登録されます。再表示する場合は、ユーザー辞書から該当する単語を削除してください。</translation>
+        <source>Configure and manage Zenz learning under [Advanced] -&gt; [Zenz Learning].</source>
+        <translation>※Zenz学習は、〔入力補助〕→〔Zenz 学習〕で設定・管理できます。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Candidates hidden from the candidate or suggestion window are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</source>
+        <translation>※候補ウィンドウまたはサジェストウィンドウで非表示にした候補は、ユーザー辞書の「非表示候補」に抑制単語として登録されます。再表示するには、ユーザー辞書から該当する単語を削除してください。</translation>
     </message>
     <message>
         <location filename="config_dialog.ui" line="989"/>
@@ -1085,8 +1090,8 @@
     </message>
     <message>
         <location filename="config_dialog.cc" line="718"/>
-        <source>Do you want to clear personalization data? Input history is not reset with this operation. Please open &quot;suggestion&quot; tab to remove input history data.</source>
-        <translation>学習結果がリセットされます。実行しますか？ 入力履歴データはリセットされません。入力履歴データのリセットは「サジェスト→全入力履歴の削除」で行えます。</translation>
+        <source>This operation clears Mozc conversion learning, including learning reflected from accepted Zenz results. Input history data and Zenz learning data itself are not cleared. To remove input history data, use &quot;Suggestion&quot; -&gt; &quot;Clear all history&quot;. To manage Zenz learning data, use &quot;Advanced&quot; -&gt; &quot;Zenz Learning&quot;. Do you want to continue?</source>
+        <translation>Mozcの変換学習がリセットされます。Zenzの結果からMozcに反映された変換学習も対象です。入力履歴データとZenz学習データそのものはリセットされません。入力履歴データの削除は「サジェスト→全入力履歴を削除」、Zenz学習データの管理は「入力補助→Zenz 学習」から行えます。実行しますか？</translation>
     </message>
     <message>
         <location filename="config_dialog.cc" line="776"/>

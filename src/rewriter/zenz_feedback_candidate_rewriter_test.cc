@@ -508,7 +508,7 @@ TEST(ZenzFeedbackCandidateRewriterTest,
 }
 
 TEST(ZenzFeedbackCandidateRewriterTest,
-     IsNotAvailableWhenUserHistoryCannotBeUsed) {
+     IsNotAvailableForIncognitoOrConvertWithoutHistory) {
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
@@ -536,16 +536,85 @@ TEST(ZenzFeedbackCandidateRewriterTest,
                                     .SetKey("かれはてんてきです")
                                     .Build()),
             RewriterInterface::NOT_AVAILABLE);
+}
 
+TEST(ZenzFeedbackCandidateRewriterTest,
+     IsAvailableAcrossMozcHistoryLearningLevels) {
+  config::Config config;
+  config.set_use_zenz_feedback_learning(true);
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
   options.enable_user_history_for_conversion = true;
-  config.set_history_learning_level(config::Config::NO_HISTORY);
-  EXPECT_EQ(rewriter.capability(ConversionRequestBuilder()
-                                    .SetConfig(config)
-                                    .SetOptions(options)
-                                    .SetRequestType(ConversionRequest::CONVERSION)
-                                    .SetKey("かれはてんてきです")
-                                    .Build()),
-            RewriterInterface::NOT_AVAILABLE);
+  options.incognito_mode = false;
+
+  const config::Config::HistoryLearningLevel levels[] = {
+      config::Config::READ_ONLY, config::Config::NO_HISTORY};
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  for (const config::Config::HistoryLearningLevel level : levels) {
+    config.set_history_learning_level(level);
+    EXPECT_EQ(rewriter.capability(ConversionRequestBuilder()
+                                      .SetConfig(config)
+                                      .SetOptions(options)
+                                      .SetRequestType(
+                                          ConversionRequest::CONVERSION)
+                                      .SetKey("かれはてんてきです")
+                                      .Build()),
+              RewriterInterface::CONVERSION)
+        << "history_learning_level=" << level;
+  }
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     ReusesFeedbackAcrossMozcHistoryLearningLevels) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("かれはてんてきです", "japanese_only",
+                       "彼は天敵です");
+
+  config::Config config;
+  config.set_use_zenz_feedback_learning(true);
+
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  options.incognito_mode = false;
+
+  const config::Config::HistoryLearningLevel levels[] = {
+      config::Config::READ_ONLY, config::Config::NO_HISTORY};
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  for (const config::Config::HistoryLearningLevel level : levels) {
+    config.set_history_learning_level(level);
+
+    Segments segments;
+    AddSegment("かれはてんてきです", "彼は点滴です", &segments);
+
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetConfig(config)
+            .SetOptions(options)
+            .SetRequestType(ConversionRequest::CONVERSION)
+            .SetKey("かれはてんてきです")
+            .Build();
+
+    EXPECT_TRUE(rewriter.Rewrite(request, &segments))
+        << "history_learning_level=" << level;
+
+    bool found_feedback_candidate = false;
+    const Segment& segment = segments.conversion_segment(0);
+    for (size_t i = 0; i < segment.candidates_size(); ++i) {
+      if (segment.candidate(i).value == "彼は天敵です") {
+        found_feedback_candidate = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(found_feedback_candidate)
+        << "history_learning_level=" << level;
+  }
 }
 
 TEST(ZenzFeedbackCandidateRewriterTest,
