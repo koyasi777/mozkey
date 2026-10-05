@@ -446,14 +446,24 @@
              </widget>
             </item>
             <item row="2" column="0" colspan="2">
+             <widget class="QLabel" name="zenzLearningIndependenceNoticeLabel">
+              <property name="text">
+               <string>Configure and manage Zenz learning under [Advanced] -&gt; [Zenz Learning].</string>
+              </property>
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0" colspan="2">
              <widget class="QLabel" name="hiddenCandidateNoticeLabel">
-                           <property name="text">
-                            <string>Hidden candidates are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</string>
-                           </property>
-                           <property name="wordWrap">
-                            <bool>true</bool>
-                           </property>
-                          </widget>
+              <property name="text">
+               <string>Candidates hidden from the candidate or suggestion window are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</string>
+              </property>
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+             </widget>
             </item>
             <item row="0" column="0">
              <widget class="QLabel" name="label_7">

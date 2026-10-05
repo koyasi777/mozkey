@@ -251,7 +251,12 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="0"/>
-        <source>Hidden candidates are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</source>
+        <source>Configure and manage Zenz learning under [Advanced] -&gt; [Zenz Learning].</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Candidates hidden from the candidate or suggestion window are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</source>
         <translation></translation>
     </message>
     <message>
@@ -1075,7 +1080,7 @@
     </message>
     <message>
         <location filename="config_dialog.cc" line="718"/>
-        <source>Do you want to clear personalization data? Input history is not reset with this operation. Please open &quot;suggestion&quot; tab to remove input history data.</source>
+        <source>This operation clears Mozc conversion learning, including learning reflected from accepted Zenz results. Input history data and Zenz learning data itself are not cleared. To remove input history data, use &quot;Suggestion&quot; -&gt; &quot;Clear all history&quot;. To manage Zenz learning data, use &quot;Advanced&quot; -&gt; &quot;Zenz Learning&quot;. Do you want to continue?</source>
         <translation></translation>
     </message>
     <message>
