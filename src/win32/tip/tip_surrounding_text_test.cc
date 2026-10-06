@@ -44,6 +44,7 @@ namespace {
 
 TEST(TipSurroundingTextInfoTest, DefaultsToNoLegacyImm32Fallback) {
   const TipSurroundingTextInfo info;
+  EXPECT_FALSE(info.is_private_input_scope);
   EXPECT_FALSE(info.used_legacy_imm32_fallback);
 }
 
@@ -91,6 +92,17 @@ TEST(TipSurroundingTextUtilTest, ContainsPasswordInputScope) {
   EXPECT_TRUE(TipSurroundingTextUtil::ContainsPasswordInputScope(
       std::vector<InputScope>{IS_URL, IS_PASSWORD, IS_HIRAGANA}));
 }
+
+TEST(TipSurroundingTextUtilTest, ContainsPrivateInputScope) {
+  EXPECT_FALSE(TipSurroundingTextUtil::ContainsPrivateInputScope({}));
+  EXPECT_FALSE(TipSurroundingTextUtil::ContainsPrivateInputScope(
+      std::vector<InputScope>{IS_DEFAULT, IS_URL}));
+  EXPECT_TRUE(TipSurroundingTextUtil::ContainsPrivateInputScope(
+      std::vector<InputScope>{IS_PRIVATE}));
+  EXPECT_TRUE(TipSurroundingTextUtil::ContainsPrivateInputScope(
+      std::vector<InputScope>{IS_URL, IS_PRIVATE, IS_HIRAGANA}));
+}
+
 TEST(TipSurroundingTextUtilTest, MeasureCharactersBackward) {
   {
     constexpr char kSource[] = "abcde";

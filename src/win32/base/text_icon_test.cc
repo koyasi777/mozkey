@@ -149,6 +149,59 @@ TEST_F(TextIconTest, CreateMonochromeIcon) {
   EXPECT_TRUE(ExpectMonochromeIcon(icon, kIconSize));
 }
 
+TEST_F(TextIconTest, CreateAdaptiveIcon) {
+  constexpr size_t kIconSize = 20;
+  wil::unique_hicon icon(TextIcon::CreateAdaptiveIcon(
+      kIconSize, kIconSize, "A", GetTestFontName(),
+      RGB(0x12, 0x34, 0x56)));
+  ASSERT_TRUE(icon);
+
+  ICONINFO info = {};
+  ASSERT_NE(::GetIconInfo(icon.get(), &info), 0);
+  wil::unique_hbitmap color_bmp(info.hbmColor);
+  wil::unique_hbitmap mask_bmp(info.hbmMask);
+
+  ASSERT_TRUE(color_bmp);
+  ASSERT_TRUE(mask_bmp);
+
+  BITMAP color_info = {};
+  ASSERT_NE(::GetObject(color_bmp.get(), sizeof(color_info), &color_info), 0);
+  EXPECT_EQ(color_info.bmWidth, kIconSize);
+  EXPECT_EQ(color_info.bmHeight, kIconSize);
+
+  BITMAP mask_info = {};
+  ASSERT_NE(::GetObject(mask_bmp.get(), sizeof(mask_info), &mask_info), 0);
+  EXPECT_EQ(mask_info.bmBitsPixel, 1);
+  EXPECT_EQ(mask_info.bmWidth, kIconSize);
+  EXPECT_EQ(mask_info.bmHeight, kIconSize);
+}
+TEST_F(TextIconTest, CreateAdaptiveIconWithPrivacyShield) {
+  constexpr size_t kIconSize = 20;
+  wil::unique_hicon icon(TextIcon::CreateAdaptiveIconWithPrivacyShield(
+      kIconSize, kIconSize, "A", GetTestFontName(),
+      RGB(0x12, 0x34, 0x56)));
+  ASSERT_TRUE(icon);
+
+  ICONINFO info = {};
+  ASSERT_NE(::GetIconInfo(icon.get(), &info), 0);
+  wil::unique_hbitmap color_bmp(info.hbmColor);
+  wil::unique_hbitmap mask_bmp(info.hbmMask);
+
+  ASSERT_TRUE(color_bmp);
+  ASSERT_TRUE(mask_bmp);
+
+  BITMAP color_info = {};
+  ASSERT_NE(::GetObject(color_bmp.get(), sizeof(color_info), &color_info), 0);
+  EXPECT_EQ(color_info.bmWidth, kIconSize);
+  EXPECT_EQ(color_info.bmHeight, kIconSize);
+
+  BITMAP mask_info = {};
+  ASSERT_NE(::GetObject(mask_bmp.get(), sizeof(mask_info), &mask_info), 0);
+  EXPECT_EQ(mask_info.bmBitsPixel, 1);
+  EXPECT_EQ(mask_info.bmWidth, kIconSize);
+  EXPECT_EQ(mask_info.bmHeight, kIconSize);
+}
+
 }  // namespace
 }  // namespace win32
 }  // namespace mozc

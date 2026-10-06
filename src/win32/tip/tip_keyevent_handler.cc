@@ -376,6 +376,13 @@ void FillMozcContextForOnKey(
     return;
   }
 
+  // IS_PRIVATE is a learning-policy signal, not a text-access restriction.
+  // Preserve generic/Zenz surrounding context while propagating the private
+  // origin to the server.
+  if (generic_info->is_private_input_scope) {
+    mozc_context->set_is_private_input(true);
+  }
+
   // Password scope is detected inside the same TSF read edit session before
   // any surrounding text is retrieved. Propagate the field type to the server
   // as a second privacy layer and never attach generic or extended text.

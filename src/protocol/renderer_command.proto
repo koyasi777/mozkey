@@ -89,6 +89,10 @@ message RendererCommand {
   // Visual information about mode indicator.
   message IndicatorInfo {
     optional Status status = 1;
+    // Mozkey Windows extension: true when the focused TSF context advertises
+    // IS_PRIVATE. This is a privacy/learning signal and is intentionally
+    // independent from Mozkey strong Incognito mode.
+    optional bool is_private_input = 1001 [default = false];
   }
 
   // Application information Mozc UI is attaching

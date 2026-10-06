@@ -610,6 +610,7 @@ void UpdateCommand(TipTextService* text_service, ITfContext* context,
           input_mode_manager->GetEffectiveOpenClose());
       info->mutable_status()->set_mode(static_cast<CompositionMode>(
           input_mode_manager->GetEffectiveConversionMode()));
+      info->set_is_private_input(input_mode_manager->IsPrivateInput());
     }
   }
 

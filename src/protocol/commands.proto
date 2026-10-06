@@ -536,6 +536,11 @@ message Context {
   // unknown writing direction.
   optional bool vertical_writing = 1003 [default = false];
 
+  // True when the focused input context is explicitly marked private by the
+  // platform. Existing personalization may still be read, but text from this
+  // context must not be persisted as new personalization.
+  optional bool is_private_input = 1004 [default = false];
+
   // If this is true, suggestion feature is disabled regardless the
   // configuration.  If this is false, suggestion feature is followed
   // by the user's configuration.  If you want to omit interim

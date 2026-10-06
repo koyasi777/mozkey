@@ -267,6 +267,162 @@ const char* GetIndicatorLabel(int mode) {
   }
 }
 
+struct PrivacyShieldPoint {
+  double x;
+  double y;
+};
+
+bool IsInsidePrivacyShield(double x, double y,
+                           const PrivacyShieldPoint* points,
+                           size_t point_count) {
+  bool inside = false;
+  for (size_t i = 0, j = point_count - 1; i < point_count; j = i++) {
+    const PrivacyShieldPoint& a = points[i];
+    const PrivacyShieldPoint& b = points[j];
+    const bool crosses = (a.y > y) != (b.y > y);
+    if (!crosses) {
+      continue;
+    }
+    const double intersect_x =
+        (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x;
+    if (x < intersect_x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+void DrawPrivacyShieldOnIndicator(HBITMAP bitmap, const CPoint& tail_offset,
+                                  double body_width, double body_height,
+                                  const RGBColor& color,
+                                  double label_point_size,
+                                  double dpi_scaling) {
+  if (bitmap == nullptr || body_width <= 0.0 || body_height <= 0.0) {
+    return;
+  }
+
+  BITMAP bitmap_info = {};
+  if (::GetObject(bitmap, sizeof(bitmap_info), &bitmap_info) == 0 ||
+      bitmap_info.bmBits == nullptr || bitmap_info.bmBitsPixel != 32 ||
+      bitmap_info.bmWidth <= 0 || bitmap_info.bmHeight == 0) {
+    return;
+  }
+
+  const int bitmap_width = bitmap_info.bmWidth;
+  const int bitmap_height = std::abs(bitmap_info.bmHeight);
+  const int stride = bitmap_info.bmWidthBytes;
+  if (stride < bitmap_width * 4) {
+    return;
+  }
+
+  // Indicator sprites use a top-side balloon with zero tail. Therefore the
+  // tail offset is the top-center of the indicator body.
+  const double body_left = tail_offset.x - body_width / 2.0;
+  const double body_top = tail_offset.y;
+
+  const double scale = std::max(dpi_scaling, 0.5);
+  // Keep the badge subordinate to the mode glyph. The previous badge was
+  // visually too dominant at normal Windows scaling, so reduce it to about
+  // two-thirds of the previous linear size while preserving DPI scaling.
+  const double shield_width =
+      std::clamp(body_width * 0.12, 3.5 * scale, 5.0 * scale);
+  const double shield_height =
+      std::clamp(body_height * 0.19, 4.0 * scale, 5.8 * scale);
+
+  // BalloonImage centers the one-character mode label in the body. Anchor the
+  // privacy badge to that centered label instead of the outer frame so the
+  // badge visually follows the glyph. 12 pt at 96 DPI is roughly 16 px; the
+  // conservative half-width estimate below intentionally leaves a small gap
+  // rather than touching the glyph.
+  const double label_em =
+      std::max(1.0, label_point_size * scale * kDefaultDPI / 72.0);
+  const double label_center_x = body_left + body_width / 2.0;
+  const double label_center_y = body_top + body_height / 2.0;
+  const double label_half_width =
+      std::min(body_width * 0.28, label_em * 0.46);
+  const double label_half_height =
+      std::min(body_height * 0.34, label_em * 0.50);
+  const double glyph_gap = std::max(0.35 * scale, 0.02 * label_em);
+
+  const double left = label_center_x + label_half_width + glyph_gap;
+  const double right = left + shield_width;
+  const double top =
+      label_center_y - label_half_height - 0.40 * scale;
+  const double bottom = top + shield_height;
+  const double center_x = (left + right) / 2.0;
+  const double middle_y = top + shield_height * 0.48;
+
+  // Keep the same filled-shield silhouette used by the taskbar privacy badge,
+  // but place it immediately at the upper-right of the centered mode glyph.
+  const PrivacyShieldPoint points[] = {
+      {left, top + shield_height * 0.12},
+      {center_x, top},
+      {right, top + shield_height * 0.12},
+      {right, middle_y},
+      {right - shield_width * 0.14, bottom - shield_height * 0.20},
+      {center_x, bottom},
+      {left + shield_width * 0.14, bottom - shield_height * 0.20},
+      {left, middle_y},
+  };
+
+  const int x_begin =
+      std::max(0, static_cast<int>(std::floor(left)) - 1);
+  const int x_end =
+      std::min(bitmap_width, static_cast<int>(std::ceil(right)) + 1);
+  const int y_begin =
+      std::max(0, static_cast<int>(std::floor(top)) - 1);
+  const int y_end =
+      std::min(bitmap_height, static_cast<int>(std::ceil(bottom)) + 1);
+
+  auto* bits = static_cast<uint8_t*>(bitmap_info.bmBits);
+  constexpr int kSamplesPerAxis = 4;
+  constexpr int kSampleCount = kSamplesPerAxis * kSamplesPerAxis;
+
+  for (int y = y_begin; y < y_end; ++y) {
+    for (int x = x_begin; x < x_end; ++x) {
+      int covered = 0;
+      for (int sample_y = 0; sample_y < kSamplesPerAxis; ++sample_y) {
+        for (int sample_x = 0; sample_x < kSamplesPerAxis; ++sample_x) {
+          const double px =
+              x + (sample_x + 0.5) / kSamplesPerAxis;
+          const double py =
+              y + (sample_y + 0.5) / kSamplesPerAxis;
+          if (IsInsidePrivacyShield(px, py, points, std::size(points))) {
+            ++covered;
+          }
+        }
+      }
+      if (covered == 0) {
+        continue;
+      }
+
+      const double src_alpha =
+          static_cast<double>(covered) / kSampleCount;
+      const double inverse_alpha = 1.0 - src_alpha;
+      uint8_t* pixel = bits + y * stride + x * 4;
+
+      const auto blend_channel =
+          [src_alpha, inverse_alpha](uint8_t foreground,
+                                     uint8_t destination) -> uint8_t {
+        const long value = std::lround(
+            foreground * src_alpha + destination * inverse_alpha);
+        return static_cast<uint8_t>(std::clamp(value, 0L, 255L));
+      };
+
+      // DIB pixels are premultiplied BGRA. The indicator body underneath is
+      // already alpha-bearing; source-over keeps the shield anti-aliased.
+      pixel[0] = blend_channel(color.b, pixel[0]);
+      pixel[1] = blend_channel(color.g, pixel[1]);
+      pixel[2] = blend_channel(color.r, pixel[2]);
+
+      const long alpha_value = std::lround(
+          255.0 * src_alpha + pixel[3] * inverse_alpha);
+      pixel[3] =
+          static_cast<uint8_t>(std::clamp(alpha_value, 0L, 255L));
+    }
+  }
+}
+
 }  // namespace
 
 class IndicatorWindow::WindowImpl
@@ -283,6 +439,7 @@ class IndicatorWindow::WindowImpl
         custom_style_(GetWindowsModeIndicatorStyle(
             *config::ConfigHandler::GetSharedConfig())) {
     sprites_.resize(commands::NUM_OF_COMPOSITIONS);
+    private_sprites_.resize(commands::NUM_OF_COMPOSITIONS);
   }
   WindowImpl(const WindowImpl&) = delete;
   WindowImpl& operator=(const WindowImpl&) = delete;
@@ -317,16 +474,21 @@ class IndicatorWindow::WindowImpl
     DCHECK(command.has_application_info());
     DCHECK(command.application_info().has_indicator_info());
     DCHECK(command.application_info().indicator_info().has_status());
-    const Status& status = command.application_info().indicator_info().status();
+    const auto& indicator_info =
+        command.application_info().indicator_info();
+    const bool is_private_input = indicator_info.is_private_input();
+    const std::vector<Sprite>& active_sprites =
+        is_private_input ? private_sprites_ : sprites_;
+    const Status& status = indicator_info.status();
 
     alpha_ = 255;
-    current_image_ = sprites_[commands::DIRECT].bitmap.get();
-    CPoint offset = sprites_[commands::DIRECT].offset;
-    int body_height = sprites_[commands::DIRECT].body_height;
+    current_image_ = active_sprites[commands::DIRECT].bitmap.get();
+    CPoint offset = active_sprites[commands::DIRECT].offset;
+    int body_height = active_sprites[commands::DIRECT].body_height;
     if (!status.has_activated() || !status.has_mode() || !status.activated()) {
-      current_image_ = sprites_[commands::DIRECT].bitmap.get();
-      offset = sprites_[commands::DIRECT].offset;
-      body_height = sprites_[commands::DIRECT].body_height;
+      current_image_ = active_sprites[commands::DIRECT].bitmap.get();
+      offset = active_sprites[commands::DIRECT].offset;
+      body_height = active_sprites[commands::DIRECT].body_height;
     } else {
       const int mode = status.mode();
       switch (mode) {
@@ -335,9 +497,9 @@ class IndicatorWindow::WindowImpl
         case commands::HALF_ASCII:
         case commands::FULL_ASCII:
         case commands::HALF_KATAKANA:
-          current_image_ = sprites_[mode].bitmap.get();
-          offset = sprites_[mode].offset;
-          body_height = sprites_[mode].body_height;
+          current_image_ = active_sprites[mode].bitmap.get();
+          offset = active_sprites[mode].offset;
+          body_height = active_sprites[mode].body_height;
           break;
       }
     }
@@ -406,14 +568,19 @@ class IndicatorWindow::WindowImpl
   void ReloadSprites() {
     current_image_ = nullptr;
 
-    for (Sprite& sprite : sprites_) {
-      sprite.bitmap.reset();
-      sprite.offset = CPoint(0, 0);
-      sprite.body_height = 0;
-    }
+    const auto reset_sprites = [](std::vector<Sprite>* sprites) {
+      for (Sprite& sprite : *sprites) {
+        sprite.bitmap.reset();
+        sprite.offset = CPoint(0, 0);
+        sprite.body_height = 0;
+      }
+    };
+    reset_sprites(&sprites_);
+    reset_sprites(&private_sprites_);
 
     for (size_t i = 0; i < std::size(kIndicatorModes); ++i) {
-      LoadSprite(kIndicatorModes[i]);
+      LoadSprite(kIndicatorModes[i], false);
+      LoadSprite(kIndicatorModes[i], true);
     }
   }
 
@@ -521,7 +688,11 @@ class IndicatorWindow::WindowImpl
     }
   }
 
-  void LoadSprite(int mode) {
+  void LoadSprite(int mode, bool is_private_input) {
+    std::vector<Sprite>& sprite_set =
+        is_private_input ? private_sprites_ : sprites_;
+    Sprite& sprite = sprite_set[mode];
+
     BalloonImage::BalloonImageInfo info;
     LOGFONT logfont = GetMessageBoxLogFont(::GetDpiForSystem());
     info.label_font = mozc::win32::WideToUtf8(logfont.lfFaceName);
@@ -569,10 +740,15 @@ class IndicatorWindow::WindowImpl
     info.label = GetIndicatorLabel(mode);
 
     if (!info.label.empty()) {
-      sprites_[mode].body_height =
+      sprite.body_height =
           static_cast<int>(std::ceil(std::max(info.rect_height, 0.0)));
-      sprites_[mode].bitmap.reset(
-          BalloonImage::Create(info, &sprites_[mode].offset));
+      sprite.bitmap.reset(
+          BalloonImage::Create(info, &sprite.offset));
+      if (is_private_input && sprite.bitmap.is_valid()) {
+        DrawPrivacyShieldOnIndicator(
+            sprite.bitmap.get(), sprite.offset, info.rect_width,
+            info.rect_height, colors.label, info.label_size, dpi_scaling_);
+      }
     }
   }
 
@@ -607,6 +783,7 @@ class IndicatorWindow::WindowImpl
   SystemColorTheme color_scheme_;
   WindowsModeIndicatorStyle custom_style_;
   std::vector<Sprite> sprites_;
+  std::vector<Sprite> private_sprites_;
 };
 
 IndicatorWindow::IndicatorWindow() : impl_(new WindowImpl) {}

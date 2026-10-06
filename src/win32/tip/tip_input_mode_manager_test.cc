@@ -323,6 +323,72 @@ TEST(TipInputModeManagerTest, InputScopeOnSetFocus_GitHubIssue826) {
             TipInputModeManager::kHiragana);
 }
 
+TEST(TipInputModeManagerTest, PrivateInputScopeOnSetFocusUpdatesUiOnly) {
+  TipInputModeManager input_mode_manager(GetThreadLocalMode());
+  input_mode_manager.OnInitialize(true, kNativeHiragana);
+
+  std::vector<InputScope> normal_scopes;
+  auto action =
+      input_mode_manager.OnSetFocus(true, kNativeHiragana, normal_scopes);
+  EXPECT_EQ(action, TipInputModeManager::kDoNothing);
+  EXPECT_FALSE(input_mode_manager.IsPrivateInput());
+  EXPECT_TRUE(input_mode_manager.GetEffectiveOpenClose());
+  EXPECT_EQ(input_mode_manager.GetEffectiveConversionMode(),
+            TipInputModeManager::kHiragana);
+  EXPECT_FALSE(input_mode_manager.IsIndicatorVisible());
+
+  std::vector<InputScope> private_scopes = {IS_DEFAULT, IS_PRIVATE};
+  action =
+      input_mode_manager.OnSetFocus(true, kNativeHiragana, private_scopes);
+  EXPECT_EQ(action, TipInputModeManager::kUpdateUI);
+  EXPECT_TRUE(input_mode_manager.IsPrivateInput());
+  EXPECT_TRUE(input_mode_manager.GetEffectiveOpenClose());
+  EXPECT_EQ(input_mode_manager.GetEffectiveConversionMode(),
+            TipInputModeManager::kHiragana);
+  EXPECT_FALSE(input_mode_manager.IsIndicatorVisible());
+
+  action =
+      input_mode_manager.OnSetFocus(true, kNativeHiragana, private_scopes);
+  EXPECT_EQ(action, TipInputModeManager::kDoNothing);
+  EXPECT_TRUE(input_mode_manager.IsPrivateInput());
+
+  action = input_mode_manager.OnSetFocus(true, kNativeHiragana, normal_scopes);
+  EXPECT_EQ(action, TipInputModeManager::kUpdateUI);
+  EXPECT_FALSE(input_mode_manager.IsPrivateInput());
+  EXPECT_FALSE(input_mode_manager.IsIndicatorVisible());
+}
+
+TEST(TipInputModeManagerTest, PrivateInputScopeChangeUpdatesUiOnly) {
+  TipInputModeManager input_mode_manager(GetThreadLocalMode());
+  input_mode_manager.OnInitialize(true, kNativeHiragana);
+
+  std::vector<InputScope> normal_scopes;
+  auto action =
+      input_mode_manager.OnSetFocus(true, kNativeHiragana, normal_scopes);
+  EXPECT_EQ(action, TipInputModeManager::kDoNothing);
+
+  std::vector<InputScope> private_scopes = {IS_PRIVATE};
+  action = input_mode_manager.OnChangeInputScope(private_scopes);
+  EXPECT_EQ(action, TipInputModeManager::kUpdateUI);
+  EXPECT_TRUE(input_mode_manager.IsPrivateInput());
+  EXPECT_TRUE(input_mode_manager.GetEffectiveOpenClose());
+  EXPECT_EQ(input_mode_manager.GetEffectiveConversionMode(),
+            TipInputModeManager::kHiragana);
+  EXPECT_FALSE(input_mode_manager.IsIndicatorVisible());
+
+  action = input_mode_manager.OnChangeInputScope(private_scopes);
+  EXPECT_EQ(action, TipInputModeManager::kDoNothing);
+  EXPECT_TRUE(input_mode_manager.IsPrivateInput());
+
+  action = input_mode_manager.OnChangeInputScope(normal_scopes);
+  EXPECT_EQ(action, TipInputModeManager::kUpdateUI);
+  EXPECT_FALSE(input_mode_manager.IsPrivateInput());
+  EXPECT_TRUE(input_mode_manager.GetEffectiveOpenClose());
+  EXPECT_EQ(input_mode_manager.GetEffectiveConversionMode(),
+            TipInputModeManager::kHiragana);
+  EXPECT_FALSE(input_mode_manager.IsIndicatorVisible());
+}
+
 }  // namespace
 }  // namespace tsf
 }  // namespace win32
