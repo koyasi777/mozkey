@@ -954,6 +954,17 @@ bool UseZenzFeedbackPersonalization(const ImeContext& context) {
          !context.GetRequest().is_incognito_mode();
 }
 
+bool CanPersistZenzFeedbackPersonalization(const ImeContext& context) {
+  if (!UseZenzFeedbackPersonalization(context)) {
+    return false;
+  }
+
+  // A platform-private input may reuse previously stored Zenz feedback, but
+  // text originating from that input must never create new persistent
+  // personalization.
+  return !context.client_context().is_private_input();
+}
+
 ZenzFeedbackAutoBlockPolicy GetZenzFeedbackAutoBlockPolicy(
     const config::Config& config) {
   ZenzFeedbackAutoBlockPolicy policy;
@@ -4733,7 +4744,7 @@ void Session::RecordZenzLiveCorrectionAccepted(
     absl::string_view key,
     absl::string_view left_context,
     absl::string_view value) {
-  if (!UseZenzFeedbackPersonalization(*context_)) {
+  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
     return;
   }
 
@@ -4785,7 +4796,7 @@ bool Session::MaybeLearnZenzCandidateToMozcHistory(
     absl::string_view key,
     absl::string_view value,
     std::vector<uint64_t>* revert_ids) {
-  if (!UseZenzFeedbackPersonalization(*context_)) {
+  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
     return false;
   }
 
@@ -4853,7 +4864,7 @@ int Session::MaybeLearnZenzReverseSegmentsToMozcHistory(
 int Session::MaybeLearnZenzProjectedSegmentsToMozcHistory(
     const std::vector<ZenzProjectedLearningSegment>& segments,
     std::vector<uint64_t>* revert_ids) {
-  if (!UseZenzFeedbackPersonalization(*context_)) {
+  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
     return 0;
   }
   if (context_->composer().GetInputFieldType() ==
@@ -5049,7 +5060,7 @@ void Session::SetPendingZenzFeedbackAccepted(
     absl::string_view key,
     absl::string_view context_class,
     absl::string_view value) {
-  if (!UseZenzFeedbackPersonalization(*context_)) {
+  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
     return;
   }
 
@@ -5570,7 +5581,7 @@ void Session::SetPendingZenzFeedbackComparison(
     absl::string_view value,
     absl::string_view reason,
     bool require_final_committed_key_match) {
-  if (!UseZenzFeedbackPersonalization(*context_)) {
+  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
     return;
   }
 
@@ -5850,6 +5861,10 @@ bool Session::SetPendingDirectCommitLearning(
     absl::string_view value,
     absl::string_view reason) {
   if (key.empty() || value.empty()) {
+    return false;
+  }
+
+  if (context_->client_context().is_private_input()) {
     return false;
   }
 

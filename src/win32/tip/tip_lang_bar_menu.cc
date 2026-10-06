@@ -41,6 +41,8 @@
 #include <windows.h>
 #include <winuser.h>
 
+#pragma comment(lib, "Advapi32.lib")
+
 #include <algorithm>
 #include <cstddef>
 #include <string>
@@ -73,6 +75,142 @@ constexpr int kTipLangBarMenuCookie =
 
 constexpr char kTextIconFont[] = "ＭＳ ゴシック";
 
+constexpr wchar_t kPersonalizeRegistryKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+
+bool ReadUseLightThemeRegistryValue(const wchar_t* value_name,
+                                    bool* use_light_theme) {
+  if (value_name == nullptr || use_light_theme == nullptr) {
+    return false;
+  }
+
+  DWORD value = 0;
+  DWORD size = sizeof(value);
+  const LSTATUS status = ::RegGetValueW(
+      HKEY_CURRENT_USER, kPersonalizeRegistryKey, value_name,
+      RRF_RT_REG_DWORD, nullptr, &value, &size);
+
+  if (status != ERROR_SUCCESS || size != sizeof(value)) {
+    return false;
+  }
+
+  *use_light_theme = value != 0;
+  return true;
+}
+
+COLORREF GetTaskbarTextColor() {
+  bool use_light_theme = true;
+
+  // The taskbar is Windows system UI, so SystemUsesLightTheme is the primary
+  // source. AppsUseLightTheme is only a compatibility fallback.
+  if (ReadUseLightThemeRegistryValue(L"SystemUsesLightTheme",
+                                     &use_light_theme) ||
+      ReadUseLightThemeRegistryValue(L"AppsUseLightTheme",
+                                     &use_light_theme)) {
+    return use_light_theme ? RGB(0, 0, 0) : RGB(0xff, 0xff, 0xff);
+  }
+
+  return ::GetSysColor(COLOR_WINDOWTEXT);
+}
+
+HICON CreateTaskbarThemeColoredAlphaIcon(HICON source_icon,
+                                         COLORREF foreground_color) {
+  if (source_icon == nullptr) {
+    return nullptr;
+  }
+
+  ICONINFO source_info = {};
+  if (!::GetIconInfo(source_icon, &source_info)) {
+    return nullptr;
+  }
+
+  wil::unique_hbitmap source_color(source_info.hbmColor);
+  wil::unique_hbitmap source_mask(source_info.hbmMask);
+  if (!source_color.is_valid() || !source_mask.is_valid()) {
+    return nullptr;
+  }
+
+  BITMAP source_bitmap = {};
+  if (::GetObject(source_color.get(), sizeof(source_bitmap), &source_bitmap) ==
+          0 ||
+      source_bitmap.bmWidth <= 0 || source_bitmap.bmHeight == 0) {
+    return nullptr;
+  }
+
+  const int width = source_bitmap.bmWidth;
+  const int height =
+      source_bitmap.bmHeight < 0 ? -source_bitmap.bmHeight
+                                 : source_bitmap.bmHeight;
+
+  BITMAPINFO color_info = {};
+  color_info.bmiHeader.biSize = sizeof(color_info.bmiHeader);
+  color_info.bmiHeader.biWidth = width;
+  color_info.bmiHeader.biHeight = -height;
+  color_info.bmiHeader.biPlanes = 1;
+  color_info.bmiHeader.biBitCount = 32;
+  color_info.bmiHeader.biCompression = BI_RGB;
+
+  BYTE* color_buffer = nullptr;
+  wil::unique_hbitmap themed_color(::CreateDIBSection(
+      nullptr, &color_info, DIB_RGB_COLORS,
+      reinterpret_cast<void**>(&color_buffer), nullptr, 0));
+  if (!themed_color.is_valid() || color_buffer == nullptr) {
+    return nullptr;
+  }
+
+  wil::unique_hdc dc(::CreateCompatibleDC(nullptr));
+  if (!dc.is_valid()) {
+    return nullptr;
+  }
+
+  if (::GetDIBits(dc.get(), source_color.get(), 0, height, color_buffer,
+                  &color_info, DIB_RGB_COLORS) != height) {
+    return nullptr;
+  }
+
+  const size_t pixel_count =
+      static_cast<size_t>(width) * static_cast<size_t>(height);
+
+  bool has_alpha = false;
+  for (size_t i = 0; i < pixel_count; ++i) {
+    if (color_buffer[i * 4 + 3] != 0) {
+      has_alpha = true;
+      break;
+    }
+  }
+
+  // The *_a.ico taskbar resources are alpha-bearing icons.  Do not guess at
+  // the silhouette if an unexpected non-alpha resource is supplied; the
+  // caller can safely fall back to the original icon instead.
+  if (!has_alpha) {
+    return nullptr;
+  }
+
+  const unsigned foreground_blue = GetBValue(foreground_color);
+  const unsigned foreground_green = GetGValue(foreground_color);
+  const unsigned foreground_red = GetRValue(foreground_color);
+
+  for (size_t i = 0; i < pixel_count; ++i) {
+    BYTE* pixel = color_buffer + i * 4;
+    const unsigned alpha = pixel[3];
+
+    // Keep the source alpha silhouette, including antialiased edges, and
+    // replace only the foreground RGB.  32-bit icon pixels are premultiplied.
+    pixel[0] =
+        static_cast<BYTE>((foreground_blue * alpha + 127u) / 255u);
+    pixel[1] =
+        static_cast<BYTE>((foreground_green * alpha + 127u) / 255u);
+    pixel[2] =
+        static_cast<BYTE>((foreground_red * alpha + 127u) / 255u);
+  }
+
+  ICONINFO output_info = {};
+  output_info.fIcon = TRUE;
+  output_info.hbmColor = themed_color.get();
+  output_info.hbmMask = source_mask.get();
+  return ::CreateIconIndirect(&output_info);
+}
+
 // TODO(yukawa): Refactor LangBar code so that we can configure following
 // settings as a part of initialization.
 std::string GetIconStringIfNecessary(UINT icon_id) {
@@ -93,15 +231,79 @@ std::string GetIconStringIfNecessary(UINT icon_id) {
   return "";
 }
 
+// The taskbar input-mode item uses the theme icon IDs (without the _NT
+// suffix). Map those IDs to text so both normal and private taskbar icons use
+// the same solid adaptive renderer and differ only by the privacy shield.
+std::string GetThemeIconString(UINT icon_id) {
+  switch (icon_id) {
+    case IDI_DIRECT:
+      return "A";
+    case IDI_HIRAGANA:
+      return "あ";
+    case IDI_FULL_KATAKANA:
+      return "ア";
+    case IDI_HALF_ALPHANUMERIC:
+      return "_A";
+    case IDI_FULL_ALPHANUMERIC:
+      return "Ａ";
+    case IDI_HALF_KATAKANA:
+      return "_ｱ";
+  }
+  return "";
+}
+
 // Loads an icon which is appropriate for the current theme.
 // An icon ID 0 represents "no icon".
-HICON LoadIconFromResource(HINSTANCE instance, UINT icon_id) {
+HICON LoadIconFromResource(HINSTANCE instance, UINT icon_id,
+                           bool show_privacy_shield = false) {
   const auto icon_size = ::GetSystemMetrics(SM_CYSMICON);
 
-  // Replace some text icons with on-the-fly image drawn with MS-Gothic.
+  // The bundled ms_disabled_a.ico has a fixed white alpha foreground.
+  // Recolor that exact alpha silhouette to the current taskbar foreground so
+  // the disabled "X" follows Windows light/dark theme like the mode icon.
+  if (icon_id == IDI_DISABLED) {
+    wil::unique_hicon source(static_cast<HICON>(::LoadImage(
+        instance, MAKEINTRESOURCE(icon_id), IMAGE_ICON, icon_size, icon_size,
+        LR_CREATEDIBSECTION)));
+    if (!source.is_valid()) {
+      return nullptr;
+    }
+
+    HICON themed =
+        CreateTaskbarThemeColoredAlphaIcon(source.get(), GetTaskbarTextColor());
+    if (themed != nullptr) {
+      return themed;
+    }
+
+    // Preserve the existing resource rather than changing disabled-icon
+    // behavior if an unexpected non-alpha resource is encountered.
+    return source.release();
+  }
+
+  // Render the Windows 8+ taskbar mode item from text for both normal and
+  // private input. This removes the light-theme outlined resource glyph and
+  // keeps normal/private icons in the same 32-bit alpha icon class.
+  const auto& theme_icon_text = GetThemeIconString(icon_id);
+  if (!theme_icon_text.empty()) {
+    if (show_privacy_shield) {
+      return TextIcon::CreateAdaptiveIconWithPrivacyShield(
+          icon_size, icon_size, theme_icon_text, kTextIconFont,
+          GetTaskbarTextColor());
+    }
+    return TextIcon::CreateAdaptiveIcon(
+        icon_size, icon_size, theme_icon_text, kTextIconFont,
+        GetTaskbarTextColor());
+  }
+
+  // Replace some non-theme text icons with an on-the-fly image drawn with
+  // MS-Gothic.
   const auto& icon_text = GetIconStringIfNecessary(icon_id);
   if (!icon_text.empty()) {
     const COLORREF text_color = ::GetSysColor(COLOR_WINDOWTEXT);
+    if (show_privacy_shield) {
+      return TextIcon::CreateMonochromeIconWithPrivacyShield(
+          icon_size, icon_size, icon_text, kTextIconFont, text_color);
+    }
     return TextIcon::CreateMonochromeIcon(icon_size, icon_size, icon_text,
                                           kTextIconFont, text_color);
   }
@@ -559,7 +761,8 @@ TipLangBarToggleButton::TipLangBarToggleButton(
     bool show_in_tray)
     : TipLangBarButton(langbar_callback, guid, is_menu, show_in_tray),
       menu_selected_(0),
-      disabled_(false) {}
+      disabled_(false),
+      private_input_(false) {}
 
 // Implements the IUnknown::QueryInterface() function.
 // This function is used by Windows to retrieve the interfaces implemented by
@@ -676,7 +879,8 @@ STDMETHODIMP TipLangBarToggleButton::GetIcon(HICON* icon) {
   //  The caller must free this icon when it is no longer required by
   //  calling DestroyIcon.
   *icon = LoadIconFromResource(TipDllModule::module_handle(),
-                               data.icon_id_for_theme_);
+                               data.icon_id_for_theme_,
+                               private_input_ && !disabled_);
   return (*icon ? S_OK : E_FAIL);
 }
 
@@ -721,6 +925,25 @@ HRESULT TipLangBarToggleButton::SelectMenuItem(UINT menu_id) {
     TipLangBarButton::OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
   }
   return S_OK;
+}
+
+HRESULT TipLangBarToggleButton::SetPrivateInput(bool private_input) {
+  if (private_input_ == private_input) {
+    return S_OK;
+  }
+  private_input_ = private_input;
+
+  // A disabled icon has higher visual priority. SetEnabled() will issue the
+  // necessary refresh when this item becomes enabled again.
+  if (disabled_) {
+    return S_OK;
+  }
+  return TipLangBarButton::OnUpdate(TF_LBI_ICON);
+}
+HRESULT TipLangBarToggleButton::RefreshIconForThemeChange() {
+  // This refresh is also required while the IME is disabled because the
+  // disabled taskbar icon has its own theme-colored foreground.
+  return TipLangBarButton::OnUpdate(TF_LBI_ICON);
 }
 
 HRESULT TipLangBarToggleButton::SetEnabled(bool enabled) {

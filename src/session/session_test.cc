@@ -1390,6 +1390,47 @@ TEST_F(SessionTest,
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
   EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
 }
+
+TEST_F(SessionTest, ZenzFeedbackPendingAcceptedIsDisabledByPrivateInput) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.context_()
+      ->mutable_client_context()
+      ->set_is_private_input(true);
+
+  session_peer.SetPendingZenzFeedbackAccepted(
+      "あい", "empty", "亜衣");
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+}
+
+TEST_F(SessionTest, ZenzFeedbackComparisonIsDisabledByPrivateInput) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzFeedbackLearning(&session);
+
+  session_peer.context_()
+      ->mutable_client_context()
+      ->set_is_private_input(true);
+
+  session_peer.SetPendingZenzFeedbackComparison(
+      "あい", "empty", "亜衣", "private_shadow_test", true);
+
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
+}
+
 TEST_F(SessionTest, PendingZenzFeedbackIsConfirmedByNextTextInput) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -1789,6 +1830,13 @@ TEST_F(SessionTest,
   EXPECT_EQ(converter->learn_call_count, 1);
   const uint64_t revert_id =
       session_peer.pending_zenz_feedback_().mozc_history_revert_ids[0];
+
+  // The pending transaction originated in a normal input context. Moving the
+  // current client context to private must not suppress compensation for that
+  // already-persisted normal-origin observation.
+  session_peer.context_()
+      ->mutable_client_context()
+      ->set_is_private_input(true);
 
   session_peer.DiscardPendingZenzFeedback("phase2_test_rollback");
 
@@ -3641,6 +3689,66 @@ TEST_F(SessionTest,
   SessionTestPeer session_peer(session);
   InitSessionToPrecomposition(&session);
   EnableZenzLiveCorrectionWithFeedbackLearning(&session);
+
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "かれはてんてきです",
+      "japanese_only",
+      "彼は天敵です");
+  ASSERT_FALSE(session_peer.zenz_feedback_store_().ListEntries().empty());
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "かれはてんてきです";
+  session_peer.live_conversion_value_() = "彼は点滴です";
+
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+
+  commands::Preedit::Segment* segment = live_preedit.add_segment();
+  segment->set_key("かれは");
+  segment->set_value("彼は");
+  segment->set_value_length(Util::CharsLen("彼は"));
+
+  segment = live_preedit.add_segment();
+  segment->set_key("てんてきです");
+  segment->set_value("点滴です");
+  segment->set_value_length(Util::CharsLen("点滴です"));
+
+  commands::Command command;
+  EXPECT_TRUE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
+
+  EXPECT_TRUE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().live_conversion_pending());
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(command.output().has_callback());
+  EXPECT_SINGLE_SEGMENT_AND_KEY("彼は天敵です",
+                                "かれはてんてきです",
+                                command);
+
+  EXPECT_EQ(session_peer.zenz_live_key_(), "かれはてんてきです");
+  EXPECT_EQ(session_peer.zenz_live_value_(), "彼は天敵です");
+  EXPECT_EQ(session_peer.zenz_live_mozc_value_(), "彼は点滴です");
+  EXPECT_EQ(session_peer.zenz_live_context_class_(), "empty");
+}
+
+TEST_F(SessionTest,
+       ZenzFeedbackFastPathRemainsAvailableForPrivateInput) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  EnableZenzLiveCorrectionWithFeedbackLearning(&session);
+
+  session_peer.context_()
+      ->mutable_client_context()
+      ->set_is_private_input(true);
 
   session_peer.zenz_feedback_store_().RecordAccepted(
       "かれはてんてきです",
@@ -9666,6 +9774,27 @@ TEST_F(SessionTest,
   EXPECT_PREEDIT("A", command);
   EXPECT_EQ(command.output().mode(), commands::HALF_ASCII);
   EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+}
+
+TEST_F(SessionTest, PendingDirectCommitLearningIsNotCreatedForPrivateInput) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  session_peer.context_()
+      ->mutable_client_context()
+      ->set_is_private_input(true);
+
+  commands::Command committed_command;
+  committed_command.mutable_output()->mutable_result()->set_key("あめ");
+  committed_command.mutable_output()->mutable_result()->set_value("雨");
+
+  EXPECT_FALSE(session_peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed_command, "private_input"));
+  EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
 }
 
 TEST_F(SessionTest, PendingDirectCommitLearningIsConfirmedByNextTextInput) {

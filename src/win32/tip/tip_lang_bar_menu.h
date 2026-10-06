@@ -257,6 +257,10 @@ class TipLangBarToggleButton : public TipLangBarButton,
   // The IMozcLangBarToggleItem interface methods
   STDMETHODIMP SelectMenuItem(UINT menu_id) override;
 
+  // Updates the visual privacy badge used for IS_PRIVATE input scopes.
+  HRESULT SetPrivateInput(bool private_input);
+  HRESULT RefreshIconForThemeChange();
+
   // The IMozcLangBarItem interface method
   // Overridden from TipLangBarButton.
   STDMETHODIMP SetEnabled(bool enabled) override;
@@ -277,6 +281,7 @@ class TipLangBarToggleButton : public TipLangBarButton,
   // Represents the index of the selected menu item.
   UINT menu_selected_;
   bool disabled_;
+  bool private_input_;
   std::wstring description_for_enabled_;
   TipLangBarMenuData menu_data_for_disabled_;
 };

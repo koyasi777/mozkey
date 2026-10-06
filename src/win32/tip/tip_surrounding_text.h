@@ -56,6 +56,10 @@ struct TipSurroundingTextInfo {
   // True when the current TSF selection is explicitly marked IS_PASSWORD.
   // In this case surrounding text is deliberately not retrieved.
   bool is_password_input_scope = false;
+  // True when the current TSF selection explicitly contains IS_PRIVATE.
+  // Unlike IS_PASSWORD, private input may still expose surrounding text and
+  // use existing personalization; only new persistent learning is suppressed.
+  bool is_private_input_scope = false;
   // True when surrounding text came from the legacy IMM32 document-feed
   // fallback rather than a synchronous TSF text-range read.
   bool used_legacy_imm32_fallback = false;
@@ -128,6 +132,10 @@ class TipSurroundingTextUtil {
 
   // Returns true when the scope list explicitly contains IS_PASSWORD.
   static bool ContainsPasswordInputScope(
+      const std::vector<InputScope>& input_scopes);
+
+  // Returns true when the scope list explicitly contains IS_PRIVATE.
+  static bool ContainsPrivateInputScope(
       const std::vector<InputScope>& input_scopes);
 
   // Returns true if |text| has more than |characters_in_codepoint| characters.

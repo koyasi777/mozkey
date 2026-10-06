@@ -209,6 +209,7 @@ TipInputModeManager::Action TipInputModeManager::OnSetFocus(
     bool system_open_close_mode, DWORD system_conversion_mode,
     absl::Span<const InputScope> input_scopes) {
   const StatePair prev_effective = mozc_state_;
+  const bool prev_private_input = IsPrivateInput();
 
   indicator_visibility_tracker_.OnMoveFocusedWindow();
 
@@ -229,6 +230,12 @@ TipInputModeManager::Action TipInputModeManager::OnSetFocus(
   if ((mozc_state_.open_close != prev_effective.open_close) ||
       (mozc_state_.conversion_mode != prev_effective.conversion_mode)) {
     indicator_visibility_tracker_.OnChangeInputMode();
+    return kUpdateUI;
+  }
+  if (prev_private_input != IsPrivateInput()) {
+    // The taskbar input-mode icon must refresh even when the effective input
+    // mode itself did not change. Do not show the transient mode indicator for
+    // this privacy-only UI change.
     return kUpdateUI;
   }
   return kDoNothing;
@@ -272,6 +279,7 @@ TipInputModeManager::Action TipInputModeManager::OnChangeConversionMode(
 TipInputModeManager::Action TipInputModeManager::OnChangeInputScope(
     absl::Span<const InputScope> input_scopes) {
   const StatePair prev_effective = mozc_state_;
+  const bool prev_private_input = IsPrivateInput();
 
   std::vector<InputScope> new_input_scopes(input_scopes.begin(),
                                            input_scopes.end());
@@ -286,6 +294,11 @@ TipInputModeManager::Action TipInputModeManager::OnChangeInputScope(
   if ((mozc_state_.open_close != prev_effective.open_close) ||
       (mozc_state_.conversion_mode != prev_effective.conversion_mode)) {
     indicator_visibility_tracker_.OnChangeInputMode();
+    return kUpdateUI;
+  }
+  if (prev_private_input != IsPrivateInput()) {
+    // Refresh the taskbar privacy badge without displaying the transient mode
+    // indicator, because the effective input mode did not change.
     return kUpdateUI;
   }
   return kDoNothing;
@@ -307,6 +320,11 @@ TipInputModeManager::GetEffectiveConversionMode() const {
 TipInputModeManagerImpl::ConversionMode
 TipInputModeManager::GetTsfConversionMode() const {
   return tsf_state_.conversion_mode;
+}
+
+bool TipInputModeManager::IsPrivateInput() const {
+  return std::find(input_scope_.begin(), input_scope_.end(), IS_PRIVATE) !=
+         input_scope_.end();
 }
 
 bool TipInputModeManager::IsIndicatorVisible() const {

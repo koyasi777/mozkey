@@ -282,6 +282,19 @@ class ConversionRequestBuilder {
           GetKey(*request_.composer_data_, request_.options_.request_type,
                  request_.options_.composer_key_selection);
     }
+
+    // Platform-private input is write-protected, not incognito. Preserve
+    // existing user history and user dictionary reads, but prevent this input
+    // from creating new Mozc history. Keep the policy request-local so the
+    // shared Config is never mutated.
+    if (request_.context().is_private_input() &&
+        request_.config().history_learning_level() ==
+            config::Config::DEFAULT_HISTORY) {
+      config::Config private_config = TrimConfig(request_.config());
+      private_config.set_history_learning_level(config::Config::READ_ONLY);
+      request_.config_.copy_from(private_config);
+    }
+
     // Populate decoupled ConversionOptions fields from commands::Request and
     // config::Config.
     request_.options_.incognito_mode = request_.incognito_mode();

@@ -62,7 +62,11 @@ class TipLangBar {
   HRESULT UninitLangBar();
 
   // Updates the selected menu in the language bar.
-  HRESULT UpdateMenu(bool enabled, uint32_t composition_mode);
+  HRESULT UpdateMenu(bool enabled, uint32_t composition_mode,
+                     bool private_input);
+
+  // Re-queries the current Windows theme and refreshes mode icons.
+  HRESULT RefreshInputModeIconForThemeChange();
 
   // Returns true if this instance is already initialized.
   bool IsInitialized() const;

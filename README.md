@@ -102,6 +102,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能。入力中の文字、変換中の文節、Zenz ライブ補正を個別に設定でき、Zenz ライブ補正の下線は新規・未設定プロファイルで既定 ON、既定色は `#C4DC6C`
 - Windows 版のローマ字入力で、変換規則の途中にある末尾の未確定ローマ字だけを薄く表示する opt-in 機能を追加。既定は OFF で、薄さは 0～100%（既定 85%）の範囲で調整可能。100% は背景色と同じになり不可視
 - Windows 版の IME 切り替えインジケータは、設定画面から「システムテーマに合わせる / ダーク / ライト / カスタム」を選択可能。カスタムでは入力モード別の配色とサイズ・角丸・枠線・影を調整でき、画面端付近では表示位置を自動調整
+- Windows TSF の `IS_PRIVATE` が指定された入力では、保存済みの Mozc 学習履歴と Zenz feedback を引き続き利用しながら、新しい永続学習を書き込まない。Mozkey のシークレットモードとは別に扱い、private input 中はタスクバーの入力モード表示と IME 切り替えインジケータに盾を表示。タスクバーの通常入力モード・private・無効表示は Windows のライト / ダークテーマへ追従
 - system dictionary 強化用の追加辞書生成パイプラインを追加
 - 日常語彙・実務語彙・外来語・英語綴り候補を小さな manual override 辞書として段階的に補強し、通常語彙は自然な第一候補、英語綴りは補助候補として扱う評価運用を追加
 - merge-ut-dictionaries 由来の地名・SudachiDict 系語彙を system dictionary に取り込めるようにした
@@ -176,6 +177,8 @@ Zenz の localhost 通信は、固定 endpoint に依存しないようにし、
 Zenz feedback learning は、完全な読み、完全な候補、粗い文脈クラス、採用/却下回数、理由 marker などの full-sequence 単位のローカル学習情報だけを保存します。生の左文脈は保存しません。feedback に使う文脈は、`empty`、`japanese_only`、`japanese_with_punctuation`、`mixed_japanese_ascii`、`sensitive_like` などの非可逆な context class に落とします。segment-local や lexical-unit の学習は Zenz feedback TSV には保存せず、安全な局所学習は Mozc history 側の責務として扱います。
 
 シークレットモードでは、Zenz のローカル推論自体は継続しますが、Zenz feedback personalization は無効になります。保存済み feedback は候補 ranking、session-level fast path、feedback decision に参照せず、新しい `accepted` / `rejected` / `accepted_rollback` feedback も保存しません。既存の feedback TSV は削除せず、シークレットモードを終了すると再び利用できます。
+
+Windows TSF の `IS_PRIVATE` は、Mozkey のシークレットモードとは別の privacy signal として扱います。Chrome Incognito、Edge InPrivate、Firefox Private Browser など、入力欄の TSF input scope に `IS_PRIVATE` が含まれる場合、保存済みの Mozc 学習履歴（変換・サジェスト）と Zenz feedback は読み取り可能なまま維持し、Zenz のローカル推論も継続します。一方、その private input を起点とする新しい Mozc history、サジェスト履歴、Zenz feedback、および Zenz から Mozc history への永続学習は書き込みません。既存の学習データ自体は削除しません。`IS_PRIVATE` と password input scope は別に扱い、password field の既存の保護は維持します。
 
 さらに、リリース時には Mozc core runtime binaries にテレメトリ、アップデータ、クラッシュアップロード、使用統計関連の危険な marker が含まれないことを確認します。
 
@@ -559,6 +562,14 @@ Windows 版の IME 切り替えインジケータは、設定画面から「シ�
 
 入力位置がモニターの作業領域端付近にある場合は、インジケータが画面外にはみ出さないよう表示位置を自動調整します。外観設定の「リセット」はテーマとカスタム値を既定値へ戻しますが、インジケータの表示 ON/OFF 設定は変更しません。
 
+### Windows TSF プライベート入力（`IS_PRIVATE`）
+
+Windows 版では、TSF input scope に `IS_PRIVATE` が含まれる入力を、Mozkey のシークレットモードとは別の private-input 状態として扱います。Chrome Incognito、Edge InPrivate、Firefox Private Browser など、この scope を通知する環境では、既存の Mozc 学習履歴や Zenz feedback を候補生成・ranking に利用でき、Zenz のローカル推論も継続しますが、その private input を起点とする新しい永続学習は保存しません。
+
+具体的には、通常の `DEFAULT_HISTORY` はその request だけ `READ_ONLY` 相当として扱い、既存履歴の読み取りを維持したまま Mozc history / サジェスト履歴への新規書き込みを止めます。Zenz feedback も保存済みデータの読み取りは維持しますが、新しい feedback の保存と、accepted Zenz 結果から Mozc history への追加学習は行いません。もともと `READ_ONLY` / `NO_HISTORY` に設定されている場合は、その設定を上書きしません。
+
+private input 中は、Windows のタスクバーに表示される入力モードアイコンと IME 切り替えインジケータに小さな盾を重ねて表示します。この盾は TSF `IS_PRIVATE` の状態を示すもので、Mozkey のシークレットモードだけでは表示しません。タスクバー側の通常入力モード文字、private の盾、IME 無効時の `×` は Windows のシステムテーマに合わせて黒 / 白を切り替え、テーマ変更にも追従します。IME 無効状態では `×` 表示を優先します。
+
 ### 縦書き対応（Windows / macOS）
 
 Windows / macOS 版では、縦書き入力時に候補ウィンドウ、予測・サジェスト、用例表示、ライブ変換中のルビを縦組みに合わせて表示します。横書き時の既存動作は維持します。
@@ -763,6 +774,17 @@ no new `accepted`, `rejected`, or `accepted_rollback` feedback is persisted.
 Existing feedback is left intact and becomes available again after leaving
 Incognito mode.
 
+On Windows, TSF `IS_PRIVATE` is treated as a privacy signal distinct from
+Mozkey Secret / Incognito mode. In environments such as Chrome Incognito,
+Edge InPrivate, and Firefox Private Browser that include `IS_PRIVATE` in the
+input scope, stored Mozc learning history (conversion and suggestion) and
+Zenz feedback remain readable, and local Zenz inference remains available.
+New persistent writes originating from that private input are suppressed for
+Mozc history, suggestion history, Zenz feedback, and Zenz-to-Mozc-history
+learning. Existing learning data is not deleted. `IS_PRIVATE` is also kept
+separate from password input scopes, whose existing protections remain in
+place.
+
 Additional release checks verify that Mozc core runtime binaries do not contain
 hard-deny telemetry, updater, crash-upload, or usage-statistics markers.
 
@@ -860,6 +882,7 @@ Main features added in this fork
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog for input text, converting segments, and Zenz live correction separately; the Zenz live-correction underline defaults to enabled with `#C4DC6C` for new or otherwise unset profiles
 - Adds an opt-in Windows feature for Roman input that dims only the unresolved trailing romaji still forming an incomplete conversion-rule prefix; it defaults to OFF and the dimness can be adjusted from 0% to 100% (default 85%); 100% matches the background and becomes invisible
 - Allows choosing System theme, Dark, Light, or Custom for the Windows IME mode indicator, including per-mode colors and geometry/shadow customization, with automatic screen-edge repositioning
+- On Windows TSF input marked with `IS_PRIVATE`, keeps existing Mozc learning history and Zenz feedback available for reading while suppressing new persistent learning. This is separate from Mozkey Secret / Incognito mode; private input is marked with a shield in the taskbar input-mode icon and IME mode indicator, while normal/private/disabled taskbar mode glyphs follow the Windows light/dark system theme
 - Adds an enhanced system dictionary generation pipeline
 - Adds a small tracked manual override dictionary for daily vocabulary, practical vocabulary, loanwords, and secondary English spelling candidates, with regression checks that keep Japanese candidates first
 - Allows incorporating place names and SudachiDict-derived vocabulary from merge-ut-dictionaries into the system dictionary
@@ -1552,6 +1575,31 @@ When the input position is near an edge of the monitor work area, the indicator
 is automatically repositioned to stay on-screen. Reset restores the indicator
 theme and custom appearance values to their defaults without changing whether
 the indicator itself is enabled.
+
+### Windows TSF private input (`IS_PRIVATE`)
+
+On Windows, an input context whose TSF input scope includes `IS_PRIVATE` is
+handled as a private-input state distinct from Mozkey Secret / Incognito mode.
+In environments such as Chrome Incognito, Edge InPrivate, and Firefox Private
+Browser that report this scope, existing Mozc learning history and Zenz
+feedback can still contribute to conversion and ranking, and local Zenz
+inference continues to run, but new persistent learning originating from that
+private input is not stored.
+
+For the normal `DEFAULT_HISTORY` setting, the affected request is treated like
+`READ_ONLY`: existing history remains readable while new Mozc history and
+suggestion-history writes are suppressed. Stored Zenz feedback remains
+readable, but Mozkey does not persist new feedback or teach an accepted Zenz
+result back into Mozc history from that private input. Existing `READ_ONLY` and
+`NO_HISTORY` settings are preserved rather than being replaced.
+
+While private input is active, Mozkey overlays a small shield on the Windows
+taskbar input-mode icon and on the IME mode indicator. The shield represents
+TSF `IS_PRIVATE`; enabling Mozkey Secret / Incognito mode alone does not show
+the same badge. The normal taskbar mode glyph, the private shield, and the
+disabled `X` switch between black and white with the Windows system light/dark
+theme and refresh when that theme changes. The disabled `X` keeps precedence
+when the IME is disabled.
 
 ### Vertical writing support (Windows / macOS)
 

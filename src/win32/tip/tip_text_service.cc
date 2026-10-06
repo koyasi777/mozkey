@@ -164,6 +164,8 @@ bool NeedsRendererUpdateOnLayoutChange(TipTextService* text_service,
 constexpr char kHelpUrl[] = "http://www.google.com/support/ime/japanese";
 constexpr wchar_t kTaskWindowClassName[] =
     L"Google Japanese Input Task Message Window";
+constexpr wchar_t kThemeWindowClassName[] =
+    L"Google Japanese Input Theme Change Window";
 
 // {67526BED-E4BE-47CA-97F8-3C84D5B408DA}
 constexpr GUID kTipPreservedKey_Kanji = {
@@ -198,6 +200,8 @@ constexpr GUID kTipFunctionProvider = {
 constexpr char kHelpUrl[] = "https://github.com/koyasi777/mozkey";
 constexpr wchar_t kTaskWindowClassName[] =
     L"Mozc Immersive Task Message Window";
+constexpr wchar_t kThemeWindowClassName[] =
+    L"Mozc Theme Change Window";
 
 // {F16B7D92-84B0-4AC6-A35B-06EA77180A18}
 constexpr GUID kTipPreservedKey_Kanji = {
@@ -468,6 +472,7 @@ class TipTextServiceImpl
         pending_roman_attribute_(TF_INVALID_GUIDATOM),
         thread_context_(nullptr),
         task_window_handle_(nullptr),
+        theme_window_handle_(nullptr),
         renderer_callback_window_handle_(nullptr),
         has_pending_delayed_session_command_(false) {}
 
@@ -481,12 +486,17 @@ class TipTextServiceImpl
                              RendererCallbackWidnowProc)) {
       return false;
     }
+    if (!RegisterWindowClass(module_handle, kThemeWindowClassName,
+                             ThemeWindowProc)) {
+      return false;
+    }
     return true;
   }
 
   static void OnDllProcessDetach(HMODULE module_handle) {
     ::UnregisterClass(kTaskWindowClassName, module_handle);
     ::UnregisterClass(kMessageReceiverClassName, module_handle);
+    ::UnregisterClass(kThemeWindowClassName, module_handle);
   }
 
   // ITfTextInputProcessorEx
@@ -512,6 +522,9 @@ class TipTextServiceImpl
 
     // Stop advising the ITfKeyEvent events.
     UninitKeyEventSink();
+
+    // Stop theme broadcasts before removing language bar items.
+    UninitThemeWindow();
 
     // Remove our button menus from the language bar.
     UninitLanguageBar();
@@ -588,6 +601,13 @@ class TipTextServiceImpl
     if (FAILED(result)) {
       LOG(ERROR) << "InitTaskWindow failed: " << result;
       return Deactivate();
+    }
+
+    // Theme following is non-critical to text input itself.  Keep the IME
+    // usable even if the hidden broadcast receiver cannot be created.
+    result = InitThemeWindow();
+    if (FAILED(result)) {
+      LOG(WARNING) << "InitThemeWindow failed: " << result;
     }
 
     // Do nothing even when we fail to initialize the renderer callback
@@ -1065,7 +1085,10 @@ class TipTextServiceImpl
   }
 
   void UpdateLangbar(bool enabled, uint32_t mozc_mode) override {
-    langbar_.UpdateMenu(enabled, mozc_mode);
+    const bool private_input =
+        thread_context_ != nullptr &&
+        thread_context_->GetInputModeManager()->IsPrivateInput();
+    langbar_.UpdateMenu(enabled, mozc_mode, private_input);
   }
 
   bool IsLangbarInitialized() const override {
@@ -1439,6 +1462,54 @@ class TipTextServiceImpl
     return S_OK;
   }
 
+  HRESULT InitThemeWindow() {
+    if (::IsWindow(theme_window_handle_)) {
+      return S_FALSE;
+    }
+
+    // WM_SETTINGCHANGE broadcasts are not delivered to HWND_MESSAGE windows.
+    // Keep the existing task window message-only and use a separate hidden
+    // top-level tool window solely as a system-theme broadcast receiver.
+    theme_window_handle_ = ::CreateWindowExW(
+        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kThemeWindowClassName, L"",
+        WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, g_module, nullptr);
+
+    if (!::IsWindow(theme_window_handle_)) {
+      return E_FAIL;
+    }
+    return S_OK;
+  }
+
+  HRESULT UninitThemeWindow() {
+    if (!::IsWindow(theme_window_handle_)) {
+      theme_window_handle_ = nullptr;
+      return S_FALSE;
+    }
+
+    ::DestroyWindow(theme_window_handle_);
+    theme_window_handle_ = nullptr;
+    return S_OK;
+  }
+
+  static LRESULT WINAPI ThemeWindowProc(HWND window_handle, UINT message,
+                                        WPARAM wparam, LPARAM lparam) {
+    TipTextServiceImpl* self = Self();
+    if (self == nullptr) {
+      return ::DefWindowProcW(window_handle, message, wparam, lparam);
+    }
+
+    if (window_handle == self->theme_window_handle_ &&
+        message == WM_SETTINGCHANGE && lparam != 0 &&
+        ::lstrcmpW(reinterpret_cast<LPCWSTR>(lparam),
+                   L"ImmersiveColorSet") == 0) {
+      if (self->langbar_.IsInitialized()) {
+        self->langbar_.RefreshInputModeIconForThemeChange();
+      }
+      return 0;
+    }
+
+    return ::DefWindowProcW(window_handle, message, wparam, lparam);
+  }
   static LRESULT WINAPI TaskWindowProc(HWND window_handle,
                                       UINT message,
                                       WPARAM wparam,
@@ -1625,6 +1696,7 @@ class TipTextServiceImpl
   PreservedKeyMap preserved_key_map_;
   std::unique_ptr<TipThreadContext> thread_context_;
   HWND task_window_handle_;
+  HWND theme_window_handle_;
   HWND renderer_callback_window_handle_;
 
   bool has_pending_delayed_session_command_;

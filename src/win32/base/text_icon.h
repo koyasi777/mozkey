@@ -53,6 +53,28 @@ class TextIcon {
                                     absl::string_view text,
                                     absl::string_view fontname,
                                     COLORREF text_color);
+
+  // Same as CreateMonochromeIcon, with a small shield badge in the lower-right
+  // corner. This is used to visualize IS_PRIVATE on the Windows taskbar input
+  // mode item without introducing separate per-mode icon resources.
+  static HICON CreateMonochromeIconWithPrivacyShield(
+      size_t width, size_t height, absl::string_view text,
+      absl::string_view fontname, COLORREF text_color);
+
+  // Creates a 32-bit alpha taskbar text icon using the caller-selected
+  // foreground color. This is the normal (non-privacy) counterpart of
+  // CreateAdaptiveIconWithPrivacyShield so normal/private transitions keep
+  // the same LangBar icon class.
+  static HICON CreateAdaptiveIcon(
+      size_t width, size_t height, absl::string_view text,
+      absl::string_view fontname, COLORREF text_color);
+  // Creates a 32-bit alpha taskbar icon containing text and a privacy
+  // shield.  The normal Windows 8+ mode resources are also 32-bit color
+  // icons, so switching privacy state does not change the LangBar item's
+  // icon class after GetInfo() has established its style.
+  static HICON CreateAdaptiveIconWithPrivacyShield(
+      size_t width, size_t height, absl::string_view text,
+      absl::string_view fontname, COLORREF text_color);
 };
 
 }  // namespace win32

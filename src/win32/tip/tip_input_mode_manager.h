@@ -130,6 +130,11 @@ class TipInputModeManager : public TipInputModeManagerImpl {
   // Returns IME conversion mode that is visible from TSF.
   ConversionMode GetTsfConversionMode() const;
 
+  // Returns true when the focused TSF InputScope contains IS_PRIVATE.
+  // This is a UI snapshot only. Learning-policy enforcement must continue to
+  // use the synchronous per-key InputScope read.
+  bool IsPrivateInput() const;
+
  private:
   bool use_global_mode_ = false;
   StatePair mozc_state_;

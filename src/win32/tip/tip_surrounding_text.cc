@@ -93,10 +93,14 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
       // text. This avoids relying on the asynchronous focus-scope cache.
       std::vector<InputScope> input_scopes;
       if (SUCCEEDED(TipRangeUtil::GetInputScopes(
-              selected_range.get(), edit_cookie, &input_scopes)) &&
-          TipSurroundingTextUtil::ContainsPasswordInputScope(input_scopes)) {
-        result_.is_password_input_scope = true;
-        return S_OK;
+              selected_range.get(), edit_cookie, &input_scopes))) {
+        result_.is_private_input_scope =
+            TipSurroundingTextUtil::ContainsPrivateInputScope(input_scopes);
+
+        if (TipSurroundingTextUtil::ContainsPasswordInputScope(input_scopes)) {
+          result_.is_password_input_scope = true;
+          return S_OK;
+        }
       }
 
       if (retrieve_selected_text_) {
@@ -475,6 +479,17 @@ bool TipSurroundingTextUtil::ContainsPasswordInputScope(
   }
   return false;
 }
+
+bool TipSurroundingTextUtil::ContainsPrivateInputScope(
+    const std::vector<InputScope>& input_scopes) {
+  for (const InputScope input_scope : input_scopes) {
+    if (input_scope == IS_PRIVATE) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool TipSurroundingTextUtil::MeasureCharactersBackward(
     const std::wstring_view text, const size_t characters_in_codepoint,
     size_t* characters_in_utf16) {
