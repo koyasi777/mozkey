@@ -507,6 +507,11 @@
     </message>
     <message>
         <location filename="config_dialog.cc" line="0"/>
+        <source>Monochrome (Light/Dark)</source>
+        <translation>Monochrome (Light/Dark)</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
         <source>Monochrome (Black)</source>
         <translation>Monochrome (Black)</translation>
     </message>

@@ -31,6 +31,7 @@ LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
 IDI_IMM32                 ICON       "data/images/win/product_icon_langbar.ico"
 IDI_IMM32_SIMPLE_BLACK    ICON       "data/images/win/product_icon_langbar_simple_black.ico"
 IDI_IMM32_SIMPLE_WHITE    ICON       "data/images/win/product_icon_langbar_simple_white.ico"
+IDI_IMM32_SIMPLE_HIGH_CONTRAST ICON   "data/images/win/product_icon_langbar_simple_high_contrast.ico"
 IDI_DIRECT                ICON       "data/images/win/ms_direct_input_a.ico"
 IDI_HIRAGANA              ICON       "data/images/win/ms_hiragana_a.ico"
 IDI_TOOL                  ICON       "data/images/win/tools_icon_a.ico"

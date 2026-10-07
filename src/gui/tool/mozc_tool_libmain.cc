@@ -86,6 +86,7 @@ namespace {
 constexpr int kTsfProfileIconIndexDefault = 0;
 constexpr int kTsfProfileIconIndexSimpleBlack = 15;
 constexpr int kTsfProfileIconIndexSimpleWhite = 16;
+constexpr int kTsfProfileIconIndexSimpleHighContrast = 17;
 
 constexpr wchar_t kTsfProfileSubKey[] =
     L"SOFTWARE\\Microsoft\\CTF\\TIP\\"
@@ -110,6 +111,9 @@ int GetTsfProfileIconIndexForStyleName(const std::string& style) {
   }
   if (style == "monochrome_white") {
     return kTsfProfileIconIndexSimpleWhite;
+  }
+  if (style == "monochrome_high_contrast") {
+    return kTsfProfileIconIndexSimpleHighContrast;
   }
   if (style == "default") {
     return kTsfProfileIconIndexDefault;
