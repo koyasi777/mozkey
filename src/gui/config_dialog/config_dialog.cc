@@ -2213,12 +2213,14 @@ constexpr int kTsfProfileIconIndexDefault = 0;
 
 // These values are TSF language profile icon indices in mozc_tip*.dll, not
 // resource IDs.  With the current tip_resource.rc order, IDI_IMM32 is exposed
-// as index 0, and the simple monochrome icons added immediately after it are
-// exposed as indices 15 and 16 on the generated mozc_tip32.dll in the current
-// Windows package.  Keep these values in sync with resource-order validation
+// as index 0, the black/white monochrome icons are indices 15 and 16, and the
+// static high-contrast variant that preserves the black icon silhouette is
+// expected at index 17.  Validate the built DLL whenever this list changes.
+// Keep these values in sync with resource-order validation
 // whenever the TIP icon resource list is changed.
 constexpr int kTsfProfileIconIndexSimpleBlack = 15;
 constexpr int kTsfProfileIconIndexSimpleWhite = 16;
+constexpr int kTsfProfileIconIndexSimpleHighContrast = 17;
 
 constexpr wchar_t kTsfProfileSubKey[] =
     L"SOFTWARE\\Microsoft\\CTF\\TIP\\"
@@ -2244,6 +2246,8 @@ int GetTsfProfileIconIndexForImeIconStyle(
       return kTsfProfileIconIndexSimpleBlack;
     case config::Config::WINDOWS_IME_ICON_MONOCHROME_WHITE:
       return kTsfProfileIconIndexSimpleWhite;
+    case config::Config::WINDOWS_IME_ICON_MONOCHROME_HIGH_CONTRAST:
+      return kTsfProfileIconIndexSimpleHighContrast;
     case config::Config::WINDOWS_IME_ICON_DEFAULT:
     default:
       return kTsfProfileIconIndexDefault;
@@ -2314,6 +2318,8 @@ const wchar_t* GetTsfProfileIconStyleFlagValue(
       return L"monochrome_black";
     case config::Config::WINDOWS_IME_ICON_MONOCHROME_WHITE:
       return L"monochrome_white";
+    case config::Config::WINDOWS_IME_ICON_MONOCHROME_HIGH_CONTRAST:
+      return L"monochrome_high_contrast";
     case config::Config::WINDOWS_IME_ICON_DEFAULT:
     default:
       return L"default";
@@ -2620,6 +2626,10 @@ void ConfigDialog::InitializeWindowsImeIconStyleControls() {
   combo->addItem(TrConfigDialog("Default"),
                  static_cast<int>(
                      config::Config::WINDOWS_IME_ICON_DEFAULT));
+  combo->addItem(
+      TrConfigDialog("Monochrome (Light/Dark)"),
+      static_cast<int>(
+          config::Config::WINDOWS_IME_ICON_MONOCHROME_HIGH_CONTRAST));
   combo->addItem(TrConfigDialog("Monochrome (Black)"),
                  static_cast<int>(
                      config::Config::WINDOWS_IME_ICON_MONOCHROME_BLACK));

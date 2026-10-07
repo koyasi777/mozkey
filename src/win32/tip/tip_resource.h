@@ -78,6 +78,7 @@
 #define IDI_DISABLED_NT 123
 #define IDI_IMM32_SIMPLE_BLACK 124
 #define IDI_IMM32_SIMPLE_WHITE 125
+#define IDI_IMM32_SIMPLE_HIGH_CONTRAST 126
 
 // Next default values for new objects
 //

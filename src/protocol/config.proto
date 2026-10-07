@@ -704,6 +704,7 @@ message Config {
     WINDOWS_IME_ICON_DEFAULT = 0;
     WINDOWS_IME_ICON_MONOCHROME_BLACK = 1;
     WINDOWS_IME_ICON_MONOCHROME_WHITE = 2;
+    WINDOWS_IME_ICON_MONOCHROME_HIGH_CONTRAST = 3;
   }
   optional WindowsImeIconStyle windows_ime_icon_style = 163
       [default = WINDOWS_IME_ICON_DEFAULT];

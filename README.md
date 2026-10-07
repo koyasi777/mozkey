@@ -89,7 +89,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - Windows 版で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を個別キーとして設定画面から割り当て可能
 - Windows 版で IMEOn / IMEOff に割り当てたキーを押した場合、すでに同じ状態でも IME モードインジケータを表示
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
-- Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（黒）/ モノクロ（白）から選択可能
+- Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（ライト・ダーク対応）/ モノクロ（黒）/ モノクロ（白）から選択可能
 - Windows Search などの immersive TSF ホストでは、候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビをホストプロセス内の renderer 経路で表示し、前面表示とマウス操作を安定化。未選択のサジェストは mouse-down だけで通常変換へ移行せず、mouse-up で実際に押したサジェストを確定
 - Windows / macOS 版の候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビ表示について、ライト / ダーク / 自動（システムテーマに合わせる）/ カスタム配色、サイズ、角丸、透明度、影を設定画面から個別に調整可能。新規設定では3項目とも「自動」が既定
 - Windows 版のルビ表示は、表示先モニターの DPI に合わせて位置・サイズを補正し、左右の余白、上下の余白、入力文字との距離を設定可能
@@ -519,8 +519,11 @@ Windows 版では、設定画面から Mozkey の IME アイコンを切り替�
 選択肢は以下です。
 
 - 既定
+- モノクロ（ライト・ダーク対応）
 - モノクロ（黒）
 - モノクロ（白）
+
+「モノクロ（ライト・ダーク対応）」は、既存の黒モノクロアイコンの形状を維持しつつ、透明背景側に細い白の逆色エッジを加えた静的アイコンです。ライト / ダークのどちらでも視認しやすくするためのもので、Windows のシステムテーマに応じてアイコン自体を切り替える機能ではありません。
 
 この設定は、Windows の TSF language profile に登録されている Mozkey の `IconFile` / `IconIndex` を更新し、タスクバーや IME 一覧に表示される IME アイコンへ反映します。
 
@@ -869,7 +872,7 @@ Main features added in this fork
 - Allows assigning left/right Shift and left/right Ctrl separately on Windows
 - Shows the IME mode indicator even when a key assigned to IMEOn or IMEOff is pressed while Mozc is already in that state
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
-- Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Black), and Monochrome (White) in the config dialog
+- Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Light/Dark), Monochrome (Black), and Monochrome (White) in the config dialog
 - Supports candidate, suggestion, and live-conversion ruby rendering in immersive TSF hosts such as Windows Search through an in-process renderer path, keeping the UI above the host presentation layer and preserving correct mouse selection; an unfocused passive suggestion does not enter normal conversion on mouse-down, and mouse-up commits the suggestion that was actually clicked
 - Allows configuring light/dark/auto (follow system theme)/custom color themes, size, corner radius, opacity, and shadow separately for the candidate window, suggestion window, and live-conversion ruby display on Windows and macOS; new configurations default all three theme selectors to Auto
 - Makes the Windows ruby display use target-monitor DPI-aware positioning and scaling, and allows configuring its horizontal padding, vertical padding, and distance from the input text
@@ -1478,8 +1481,11 @@ On Windows, the config dialog can switch the Mozkey IME icon.
 The available styles are:
 
 - Default
+- Monochrome (Light/Dark)
 - Monochrome (Black)
 - Monochrome (White)
+
+`Monochrome (Light/Dark)` preserves the shape of the existing black monochrome icon and adds a thin white inverse-color edge only on the transparent side of the glyph. It is a static icon designed to remain visible on both light and dark surfaces; it does not switch icon resources when the Windows system theme changes.
 
 This setting updates the `IconFile` / `IconIndex` values registered in the Windows TSF language profile for Mozkey, and applies to the IME icon shown in the taskbar and IME list.
 
