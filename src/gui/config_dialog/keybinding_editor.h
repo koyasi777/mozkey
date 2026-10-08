@@ -36,6 +36,8 @@
 
 #include "gui/config_dialog/ui_keybinding_editor.h"
 
+class QComboBox;
+
 namespace mozc {
 namespace gui {
 namespace key_binding_editor_internal {
@@ -105,8 +107,14 @@ class KeyBindingEditor : public QDialog, private Ui::KeyBindingEditor {
   void Clicked(QAbstractButton *button);
 
  private:
+  void SyncModifierSideControlsFromBinding();
+  void ApplyModifierSideControlsToBinding();
+
   QWidget *trigger_parent_;
   std::unique_ptr<key_binding_editor_internal::KeyBindingFilter> filter_;
+  QComboBox *ctrl_side_combo_ = nullptr;
+  QComboBox *shift_side_combo_ = nullptr;
+  bool updating_modifier_side_controls_ = false;
 };
 
 }  // namespace gui

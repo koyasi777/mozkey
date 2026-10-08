@@ -35,6 +35,7 @@
 #include <msctf.h>
 // clang-format on
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -153,7 +154,7 @@ class TestServerLauncher : public client::ServerLauncherInterface {
   }
 
   void set_mock_after_start_server(const Output& mock_output) {
-    mock_output.SerializeToString(&response_);
+    response_ = mock_output.SerializeAsString();
   }
 
  private:
@@ -1669,6 +1670,222 @@ TEST_F(KeyEventHandlerTest, ProtocolAnomalyModiferKeyMayBeSentOnKeyUp) {
   }
 }
 
+TEST_F(KeyEventHandlerTest, CapsToggleStateForSpecialKeysAndCandidates) {
+  constexpr bool kKanaLocked = false;
+  KeyboardMock keyboard(kKanaLocked);
+
+  InputBehavior behavior;
+  behavior.prefer_kana_input = kKanaLocked;
+  behavior.disabled = false;
+
+  InputState initial_state;
+  initial_state.logical_conversion_mode =
+      IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN;
+  initial_state.visible_conversion_mode =
+      initial_state.logical_conversion_mode;
+  initial_state.open = true;
+
+  // With GetKeyboardState, 0x01 is toggled, 0x80 is held physically.
+  // Test the combinations independently so physical Caps-key presses do not
+  // masquerade as the persistent CapsLock state.
+  const std::vector<std::pair<BYTE, bool>> cases = {
+      {0, false},
+      {kToggled, true},
+      {kPressed, false},
+      {static_cast<BYTE>(kToggled | kPressed), true},
+  };
+  for (const auto& [caps_state, expect_caps] : cases) {
+    SCOPED_TRACE(static_cast<unsigned>(caps_state));
+    KeyboardStatus keyboard_status;
+    keyboard_status.SetState(VK_DELETE, kPressed);
+    keyboard_status.SetState(VK_CONTROL, kPressed);
+    keyboard_status.SetState(VK_LCONTROL, kPressed);
+    keyboard_status.SetState(VK_CAPITAL, caps_state);
+
+    commands::KeyEvent key;
+    const KeyEventHandlerResult result = TestableKeyEventHandler::HandleKey(
+        VirtualKey::FromVirtualKey(VK_DELETE), 0, true, keyboard_status,
+        behavior, initial_state, &keyboard, &key);
+    ASSERT_TRUE(result.succeeded);
+    ASSERT_TRUE(key.has_special_key());
+    EXPECT_EQ(key.special_key(), commands::KeyEvent::DEL);
+    const uint32_t expected_modifiers =
+        commands::KeyEvent::CTRL | commands::KeyEvent::LEFT_CTRL |
+        (expect_caps ? commands::KeyEvent::CAPS : 0);
+    EXPECT_EQ(KeyEventUtil::GetModifiers(key), expected_modifiers);
+
+    commands::KeyEvent expected_generic;
+    expected_generic.set_special_key(commands::KeyEvent::DEL);
+    expected_generic.add_modifier_keys(commands::KeyEvent::CTRL);
+    if (expect_caps) {
+      expected_generic.add_modifier_keys(commands::KeyEvent::CAPS);
+    }
+    KeyInformation expected_key = 0;
+    ASSERT_TRUE(KeyEventUtil::GetKeyInformation(expected_generic, &expected_key));
+    EXPECT_NE(std::find(result.key_information_lookup_candidates.begin(),
+                        result.key_information_lookup_candidates.end(),
+                        expected_key),
+              result.key_information_lookup_candidates.end());
+
+    // A Caps-only binding must never match a Caps-off event.
+    if (!expect_caps) {
+      commands::KeyEvent caps_binding;
+      caps_binding.set_special_key(commands::KeyEvent::DEL);
+      caps_binding.add_modifier_keys(commands::KeyEvent::CTRL);
+      caps_binding.add_modifier_keys(commands::KeyEvent::CAPS);
+      KeyInformation caps_key = 0;
+      ASSERT_TRUE(KeyEventUtil::GetKeyInformation(caps_binding, &caps_key));
+      EXPECT_EQ(std::find(result.key_information_lookup_candidates.begin(),
+                          result.key_information_lookup_candidates.end(),
+                          caps_key),
+                result.key_information_lookup_candidates.end());
+    }
+  }
+}
+
+TEST_F(KeyEventHandlerTest, CapsTogglePreservesAlphabeticNormalization) {
+  constexpr bool kKanaLocked = false;
+  KeyboardMock keyboard(kKanaLocked);
+
+  KeyboardStatus keyboard_status;
+  keyboard_status.SetState('A', kPressed);
+  keyboard_status.SetState(VK_CONTROL, kPressed);
+  keyboard_status.SetState(VK_LCONTROL, kPressed);
+  keyboard_status.SetState(VK_CAPITAL, kToggled);
+
+  InputBehavior behavior;
+  behavior.prefer_kana_input = kKanaLocked;
+  behavior.disabled = false;
+
+  InputState initial_state;
+  initial_state.logical_conversion_mode =
+      IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN;
+  initial_state.visible_conversion_mode =
+      initial_state.logical_conversion_mode;
+  initial_state.open = true;
+
+  commands::KeyEvent key;
+  const KeyEventHandlerResult result = TestableKeyEventHandler::HandleKey(
+      VirtualKey::FromVirtualKey('A'), 0, true, keyboard_status, behavior,
+      initial_state, &keyboard, &key);
+  ASSERT_TRUE(result.succeeded);
+  ASSERT_TRUE(key.has_key_code());
+  EXPECT_EQ(key.key_code(), 'A');
+  EXPECT_TRUE(KeyEventUtil::HasCaps(KeyEventUtil::GetModifiers(key)));
+
+  commands::KeyEvent fallback;
+  fallback.set_key_code('a');
+  fallback.add_modifier_keys(commands::KeyEvent::CTRL);
+  KeyInformation fallback_key = 0;
+  ASSERT_TRUE(KeyEventUtil::GetKeyInformation(fallback, &fallback_key));
+  EXPECT_NE(std::find(result.key_information_lookup_candidates.begin(),
+                      result.key_information_lookup_candidates.end(),
+                      fallback_key),
+            result.key_information_lookup_candidates.end());
+}
+
+TEST_F(KeyEventHandlerTest, PreservesHeldLeftRightModifierSides) {
+  constexpr bool kKanaLocked = false;
+  KeyboardMock keyboard(kKanaLocked);
+
+  KeyboardStatus keyboard_status;
+  keyboard_status.SetState(VK_DELETE, kPressed);
+  keyboard_status.SetState(VK_SHIFT, kPressed);
+  keyboard_status.SetState(VK_LSHIFT, kPressed);
+  keyboard_status.SetState(VK_CONTROL, kPressed);
+  keyboard_status.SetState(VK_RCONTROL, kPressed);
+
+  InputBehavior behavior;
+  behavior.prefer_kana_input = kKanaLocked;
+  behavior.disabled = false;
+
+  InputState initial_state;
+  initial_state.logical_conversion_mode =
+      IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN;
+  initial_state.visible_conversion_mode =
+      initial_state.logical_conversion_mode;
+  initial_state.open = true;
+
+  commands::KeyEvent key;
+  ASSERT_TRUE(TestableKeyEventHandler::ConvertToKeyEvent(
+      VirtualKey::FromVirtualKey(VK_DELETE), 0, true, false, behavior,
+      initial_state, keyboard_status, &keyboard, &key));
+
+  EXPECT_EQ(KeyEventUtil::GetModifiers(key),
+            commands::KeyEvent::CTRL | commands::KeyEvent::SHIFT |
+                commands::KeyEvent::LEFT_SHIFT |
+                commands::KeyEvent::RIGHT_CTRL);
+  ASSERT_TRUE(key.has_special_key());
+  EXPECT_EQ(key.special_key(), commands::KeyEvent::DEL);
+}
+
+TEST_F(KeyEventHandlerTest,
+       ExposesSideAwareKeyInformationLookupCandidates) {
+  constexpr bool kKanaLocked = false;
+  KeyboardMock keyboard(kKanaLocked);
+
+  KeyboardStatus keyboard_status;
+  keyboard_status.SetState(VK_DELETE, kPressed);
+  keyboard_status.SetState(VK_SHIFT, kPressed);
+  keyboard_status.SetState(VK_LSHIFT, kPressed);
+  keyboard_status.SetState(VK_RSHIFT, kPressed);
+  keyboard_status.SetState(VK_CONTROL, kPressed);
+  keyboard_status.SetState(VK_RCONTROL, kPressed);
+
+  InputBehavior behavior;
+  behavior.prefer_kana_input = kKanaLocked;
+  behavior.disabled = false;
+
+  InputState initial_state;
+  initial_state.logical_conversion_mode =
+      IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN;
+  initial_state.visible_conversion_mode =
+      initial_state.logical_conversion_mode;
+  initial_state.open = true;
+
+  commands::KeyEvent key;
+  const KeyEventHandlerResult result = TestableKeyEventHandler::HandleKey(
+      VirtualKey::FromVirtualKey(VK_DELETE), 0, true, keyboard_status,
+      behavior, initial_state, &keyboard, &key);
+
+  ASSERT_TRUE(result.succeeded);
+  ASSERT_TRUE(result.has_key_information);
+  ASSERT_EQ(result.key_information_lookup_candidates.size(), 4);
+
+  const auto contains =
+      [&result](const std::vector<commands::KeyEvent::ModifierKey>& modifiers) {
+        commands::KeyEvent expected_event;
+        expected_event.set_special_key(commands::KeyEvent::DEL);
+        for (const commands::KeyEvent::ModifierKey modifier : modifiers) {
+          expected_event.add_modifier_keys(modifier);
+        }
+        KeyInformation expected = 0;
+        if (!KeyEventUtil::GetKeyInformation(expected_event, &expected)) {
+          return false;
+        }
+        return std::find(result.key_information_lookup_candidates.begin(),
+                         result.key_information_lookup_candidates.end(),
+                         expected) !=
+               result.key_information_lookup_candidates.end();
+      };
+
+  EXPECT_TRUE(contains(
+      {commands::KeyEvent::CTRL, commands::KeyEvent::RIGHT_CTRL,
+       commands::KeyEvent::SHIFT, commands::KeyEvent::LEFT_SHIFT,
+       commands::KeyEvent::RIGHT_SHIFT}));
+  EXPECT_TRUE(contains(
+      {commands::KeyEvent::CTRL, commands::KeyEvent::SHIFT,
+       commands::KeyEvent::LEFT_SHIFT, commands::KeyEvent::RIGHT_SHIFT}));
+  EXPECT_TRUE(contains(
+      {commands::KeyEvent::CTRL, commands::KeyEvent::RIGHT_CTRL,
+       commands::KeyEvent::SHIFT}));
+  EXPECT_TRUE(
+      contains({commands::KeyEvent::CTRL, commands::KeyEvent::SHIFT}));
+  EXPECT_FALSE(contains(
+      {commands::KeyEvent::CTRL, commands::KeyEvent::LEFT_CTRL,
+       commands::KeyEvent::SHIFT}));
+}
+
 TEST_F(KeyEventHandlerTest,
        ProtocolAnomalyModifierShiftShouldBeRemovedForPrintableChar) {
   // Currently, the Mozc server expects the client remove Shift modifier if
@@ -1705,6 +1922,7 @@ TEST_F(KeyEventHandlerTest,
 
     KeyboardStatus keyboard_status;
     keyboard_status.SetState(VK_SHIFT, kPressed);
+    keyboard_status.SetState(VK_LSHIFT, kPressed);
     keyboard_status.SetState('A', kPressed);
 
     constexpr VirtualKey kVirtualKey = VirtualKey::FromVirtualKey('A');

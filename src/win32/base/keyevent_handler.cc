@@ -468,6 +468,16 @@ bool ConvertToKeyEventMain(const VirtualKey& virtual_key, UINT scan_code,
     modifer_keys->insert(KeyEvent::SHIFT);
   }
 
+  if (keyboard_status.IsPressed(VK_LSHIFT)) {
+    modifer_keys->insert(KeyEvent::SHIFT);
+    modifer_keys->insert(KeyEvent::LEFT_SHIFT);
+  }
+
+  if (keyboard_status.IsPressed(VK_RSHIFT)) {
+    modifer_keys->insert(KeyEvent::SHIFT);
+    modifer_keys->insert(KeyEvent::RIGHT_SHIFT);
+  }
+
   if (keyboard_status.IsPressed(VK_CONTROL)) {
     modifer_keys->insert(KeyEvent::CTRL);
   }
@@ -486,7 +496,10 @@ bool ConvertToKeyEventMain(const VirtualKey& virtual_key, UINT scan_code,
     modifer_keys->insert(KeyEvent::ALT);
   }
 
-  if (keyboard_status.IsPressed(VK_CAPITAL)) {
+  // CAPS is the persistent CapsLock toggle state, not the physical
+  // key-down state.  The latter would omit CAPS for shortcuts such as
+  // Ctrl+Delete after the CapsLock key has been released.
+  if (keyboard_status.IsToggled(VK_CAPITAL)) {
     modifer_keys->insert(KeyEvent::CAPS);
   }
 
@@ -617,6 +630,8 @@ bool ConvertToKeyEventMain(const VirtualKey& virtual_key, UINT scan_code,
       if (keyboard_status_wo_kana_lock.IsPressed(VK_SHIFT)) {
         if (!keyboard_status_wo_kana_lock.IsPressed(VK_CONTROL)) {
           modifer_keys->erase(KeyEvent::SHIFT);
+          modifer_keys->erase(KeyEvent::LEFT_SHIFT);
+          modifer_keys->erase(KeyEvent::RIGHT_SHIFT);
         }
         key->set_key_code('a' + index);
       } else {
@@ -639,6 +654,8 @@ bool ConvertToKeyEventMain(const VirtualKey& virtual_key, UINT scan_code,
     if (keyboard_status_wo_kana_lock.IsPressed(VK_SHIFT)) {
       // In this cases, SHIFT modifier should be removed.
       modifer_keys->erase(KeyEvent::SHIFT);
+      modifer_keys->erase(KeyEvent::LEFT_SHIFT);
+      modifer_keys->erase(KeyEvent::RIGHT_SHIFT);
       key->set_key_code('A' + index);
       return true;
     }
@@ -703,6 +720,8 @@ bool ConvertToKeyEventMain(const VirtualKey& virtual_key, UINT scan_code,
   // Remove the SHIFT modifier if CapsLock is not locked.
   if (modifer_keys->find(KeyEvent::CAPS) == modifer_keys->end()) {
     modifer_keys->erase(KeyEvent::SHIFT);
+    modifer_keys->erase(KeyEvent::LEFT_SHIFT);
+    modifer_keys->erase(KeyEvent::RIGHT_SHIFT);
   }
 
   key->set_key_code(codes[0]);
@@ -761,6 +780,8 @@ KeyEventHandlerResult KeyEventHandler::HandleKey(
   if (KeyEventUtil::GetKeyInformation(*key, &result.key_information)) {
     result.has_key_information = true;
   }
+  result.key_information_lookup_candidates =
+      KeyEventUtil::GetKeyInformationLookupCandidates(*key);
 
   // We do not handle key message unless the key is one of force activation
   // keys.

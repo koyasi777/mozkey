@@ -786,6 +786,18 @@
         <source>Input key assignments:</source>
         <translation></translation>
     </message>
+    <message>
+        <source>Either side</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Left only</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Right only</source>
+        <translation></translation>
+    </message>
 </context>
 <context>
     <name>QObject</name>
@@ -1679,6 +1691,14 @@ The current Windows default IME override will be saved so it can be restored lat
     <message>
         <location filename="keymap_editor.cc" line="473"/>
         <source>Do you want to overwrite the current keymaps?</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Conflicting key assignments:
+%1 -&gt; %2
+%3 -&gt; %4
+
+These assignments can match the same physical key input. Choose non-overlapping left/right conditions.</source>
         <translation></translation>
     </message>
 </context>

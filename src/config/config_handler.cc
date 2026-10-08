@@ -117,9 +117,11 @@ bool MaybeMigrateCandidateHideCustomKeymap(Config* config) {
 
     for (absl::string_view command :
          absl::StrSplit(command_sequence, '|', absl::SkipEmpty())) {
-      has_conversion_delete_selected_candidate =
-          absl::StripAsciiWhitespace(command) == "DeleteSelectedCandidate";
-      break;
+      if (absl::StripAsciiWhitespace(command) ==
+          "DeleteSelectedCandidate") {
+        has_conversion_delete_selected_candidate = true;
+        break;
+      }
     }
   }
 

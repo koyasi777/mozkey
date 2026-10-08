@@ -251,6 +251,7 @@ mozc_cc_library(
         "//client:client_interface",
         "//protocol:commands_cc_proto",
         "//session:key_info_util",
+        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log:check",
     ],
 )

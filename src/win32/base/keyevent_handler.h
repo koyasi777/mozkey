@@ -32,6 +32,7 @@
 
 #include <windows.h>
 
+#include "absl/container/inlined_vector.h"
 #include "composer/key_event_util.h"
 
 namespace mozc {
@@ -59,6 +60,7 @@ struct KeyEventHandlerResult {
   bool succeeded;
   bool has_key_information;
   KeyInformation key_information;
+  absl::InlinedVector<KeyInformation, 9> key_information_lookup_candidates;
 
   KeyEventHandlerResult();
 };

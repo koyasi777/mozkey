@@ -786,6 +786,18 @@
         <source>Input key assignments:</source>
         <translation>割り当てるキーの入力:</translation>
     </message>
+    <message>
+        <source>Either side</source>
+        <translation>左右どちらでも</translation>
+    </message>
+    <message>
+        <source>Left only</source>
+        <translation>左のみ</translation>
+    </message>
+    <message>
+        <source>Right only</source>
+        <translation>右のみ</translation>
+    </message>
 </context>
 <context>
     <name>QObject</name>
@@ -1720,6 +1732,18 @@ The current Windows default IME override will be saved so it can be restored lat
         <location filename="keymap_editor.cc" line="473"/>
         <source>Do you want to overwrite the current keymaps?</source>
         <translation>現在のキー設定が上書きされます。実行しますか？</translation>
+    </message>
+    <message>
+        <source>Conflicting key assignments:
+%1 -&gt; %2
+%3 -&gt; %4
+
+These assignments can match the same physical key input. Choose non-overlapping left/right conditions.</source>
+        <translation>キー割り当てが競合しています:
+%1 → %2
+%3 → %4
+
+同じ物理キー入力が両方の設定に一致する可能性があります。左右条件が重ならないように設定してください。</translation>
     </message>
 </context>
 <context>

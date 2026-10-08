@@ -34,6 +34,8 @@
 
 #include <algorithm>
 
+#include "absl/types/span.h"
+#include "protocol/commands.pb.h"
 #include "win32/base/input_state.h"
 #include "win32/base/keyboard.h"
 
@@ -43,12 +45,77 @@ namespace tsf {
 
 inline bool HasNoModifiers(KeyInformation key_information) {
   // KeyInformation is |Modifiers(16)|SpecialKey(16)|Unicode(32)|.
-  return (key_information >> 48) == 0;
+  // CapsLock is a persistent toggle state, not a held shortcut modifier.
+  // Dedicated VK_IME_ON/OFF must still work with CapsLock enabled.
+  constexpr KeyInformation kCapsMask =
+      static_cast<KeyInformation>(commands::KeyEvent::CAPS);
+  return ((key_information >> 48) & ~kCapsMask) == 0;
+}
+
+inline bool FindConfiguredModeKey(
+    absl::Span<const KeyInformation> configured_keys,
+    absl::Span<const KeyInformation> lookup_candidates,
+    KeyInformation* matched_key) {
+  for (const KeyInformation candidate : lookup_candidates) {
+    if (std::binary_search(configured_keys.begin(), configured_keys.end(),
+                           candidate)) {
+      if (matched_key != nullptr) {
+        *matched_key = candidate;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+inline bool ContainsConfiguredModeKey(
+    absl::Span<const KeyInformation> configured_keys,
+    absl::Span<const KeyInformation> lookup_candidates) {
+  return FindConfiguredModeKey(configured_keys, lookup_candidates, nullptr);
 }
 
 // Returns true when |key| explicitly requests the IME state that is already
 // active. User-configured IMEOn/IMEOff bindings and the dedicated Windows
 // VK_IME_ON/VK_IME_OFF state-selection keys share the same semantics here.
+inline bool IsNoOpModeIndicatorKey(
+    const VirtualKey& key, const InputBehavior& behavior,
+    const InputState& current_state, bool has_key_information,
+    KeyInformation key_information,
+    absl::Span<const KeyInformation> key_information_lookup_candidates,
+    KeyInformation* matched_key = nullptr) {
+  if (!has_key_information) {
+    return false;
+  }
+
+  if (current_state.open) {
+    if (key.virtual_key() == VK_IME_ON &&
+        HasNoModifiers(key_information)) {
+      if (matched_key != nullptr) {
+        *matched_key = key_information;
+      }
+      return true;
+    }
+    return FindConfiguredModeKey(
+        behavior.active_mode_ime_on_keys,
+        key_information_lookup_candidates, matched_key);
+  }
+
+  if (key.virtual_key() == VK_IME_OFF &&
+      HasNoModifiers(key_information)) {
+    if (matched_key != nullptr) {
+      *matched_key = key_information;
+    }
+    return true;
+  }
+  return FindConfiguredModeKey(
+      behavior.direct_mode_ime_off_keys,
+      key_information_lookup_candidates, matched_key);
+}
+
+// Exact-only compatibility overload for callers/tests that do not have the
+// Windows key-event lookup candidates. Production TSF key handling uses the
+// overload above so configured generic/side-specific modifier semantics stay
+// identical to the session keymap matcher.
 inline bool IsNoOpModeIndicatorKey(const VirtualKey& key,
                                    const InputBehavior& behavior,
                                    const InputState& current_state,
@@ -57,24 +124,10 @@ inline bool IsNoOpModeIndicatorKey(const VirtualKey& key,
   if (!has_key_information) {
     return false;
   }
-
-  if (current_state.open) {
-    if (key.virtual_key() == VK_IME_ON &&
-        HasNoModifiers(key_information)) {
-      return true;
-    }
-    return std::binary_search(behavior.active_mode_ime_on_keys.begin(),
-                              behavior.active_mode_ime_on_keys.end(),
-                              key_information);
-  }
-
-  if (key.virtual_key() == VK_IME_OFF &&
-      HasNoModifiers(key_information)) {
-    return true;
-  }
-  return std::binary_search(behavior.direct_mode_ime_off_keys.begin(),
-                            behavior.direct_mode_ime_off_keys.end(),
-                            key_information);
+  const KeyInformation candidate = key_information;
+  return IsNoOpModeIndicatorKey(
+      key, behavior, current_state, true, key_information,
+      absl::Span<const KeyInformation>(&candidate, 1));
 }
 
 }  // namespace tsf

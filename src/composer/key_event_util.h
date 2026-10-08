@@ -34,6 +34,7 @@
 
 #include <cstdint>
 
+#include "absl/container/inlined_vector.h"
 #include "protocol/commands.pb.h"
 
 namespace mozc {
@@ -52,6 +53,25 @@ class KeyEventUtil {
   // |Modifiers(16bit)|SpecialKey(16bit)|Unicode(32bit)|
   static bool GetKeyInformation(const commands::KeyEvent& key_event,
                                 KeyInformation* key);
+
+  // Returns key events to try for keymap lookup, ordered from the most
+  // specific representation to more generic left/right modifier variants.
+  // CapsLock normalization is also included while preserving the existing
+  // exact-match-first behavior.
+  static absl::InlinedVector<commands::KeyEvent, 9>
+  GetKeyEventLookupCandidates(const commands::KeyEvent& key_event);
+
+  // Returns the KeyInformation values for GetKeyEventLookupCandidates() in
+  // exactly the same order.  Keeping this conversion centralized prevents
+  // Windows-side shortcut checks from drifting away from session keymap
+  // matching semantics.
+  static absl::InlinedVector<KeyInformation, 9>
+  GetKeyInformationLookupCandidates(const commands::KeyEvent& key_event);
+
+  // Returns true when two key binding patterns can match the same physical
+  // key input under the left/right modifier matching semantics above.
+  static bool KeyBindingPatternsOverlap(const commands::KeyEvent& lhs,
+                                        const commands::KeyEvent& rhs);
 
   // Normalizes given key event for key command looking-up. This function does
   // - remove commands::KeyEvent::CAPS from the modifier keys

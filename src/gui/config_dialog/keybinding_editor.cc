@@ -29,9 +29,14 @@
 
 #include "gui/config_dialog/keybinding_editor.h"
 
+#include <QComboBox>
+#include <QCoreApplication>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QString>
 #include <QTableWidget>
 #include <memory>
@@ -213,6 +218,83 @@ bool IsDownOnlyKey(const QKeyEvent &key_event) {
 }
 
 bool IsAlphabet(const char key) { return (key >= 'a' && key <= 'z'); }
+
+#ifdef _WIN32
+constexpr int kBothSpecificSidesIndex = -2;
+constexpr int kEitherSideIndex = 0;
+constexpr int kLeftOnlyIndex = 1;
+constexpr int kRightOnlyIndex = 2;
+
+int ModifierSideIndexFromBinding(const QStringList &tokens,
+                                 const QString &generic_token,
+                                 const QString &left_token,
+                                 const QString &right_token) {
+  bool has_generic = false;
+  bool has_left = false;
+  bool has_right = false;
+  for (const QString &token : tokens) {
+    has_generic |= token == generic_token;
+    has_left |= token == left_token;
+    has_right |= token == right_token;
+  }
+
+  // An externally imported binding can explicitly require both physical sides
+  // of one modifier family.  The editor intentionally exposes only
+  // Either/Left/Right, so report this separately and preserve it as-is.
+  if (has_left && has_right) {
+    return kBothSpecificSidesIndex;
+  }
+  if (has_left) {
+    return kLeftOnlyIndex;
+  }
+  if (has_right) {
+    return kRightOnlyIndex;
+  }
+  if (has_generic) {
+    return kEitherSideIndex;
+  }
+  return -1;
+}
+
+QString ModifierTokenForSideIndex(const QString &generic_token,
+                                  const QString &left_token,
+                                  const QString &right_token, int index) {
+  switch (index) {
+    case kLeftOnlyIndex:
+      return left_token;
+    case kRightOnlyIndex:
+      return right_token;
+    default:
+      return generic_token;
+  }
+}
+
+void RewriteModifierSide(QStringList *tokens, const QString &generic_token,
+                         const QString &left_token, const QString &right_token,
+                         int index) {
+  CHECK(tokens);
+
+  int insert_index = -1;
+  for (int i = tokens->size() - 1; i >= 0; --i) {
+    const QString &token = tokens->at(i);
+    if (token == generic_token || token == left_token || token == right_token) {
+      insert_index = i;
+      tokens->removeAt(i);
+    }
+  }
+
+  if (insert_index < 0) {
+    return;
+  }
+
+  if (insert_index > tokens->size()) {
+    insert_index = tokens->size();
+  }
+  tokens->insert(insert_index, ModifierTokenForSideIndex(
+                                   generic_token, left_token, right_token,
+                                   index));
+}
+#endif  // _WIN32
 }  // namespace
 
 namespace key_binding_editor_internal {
@@ -318,9 +400,18 @@ KeyBindingFilter::KeyState KeyBindingFilter::Encode(QString *result) const {
       !modifier_non_required_key_.isEmpty() ||
       !modifier_required_key_.isEmpty();
 
+#ifdef _WIN32
+  // Modifier-only Ctrl / Shift chords are valid Windows key bindings.  They
+  // are required so a captured side-specific chord such as
+  // "LeftCtrl LeftShift" can be generalized to "LeftCtrl Shift" in the UI.
+  // Alt remains unsupported by the Windows keybinding editor.
+  if (!has_non_modifier_key && alt_pressed_) {
+    result_state = KeyBindingFilter::DENY_KEY;
+  }
+#else   // _WIN32
   const bool is_explicit_left_or_right_ctrl =
       (ctrl_key_name_ == QLatin1String("LeftCtrl") ||
-      ctrl_key_name_ == QLatin1String("RightCtrl"));
+       ctrl_key_name_ == QLatin1String("RightCtrl"));
 
   const bool ctrl_only =
       ctrl_pressed_ && !alt_pressed_ && !shift_pressed_ &&
@@ -333,12 +424,14 @@ KeyBindingFilter::KeyState KeyBindingFilter::Encode(QString *result) const {
       result_state = KeyBindingFilter::DENY_KEY;
     }
   }
+#endif  // _WIN32
 
   // TODO(taku) Shift + 3 ("#" on US-keyboard) is also valid
   // keys, but we disable it for now, since we have no way
   // to get the original key "3" from "#" only with Qt layer.
   // need to see platform dependent scan code here.
 
+#ifndef _WIN32
   const bool shift_only = shift_pressed_ && !ctrl_pressed_ && !alt_pressed_ &&
                           modifier_required_key_.isEmpty() &&
                           modifier_non_required_key_.isEmpty();
@@ -352,6 +445,7 @@ KeyBindingFilter::KeyState KeyBindingFilter::Encode(QString *result) const {
   if (shift_only && !is_explicit_left_or_right_shift) {
     result_state = KeyBindingFilter::DENY_KEY;
   }
+#endif  // !_WIN32
 
   // Don't support Shift + 'a' only
   if (shift_pressed_ && !ctrl_pressed_ && !alt_pressed_ &&
@@ -575,6 +669,61 @@ KeyBindingEditor::KeyBindingEditor(QWidget *parent, QWidget *trigger_parent)
 
 #ifdef _WIN32
   ::ImmAssociateContext(reinterpret_cast<HWND>(KeyBindingLineEdit->winId()), 0);
+
+  // Replace the spacer under the key capture field with per-modifier
+  // left/right matching controls.  Capturing a physical key keeps the current
+  // side-specific behavior by default; users can independently generalize
+  // Ctrl and Shift to either side.
+  gridLayout->removeItem(verticalSpacer);
+  delete verticalSpacer;
+  verticalSpacer = nullptr;
+
+  auto *modifier_side_layout = new QHBoxLayout();
+  modifier_side_layout->setContentsMargins(0, 0, 0, 0);
+
+  auto *ctrl_label = new QLabel(QStringLiteral("Ctrl:"), this);
+  ctrl_side_combo_ = new QComboBox(this);
+  ctrl_side_combo_->setObjectName(QStringLiteral("CtrlSideComboBox"));
+
+  auto *shift_label = new QLabel(QStringLiteral("Shift:"), this);
+  shift_side_combo_ = new QComboBox(this);
+  shift_side_combo_->setObjectName(QStringLiteral("ShiftSideComboBox"));
+
+  for (QComboBox *combo : {ctrl_side_combo_, shift_side_combo_}) {
+    // These controls are created in C++, while the existing keybinding-editor
+    // strings in the translation catalog use the .ui context
+    // "KeyBindingEditor".  Use that context explicitly so Japanese builds do
+    // not fall back to the English source text.
+    combo->addItem(
+        QCoreApplication::translate("KeyBindingEditor", "Either side"));
+    combo->addItem(
+        QCoreApplication::translate("KeyBindingEditor", "Left only"));
+    combo->addItem(
+        QCoreApplication::translate("KeyBindingEditor", "Right only"));
+    combo->setEnabled(false);
+  }
+
+  modifier_side_layout->addWidget(ctrl_label);
+  modifier_side_layout->addWidget(ctrl_side_combo_);
+  modifier_side_layout->addSpacing(8);
+  modifier_side_layout->addWidget(shift_label);
+  modifier_side_layout->addWidget(shift_side_combo_);
+  modifier_side_layout->addStretch(1);
+  gridLayout->addLayout(modifier_side_layout, 2, 0, 1, 3);
+
+  setMinimumSize(QSize(430, 140));
+  setMaximumSize(QSize(430, 140));
+  resize(430, 140);
+
+  QObject::connect(
+      ctrl_side_combo_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+      [this](int) { ApplyModifierSideControlsToBinding(); });
+  QObject::connect(
+      shift_side_combo_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+      [this](int) { ApplyModifierSideControlsToBinding(); });
+  QObject::connect(
+      KeyBindingLineEdit, &QLineEdit::textChanged, this,
+      [this](const QString &) { SyncModifierSideControlsFromBinding(); });
 #endif  // _WIN32
 
   QObject::connect(KeyBindingEditorbuttonBox,
@@ -601,9 +750,93 @@ QString KeyBindingEditor::GetBinding() const {
   return KeyBindingLineEdit->text();
 }
 
+void KeyBindingEditor::SyncModifierSideControlsFromBinding() {
+#ifdef _WIN32
+  if (updating_modifier_side_controls_ || ctrl_side_combo_ == nullptr ||
+      shift_side_combo_ == nullptr) {
+    return;
+  }
+
+  const QStringList tokens =
+      KeyBindingLineEdit->text().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+
+  const auto sync_combo = [&tokens](QComboBox *combo,
+                                    const QString &generic_token,
+                                    const QString &left_token,
+                                    const QString &right_token) {
+    const int index = ModifierSideIndexFromBinding(
+        tokens, generic_token, left_token, right_token);
+    const QSignalBlocker blocker(combo);
+
+    // Do not silently rewrite imported bindings such as
+    // "LeftCtrl RightCtrl ...".  The three-state selector cannot represent a
+    // both-sides-required condition, so disable only that family and leave its
+    // original tokens untouched.  The other modifier family remains editable.
+    if (index == kBothSpecificSidesIndex) {
+      combo->setEnabled(false);
+      combo->setCurrentIndex(-1);
+      return;
+    }
+
+    combo->setEnabled(index >= 0);
+    combo->setCurrentIndex(index >= 0 ? index : kEitherSideIndex);
+  };
+
+  sync_combo(ctrl_side_combo_, QStringLiteral("Ctrl"),
+             QStringLiteral("LeftCtrl"), QStringLiteral("RightCtrl"));
+  sync_combo(shift_side_combo_, QStringLiteral("Shift"),
+             QStringLiteral("LeftShift"), QStringLiteral("RightShift"));
+#endif  // _WIN32
+}
+
+void KeyBindingEditor::ApplyModifierSideControlsToBinding() {
+#ifdef _WIN32
+  if (updating_modifier_side_controls_ || ctrl_side_combo_ == nullptr ||
+      shift_side_combo_ == nullptr) {
+    return;
+  }
+
+  updating_modifier_side_controls_ = true;
+
+  QStringList tokens =
+      KeyBindingLineEdit->text().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+
+  if (ctrl_side_combo_->isEnabled()) {
+    RewriteModifierSide(&tokens, QStringLiteral("Ctrl"),
+                        QStringLiteral("LeftCtrl"),
+                        QStringLiteral("RightCtrl"),
+                        ctrl_side_combo_->currentIndex());
+  }
+  if (shift_side_combo_->isEnabled()) {
+    RewriteModifierSide(&tokens, QStringLiteral("Shift"),
+                        QStringLiteral("LeftShift"),
+                        QStringLiteral("RightShift"),
+                        shift_side_combo_->currentIndex());
+  }
+
+  const QString binding = tokens.join(QLatin1Char(' '));
+  KeyBindingLineEdit->setText(binding);
+  KeyBindingLineEdit->setCursorPosition(0);
+
+  // Side generalization does not change whether the captured key shape is
+  // otherwise valid.  Preserve the filter's current OK-button state instead
+  // of accidentally making rejected combinations valid.
+  updating_modifier_side_controls_ = false;
+#endif  // _WIN32
+}
+
 void KeyBindingEditor::SetBinding(const QString &binding) {
   KeyBindingLineEdit->setText(binding);
   KeyBindingLineEdit->setCursorPosition(0);
+#ifdef _WIN32
+  SyncModifierSideControlsFromBinding();
+
+  if (QPushButton *ok_button =
+          KeyBindingEditorbuttonBox->button(QDialogButtonBox::Ok);
+      ok_button != nullptr) {
+    ok_button->setEnabled(!binding.trimmed().isEmpty());
+  }
+#endif  // _WIN32
 }
 }  // namespace gui
 }  // namespace mozc

@@ -178,11 +178,13 @@ mozc_cc_library(
     hdrs = ["key_event_util.h"],
     visibility = [
         "//client:__pkg__",
+        "//gui/config_dialog:__pkg__",
         "//session:__pkg__",
         "//win32/base:__pkg__",
     ],
     deps = [
         "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
     ],
