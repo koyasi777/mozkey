@@ -86,7 +86,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - 通常変換では、Mozc が顔文字として意味的に識別できる候補（標準の顔文字候補、およびユーザー辞書で品詞「顔文字」として登録された候補）が、学習によって第1候補へ上がらないように制御。候補自体は一覧に残し、同じ表記でも「顔文字」以外の品詞として登録した候補は通常の順位付け・学習を許可。Zenz が独立して生成した表記は、文字列の見た目だけを理由に顔文字扱いしない
 - 複数コマンドは `Commit|IMEOff` のような形式で保存され、設定画面では `Commit → IMEOff` のように編集可能
 - MS-IME 風キー設定では、確定済み文字列を選択した状態で Space を押すと再変換し、未選択時は従来どおり空白を入力
-- Windows 版で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を個別キーとして設定画面から割り当て可能
+- Windows 版のキー設定で、Ctrl / Shift の左右条件を独立して「左右どちらでも / 左のみ / 右のみ」から選択可能。従来の汎用 Ctrl / Shift 割り当ても維持し、競合する異なるコマンドの割り当ては保存時に検出
 - Windows 版で IMEOn / IMEOff に割り当てたキーを押した場合、すでに同じ状態でも IME モードインジケータを表示
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
 - Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（ライト・ダーク対応）/ モノクロ（黒）/ モノクロ（白）から選択可能
@@ -483,11 +483,9 @@ Windows 版の MS-IME 風キー設定では、確定済みテキストを範囲�
 
 ### 左右 Shift / Ctrl の個別キー割り当て（Windows）
 
-Windows 版では、キー設定エディタ上で左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl を別々のキーとして扱えます。
+Windows 版では、左 Shift / 右 Shift / 左 Ctrl / 右 Ctrl にそれぞれ IME の操作を割り当てられます。たとえば右 Shift で IME を有効化し、左 Shift で無効化することもできます。
 
-`Ctrl j` のような従来の汎用 Ctrl キーバインドは、左 Ctrl / 右 Ctrl のどちらでも従来どおり動作します。
-
-たとえば
+設定例:
 
 - `DirectInput + RightShift -> IMEOn`
 - `Precomposition + LeftShift -> IMEOff`
@@ -496,9 +494,17 @@ Windows 版では、キー設定エディタ上で左 Shift / 右 Shift / 左 Ct
 - `DirectInput + RightCtrl -> IMEOn`
 - `Precomposition + LeftCtrl -> IMEOff`
 
-のように設定でき、左右の Shift / Ctrl に別々の IME 操作を割り当てられます。
+キー設定エディタでは、Ctrl と Shift の左右条件を**それぞれ独立して**指定できます。キーを入力した後、該当する修飾キーについて「左右どちらでも」「左のみ」「右のみ」を選択します。Ctrl / Shift が割り当てに含まれない場合、その修飾キーの選択欄は無効になります。
 
-`IMEOn` または `IMEOff` に明示的に割り当てたキーを押した場合は、すでにその状態であっても IME モードインジケータを表示します。たとえば、IME がすでに無効の状態で `IMEOff` キーを押しても、直接入力状態のインジケータを表示します。
+「左右どちらでも」は従来の汎用 `Ctrl` / `Shift` と同じ意味です。`Ctrl j` のような既存のキー設定は、左 Ctrl / 右 Ctrl のどちらでも動作します。キー入力を取り込んだ直後は、検出できた左右の物理キー指定を初期値として使用します。
+
+従来の汎用割り当てを残したまま、左右を限定した割り当ても作成できます。ただし、**同じ入力状態で同じ物理キー操作に一致し得る割り当てを、異なるコマンドに設定すると保存時に競合として拒否されます。** たとえば、同じ入力状態の `Ctrl Delete` と `LeftCtrl Delete` に別々のコマンドを割り当てることはできません。
+
+CapsLock が有効な場合も、左右指定の照合と汎用ショートカットへのフォールバックを行います。Windows 専用の `VK_IME_ON` / `VK_IME_OFF` は、CapsLock のトグル状態だけを理由に修飾キー付き操作として扱われません。
+
+左右両方を同時に押す特殊な操作、特に修飾キー単独の組み合わせにおける TSF のキー解放タイミングは、すべての挙動を保証するものではありません。また、外部から取り込んだ「左右両方を同時に要求する」設定は、3択の選択欄では表現できないため、元の設定を保持したままその欄の編集を無効にします。
+
+`IMEOn` または `IMEOff` に明示的に割り当てたキーを押した場合は、すでに同じ状態であっても IME モードインジケータを表示します。たとえば、IME がすでに無効の状態で `IMEOff` キーを押しても、直接入力状態のインジケータを表示します。
 
 これにより、IME 有効化・無効化キーを「状態を切り替えるキー」としてだけでなく、現在状態を視覚的に確認するためのキーとしても使えます。
 
@@ -869,7 +875,7 @@ Main features added in this fork
 - Prevents candidates that Mozc can semantically identify as emoticons—built-in emoticon candidates and user-dictionary entries registered with the `顔文字` POS—from being promoted to the first candidate in ordinary conversion through learning. The candidates remain visible, while the same surface registered under a non-emoticon POS remains eligible for normal ranking and learning. Independently generated Zenz surfaces are not classified as emoticons from string shape alone
 - Stores command sequences as `Commit|IMEOff` and shows them in the keymap editor as `Commit → IMEOff`
 - In the MS-IME style keymap, pressing Space while committed text is selected reconverts that selection; with no selection, Space still inserts a normal space
-- Allows assigning left/right Shift and left/right Ctrl separately on Windows
+- On Windows, allows independently selecting Either side / Left only / Right only for Ctrl and Shift in the keybinding editor; generic Ctrl/Shift shortcuts remain supported, while conflicting bindings for different commands are rejected when saving
 - Shows the IME mode indicator even when a key assigned to IMEOn or IMEOff is pressed while Mozc is already in that state
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Light/Dark), Monochrome (Black), and Monochrome (White) in the config dialog
@@ -1443,9 +1449,9 @@ Users with an existing custom keymap can enable this behavior by selecting the M
 
 ### Independent left/right Shift and Ctrl key bindings (Windows)
 
-On Windows, left/right Shift and left/right Ctrl can be configured as separate keys in the keybinding editor.
+On Windows, you can assign different IME actions to left/right Shift and Ctrl keys. For example, right Shift can turn the IME on and left Shift can turn it off.
 
-For example:
+Examples:
 
 - `DirectInput + RightShift -> IMEOn`
 - `Precomposition + LeftShift -> IMEOff`
@@ -1454,15 +1460,19 @@ For example:
 - `DirectInput + RightCtrl -> IMEOn`
 - `Precomposition + LeftCtrl -> IMEOff`
 
-This allows assigning different IME actions to the left and right Shift/Ctrl keys.
+The keybinding editor also lets you select **Ctrl and Shift sides independently**. After capturing a key combination, choose `Either side`, `Left only`, or `Right only` for each modifier present in that binding. A selector is disabled if the binding does not contain that modifier.
 
-Generic Ctrl key bindings such as `Ctrl j` continue to work with either left or right Ctrl.
+`Either side` uses the original generic `Ctrl` / `Shift` semantics. Existing bindings such as `Ctrl j` continue to work with either Ctrl key. When available, the physically captured left/right modifier becomes the initial side selection.
 
-When a key is explicitly assigned to `IMEOn` or `IMEOff`, the mode indicator is
-also shown even if Mozc is already in the requested state. For example, pressing
-an `IMEOff` key while IME is already off still shows the direct-input indicator.
-This makes mode-confirmation keys useful as explicit visual feedback, not only
-as state-changing toggles.
+Generic and side-specific bindings are both supported, but **overlapping assignments in the same input state cannot be saved with different commands**. For example, `Ctrl Delete` and `LeftCtrl Delete` cannot be mapped to different commands in the same state because a physical left-Ctrl-plus-Delete input would match both.
+
+CapsLock-aware matching preserves the side-specific and generic shortcut fallback behavior. Dedicated Windows `VK_IME_ON` / `VK_IME_OFF` keys do not treat the CapsLock toggle alone as a held shortcut modifier.
+
+Simultaneous left-and-right modifier presses, particularly TSF key-up timing for modifier-only chords, do not have fully guaranteed release semantics. An imported binding explicitly requiring both sides of one modifier family is preserved, but its corresponding three-choice side selector is disabled because it cannot represent that condition.
+
+When a key is explicitly assigned to `IMEOn` or `IMEOff`, the mode indicator is also shown even if Mozc is already in the requested state. For example, pressing an `IMEOff` key while IME is already off still shows the direct-input indicator.
+
+This lets you use an IME on/off key not only to change the input mode, but also to visually confirm the current mode.
 
 ### Windows default IME setting
 

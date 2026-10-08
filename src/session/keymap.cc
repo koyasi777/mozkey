@@ -314,9 +314,15 @@ bool KeyMapManager::LoadStreamWithErrors(std::istream* ifs,
 
   key_event.Clear();
   KeyParser::ParseKey("Shift", &key_event);
-  keymap_composition_.AddRule(
-      key_event, CompositionState::INSERT_CHARACTER,
-      CommandSequence{"InsertCharacter"});
+  KeyInformation shift_key = 0;
+  if (KeyEventUtil::GetKeyInformation(key_event, &shift_key) &&
+      !keymap_composition_.HasBinding(shift_key)) {
+    // Preserve the historical fallback unless the active keymap explicitly
+    // assigns Composition Shift to a different command or sequence.
+    keymap_composition_.AddRule(
+        key_event, CompositionState::INSERT_CHARACTER,
+        CommandSequence{"InsertCharacter"});
+  }
 
   key_event.Clear();
   key_event.set_special_key(commands::KeyEvent::IME_ACTION);

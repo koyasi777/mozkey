@@ -287,6 +287,57 @@ TEST_F(ConfigHandlerTest,
             std::string::npos);
 }
 
+TEST_F(
+    ConfigHandlerTest,
+    CustomKeymapMigrationPreservesAlternateDeleteBindingWithLaterRows) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(),
+                         "custom_keymap_alternate_with_later_rows.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config input;
+  input.set_session_keymap(Config::CUSTOM);
+  input.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tRightCtrl Delete\tDeleteSelectedCandidate\n"
+      "Conversion\tCtrl y\tBackspace\n"
+      "Conversion\tON\tIMEOn\n");
+
+  ConfigHandler::SetConfig(input);
+  const Config output = ConfigHandler::GetCopiedConfig();
+  EXPECT_NE(output.custom_keymap_table().find(
+                "Conversion\tRightCtrl Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
+  EXPECT_EQ(output.custom_keymap_table().find(
+                "Conversion\tCtrl Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
+}
+
+TEST_F(ConfigHandlerTest,
+       CustomKeymapMigrationFindsDeleteCommandAnywhereInSequence) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(),
+                         "custom_keymap_alternate_command_sequence.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config input;
+  input.set_session_keymap(Config::CUSTOM);
+  input.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tAlt Delete\tCancel | DeleteSelectedCandidate\n"
+      "Conversion\tCtrl y\tBackspace\n");
+
+  ConfigHandler::SetConfig(input);
+  const Config output = ConfigHandler::GetCopiedConfig();
+  EXPECT_EQ(output.custom_keymap_table().find(
+                "Conversion\tCtrl Delete\tDeleteSelectedCandidate"),
+            std::string::npos);
+}
+
 TEST_F(ConfigHandlerTest, CustomKeymapMigrationPreservesOccupiedCtrlDelete) {
   TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
   const std::string config_file =

@@ -176,19 +176,13 @@ std::vector<KeyInformation> KeyInfoUtil::ExtractSortedActiveModeImeOnKeys(
 
 bool KeyInfoUtil::ContainsKey(absl::Span<const KeyInformation> sorted_keys,
                               const commands::KeyEvent& key_event) {
-  KeyInformation key_info;
-  if (KeyEventUtil::GetKeyInformation(key_event, &key_info) &&
-      std::binary_search(sorted_keys.begin(), sorted_keys.end(), key_info)) {
-    return true;
+  for (const KeyInformation key_info :
+       KeyEventUtil::GetKeyInformationLookupCandidates(key_event)) {
+    if (std::binary_search(sorted_keys.begin(), sorted_keys.end(), key_info)) {
+      return true;
+    }
   }
-
-  commands::KeyEvent normalized_key_event;
-  KeyEventUtil::NormalizeModifiers(key_event, &normalized_key_event);
-  if (!KeyEventUtil::GetKeyInformation(normalized_key_event, &key_info)) {
-    return false;
-  }
-
-  return std::binary_search(sorted_keys.begin(), sorted_keys.end(), key_info);
+  return false;
 }
 
 bool KeyInfoUtil::ContainsKeyInformation(

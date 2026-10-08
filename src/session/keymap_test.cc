@@ -1319,6 +1319,174 @@ TEST_F(KeyMapTest, AddCommand) {
   }
 }
 
+TEST_F(KeyMapTest, ModifierSidesCanBeGenericizedIndependently) {
+  KeyMap<PrecompositionState> keymap;
+
+  commands::KeyEvent binding;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl Shift", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::IME_OFF));
+
+  PrecompositionState::Commands command;
+
+  commands::KeyEvent left_left;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl LeftShift", &left_left));
+  EXPECT_TRUE(keymap.GetCommand(left_left, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_OFF);
+
+  commands::KeyEvent left_right;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl RightShift", &left_right));
+  EXPECT_TRUE(keymap.GetCommand(left_right, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_OFF);
+
+  commands::KeyEvent right_left;
+  ASSERT_TRUE(KeyParser::ParseKey("RightCtrl LeftShift", &right_left));
+  EXPECT_FALSE(keymap.GetCommand(right_left, &command));
+}
+
+TEST_F(KeyMapTest, GenericModifierOnlyBindingMatchesEitherSide) {
+  KeyMap<PrecompositionState> keymap;
+
+  commands::KeyEvent binding;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::IME_OFF));
+
+  PrecompositionState::Commands command;
+
+  commands::KeyEvent left_ctrl;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl", &left_ctrl));
+  EXPECT_TRUE(keymap.GetCommand(left_ctrl, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_OFF);
+
+  commands::KeyEvent right_ctrl;
+  ASSERT_TRUE(KeyParser::ParseKey("RightCtrl", &right_ctrl));
+  EXPECT_TRUE(keymap.GetCommand(right_ctrl, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_OFF);
+}
+
+TEST_F(KeyMapTest, ExplicitGenericCompositionShiftOverridesFallback) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tShift\tIMEOff\n");
+  KeyMapManager manager(config);
+
+  commands::KeyEvent shift;
+  ASSERT_TRUE(KeyParser::ParseKey("Shift", &shift));
+  CompositionState::Commands command = CompositionState::NONE;
+  ASSERT_TRUE(manager.GetCommandComposition(shift, &command));
+  EXPECT_EQ(command, CompositionState::IME_OFF);
+
+  commands::KeyEvent left_shift;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftShift", &left_shift));
+  ASSERT_TRUE(manager.GetCommandComposition(left_shift, &command));
+  EXPECT_EQ(command, CompositionState::IME_OFF);
+}
+
+TEST_F(KeyMapTest, CompositionShiftFallbackStillAppliesWhenNotConfigured) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl y\tIMEOff\n");
+  KeyMapManager manager(config);
+
+  commands::KeyEvent shift;
+  ASSERT_TRUE(KeyParser::ParseKey("Shift", &shift));
+  CompositionState::Commands command = CompositionState::NONE;
+  ASSERT_TRUE(manager.GetCommandComposition(shift, &command));
+  EXPECT_EQ(command, CompositionState::INSERT_CHARACTER);
+}
+
+TEST_F(KeyMapTest, SpecificCompositionShiftKeepsGenericFallback) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tLeftShift\tIMEOff\n");
+  KeyMapManager manager(config);
+
+  commands::KeyEvent left_shift;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftShift", &left_shift));
+  CompositionState::Commands command = CompositionState::NONE;
+  ASSERT_TRUE(manager.GetCommandComposition(left_shift, &command));
+  EXPECT_EQ(command, CompositionState::IME_OFF);
+
+  commands::KeyEvent right_shift;
+  ASSERT_TRUE(KeyParser::ParseKey("RightShift", &right_shift));
+  ASSERT_TRUE(manager.GetCommandComposition(right_shift, &command));
+  EXPECT_EQ(command, CompositionState::INSERT_CHARACTER);
+}
+
+TEST_F(KeyMapTest, CapsGenericBindingPrecedesPlainSideSpecific) {
+  KeyMap<PrecompositionState> keymap;
+  commands::KeyEvent binding;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl Delete", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::IME_ON));
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Delete", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::INSERT_SPACE));
+  ASSERT_TRUE(KeyParser::ParseKey("Caps Ctrl Delete", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::IME_OFF));
+
+  commands::KeyEvent pressed;
+  ASSERT_TRUE(KeyParser::ParseKey("Caps LeftCtrl Delete", &pressed));
+  PrecompositionState::Commands command = PrecompositionState::NONE;
+  ASSERT_TRUE(keymap.GetCommand(pressed, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_OFF);
+
+  ASSERT_TRUE(KeyParser::ParseKey("Caps RightCtrl Delete", &pressed));
+  ASSERT_TRUE(keymap.GetCommand(pressed, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_OFF);
+
+  ASSERT_TRUE(KeyParser::ParseKey("Caps LeftCtrl Delete", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::REVERT));
+  ASSERT_TRUE(keymap.GetCommand(pressed, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_OFF);
+  ASSERT_TRUE(KeyParser::ParseKey("Caps LeftCtrl Delete", &pressed));
+  ASSERT_TRUE(keymap.GetCommand(pressed, &command));
+  EXPECT_EQ(command, PrecompositionState::REVERT);
+
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl Delete", &pressed));
+  ASSERT_TRUE(keymap.GetCommand(pressed, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_ON);
+}
+
+TEST_F(KeyMapTest, CapsGenericSequencePrecedesPlainSideSpecificSequence) {
+  KeyMap<PrecompositionState> keymap;
+  commands::KeyEvent binding;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl Delete", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::IME_ON,
+                             CommandSequence{"IMEOn"}));
+  ASSERT_TRUE(KeyParser::ParseKey("Caps Ctrl Delete", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::IME_OFF,
+                             CommandSequence{"IMEOff"}));
+
+  commands::KeyEvent pressed;
+  ASSERT_TRUE(KeyParser::ParseKey("Caps LeftCtrl Delete", &pressed));
+  CommandSequence actual;
+  ASSERT_TRUE(keymap.GetCommandSequence(pressed, &actual));
+  ASSERT_EQ(actual.size(), 1);
+  EXPECT_EQ(actual[0], "IMEOff");
+}
+
+TEST_F(KeyMapTest, CapsCaseFlipFallbackRemainsAvailable) {
+  KeyMap<PrecompositionState> keymap;
+  commands::KeyEvent binding;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl A", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::IME_ON));
+
+  commands::KeyEvent pressed;
+  ASSERT_TRUE(KeyParser::ParseKey("Caps LeftCtrl a", &pressed));
+  PrecompositionState::Commands command = PrecompositionState::NONE;
+  ASSERT_TRUE(keymap.GetCommand(pressed, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_ON);
+
+  ASSERT_TRUE(KeyParser::ParseKey("Caps Ctrl a", &binding));
+  ASSERT_TRUE(keymap.AddRule(binding, PrecompositionState::IME_OFF));
+  ASSERT_TRUE(keymap.GetCommand(pressed, &command));
+  EXPECT_EQ(command, PrecompositionState::IME_OFF);
+}
+
 TEST_F(KeyMapTest, ZeroQuerySuggestion) {
   KeyMapManager manager;
   KeyMapManagerTestPeer manager_peer(manager);

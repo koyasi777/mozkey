@@ -62,6 +62,41 @@ bool None(uint32_t modifiers_to_be_tested, uint32_t modifiers_to_be_queried) {
   return !Any(modifiers_to_be_tested, modifiers_to_be_queried);
 }
 
+int CountSetBits(uint32_t value) {
+  int count = 0;
+  while (value != 0) {
+    count += value & 1;
+    value >>= 1;
+  }
+  return count;
+}
+
+// Returns the set of physical side states accepted by one stored binding.
+// Bit 0: no modifier, bit 1: left, bit 2: right, bit 3: both sides.
+uint8_t AcceptedPhysicalSideStates(uint32_t modifiers, uint32_t generic,
+                                   uint32_t left, uint32_t right) {
+  const bool has_generic = (modifiers & generic) != 0;
+  const bool has_left = (modifiers & left) != 0;
+  const bool has_right = (modifiers & right) != 0;
+
+  if (!has_generic && !has_left && !has_right) {
+    return 1u << 0;
+  }
+  if (has_left && has_right) {
+    return 1u << 3;
+  }
+  if (has_left) {
+    return 1u << 1;
+  }
+  if (has_right) {
+    return 1u << 2;
+  }
+
+  // Generic Ctrl / Shift / Alt means either side.  A physical event with both
+  // sides held also falls back to the generic representation.
+  return (1u << 1) | (1u << 2) | (1u << 3);
+}
+
 }  // namespace
 
 uint32_t KeyEventUtil::GetModifiers(const KeyEvent& key_event) {
@@ -97,6 +132,170 @@ bool KeyEventUtil::GetKeyInformation(const KeyEvent& key_event,
          (static_cast<KeyInformation>(key_code));
 
   return true;
+}
+
+absl::InlinedVector<KeyEvent, 9> KeyEventUtil::GetKeyEventLookupCandidates(
+    const KeyEvent& key_event) {
+  absl::InlinedVector<KeyEvent, 9> candidates;
+  absl::InlinedVector<KeyInformation, 9> candidate_keys;
+
+  const auto append_candidate =
+      [&candidates, &candidate_keys](const KeyEvent& candidate) {
+        KeyInformation key = 0;
+        if (!GetKeyInformation(candidate, &key)) {
+          return;
+        }
+        for (const KeyInformation existing_key : candidate_keys) {
+          if (existing_key == key) {
+            return;
+          }
+        }
+        candidate_keys.push_back(key);
+        candidates.push_back(candidate);
+      };
+
+  // The most specific Caps-qualified variants must precede the Caps-free
+  // fallbacks.  In particular, Caps Ctrl Delete must match a physical
+  // Caps LeftCtrl Delete before an unqualified LeftCtrl Delete rule.
+  const auto append_side_variants = [&append_candidate](
+                                        const KeyEvent& source_event) {
+    const uint32_t modifiers = GetModifiers(source_event);
+    absl::InlinedVector<uint32_t, 3> side_modifier_masks;
+    if ((modifiers & (KeyEvent::LEFT_CTRL | KeyEvent::RIGHT_CTRL)) != 0) {
+      side_modifier_masks.push_back(KeyEvent::LEFT_CTRL | KeyEvent::RIGHT_CTRL);
+    }
+    if ((modifiers & (KeyEvent::LEFT_SHIFT | KeyEvent::RIGHT_SHIFT)) != 0) {
+      side_modifier_masks.push_back(KeyEvent::LEFT_SHIFT | KeyEvent::RIGHT_SHIFT);
+    }
+    if ((modifiers & (KeyEvent::LEFT_ALT | KeyEvent::RIGHT_ALT)) != 0) {
+      side_modifier_masks.push_back(KeyEvent::LEFT_ALT | KeyEvent::RIGHT_ALT);
+    }
+
+    const uint32_t combination_count = 1u << side_modifier_masks.size();
+    for (size_t generalized_count = 0;
+         generalized_count <= side_modifier_masks.size();
+         ++generalized_count) {
+      for (uint32_t subset = 0; subset < combination_count; ++subset) {
+        if (CountSetBits(subset) != static_cast<int>(generalized_count)) {
+          continue;
+        }
+        uint32_t remove_modifiers = 0;
+        for (size_t i = 0; i < side_modifier_masks.size(); ++i) {
+          if ((subset & (1u << i)) != 0) {
+            remove_modifiers |= side_modifier_masks[i];
+          }
+        }
+        KeyEvent candidate;
+        RemoveModifiers(source_event, remove_modifiers, &candidate);
+        append_candidate(candidate);
+      }
+    }
+  };
+
+  // The first candidate is the original event (subset == 0).  Each
+  // subsequent candidate drops one or more physical side restrictions.
+  append_side_variants(key_event);
+
+  // Normalize CapsLock only when present.  Besides avoiding duplicate work
+  // on ordinary keystrokes, this preserves the established alphabetic case
+  // flip and keeps Caps-free fallbacks below Caps-qualified bindings.
+  if (GetModifiers(key_event) & KeyEvent::CAPS) {
+    KeyEvent normalized_key_event;
+    RemoveModifiers(key_event, KeyEvent::CAPS, &normalized_key_event);
+    if (key_event.has_key_code()) {
+      const uint32_t key_code = key_event.key_code();
+      if ('A' <= key_code && key_code <= 'Z') {
+        normalized_key_event.set_key_code(key_code + ('a' - 'A'));
+      } else if ('a' <= key_code && key_code <= 'z') {
+        normalized_key_event.set_key_code(key_code + ('A' - 'a'));
+      }
+    }
+    append_side_variants(normalized_key_event);
+  }
+
+  return candidates;
+}
+
+absl::InlinedVector<KeyInformation, 9>
+KeyEventUtil::GetKeyInformationLookupCandidates(const KeyEvent& key_event) {
+  absl::InlinedVector<KeyInformation, 9> result;
+  for (const KeyEvent& candidate : GetKeyEventLookupCandidates(key_event)) {
+    KeyInformation key = 0;
+    if (GetKeyInformation(candidate, &key)) {
+      result.push_back(key);
+    }
+  }
+  return result;
+}
+
+bool KeyEventUtil::KeyBindingPatternsOverlap(const KeyEvent& lhs,
+                                             const KeyEvent& rhs) {
+  KeyInformation lhs_key = 0;
+  KeyInformation rhs_key = 0;
+  if (!GetKeyInformation(lhs, &lhs_key) ||
+      !GetKeyInformation(rhs, &rhs_key)) {
+    return false;
+  }
+
+  constexpr KeyInformation kModifierInformationMask =
+      static_cast<KeyInformation>(0xFFFF) << 48;
+  const uint32_t lhs_modifiers = GetModifiers(lhs);
+  const uint32_t rhs_modifiers = GetModifiers(rhs);
+
+  const bool lhs_caps = (lhs_modifiers & KeyEvent::CAPS) != 0;
+  const bool rhs_caps = (rhs_modifiers & KeyEvent::CAPS) != 0;
+  if (lhs_caps == rhs_caps) {
+    // Without a Caps difference the physical key identity must match exactly.
+    if ((lhs_key & ~kModifierInformationMask) !=
+        (rhs_key & ~kModifierInformationMask)) {
+      return false;
+    }
+  } else {
+    // A Caps-qualified binding may overlap an unqualified fallback.  Mirror
+    // lookup's CapsLock normalization, including ASCII alphabet case flip;
+    // simply ignoring the CAPS modifier bit would create false conflicts.
+    const KeyEvent& caps_key_event = lhs_caps ? lhs : rhs;
+    const KeyInformation plain_key = lhs_caps ? rhs_key : lhs_key;
+    KeyEvent normalized_caps_key_event;
+    NormalizeModifiers(caps_key_event, &normalized_caps_key_event);
+    KeyInformation normalized_caps_key = 0;
+    if (!GetKeyInformation(normalized_caps_key_event, &normalized_caps_key) ||
+        (normalized_caps_key & ~kModifierInformationMask) !=
+            (plain_key & ~kModifierInformationMask)) {
+      return false;
+    }
+  }
+  constexpr uint32_t kSideAwareModifierMask =
+      KeyEvent::CTRL | KeyEvent::LEFT_CTRL | KeyEvent::RIGHT_CTRL |
+      KeyEvent::SHIFT | KeyEvent::LEFT_SHIFT | KeyEvent::RIGHT_SHIFT |
+      KeyEvent::ALT | KeyEvent::LEFT_ALT | KeyEvent::RIGHT_ALT;
+
+  // KEY_DOWN / KEY_UP and future non-side modifiers must agree.  Caps can
+  // differ because the Caps-qualified exact match and the normalized fallback
+  // are both candidates for a single physical event.
+  constexpr uint32_t kIgnorableForOverlap =
+      kSideAwareModifierMask | KeyEvent::CAPS;
+  if ((lhs_modifiers & ~kIgnorableForOverlap) !=
+      (rhs_modifiers & ~kIgnorableForOverlap)) {
+    return false;
+  }
+
+  const auto family_overlaps = [lhs_modifiers, rhs_modifiers](
+                                   uint32_t generic, uint32_t left,
+                                   uint32_t right) {
+    const uint8_t lhs_states =
+        AcceptedPhysicalSideStates(lhs_modifiers, generic, left, right);
+    const uint8_t rhs_states =
+        AcceptedPhysicalSideStates(rhs_modifiers, generic, left, right);
+    return (lhs_states & rhs_states) != 0;
+  };
+
+  return family_overlaps(KeyEvent::CTRL, KeyEvent::LEFT_CTRL,
+                         KeyEvent::RIGHT_CTRL) &&
+         family_overlaps(KeyEvent::SHIFT, KeyEvent::LEFT_SHIFT,
+                         KeyEvent::RIGHT_SHIFT) &&
+         family_overlaps(KeyEvent::ALT, KeyEvent::LEFT_ALT,
+                         KeyEvent::RIGHT_ALT);
 }
 
 void KeyEventUtil::NormalizeModifiers(const KeyEvent& key_event,

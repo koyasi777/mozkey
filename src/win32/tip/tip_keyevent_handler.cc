@@ -129,17 +129,40 @@ bool UpdateNoOpModeIndicatorKeyState(
   }
 
   if (is_key_down) {
+    KeyInformation matched_key = 0;
     if (IsNoOpModeIndicatorKey(
             key, behavior, current_state, result.has_key_information,
-            result.key_information)) {
-      private_context->SetPendingModeIndicatorKey(result.key_information);
+            result.key_information,
+            result.key_information_lookup_candidates, &matched_key)) {
+      // Keep the semantic configured binding as the pending identity rather
+      // than the current physical modifier snapshot.  For example, a
+      // configured generic Shift continues to mean the same binding when the
+      // physical state moves from LeftShift to LeftShift+RightShift.
+      //
+      // This identifies the configured binding only.  It intentionally does
+      // not define which key-up ends a modifier-only chord when both physical
+      // sides of the same modifier family are held; that edge case depends on
+      // the TSF key-up event flow and is outside the guaranteed binding
+      // semantics.
+      private_context->SetPendingModeIndicatorKey(matched_key);
     } else {
       private_context->ClearPendingModeIndicatorKey();
     }
     return false;
   }
 
-  if (!private_context->IsPendingModeIndicatorKey(result.key_information)) {
+  bool is_pending_mode_indicator_key =
+      private_context->IsPendingModeIndicatorKey(result.key_information);
+  if (!is_pending_mode_indicator_key) {
+    for (const KeyInformation candidate :
+         result.key_information_lookup_candidates) {
+      if (private_context->IsPendingModeIndicatorKey(candidate)) {
+        is_pending_mode_indicator_key = true;
+        break;
+      }
+    }
+  }
+  if (!is_pending_mode_indicator_key) {
     return false;
   }
 

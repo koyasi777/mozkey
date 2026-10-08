@@ -143,5 +143,49 @@ TEST(KeyInfoUtilTest, ContainsKey) {
   }
 }
 
+TEST(KeyInfoUtilTest, ContainsCapsQualifiedGenericSideBinding) {
+  std::vector<KeyInformation> keys;
+  PushKey("Caps Ctrl Delete", &keys);
+  std::sort(keys.begin(), keys.end());
+
+  KeyEvent physical_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Caps LeftCtrl Delete", &physical_event));
+  EXPECT_TRUE(KeyInfoUtil::ContainsKey(keys, physical_event));
+
+  ASSERT_TRUE(KeyParser::ParseKey("Caps RightCtrl Delete", &physical_event));
+  EXPECT_TRUE(KeyInfoUtil::ContainsKey(keys, physical_event));
+
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl Delete", &physical_event));
+  EXPECT_FALSE(KeyInfoUtil::ContainsKey(keys, physical_event));
+}
+
+TEST(KeyInfoUtilTest, ContainsKeyWithPartiallyGenericModifierSides) {
+  std::vector<KeyInformation> keys;
+  PushKey("LeftCtrl Shift", &keys);
+  std::sort(keys.begin(), keys.end());
+
+  {
+    KeyEvent key;
+    ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl LeftShift", &key));
+    EXPECT_TRUE(KeyInfoUtil::ContainsKey(keys, key));
+  }
+  {
+    KeyEvent key;
+    ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl RightShift", &key));
+    EXPECT_TRUE(KeyInfoUtil::ContainsKey(keys, key));
+  }
+  {
+    KeyEvent key;
+    ASSERT_TRUE(KeyParser::ParseKey("RightCtrl LeftShift", &key));
+    EXPECT_FALSE(KeyInfoUtil::ContainsKey(keys, key));
+  }
+  {
+    KeyEvent key;
+    ASSERT_TRUE(
+        KeyParser::ParseKey("LeftCtrl LeftShift RightShift", &key));
+    EXPECT_TRUE(KeyInfoUtil::ContainsKey(keys, key));
+  }
+}
+
 }  // namespace
 }  // namespace mozc

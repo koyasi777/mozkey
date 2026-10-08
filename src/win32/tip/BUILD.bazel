@@ -399,8 +399,10 @@ mozc_cc_library(
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        "//protocol:commands_cc_proto",
         "//win32/base:input_state",
         "//win32/base:keyboard",
+        "@com_google_absl//absl/types:span",
     ],
 )
 

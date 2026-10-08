@@ -216,6 +216,143 @@ TEST(KeyEventUtilTest, NormalizeModifiers) {
   }
 }
 
+TEST(KeyEventUtilTest, GetKeyEventLookupCandidates) {
+  KeyEvent key_event;
+  ASSERT_TRUE(
+      KeyParser::ParseKey("LeftCtrl RightShift Delete", &key_event));
+
+  const auto candidates =
+      KeyEventUtil::GetKeyEventLookupCandidates(key_event);
+  constexpr absl::string_view kExpected[] = {
+      "LeftCtrl RightShift Delete",
+      "Ctrl RightShift Delete",
+      "LeftCtrl Shift Delete",
+      "Ctrl Shift Delete",
+  };
+
+  ASSERT_EQ(candidates.size(), std::size(kExpected));
+  for (size_t i = 0; i < std::size(kExpected); ++i) {
+    KeyEvent expected;
+    ASSERT_TRUE(KeyParser::ParseKey(kExpected[i], &expected));
+    EXPECT_EQ_KEY_EVENT(candidates[i], expected);
+  }
+}
+
+TEST(KeyEventUtilTest, CapsQualifiedSideCandidatesPrecedeCapsFallbacks) {
+  KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Caps LeftCtrl RightShift Delete", &key_event));
+  const auto candidates = KeyEventUtil::GetKeyEventLookupCandidates(key_event);
+  constexpr absl::string_view kExpected[] = {
+      "Caps LeftCtrl RightShift Delete",
+      "Caps Ctrl RightShift Delete",
+      "Caps LeftCtrl Shift Delete",
+      "Caps Ctrl Shift Delete",
+      "LeftCtrl RightShift Delete",
+      "Ctrl RightShift Delete",
+      "LeftCtrl Shift Delete",
+      "Ctrl Shift Delete",
+  };
+  ASSERT_EQ(candidates.size(), std::size(kExpected));
+  for (size_t i = 0; i < std::size(kExpected); ++i) {
+    KeyEvent expected;
+    ASSERT_TRUE(KeyParser::ParseKey(kExpected[i], &expected));
+    EXPECT_EQ_KEY_EVENT(candidates[i], expected);
+  }
+}
+
+TEST(KeyEventUtilTest, CapsQualifiedSideCandidatesFlipAlphabeticCase) {
+  KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("Caps LeftCtrl a", &key_event));
+  const auto candidates = KeyEventUtil::GetKeyEventLookupCandidates(key_event);
+  constexpr absl::string_view kExpected[] = {
+      "Caps LeftCtrl a", "Caps Ctrl a", "LeftCtrl A", "Ctrl A",
+  };
+  ASSERT_EQ(candidates.size(), std::size(kExpected));
+  for (size_t i = 0; i < std::size(kExpected); ++i) {
+    KeyEvent expected;
+    ASSERT_TRUE(KeyParser::ParseKey(kExpected[i], &expected));
+    EXPECT_EQ_KEY_EVENT(candidates[i], expected);
+  }
+}
+
+TEST(KeyEventUtilTest, UnqualifiedSideCandidatesRemainUnchanged) {
+  KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey("LeftCtrl Delete", &key_event));
+  const auto candidates = KeyEventUtil::GetKeyEventLookupCandidates(key_event);
+  constexpr absl::string_view kExpected[] = {
+      "LeftCtrl Delete", "Ctrl Delete",
+  };
+  ASSERT_EQ(candidates.size(), std::size(kExpected));
+  for (size_t i = 0; i < std::size(kExpected); ++i) {
+    KeyEvent expected;
+    ASSERT_TRUE(KeyParser::ParseKey(kExpected[i], &expected));
+    EXPECT_EQ_KEY_EVENT(candidates[i], expected);
+  }
+}
+
+TEST(KeyEventUtilTest,
+     GetKeyInformationLookupCandidatesIncludesBothSideGenericFallback) {
+  KeyEvent key_event;
+  ASSERT_TRUE(KeyParser::ParseKey(
+      "RightCtrl LeftShift RightShift Delete", &key_event));
+
+  const auto actual =
+      KeyEventUtil::GetKeyInformationLookupCandidates(key_event);
+
+  constexpr absl::string_view kExpected[] = {
+      "RightCtrl LeftShift RightShift Delete",
+      "Ctrl LeftShift RightShift Delete",
+      "RightCtrl Shift Delete",
+      "Ctrl Shift Delete",
+  };
+  ASSERT_EQ(actual.size(), std::size(kExpected));
+
+  for (size_t i = 0; i < std::size(kExpected); ++i) {
+    KeyEvent expected_event;
+    ASSERT_TRUE(KeyParser::ParseKey(kExpected[i], &expected_event));
+    KeyInformation expected = 0;
+    ASSERT_TRUE(KeyEventUtil::GetKeyInformation(expected_event, &expected));
+    EXPECT_EQ(actual[i], expected);
+  }
+}
+
+TEST(KeyEventUtilTest, KeyBindingPatternsOverlap) {
+  struct TestData {
+    absl::string_view lhs;
+    absl::string_view rhs;
+    bool overlaps;
+  };
+  constexpr TestData kTestData[] = {
+      {"Ctrl", "LeftCtrl", true},
+      {"Ctrl", "RightCtrl", true},
+      {"LeftCtrl", "RightCtrl", false},
+      {"LeftCtrl Shift", "Ctrl RightShift", true},
+      {"LeftCtrl LeftShift", "Ctrl RightShift", false},
+      {"LeftCtrl Shift Delete", "Ctrl RightShift Delete", true},
+      {"LeftCtrl Shift Delete", "Ctrl RightShift Space", false},
+      {"LeftCtrl", "LeftCtrl Shift", false},
+      {"Caps Ctrl Delete", "Ctrl Delete", true},
+      {"Caps LeftCtrl Delete", "Ctrl Delete", true},
+      {"Caps LeftCtrl Delete", "RightCtrl Delete", false},
+      {"Caps Ctrl Delete", "Ctrl Space", false},
+      {"Caps Ctrl a", "Ctrl A", true},
+      {"Caps Ctrl A", "Ctrl a", true},
+      {"Caps Ctrl a", "Ctrl a", false},
+      {"Caps Ctrl A", "Ctrl A", false},
+      {"Ctrl a", "Ctrl A", false},
+  };
+
+  for (const TestData &data : kTestData) {
+    SCOPED_TRACE(absl::StrFormat("%s / %s", data.lhs, data.rhs));
+    KeyEvent lhs;
+    KeyEvent rhs;
+    ASSERT_TRUE(KeyParser::ParseKey(data.lhs, &lhs));
+    ASSERT_TRUE(KeyParser::ParseKey(data.rhs, &rhs));
+    EXPECT_EQ(KeyEventUtil::KeyBindingPatternsOverlap(lhs, rhs),
+              data.overlaps);
+  }
+}
+
 TEST(KeyEventUtilTest, NormalizeNumpadKey) {
   constexpr struct NormalizeNumpadKeyTestData {
     absl::string_view from;
