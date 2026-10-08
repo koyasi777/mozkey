@@ -5,10 +5,13 @@
 
 #include <algorithm>
 
+#include <QCoreApplication>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QListWidgetItem>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -108,9 +111,47 @@ CommandSequenceEditorDialog::CommandSequenceEditorDialog(
   connect(available_list_, &QListWidget::itemDoubleClicked,
           this, [this](QListWidgetItem*) { AddSelectedCommand(); });
   connect(sequence_list_, &QListWidget::itemDoubleClicked,
-          this, [this](QListWidgetItem*) { RemoveSelectedCommand(); });
-  connect(button_box, &QDialogButtonBox::accepted,
-          this, &QDialog::accept);
+          this, [this](QListWidgetItem* item) {
+            if (item == nullptr) return;
+            const QString raw = item->data(kRawCommandRole).toString();
+            if (!raw.startsWith(QStringLiteral("Delay("))) {
+              RemoveSelectedCommand();  // Preserve existing double-click UX.
+              return;
+            }
+            bool valid = false;
+            const int old_ms = raw.mid(6, raw.size() - 7).toInt(&valid);
+            if (!valid) return;
+            bool ok = false;
+            const int ms = QInputDialog::getInt(
+                this,
+                QCoreApplication::translate("mozc::gui::KeyMapEditorDialog", "Delay"),
+                QCoreApplication::translate("mozc::gui::KeyMapEditorDialog", "Delay (ms)"),
+                old_ms, 0, 5000, 1, &ok);
+            if (ok) {
+              const QString updated = QStringLiteral("Delay(%1)").arg(ms);
+              item->setData(kRawCommandRole, updated);
+              item->setText(DisplayNameForRawCommand(updated));
+            }
+          });
+  connect(button_box, &QDialogButtonBox::accepted, this, [this]() {
+    for (int i = 0; i < sequence_list_->count(); ++i) {
+      const QString raw =
+          sequence_list_->item(i)->data(kRawCommandRole).toString();
+      if ((i == 0 && raw.startsWith(QStringLiteral("Delay("))) ||
+          (i + 1 < sequence_list_->count() &&
+           raw == QStringLiteral("ForceZenzLiveCorrection"))) {
+        QMessageBox::warning(
+            this,
+            QCoreApplication::translate("mozc::gui::KeyMapEditorDialog",
+                                        "Invalid command sequence"),
+            QCoreApplication::translate(
+                "mozc::gui::KeyMapEditorDialog",
+                "Delay cannot be first; manual Zenz correction must be last."));
+        return;
+      }
+    }
+    accept();
+  });
   connect(button_box, &QDialogButtonBox::rejected,
           this, &QDialog::reject);
 
@@ -163,7 +204,22 @@ void CommandSequenceEditorDialog::AddSelectedCommand() {
     return;
   }
 
-  AddSequenceCommand(item->data(kRawCommandRole).toString());
+  QString raw = item->data(kRawCommandRole).toString();
+  if (raw == QStringLiteral("Delay")) {
+    if (sequence_list_->count() == 0) {
+      // The first command determines the keymap's initial input state.
+      // Delay is deliberately only a continuation step.
+      return;
+    }
+    bool ok = false;
+    const int ms = QInputDialog::getInt(
+        this, QCoreApplication::translate("mozc::gui::KeyMapEditorDialog", "Delay"),
+        QCoreApplication::translate("mozc::gui::KeyMapEditorDialog", "Delay (ms)"),
+        700, 0, 5000, 1, &ok);
+    if (!ok) return;
+    raw = QStringLiteral("Delay(%1)").arg(ms);
+  }
+  AddSequenceCommand(raw);
 }
 
 void CommandSequenceEditorDialog::RemoveSelectedCommand() {
@@ -227,6 +283,15 @@ QString CommandSequenceEditorDialog::DisplayNameForRawCommand(
   const auto it = raw_to_display_.find(raw_command);
   if (it != raw_to_display_.end()) {
     return it.value();
+  }
+  if (raw_command == QStringLiteral("Delay")) {
+    return QCoreApplication::translate("mozc::gui::KeyMapEditorDialog", "Delay");
+  }
+  if (raw_command.startsWith(QStringLiteral("Delay(")) &&
+      raw_command.endsWith(QLatin1Char(')'))) {
+    return QCoreApplication::translate(
+        "mozc::gui::KeyMapEditorDialog", "Delay %1 ms")
+        .arg(raw_command.mid(6, raw_command.size() - 7));
   }
   return raw_command;
 }

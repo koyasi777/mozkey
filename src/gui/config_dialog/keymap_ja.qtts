@@ -259,5 +259,29 @@
         <source>DeleteSelectedCandidate</source>
         <translation>選択候補を履歴から削除／候補を非表示</translation>
     </message>
+    <message>
+        <source>ForceZenzLiveCorrection</source>
+        <translation>Zenz補正を実行（未確定文字に対して）</translation>
+    </message>
+    <message>
+        <source>Delay</source>
+        <translation>遅延</translation>
+    </message>
+    <message>
+        <source>Delay %1 ms</source>
+        <translation>遅延 %1ms</translation>
+    </message>
+    <message>
+        <source>Delay (ms)</source>
+        <translation>遅延時間（ミリ秒）</translation>
+    </message>
+    <message>
+        <source>Invalid command sequence</source>
+        <translation>無効なコマンド列</translation>
+    </message>
+    <message>
+        <source>Delay cannot be first; manual Zenz correction must be last.</source>
+        <translation>遅延は先頭に置けません。手動Zenz補正は最後に配置してください。</translation>
+    </message>
 </context>
 </TS>

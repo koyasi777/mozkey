@@ -41,6 +41,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -473,8 +474,7 @@ class TipTextServiceImpl
         thread_context_(nullptr),
         task_window_handle_(nullptr),
         theme_window_handle_(nullptr),
-        renderer_callback_window_handle_(nullptr),
-        has_pending_delayed_session_command_(false) {}
+        renderer_callback_window_handle_(nullptr) {}
 
   static bool OnDllProcessAttach(HMODULE module_handle) {
     if (!RegisterWindowClass(module_handle, kTaskWindowClassName,
@@ -1070,18 +1070,34 @@ class TipTextServiceImpl
       return;
     }
 
-    pending_delayed_session_context_ = context;
-    pending_delayed_session_command_ = command;
-    has_pending_delayed_session_command_ = true;
+    // Use an independent timer per callback. The previous single-slot timer
+    // silently replaced an earlier Zenz poll when a user macro added a delay.
+    // Bound outstanding timers to avoid retaining arbitrarily many COM TSF
+    // contexts if a key repeats rapidly or a client stops dispatching timers.
+    constexpr size_t kMaxPendingDelayedSessionCommands = 512;
+    while (delayed_session_commands_.size() >=
+           kMaxPendingDelayedSessionCommands) {
+      const auto oldest = delayed_session_commands_.begin();
+      ::KillTimer(task_window_handle_, oldest->first);
+      delayed_session_commands_.erase(oldest);
+    }
+    UINT_PTR id = next_delayed_session_timer_id_++;
+    if (next_delayed_session_timer_id_ < kDelayedSessionCommandTimerId + 1) {
+      next_delayed_session_timer_id_ = kDelayedSessionCommandTimerId + 1;
+    }
+    while (delayed_session_commands_.contains(id) || id == 0 ||
+           id == kDelayedSessionCommandTimerId) {
+      id = next_delayed_session_timer_id_++;
+    }
+    PendingDelayedSessionCommand pending;
+    pending.context = context;
+    pending.command = command;
+    delayed_session_commands_.emplace(id, std::move(pending));
 
-    ::KillTimer(task_window_handle_, kDelayedSessionCommandTimerId);
-
-    const UINT delay =
-        delay_millisec == 0 ? 1 : static_cast<UINT>(delay_millisec);
-    ::SetTimer(task_window_handle_,
-              kDelayedSessionCommandTimerId,
-              delay,
-              nullptr);
+    const UINT delay = std::max<UINT>(1, delay_millisec);
+    if (::SetTimer(task_window_handle_, id, delay, nullptr) == 0) {
+      delayed_session_commands_.erase(id);
+    }
   }
 
   void UpdateLangbar(bool enabled, uint32_t mozc_mode) override {
@@ -1452,10 +1468,10 @@ class TipTextServiceImpl
       return S_FALSE;
     }
 
-    ::KillTimer(task_window_handle_, kDelayedSessionCommandTimerId);
-    has_pending_delayed_session_command_ = false;
-    pending_delayed_session_command_.Clear();
-    pending_delayed_session_context_.reset();
+    for (const auto& [id, pending] : delayed_session_commands_) {
+      ::KillTimer(task_window_handle_, id);
+    }
+    delayed_session_commands_.clear();
 
     ::DestroyWindow(task_window_handle_);
     task_window_handle_ = nullptr;
@@ -1526,8 +1542,7 @@ class TipTextServiceImpl
       }
 
       if (message == WM_TIMER &&
-          wparam == kDelayedSessionCommandTimerId) {
-        self->OnDelayedSessionCommandTimer();
+          self->OnDelayedSessionCommandTimer(static_cast<UINT_PTR>(wparam))) {
         return 0;
       }
     }
@@ -1535,30 +1550,17 @@ class TipTextServiceImpl
     return ::DefWindowProcW(window_handle, message, wparam, lparam);
   }
 
-  void OnDelayedSessionCommandTimer() {
-    if (!::IsWindow(task_window_handle_)) {
-      return;
+  bool OnDelayedSessionCommandTimer(UINT_PTR id) {
+    auto it = delayed_session_commands_.find(id);
+    if (it == delayed_session_commands_.end()) return false;
+    ::KillTimer(task_window_handle_, id);
+    PendingDelayedSessionCommand pending = std::move(it->second);
+    delayed_session_commands_.erase(it);
+    if (pending.context) {
+      TipEditSession::SendSessionCommandAsync(
+          this, pending.context.get(), pending.command);
     }
-
-    ::KillTimer(task_window_handle_, kDelayedSessionCommandTimerId);
-
-    if (!has_pending_delayed_session_command_) {
-      return;
-    }
-
-    commands::SessionCommand command = pending_delayed_session_command_;
-    wil::com_ptr_nothrow<ITfContext> context =
-        pending_delayed_session_context_;
-
-    has_pending_delayed_session_command_ = false;
-    pending_delayed_session_command_.Clear();
-    pending_delayed_session_context_.reset();
-
-    if (!context) {
-      return;
-    }
-
-    TipEditSession::SendSessionCommandAsync(this, context.get(), command);
+    return true;
   }
 
   void OnUpdateUI() {
@@ -1699,9 +1701,12 @@ class TipTextServiceImpl
   HWND theme_window_handle_;
   HWND renderer_callback_window_handle_;
 
-  bool has_pending_delayed_session_command_;
-  commands::SessionCommand pending_delayed_session_command_;
-  wil::com_ptr_nothrow<ITfContext> pending_delayed_session_context_;
+  struct PendingDelayedSessionCommand {
+    commands::SessionCommand command;
+    wil::com_ptr_nothrow<ITfContext> context;
+  };
+  UINT_PTR next_delayed_session_timer_id_ = kDelayedSessionCommandTimerId + 1;
+  std::map<UINT_PTR, PendingDelayedSessionCommand> delayed_session_commands_;
 };
 
 }  // namespace

@@ -44,6 +44,7 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/strings/match.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
@@ -186,6 +187,25 @@ const size_t kMultipleUndoMaxSize = 10;
 // user segment history when the user cancels a conversion and immediately
 // commits the restored hiragana preedit.
 constexpr size_t kMinRerankedPreeditCommitCharsAfterConvertCancel = 2;
+
+// The keymap uses integer milliseconds, like the normal live conversion UI.
+// Delay(0) is a no-op; all positive delays suspend the command sequence.
+std::optional<uint32_t> ParseKeymapDelay(absl::string_view command) {
+  if (!command.starts_with("Delay(") || !command.ends_with(")")) {
+    return std::nullopt;
+  }
+  const absl::string_view digits = command.substr(6, command.size() - 7);
+  if (digits.empty() || digits.size() > 4 ||
+      !std::all_of(digits.begin(), digits.end(),
+                   [](char c) { return c >= '0' && c <= '9'; })) {
+    return std::nullopt;
+  }
+  uint32_t delay = 0;
+  if (!absl::SimpleAtoi(digits, &delay) || delay > 5000) {
+    return std::nullopt;
+  }
+  return delay;
+}
 
 // Default live conversion debounce delay. The user-visible value is stored in
 // Config::live_conversion_delay_msec.
@@ -1847,6 +1867,28 @@ bool Session::SendCommand(commands::Command* command) {
   TransformInput(command->mutable_input());
 
   const commands::SessionCommand& session_command = command->input().command();
+  // SEND_COMMAND bypasses SendKey's generation invalidation. Candidate
+  // selection/highlighting, cursor movement, and other client-side actions
+  // must cancel a pending macro too, even when the reading stays unchanged.
+  // Only query commands, timer callbacks, and the expected TSF reconversion
+  // acknowledgement are allowed to preserve the suspended continuation.
+  switch (session_command.type()) {
+    case commands::SessionCommand::NONE:
+    case commands::SessionCommand::GET_STATUS:
+    case commands::SessionCommand::APPLY_LIVE_CONVERSION:
+    case commands::SessionCommand::APPLY_ZENZ_LIVE_CORRECTION:
+    case commands::SessionCommand::RESUME_COMMAND_SEQUENCE:
+      break;
+    case commands::SessionCommand::CONVERT_REVERSE:
+      if (command_sequence_waits_for_reconversion_) break;
+      [[fallthrough]];
+    default:
+      ++command_sequence_generation_;
+      pending_command_sequence_.clear();
+      pending_command_sequence_key_.clear();
+      command_sequence_waits_for_reconversion_ = false;
+      break;
+  }
   HandlePendingDirectCommitLearningForSessionCommand(session_command.type());
   HandlePendingZenzFeedbackForSessionCommand(session_command.type());
 
@@ -1955,6 +1997,9 @@ bool Session::SendCommand(commands::Command* command) {
 
     case commands::SessionCommand::APPLY_ZENZ_LIVE_CORRECTION:
       result = ApplyZenzLiveCorrection(command);
+      break;
+    case commands::SessionCommand::RESUME_COMMAND_SEQUENCE:
+      result = ResumeCommandSequence(command);
       break;
 
     case commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE:
@@ -2117,6 +2162,12 @@ bool Session::TestSendKey(commands::Command* command) {
 }
 
 bool Session::SendKey(commands::Command* command) {
+  // A new physical key always invalidates a suspended macro, including a
+  // reconversion continuation that has not reached the TSF callback yet.
+  ++command_sequence_generation_;
+  pending_command_sequence_.clear();
+  pending_command_sequence_key_.clear();
+  command_sequence_waits_for_reconversion_ = false;
   UpdateTime();
   UpdatePreferences(command);
   TransformInput(command->mutable_input());
@@ -2225,9 +2276,46 @@ bool Session::ExecuteCommandSequenceWithInitialOutput(
     executed = true;
   }
 
-  for (const std::string& command_name : command_sequence) {
-    if (command_name.empty()) {
-      continue;
+  for (size_t i = 0; i < command_sequence.size(); ++i) {
+    const std::string& command_name = command_sequence[i];
+    if (command_name.empty()) continue;
+
+    const std::optional<uint32_t> delay = ParseKeymapDelay(command_name);
+    if (delay.has_value()) {
+      if (*delay == 0 || i + 1 == command_sequence.size()) continue;
+      // An earlier command may already have installed an asynchronous
+      // callback (live conversion, Zenz, undo, etc.). Never overwrite it with
+      // RESUME_COMMAND_SEQUENCE: preserving that callback is more important
+      // than running unsupported chained steps. Malformed imported keymaps
+      // can reach here even if the normal keymap validator rejects them.
+      if (final_output.has_callback()) {
+        LOG(WARNING) << "Skipping keymap Delay after asynchronous callback";
+        final_output.set_consumed(consumed);
+        if (has_accumulated_result) {
+          *final_output.mutable_result() = accumulated_result;
+        }
+        *command->mutable_output() = final_output;
+        return true;
+      }
+      pending_command_sequence_.assign(command_sequence.begin() + i + 1,
+                                       command_sequence.end());
+      command_sequence_waits_for_reconversion_ = false;
+      pending_command_sequence_key_ = context_->composer().GetQueryForConversion();
+      commands::Output::Callback* callback =
+          final_output.mutable_callback();
+      callback->mutable_session_command()->set_type(
+          commands::SessionCommand::RESUME_COMMAND_SEQUENCE);
+      callback->mutable_session_command()->set_command_sequence_generation(
+          ++command_sequence_generation_);
+      callback->set_delay_millisec(*delay);
+      // Delaying the remainder must not change the original key's
+      // pass-through semantics (e.g. a half-width Space).
+      final_output.set_consumed(consumed);
+      if (has_accumulated_result) {
+        *final_output.mutable_result() = accumulated_result;
+      }
+      *command->mutable_output() = final_output;
+      return true;
     }
 
     command->mutable_output()->Clear();
@@ -2253,6 +2341,24 @@ bool Session::ExecuteCommandSequenceWithInitialOutput(
                             &has_accumulated_result,
                             &accumulated_result,
                             &final_output);
+
+    if (command_name == "ReconvertSelectionOrInsertSpace" &&
+        i + 1 < command_sequence.size() &&
+        step_output.has_callback() &&
+        step_output.callback().has_session_command() &&
+        step_output.callback().session_command().type() ==
+            commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE) {
+      pending_command_sequence_.assign(command_sequence.begin() + i + 1,
+                                       command_sequence.end());
+      command_sequence_waits_for_reconversion_ = true;
+      pending_command_sequence_key_.clear();
+      ++command_sequence_generation_;
+      // The client still decides whether a selection is present. In the
+      // unselected case the original half-width Space must pass through.
+      final_output.set_consumed(consumed);
+      *command->mutable_output() = final_output;
+      return true;
+    }
   }
 
   if (!executed) {
@@ -2265,6 +2371,47 @@ bool Session::ExecuteCommandSequenceWithInitialOutput(
   }
   *command->mutable_output() = final_output;
   return true;
+}
+
+bool Session::ResumeCommandSequence(commands::Command* command) {
+  command->mutable_output()->set_consumed(true);
+  const commands::SessionCommand& resume = command->input().command();
+  if (!resume.has_command_sequence_generation() ||
+      resume.command_sequence_generation() != command_sequence_generation_ ||
+      pending_command_sequence_.empty()) {
+    return IgnoreStaleDelayedLiveConversion(command);
+  }
+  if (!command_sequence_waits_for_reconversion_ &&
+      context_->composer().GetQueryForConversion() !=
+          pending_command_sequence_key_) {
+    pending_command_sequence_.clear();
+    pending_command_sequence_key_.clear();
+    return IgnoreStaleDelayedLiveConversion(command);
+  }
+  if (command_sequence_waits_for_reconversion_) {
+    // Never resume client reconversion until TSF has made a real preedit.
+    if (context_->state() != ImeContext::CONVERSION) {
+      pending_command_sequence_.clear();
+      command_sequence_waits_for_reconversion_ = false;
+      return IgnoreStaleDelayedLiveConversion(command);
+    }
+  }
+  keymap::CommandSequence remaining = std::move(pending_command_sequence_);
+  pending_command_sequence_.clear();
+  command_sequence_waits_for_reconversion_ = false;
+  pending_command_sequence_key_.clear();
+  ++command_sequence_generation_;
+  // A continuation may only install a new callback, not emit fresh preedit.
+  // The baseline output must be carried forward, or the Windows TSF client
+  // will interpret an empty output as EndComposition.
+  if (!remaining.empty() && remaining.front() == "ForceZenzLiveCorrection") {
+    // ForceZenzLiveCorrection builds its own baseline output. Avoid a second
+    // PopOutput in one callback, which may duplicate TSF composition text.
+    return ExecuteCommandSequence(remaining, command);
+  }
+  OutputFromState(command);
+  const commands::Output initial = command->output();
+  return ExecuteCommandSequenceWithInitialOutput(remaining, &initial, command);
 }
 
 bool Session::ExecuteCommandName(const std::string& command_name,
@@ -2413,6 +2560,8 @@ bool Session::ExecuteCompositionCommand(
     keymap::CompositionState::Commands key_command,
     commands::Command* command) {
   switch (key_command) {
+    case keymap::CompositionState::FORCE_ZENZ_LIVE_CORRECTION:
+      return ForceZenzLiveCorrection(command);
     case keymap::CompositionState::INSERT_CHARACTER:
       return InsertCharacter(command);
 
@@ -2544,6 +2693,8 @@ bool Session::ExecuteConversionCommand(
     keymap::ConversionState::Commands key_command,
     commands::Command* command) {
   switch (key_command) {
+    case keymap::ConversionState::FORCE_ZENZ_LIVE_CORRECTION:
+      return ForceZenzLiveCorrection(command);
     case keymap::ConversionState::INSERT_CHARACTER:
       return InsertCharacter(command);
 
@@ -3311,6 +3462,11 @@ bool Session::ConvertReverse(commands::Command* command) {
   SetSessionState(ImeContext::CONVERSION, context_.get());
   context_->mutable_converter()->SetCandidateListVisible(true);
   Output(command);
+  if (command_sequence_waits_for_reconversion_ &&
+      !pending_command_sequence_.empty()) {
+    command->mutable_output()->set_command_sequence_resume_generation(
+        command_sequence_generation_);
+  }
   return true;
 }
 
@@ -4647,6 +4803,16 @@ bool Session::MaybeScheduleLiveConversion(
 
 bool Session::IgnoreStaleDelayedLiveConversion(commands::Command* command) {
   command->mutable_output()->set_consumed(true);
+
+  // Synthetic Zenz preedit is not the converter's PopOutput. Re-emitting
+  // ordinary conversion here would visually undo a newer manual correction.
+  if (HasVisibleZenzLiveCorrection()) {
+    return OutputZenzLiveCorrection(zenz_live_value_, command);
+  }
+  if (pending_zenz_live_.pending && live_conversion_active_ &&
+      context_->state() == ImeContext::CONVERSION) {
+    return OutputCurrentLiveConversionWithZenzPending(command);
+  }
 
   // A stale delayed callback must not return an empty Output. In TSF, an empty
   // consumed Output may clear the visible composition even though the server-side
@@ -6443,14 +6609,70 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
   return false;
 }
 
-bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
+bool Session::ForceZenzLiveCorrection(commands::Command* command) {
+  // Explicit user action. Build a regular Mozc conversion as the baseline,
+  // then run the existing asynchronous Zenz validation/adoption pipeline.
+  // A manual request must never convert or export a password preedit.
+  if (context_->composer().GetInputFieldType() == commands::Context::PASSWORD) {
+    return DoNothing(command);
+  }
+  const bool previously_live = live_conversion_active_;
+  if (context_->state() == ImeContext::COMPOSITION) {
+    if (context_->composer().GetQueryForConversion().empty()) {
+      return DoNothing(command);
+    }
+    // This key may arrive before the auto live-conversion debounce fires.
+    // Invalidate its generation before the manual conversion changes state;
+    // otherwise the old APPLY_LIVE_CONVERSION timer may repaint our preedit.
+    CancelPendingLiveConversion();
+    if (!context_->mutable_converter()->Convert(
+            context_->composer(), context_->client_context())) {
+      return DoNothing(command);
+    }
+    SetSessionState(ImeContext::CONVERSION, context_.get());
+  } else if (context_->state() != ImeContext::CONVERSION) {
+    return DoNothing(command);
+  }
+
+  command->mutable_output()->set_consumed(true);
+  Output(command);
+  const std::string key = context_->composer().GetQueryForConversion();
+  if (key.empty() || !command->output().has_preedit()) {
+    return true;
+  }
+  std::string unused_key;
+  std::string mozc_value;
+  ExtractPreeditKeyAndValue(command->output().preedit(), &unused_key,
+                            &mozc_value);
+  if (mozc_value.empty()) return true;
+
+  // Clear any earlier auto request before creating the explicit generation.
+  ClearZenzLiveCorrectionState();
+  live_conversion_active_ = true;
+  live_conversion_key_ = key;
+  live_conversion_preedit_ = context_->composer().GetStringForPreedit();
+  live_conversion_value_ = mozc_value;
+  live_conversion_preedit_output_ = command->output().preedit();
+  live_conversion_protected_spans_ = BuildZenzProtectedConversionSpans(
+      context_->converter(), command->output(), key, mozc_value);
+  if (!MaybeScheduleZenzLiveCorrection(command, /*forced=*/true) &&
+      !previously_live) {
+    // Rejected by the regular privacy/eligibility gates. Preserve ordinary
+    // conversion semantics rather than leaving a spurious live-conversion mode.
+    ClearLiveConversionState();
+  }
+  return true;
+}
+
+bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command,
+                                              const bool forced) {
   const config::Config& config = context_->GetConfig();
 
-  if (!config.use_zenz_live_correction()) {
+  if (!forced && !config.use_zenz_live_correction()) {
     return false;
   }
 
-  if (!config.use_live_conversion()) {
+  if (!forced && !config.use_live_conversion()) {
     return false;
   }
 
@@ -6493,7 +6715,7 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
   }
 
   const uint32_t min_key_len = GetZenzLiveCorrectionMinKeyLength(config);
-  if (Util::CharsLen(live_conversion_key_) < min_key_len) {
+  if (!forced && Util::CharsLen(live_conversion_key_) < min_key_len) {
     return false;
   }
 
@@ -6571,7 +6793,8 @@ bool Session::MaybeScheduleZenzLiveCorrection(commands::Command* command) {
       " protected_prompt_replacements=",
       protected_prompt.placeholder_count));
 
-  const uint32_t delay_msec = GetZenzLiveCorrectionDelayMsec(config);
+  const uint32_t delay_msec =
+      forced ? 0 : GetZenzLiveCorrectionDelayMsec(config);
   if (delay_msec == 0) {
     ZenzDebugOutput("[zenz] start immediately");
     // The current command already contains the freshly generated live

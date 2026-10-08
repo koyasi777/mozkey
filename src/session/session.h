@@ -319,6 +319,13 @@ class Session {
     std::unique_ptr<ImeContext> context;
   };
 
+  // One continuation per IME session. Invalidated on every physical key.
+  // Never retain a pointer to a stack-allocated commands::Command.
+  keymap::CommandSequence pending_command_sequence_;
+  uint32_t command_sequence_generation_ = 0;
+  bool command_sequence_waits_for_reconversion_ = false;
+  std::string pending_command_sequence_key_;
+
   std::unique_ptr<ImeContext> context_;
 
   // True only while ordinary composition is displaying a passive suggestion
@@ -769,7 +776,10 @@ class Session {
   // zenz live correction.
   bool MaybeApplyZenzFeedbackLiveCorrection(
       mozc::commands::Command* command);
-  bool MaybeScheduleZenzLiveCorrection(mozc::commands::Command* command);
+  bool MaybeScheduleZenzLiveCorrection(mozc::commands::Command* command,
+                                       bool forced = false);
+  bool ForceZenzLiveCorrection(mozc::commands::Command* command);
+  bool ResumeCommandSequence(mozc::commands::Command* command);
   void AttachZenzLiveCorrectionStartCallback(
       mozc::commands::Command* command) const;
   void AttachZenzLiveCorrectionPollCallback(

@@ -148,6 +148,9 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_VARIABLE(zenz_feedback_store_);
   PEER_VARIABLE(pending_zenz_feedback_);
   PEER_VARIABLE(pending_direct_commit_learning_);
+  PEER_VARIABLE(pending_command_sequence_);
+  PEER_VARIABLE(command_sequence_generation_);
+  PEER_VARIABLE(pending_command_sequence_key_);
 };
 
 namespace {
@@ -15472,6 +15475,224 @@ TEST_F(SessionTest,
   ASSERT_TRUE(command.output().callback().has_session_command());
   EXPECT_EQ(command.output().callback().session_command().type(),
             commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE);
+}
+
+TEST_F(SessionTest,
+       ReconvertSequenceKeepsHalfWidthSpaceFallbackUnconsumed) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tSpace\t"
+      "ReconvertSelectionOrInsertSpace|Delay(700)|ForceZenzLiveCorrection\n");
+  config.set_space_character_form(config::Config::FUNDAMENTAL_HALF_WIDTH);
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  InitSessionToPrecomposition(&session);
+
+  commands::Command command;
+  // TestSendKey reserves the key so that TSF can check the selection.
+  EXPECT_TRUE(TestSendKey("Space", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+
+  // If no text is selected, TSF applies the fallback; delaying the later
+  // Zenz step must not swallow the original half-width Space.
+  EXPECT_TRUE(SendKey("Space", &session, &command));
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  ASSERT_TRUE(command.output().has_callback());
+  EXPECT_EQ(command.output().callback().session_command().type(),
+            commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE);
+  EXPECT_FALSE(command.output().has_command_sequence_resume_generation());
+}
+
+TEST_F(SessionTest, DelaySequencePreservesPhysicalSpacePassThrough) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tSpace\tInsertHalfSpace|Delay(700)|IMEOn\n");
+  config.set_space_character_form(config::Config::FUNDAMENTAL_HALF_WIDTH);
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  InitSessionToPrecomposition(&session);
+
+  commands::Command command;
+  EXPECT_TRUE(SendKey("Space", &session, &command));
+  EXPECT_FALSE(command.output().consumed());
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  EXPECT_EQ(command.output().callback().session_command().type(),
+            commands::SessionCommand::RESUME_COMMAND_SEQUENCE);
+  ASSERT_TRUE(command.output().callback().has_delay_millisec());
+  EXPECT_EQ(command.output().callback().delay_millisec(), 700);
+}
+
+TEST_F(SessionTest, StaleKeymapResumePreservesNewComposition) {
+  config::Config config;
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Space\tIMEOn|Delay(700)|IMEOn\n");
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  InitSessionToPrecomposition(&session);
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Ctrl Space", &session, &command));
+  ASSERT_TRUE(command.output().has_callback());
+  const commands::SessionCommand old_resume =
+      command.output().callback().session_command();
+  ASSERT_EQ(old_resume.type(),
+            commands::SessionCommand::RESUME_COMMAND_SEQUENCE);
+
+  // A fresh physical key invalidates the preceding continuation.
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  ASSERT_TRUE(command.output().has_preedit());
+  const commands::Preedit current = command.output().preedit();
+
+  command.Clear();
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *command.mutable_input()->mutable_command() = old_resume;
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_TRUE(command.output().consumed());
+  ASSERT_TRUE(command.output().has_preedit());
+  EXPECT_EQ(command.output().preedit().SerializeAsString(),
+            current.SerializeAsString());
+}
+
+TEST_F(SessionTest, MouseCandidateSelectionCancelsDelayedKeymapSequence) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  commands::Command command;
+  InsertCharacterChars("aiueo", &session, &command);
+  const ConversionRequest request = CreateConversionRequest(session);
+  Segments segments;
+  SetAiueo(&segments);
+  FillT13Ns(request, &segments);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  command.Clear();
+  ASSERT_TRUE(session.Convert(&command));
+  ASSERT_TRUE(session.ConvertNext(&command));
+
+  SessionTestPeer peer(session);
+  peer.pending_command_sequence_() = {"ForceZenzLiveCorrection"};
+  peer.pending_command_sequence_key_() = "あいうえお";
+  peer.command_sequence_generation_() = 42;
+
+  // Candidate-window mouse actions arrive as SEND_COMMAND rather than SEND_KEY.
+  SetSendCommandCommand(commands::SessionCommand::SELECT_CANDIDATE, &command);
+  command.mutable_input()->mutable_command()->set_id(
+      -(transliteration::HALF_KATAKANA + 1));
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_PREEDIT("ｱｲｳｴｵ", command);
+  EXPECT_TRUE(peer.pending_command_sequence_().empty());
+  EXPECT_NE(peer.command_sequence_generation_(), 42);
+
+  // Simulate a delayed callback arriving after candidate selection.
+  command.Clear();
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  commands::SessionCommand* resume = command.mutable_input()->mutable_command();
+  resume->set_type(commands::SessionCommand::RESUME_COMMAND_SEQUENCE);
+  resume->set_command_sequence_generation(42);
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_PREEDIT("ｱｲｳｴｵ", command);
+
+  // Candidate highlighting must also cancel a macro without a physical key.
+  peer.pending_command_sequence_() = {"ForceZenzLiveCorrection"};
+  peer.pending_command_sequence_key_() = "あいうえお";
+  peer.command_sequence_generation_() = 50;
+  SetSendCommandCommand(commands::SessionCommand::HIGHLIGHT_CANDIDATE, &command);
+  command.mutable_input()->mutable_command()->set_id(
+      -(transliteration::FULL_KATAKANA + 1));
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_TRUE(peer.pending_command_sequence_().empty());
+  EXPECT_NE(peer.command_sequence_generation_(), 50);
+}
+
+TEST_F(SessionTest, StaleKeymapResumeKeepsVisibleZenzSurface) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToConversionWithAiueo(&session, converter.get());
+  SessionTestPeer peer(session);
+  peer.live_conversion_active_() = true;
+  peer.live_conversion_key_() = "あいうえお";
+  peer.live_conversion_preedit_() = "あいうえお";
+  peer.live_conversion_value_() = "あいうえお";
+  peer.zenz_live_visible_generation_() = 1;
+  peer.zenz_live_key_() = "あいうえお";
+  peer.zenz_live_value_() = "愛上尾";
+  peer.zenz_live_mozc_value_() = "あいうえお";
+
+  commands::Command command;
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  auto* resume = command.mutable_input()->mutable_command();
+  resume->set_type(commands::SessionCommand::RESUME_COMMAND_SEQUENCE);
+  resume->set_command_sequence_generation(42);  // No such pending sequence.
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_PREEDIT("愛上尾", command);
+}
+
+TEST_F(SessionTest, ManualZenzInvalidatesPendingAutomaticLiveConversion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(700);
+  config.set_live_conversion_min_key_length(2);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tShift Space\tForceZenzLiveCorrection\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+
+  commands::Command command;
+  EXPECT_CALL(*converter, StartConversion(_, _)).Times(0);
+  InsertCharacterString("かき", "aa", &session, &command);
+  ASSERT_TRUE(peer.live_conversion_pending_());
+  ASSERT_TRUE(command.output().has_callback());
+  const commands::SessionCommand old_live_timer =
+      command.output().callback().session_command();
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  // Even if manual conversion cannot create a baseline, its attempted start
+  // must cancel the previous automatic live-conversion generation.
+  EXPECT_CALL(*converter, StartConversion(_, _)).WillOnce(Return(false));
+  command.Clear();
+  SendKey("Shift Space", &session, &command);
+  EXPECT_FALSE(peer.live_conversion_pending_());
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  command.Clear();
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *command.mutable_input()->mutable_command() = old_live_timer;
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_FALSE(command.output().live_conversion_pending());
+  EXPECT_TRUE(command.output().has_preedit());
 }
 
 TEST_F(SessionTest, InsertAlternateSpaceWithCustomKeyBinding) {

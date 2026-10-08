@@ -32,6 +32,7 @@
 #include "session/keymap.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <istream>
 #include <memory>
 #include <ostream>
@@ -44,6 +45,7 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/strings/ascii.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "base/config_file_stream.h"
@@ -117,6 +119,20 @@ constexpr absl::string_view NormalizeCommand(absl::string_view command_string) {
     return *normalized;
   }
   return command_string;
+}
+
+// Delay commands are parsed separately from state-specific commands. The
+// syntax is intentionally bounded and independent from locale/UI translation.
+bool ParseSequenceDelay(absl::string_view name, uint32_t* delay_msec) {
+  if (!name.starts_with("Delay(") || !name.ends_with(")")) return false;
+  const absl::string_view digits = name.substr(6, name.size() - 7);
+  if (digits.empty() || digits.size() > 4 ||
+      !std::all_of(digits.begin(), digits.end(),
+                   [](char c) { return c >= '0' && c <= '9'; })) return false;
+  uint32_t value = 0;
+  if (!absl::SimpleAtoi(digits, &value) || value > 5000) return false;
+  if (delay_msec) *delay_msec = value;
+  return true;
 }
 
 CommandSequence ParseCommandSequenceString(
@@ -353,8 +369,17 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
   }
 #endif  // NDEBUG
 
-  for (const std::string& command : command_sequence) {
+  for (size_t i = 0; i < command_sequence.size(); ++i) {
+    const std::string& command = command_sequence[i];
     if (!IsKnownCommandNameForAnyState(command)) {
+      return false;
+    }
+    // Output::Callback carries only one SessionCommand. Starting Zenz and
+    // then continuing with Delay/another command would replace its async poll
+    // callback. Until callback chaining is explicitly supported, make manual
+    // Zenz correction a terminal command instead of silently losing results.
+    if (command == "ForceZenzLiveCorrection" &&
+        i + 1 != command_sequence.size()) {
       return false;
     }
   }
@@ -448,6 +473,7 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
 
 bool KeyMapManager::IsKnownCommandNameForAnyState(
     const std::string& command_string) const {
+  if (ParseSequenceDelay(command_string, nullptr)) return true;
   DirectInputState::Commands direct_command;
   if (ParseCommandDirect(command_string, &direct_command)) {
     return true;
@@ -635,6 +661,8 @@ void KeyMapManager::InitCommandData() {
                                 PrecompositionState::PREDICT_AND_CONVERT);
 
   // Composition
+  RegisterCompositionCommand("ForceZenzLiveCorrection",
+                             CompositionState::FORCE_ZENZ_LIVE_CORRECTION);
   RegisterCompositionCommand("IMEOff", CompositionState::IME_OFF);
   RegisterCompositionCommand("IMEOn", CompositionState::IME_ON);
   RegisterCompositionCommand("InsertCharacter",
@@ -725,6 +753,8 @@ void KeyMapManager::InitCommandData() {
   }
 
   // Conversion
+  RegisterConversionCommand("ForceZenzLiveCorrection",
+                            ConversionState::FORCE_ZENZ_LIVE_CORRECTION);
   RegisterConversionCommand("IMEOff", ConversionState::IME_OFF);
   RegisterConversionCommand("IMEOn", ConversionState::IME_ON);
   RegisterConversionCommand("InsertCharacter",

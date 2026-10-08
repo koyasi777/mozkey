@@ -237,6 +237,48 @@ TEST_F(KeyMapTest, AddCommandSequence) {
   EXPECT_EQ(sequence[2], "Commit");
 }
 
+TEST_F(KeyMapTest, ZenzManualCommandAndDelayGrammar) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer peer(manager);
+
+  EXPECT_TRUE(peer.AddCommand(
+      "Precomposition", "Ctrl Shift Space",
+      "ReconvertSelectionOrInsertSpace|Delay(700)|ForceZenzLiveCorrection"));
+  EXPECT_TRUE(peer.AddCommand(
+      "Composition", "Ctrl Shift Enter",
+      "ForceZenzLiveCorrection"));
+  EXPECT_TRUE(peer.AddCommand(
+      "Conversion", "Ctrl Shift Enter",
+      "ForceZenzLiveCorrection"));
+
+  commands::KeyEvent key;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Shift Space", &key));
+  CommandSequence seq;
+  ASSERT_TRUE(manager.GetCommandSequencePrecomposition(key, &seq));
+  ASSERT_EQ(seq.size(), 3);
+  EXPECT_EQ(seq[1], "Delay(700)");
+  EXPECT_EQ(seq[2], "ForceZenzLiveCorrection");
+
+  EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Enter",
+                               "Convert|Delay(-1)|Commit"));
+  EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Enter",
+                               "Convert|Delay(5001)|Commit"));
+  EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Enter",
+                               "Convert|Delay(2.85)|Commit"));
+  EXPECT_TRUE(peer.AddCommand("Composition", "Ctrl Enter",
+                              "Convert|Delay(0)|Commit"));
+  EXPECT_TRUE(peer.AddCommand("Composition", "Ctrl Enter",
+                              "Convert|Delay(5000)|Commit"));
+  EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Shift F11",
+                                "ForceZenzLiveCorrection|Delay(700)|Commit"));
+  EXPECT_FALSE(peer.AddCommand("Conversion", "Ctrl Shift F11",
+                                "ConvertNext|ForceZenzLiveCorrection|Commit"));
+  EXPECT_TRUE(peer.AddCommand("Composition", "Ctrl Shift F11",
+                               "Convert|Delay(700)|ForceZenzLiveCorrection"));
+  EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Enter",
+                               "Delay(700)|Commit"));
+}
+
 TEST_F(KeyMapTest, AddCommandSequenceRejectsInvalidFirstCommand) {
   KeyMapManager manager;
   KeyMapManagerTestPeer manager_peer(manager);

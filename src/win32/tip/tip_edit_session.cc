@@ -510,6 +510,9 @@ ReconvertSelectionResult ReconvertSelectionOrKeepFallbackOutput(
     return ReconvertSelectionResult::kHandledWithError;
   }
 
+  // The Output carries a continuation token only when the server has a
+  // suspended keymap macro. SyncEditSessionImpl posts its acknowledgement
+  // after applying that Output, including when the edit session is async.
   const bool applied =
       need_async_edit_session
           ? TipEditSession::OnOutputReceivedAsync(text_service, context,
@@ -617,8 +620,19 @@ class SyncEditSessionImpl final : public TipComImplements<ITfEditSession> {
   // This function is called back by the TSF thread manager when an edit
   // request is granted.
   STDMETHODIMP DoEditSession(TfEditCookie write_cookie) override {
-    return TipEditSessionImpl::UpdateContext(
+    const HRESULT result = TipEditSessionImpl::UpdateContext(
         text_service_.get(), context_.get(), write_cookie, output_);
+    if (SUCCEEDED(result) &&
+        output_.has_command_sequence_resume_generation()) {
+      // TSF has actually applied the reconverted preedit. Queue the resume
+      // for the next message-loop turn, outside this edit session lock.
+      SessionCommand resume;
+      resume.set_type(SessionCommand::RESUME_COMMAND_SEQUENCE);
+      resume.set_command_sequence_generation(
+          output_.command_sequence_resume_generation());
+      text_service_->PostDelayedSessionCommand(context_.get(), resume, 1);
+    }
+    return result;
   }
 
  private:
