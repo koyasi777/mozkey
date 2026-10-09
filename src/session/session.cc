@@ -2033,6 +2033,7 @@ bool Session::SendCommand(commands::Command* command) {
   }
   if (context_->state() != ImeContext::CONVERSION) {
     live_conversion_active_ = false;
+    live_conversion_from_composition_ = false;
     ClearZenzLiveCorrectionState();
   }
 
@@ -2200,6 +2201,7 @@ bool Session::SendKey(commands::Command* command) {
 
   if (context_->state() != ImeContext::CONVERSION) {
     live_conversion_active_ = false;
+    live_conversion_from_composition_ = false;
     ClearZenzLiveCorrectionState();
   }
 
@@ -2695,6 +2697,19 @@ bool Session::ExecuteConversionCommand(
   switch (key_command) {
     case keymap::ConversionState::FORCE_ZENZ_LIVE_CORRECTION:
       return ForceZenzLiveCorrection(command);
+    case keymap::ConversionState::REVERT_ZENZ_TO_MOZC:
+      return HasVisibleZenzLiveCorrection()
+                 ? RevertZenzLiveCorrectionToNormalConversion(command)
+                 : DoNothing(command);
+    case keymap::ConversionState::BACKSPACE:
+      // Backspace() edits the composer, not the visible kanji surface. An
+      // ordinary (non-live) conversion must first return to composition.
+      if (!live_conversion_active_ &&
+          context_->state() == ImeContext::CONVERSION &&
+          !ConvertCancel(command)) {
+        return false;
+      }
+      return Backspace(command);
     case keymap::ConversionState::INSERT_CHARACTER:
       return InsertCharacter(command);
 
@@ -2927,12 +2942,33 @@ bool Session::SendKeyCompositionState(commands::Command* command) {
 bool Session::SendKeyConversionState(commands::Command* command) {
   keymap::CommandSequence command_sequence;
   const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
-  const bool result =
-      context_->converter().CheckState(EngineConverterInterface::PREDICTION)
-          ? keymap->GetCommandSequencePrediction(command->input().key(),
-                                                 &command_sequence)
-          : keymap->GetCommandSequenceConversion(command->input().key(),
+  const bool is_prediction =
+      context_->converter().CheckState(EngineConverterInterface::PREDICTION);
+  // Manual Zenz can temporarily use the live converter implementation even
+  // when use_live_conversion() is false.  Do not equate its internal flag with
+  // the user's live-conversion mode.
+  const bool live_keymap_active = live_conversion_active_ &&
+      live_conversion_from_composition_ &&
+      context_->GetConfig().use_live_conversion();
+  const bool zenz_visible = HasVisibleZenzLiveCorrection();
+  bool specialized_override = false;
+  bool result = false;
+  if (is_prediction) {
+    result = keymap->GetCommandSequencePrediction(command->input().key(),
                                                  &command_sequence);
+  } else if (zenz_visible && live_keymap_active) {
+    result = keymap->GetCommandSequenceZenzLiveConversion(
+        command->input().key(), &command_sequence, &specialized_override);
+  } else if (zenz_visible) {
+    result = keymap->GetCommandSequenceZenzConversion(
+        command->input().key(), &command_sequence, &specialized_override);
+  } else if (live_keymap_active) {
+    result = keymap->GetCommandSequenceLiveConversion(
+        command->input().key(), &command_sequence, &specialized_override);
+  } else {
+    result = keymap->GetCommandSequenceConversion(command->input().key(),
+                                                  &command_sequence);
+  }
 
   if (!result || command_sequence.empty()) {
     return DoNothing(command);
@@ -2976,10 +3012,39 @@ bool Session::SendKeyConversionState(commands::Command* command) {
       " mode=", input_key.has_mode() ? static_cast<int>(input_key.mode()) : -1,
       " input_style=", static_cast<int>(input_key.input_style())));
 
+  // Explicit user-selected return to the baseline. Handle before the
+  // generic live-conversion promotion clears the visible Zenz snapshot.
+  // Ordinary Conversion is preserved if the command is not applicable.
+  if (key_command == keymap::ConversionState::REVERT_ZENZ_TO_MOZC) {
+    return HasVisibleZenzLiveCorrection()
+               ? RevertZenzLiveCorrectionToNormalConversion(command)
+               : DoNothing(command);
+  }
+
+  // A standalone manual Zenz correction is not a candidate-navigation action.
+  // Avoid clearing live provenance before ForceZenzLiveCorrection captures it.
+  // Multi-step sequences retain their existing ordered-command semantics.
+  if (key_command == keymap::ConversionState::FORCE_ZENZ_LIVE_CORRECTION &&
+      command_sequence.size() == 1) {
+    return ExecuteCommandSequence(command_sequence, command);
+  }
+
+  // Honor an explicit editing command on any bound key. Keep the command
+  // sequence dispatcher responsible for executing macro continuations.
+  // This must precede generic live-conversion promotion/feedback rejection.
+  if (key_command == keymap::ConversionState::BACKSPACE) {
+    return ExecuteCommandSequence(command_sequence, command);
+  }
+
   if (live_conversion_active_) {
-    // During live conversion, Backspace should edit the underlying
-    // composition instead of cancelling conversion.
-    if (IsPlainBackspaceKey(command->input().key())) {
+    // Backward compatibility with older CUSTOM tables lacking a specialized
+    // Backspace row. Built-in maps now express this behavior explicitly in
+    // LiveConversion, and custom explicit overrides always win. Manual Zenz
+    // can temporarily set live_conversion_active_ even when it originated in
+    // ordinary conversion, where an inherited Cancel must remain Cancel.
+    if (live_keymap_active && IsPlainBackspaceKey(input_key) &&
+        key_command == keymap::ConversionState::CANCEL &&
+        !specialized_override) {
       DiscardPendingZenzFeedback("backspace_after_zenz");
       // Backspace() calls CancelLiveConversionForEditing(), which must see a
       // deferred Zenz presentation before it is cleared so it can restore the
@@ -3131,6 +3196,7 @@ bool Session::SendKeyConversionState(commands::Command* command) {
         ClearZenzLiveCorrectionState();
       }
       live_conversion_active_ = false;
+      live_conversion_from_composition_ = false;
       context_->mutable_converter()->SetCandidateListVisible(true);
     }
   }
@@ -3809,6 +3875,8 @@ void Session::ClearLiveConversionState() {
   ++live_conversion_generation_;
 
   live_conversion_active_ = false;
+
+  live_conversion_from_composition_ = false;
   live_conversion_pending_ = false;
   pending_live_conversion_generation_ = 0;
   pending_live_conversion_key_.clear();
@@ -3845,6 +3913,8 @@ void Session::CancelLiveConversionForEditing() {
   }
 
   live_conversion_active_ = false;
+
+  live_conversion_from_composition_ = false;
   SetSessionState(ImeContext::COMPOSITION, context_.get());
   context_->mutable_converter()->Cancel();
 }
@@ -4072,6 +4142,7 @@ bool Session::MaybeStartLiveConversionInternal(
 
   SetSessionState(ImeContext::CONVERSION, context_.get());
   live_conversion_active_ = true;
+  live_conversion_from_composition_ = true;
 
   // Keep the candidate list visible internally so that the Windows renderer is
   // updated.
@@ -6249,6 +6320,7 @@ void Session::RestoreDeferredZenzLivePresentationForEditing() {
   if (live_conversion_active_ &&
       context_->state() == ImeContext::CONVERSION) {
     live_conversion_active_ = false;
+    live_conversion_from_composition_ = false;
     SetSessionState(ImeContext::COMPOSITION, context_.get());
     context_->mutable_converter()->Cancel();
   }
@@ -6617,6 +6689,9 @@ bool Session::ForceZenzLiveCorrection(commands::Command* command) {
     return DoNothing(command);
   }
   const bool previously_live = live_conversion_active_;
+  const bool originally_live_composition =
+      (live_conversion_active_ && live_conversion_from_composition_) ||
+      (live_conversion_pending_ && context_->GetConfig().use_live_conversion());
   if (context_->state() == ImeContext::COMPOSITION) {
     if (context_->composer().GetQueryForConversion().empty()) {
       return DoNothing(command);
@@ -6649,6 +6724,7 @@ bool Session::ForceZenzLiveCorrection(commands::Command* command) {
   // Clear any earlier auto request before creating the explicit generation.
   ClearZenzLiveCorrectionState();
   live_conversion_active_ = true;
+  live_conversion_from_composition_ = originally_live_composition;
   live_conversion_key_ = key;
   live_conversion_preedit_ = context_->composer().GetStringForPreedit();
   live_conversion_value_ = mozc_value;
@@ -7548,12 +7624,22 @@ bool Session::RevertZenzLiveCorrectionToNormalConversion(
   const commands::Preedit live_preedit = live_conversion_preedit_output_;
   const std::string live_value = live_conversion_value_;
 
-  // This Space is already a conversion operation.  After peeling off the zenz
-  // layer, keep the converter's current segments but leave live conversion
-  // mode.  This makes the next character input follow normal conversion
-  // semantics: commit the restored Mozc result first, then start a new
-  // composition.
-  ClearLiveConversionState();
+  // Reverting the Zenz presentation does not inherently terminate live
+  // composition.  Preserve the live Mozc snapshot when the user selected
+  // live conversion; manual Zenz used with live conversion disabled retains
+  // the original ordinary-conversion behavior.
+  const bool keep_live_conversion =
+      context_->GetConfig().use_live_conversion() &&
+      live_conversion_active_ && live_conversion_from_composition_;
+  if (keep_live_conversion) {
+    // Cancel stale asynchronous results but retain live Mozc key/value/preedit
+    // and the converter's existing segments for continued input or Backspace.
+    CancelPendingLiveConversion();
+    ClearZenzLiveCorrectionState();
+    live_conversion_protected_spans_.clear();
+  } else {
+    ClearLiveConversionState();
+  }
   context_->mutable_converter()->SetCandidateListVisible(false);
 
   command->mutable_output()->set_consumed(true);
@@ -7571,7 +7657,7 @@ bool Session::RevertZenzLiveCorrectionToNormalConversion(
     output->clear_candidate_window();
   }
 
-  output->set_live_conversion(false);
+  output->set_live_conversion(keep_live_conversion);
   output->set_live_conversion_pending(false);
   output->set_zenz_live_correction_pending(false);
   output->set_zenz_live_correction_applied(false);

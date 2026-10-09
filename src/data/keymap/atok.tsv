@@ -125,3 +125,5 @@ Suggestion	Ctrl Down	PredictAndConvert
 Suggestion	Ctrl Enter	CommitFirstSuggestion
 Suggestion	Down	PredictAndConvert
 Suggestion	Shift Enter	CommitFirstSuggestion
+ZenzConversion	Space	RevertZenzToMozc
+LiveConversion	Backspace	Backspace

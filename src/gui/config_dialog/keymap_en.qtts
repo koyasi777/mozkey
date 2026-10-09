@@ -4,6 +4,14 @@
 <context>
     <name>mozc::gui::KeyMapEditorDialog</name>
     <message>
+        <source>LiveConversion</source>
+        <translation>Live converting</translation>
+    </message>
+    <message>
+        <source>ZenzConversion</source>
+        <translation>Zenz correction</translation>
+    </message>
+    <message>
         <source>Conversion</source>
         <translation>Conversion</translation>
     </message>
@@ -258,6 +266,14 @@
     <message>
         <source>DeleteSelectedCandidate</source>
         <translation>Remove selected candidate from history / hide candidate</translation>
+    </message>
+    <message>
+        <source>RevertZenzToMozc</source>
+        <translation>Return to ordinary Mozc conversion</translation>
+    </message>
+    <message>
+        <source>Return to Mozc conversion must be used alone.</source>
+        <translation>Return to Mozc conversion must be used alone.</translation>
     </message>
     <message>
         <source>ForceZenzLiveCorrection</source>

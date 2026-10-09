@@ -337,6 +337,13 @@ class Session {
   // composition instead of committing the conversion.
   bool live_conversion_active_ = false;
 
+  // Provenance of the active live conversion. A forced Zenz request sets
+  // live_conversion_active_ even for ordinary conversion with live mode OFF
+  // or ON.  That temporary state must not acquire LiveConversion bindings or
+  // live-edit continuation unless conversion actually started from streaming
+  // composition (including a pending live-conversion request).
+  bool live_conversion_from_composition_ = false;
+
   // True while a live conversion request has been scheduled but not applied yet.
   bool live_conversion_pending_ = false;
 
