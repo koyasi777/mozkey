@@ -29,6 +29,7 @@
 
 #include "gui/config_dialog/keymap_editor.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileDialog>
 #include <QMenu>
@@ -127,8 +128,14 @@ QString DisplayCommandSequenceForEditor(
   for (const std::string& raw_command :
        SplitCommandSequenceForEditor(command_sequence)) {
     const auto it = localized_command_map.find(raw_command);
-    display_commands << QString::fromStdString(
-        it != localized_command_map.end() ? it->second : raw_command);
+    if (raw_command.starts_with("Delay(") && raw_command.ends_with(")")) {
+      display_commands << QCoreApplication::translate(
+          "mozc::gui::KeyMapEditorDialog", "Delay %1 ms").arg(
+          QString::fromStdString(raw_command.substr(6, raw_command.size() - 7)));
+    } else {
+      display_commands << QString::fromStdString(
+          it != localized_command_map.end() ? it->second : raw_command);
+    }
   }
 
   return display_commands.join(QString::fromUtf8(" → "));
@@ -281,6 +288,7 @@ class KeyMapTableLoader {
     for (const std::string &command : commands) {
       commands_ << QString::fromStdString(command);
     }
+    commands_ << QStringLiteral("Delay");
 
     for (const absl::string_view status : kKeyMapStatus) {
       status_ << QString::fromUtf8(status.data(), status.size());

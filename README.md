@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="src/data/images/icon.svg" width="112" height="112" alt="Mozkey icon">
 </p>
 
@@ -82,6 +82,8 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - `うっそ`、`くっそ`、`やっば`、`すっげぇ`、`めっちゃ`、`ちっす`、`ちょりっす`、`ほえ～`、`ほぇ～`、`ほっほーん` などの expressive kana を生成辞書で自然なかな候補として補強
 - 確定済みの左文脈や直前の文節、限定的な右文脈を参照し、`mainにマージしました`、`githubには`、`彼になった`、`彼なのか`、`2名しかいない`、`追記したい`、`山梨県立美術館`、`滋賀方面` のような文脈で、助詞・複合機能語・名詞相当の左文脈に続く叙述・疑問の機能語列・機能表現・接尾的な語構成・地名接尾構成が同音漢字候補に負ける挙動を抑制
 - キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
+- `ForceZenzLiveCorrection` により、未確定文字列へ手動で Zenz 補正を要求可能。Zenz の自動ライブ補正が OFF でもキー設定から明示実行できる
+- キー設定のコマンド列に `Delay(700)` などの待機ステップ（0～5000 ms）を追加。選択文字列の再変換後に待機して手動 Zenz 補正する操作にも対応
 - 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには、選択中の候補の状態と現在のキー設定に応じて履歴削除または候補非表示の操作案内を表示
 - 通常変換では、Mozc が顔文字として意味的に識別できる候補（標準の顔文字候補、およびユーザー辞書で品詞「顔文字」として登録された候補）が、学習によって第1候補へ上がらないように制御。候補自体は一覧に残し、同じ表記でも「顔文字」以外の品詞として登録した候補は通常の順位付け・学習を許可。Zenz が独立して生成した表記は、文字列の見た目だけを理由に顔文字扱いしない
 - 複数コマンドは `Commit|IMEOff` のような形式で保存され、設定画面では `Commit → IMEOff` のように編集可能
@@ -448,6 +450,33 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 コマンド列は左から右へ順に実行されます。途中で入力状態が変わった場合、後続コマンドはその時点の状態に合わせて解決されます。たとえば `Convert → ConvertNext` では、まず未変換状態から変換状態へ入り、その後に次候補へ移動します。
 
 設定ファイル上では、複数コマンドは `Commit|IMEOff` や `Convert|ConvertNext` のように `|` 区切りで保存されます。設定画面では `Commit → IMEOff` のように表示され、コマンドの追加、削除、並べ替えができます。
+
+### 手動 Zenz 補正と遅延コマンド列
+
+キー設定エディタでは、未確定文字列に対して明示的に Zenz 補正を実行する `ForceZenzLiveCorrection`（「Zenz補正を実行（未確定文字に対して）」）と、コマンド列の途中で待機する `Delay(ms)`（「遅延」）を利用できます。
+
+- **手動 Zenz 補正**: 入力中（Composition）または変換中（Conversion）の未確定文字列に対して、通常の Mozc 変換結果を基準に Zenz 補正を非同期で要求します。自動の「Zenz ライブ補正を有効にする」が OFF でも、キーからの明示的な要求は可能です。ただし、パスワード欄やプライバシー・入力内容の適格性検査は引き続き適用され、必ず補正が採用されるとは限りません。
+- **遅延**: `Delay(700)` は後続コマンドを 700 ms 後に再開する指定です。設定できる値は 0～5000 ms で、`Delay(0)` は待機しません。これは自動ライブ変換や自動 Zenz 補正の遅延設定とは独立した、キー割り当て専用の待機です。
+
+実用的なキー割り当て例（**カスタム設定例**であり、標準の既定割り当てではありません）:
+
+```text
+Precomposition + Space -> ReconvertSelectionOrInsertSpace|Delay(700)|ForceZenzLiveCorrection
+Composition + Shift Space -> ForceZenzLiveCorrection
+Conversion + Shift Space -> ForceZenzLiveCorrection
+```
+
+1行目は **Windows TSF 向け**です。「入力文字なし」の Space を、選択テキストがある場合だけ再変換 → 700 ms 待機 → 手動 Zenz 補正とし、選択されていなければ従来どおり空白を入力します。アプリケーション側の再変換対応が必要です。2・3行目は、入力中と変換中の双方から Shift+Space で手動補正する設定です。状態ごとに別々のキー設定行を作成します。
+
+**制約と操作上の注意**:
+
+- `Delay` はコマンド列の先頭には置けません。設定画面では待機時間を入力して追加し、コマンド列の `Delay` をダブルクリックすると再編集できます。通常コマンドのダブルクリックは従来どおり削除操作です。
+- `ForceZenzLiveCorrection` はコマンド列の**最後**にのみ配置できます。たとえば `ForceZenzLiveCorrection|Delay(700)|Commit` は設定できません。Zenz の非同期応答処理を後続コマンドで上書きしないための制約です。
+- Space / Shift+Space に別のコマンドが既に割り当てられている場合は、同じ入力状態の既存行を**置き換えて**ください（重複行を追加しない）。特に Shift+Space は従来の別種の空白入力などを置き換える可能性があり、他のアプリケーションや OS のショートカットに先取りされる場合もあります。
+- 待機中に別のキー操作、候補のマウス選択、入力先の切り替えなどが行われた場合、古いコマンド列が後から入力へ作用しないよう、保留していた再開処理を無効化します。
+- 手動補正後も Space で通常の Mozc 変換へ戻れます。再度手動補正を実行するには、変換中に割り当てたキーを使用します。専用の「変換中（Zenz）」キー設定モードは現時点ではありません。
+
+**OS 別の実装・検証状況**: `ForceZenzLiveCorrection` と `Delay(ms)` のコア実装は Windows 専用ではなく、共通の Session 層にあります。macOS の IMK クライアントにも遅延コールバック処理がありますが、現時点では保留タイマーを1本だけ保持する実装であり、自動 Zenz 処理など複数の非同期処理が重なる場合の互換性は未確認です。このため、今回の手動補正・遅延ワークフローは **Windows で実機確認済み、macOS は未検証・動作保証なし**です。Linux も未検証です。なお、選択文字列の `ReconvertSelectionOrInsertSpace` は Windows TSF クライアント固有の処理であり、上記1行目の選択再変換マクロは macOS 対応ではありません。
 
 ### 候補の履歴削除・非表示
 
@@ -871,6 +900,8 @@ Main features added in this fork
 - Reinforces expressive kana forms such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん` with natural-kana generated dictionary candidates
 - Uses committed left context, previous segments, and limited right context to reduce unnatural homophone results in cases such as `mainにマージしました`, `githubには`, `彼になった`, `彼なのか`, `2名しかいない`, `追記したい`, `山梨県立美術館`, and `滋賀方面`
 - Allows assigning multiple commands to a single key binding as an ordered command sequence
+- Adds `ForceZenzLiveCorrection` to explicitly request Zenz correction for uncommitted text, including when automatic Zenz live correction is disabled
+- Adds `Delay(700)`-style waiting steps (0–5000 ms) in keymap command sequences, including after selected-text reconversion
 - Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows history-delete or hide guidance for the currently selected candidate using the active key binding
 - Prevents candidates that Mozc can semantically identify as emoticons—built-in emoticon candidates and user-dictionary entries registered with the `顔文字` POS—from being promoted to the first candidate in ordinary conversion through learning. The candidates remain visible, while the same surface registered under a non-emoticon POS remains eligible for normal ranking and learning. Independently generated Zenz surfaces are not classified as emoticons from string shape alone
 - Stores command sequences as `Commit|IMEOff` and shows them in the keymap editor as `Commit → IMEOff`
@@ -1414,6 +1445,33 @@ Examples:
 Commands are executed from left to right. If the input state changes during the sequence, the following command is resolved against the current state at that point. For example, `Convert → ConvertNext` first enters conversion from composition and then moves to the next candidate.
 
 In exported keymap files, command sequences are stored with `|`, such as `Commit|IMEOff` or `Convert|ConvertNext`. In the keymap editor UI, they are displayed with arrows, such as `Commit → IMEOff`.
+
+### Manual Zenz correction and delayed keymap sequences
+
+The keymap editor provides `ForceZenzLiveCorrection` (manual correction of uncommitted text) and `Delay(ms)` (a pause before subsequent commands).
+
+- **Manual Zenz correction** explicitly requests asynchronous Zenz refinement of the current uncommitted composition or conversion using a normal Mozc conversion as its baseline. It can be invoked even when automatic Zenz live correction is OFF. Password/privacy and input eligibility checks still apply; the result is not guaranteed to be adopted.
+- **Delay**: `Delay(700)` resumes the remaining steps after 700 ms. Values from 0 through 5000 milliseconds are supported; `Delay(0)` does not wait. This delay is separate from the automatic live-conversion and Zenz debounce settings.
+
+Practical custom bindings (examples, **not the defaults**):
+
+```text
+Precomposition + Space -> ReconvertSelectionOrInsertSpace|Delay(700)|ForceZenzLiveCorrection
+Composition + Shift Space -> ForceZenzLiveCorrection
+Conversion + Shift Space -> ForceZenzLiveCorrection
+```
+
+The first binding is **Windows TSF-specific**: with selected committed text, Space requests reconversion, waits 700 ms, then requests manual Zenz correction; without a selection, it keeps the usual space-insertion fallback. The application must support reconversion. The other two bindings provide Shift+Space manual correction in both composition and conversion states; configure a separate row for each state.
+
+**Constraints and interruption behavior**:
+
+- `Delay` cannot be the first step. In the editor, double-click a `Delay` step to change its milliseconds; double-clicking a regular step keeps the existing remove behavior.
+- `ForceZenzLiveCorrection` must be the **last** step; `ForceZenzLiveCorrection|Delay(700)|Commit` is invalid. This prevents subsequent commands from replacing an asynchronous Zenz callback.
+- If Space or Shift+Space already has a command in the same input state, **replace** that binding rather than adding a duplicate row. In particular, Shift+Space may replace an existing alternate-space action, and OS/application shortcuts can intercept keys before Mozkey receives them.
+- A different key action, mouse candidate selection, or input-context change while waiting invalidates the pending continuation so that an old delayed command does not act on the new input.
+- Space can still switch a visible Zenz correction back to ordinary Mozc conversion. A separately bound manual Zenz action can request another correction from conversion state. There is not yet a dedicated `Conversion (Zenz)` keymap mode.
+
+**Platform implementation and verification:** `ForceZenzLiveCorrection` and `Delay(ms)` are implemented in the shared Session layer, not exclusively in Windows code. The macOS IMK client also handles delayed callbacks, but currently retains only one pending timer; coexistence with other asynchronous callbacks such as automatic Zenz processing has not been verified. Therefore the manual-correction/delay workflow is **runtime-tested on Windows, not validated or guaranteed on macOS**. Linux is also untested. `ReconvertSelectionOrInsertSpace` is implemented specifically by the Windows TSF client, so the selected-text reconversion sequence in the first example is not supported on macOS.
 
 ### Delete candidate history / hide candidate
 

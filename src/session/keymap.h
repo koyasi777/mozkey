@@ -104,6 +104,7 @@ struct PrecompositionState {
 struct CompositionState {
   enum Commands {
     NONE = 0,
+    FORCE_ZENZ_LIVE_CORRECTION,
     IME_OFF,
     IME_ON,
     INSERT_CHARACTER,
@@ -154,6 +155,7 @@ struct CompositionState {
 struct ConversionState {
   enum Commands {
     NONE = 0,
+    FORCE_ZENZ_LIVE_CORRECTION,
     IME_OFF,
     IME_ON,
     INSERT_CHARACTER,  // Submit and Move to Composition status.

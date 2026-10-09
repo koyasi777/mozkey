@@ -259,5 +259,29 @@
         <source>DeleteSelectedCandidate</source>
         <translation>Remove selected candidate from history / hide candidate</translation>
     </message>
+    <message>
+        <source>ForceZenzLiveCorrection</source>
+        <translation>Force Zenz correction (uncommitted text)</translation>
+    </message>
+    <message>
+        <source>Delay</source>
+        <translation>Delay</translation>
+    </message>
+    <message>
+        <source>Delay %1 ms</source>
+        <translation>Delay %1 ms</translation>
+    </message>
+    <message>
+        <source>Delay (ms)</source>
+        <translation>Delay (ms)</translation>
+    </message>
+    <message>
+        <source>Invalid command sequence</source>
+        <translation>Invalid command sequence</translation>
+    </message>
+    <message>
+        <source>Delay cannot be first; manual Zenz correction must be last.</source>
+        <translation>Delay cannot be first; manual Zenz correction must be last.</translation>
+    </message>
 </context>
 </TS>
