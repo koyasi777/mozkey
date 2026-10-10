@@ -380,7 +380,8 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
     // then continuing with Delay/another command would replace its async poll
     // callback. Until callback chaining is explicitly supported, make manual
     // Zenz correction a terminal command instead of silently losing results.
-    if (command == "ForceZenzLiveCorrection" &&
+    if ((command == "ForceZenzLiveCorrection" ||
+         command == "ForceZenzLiveCorrectionWithoutFeedback") &&
         i + 1 != command_sequence.size()) {
       return false;
     }
@@ -693,6 +694,9 @@ void KeyMapManager::InitCommandData() {
   // Composition
   RegisterCompositionCommand("ForceZenzLiveCorrection",
                              CompositionState::FORCE_ZENZ_LIVE_CORRECTION);
+  RegisterCompositionCommand(
+      "ForceZenzLiveCorrectionWithoutFeedback",
+      CompositionState::FORCE_ZENZ_LIVE_CORRECTION_WITHOUT_FEEDBACK);
   RegisterCompositionCommand("IMEOff", CompositionState::IME_OFF);
   RegisterCompositionCommand("IMEOn", CompositionState::IME_ON);
   RegisterCompositionCommand("InsertCharacter",
@@ -785,6 +789,9 @@ void KeyMapManager::InitCommandData() {
   // Conversion
   RegisterConversionCommand("ForceZenzLiveCorrection",
                             ConversionState::FORCE_ZENZ_LIVE_CORRECTION);
+  RegisterConversionCommand(
+      "ForceZenzLiveCorrectionWithoutFeedback",
+      ConversionState::FORCE_ZENZ_LIVE_CORRECTION_WITHOUT_FEEDBACK);
   RegisterConversionCommand("RevertZenzToMozc",
                             ConversionState::REVERT_ZENZ_TO_MOZC);
   RegisterConversionCommand("Backspace", ConversionState::BACKSPACE);

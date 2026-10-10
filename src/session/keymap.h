@@ -105,6 +105,7 @@ struct CompositionState {
   enum Commands {
     NONE = 0,
     FORCE_ZENZ_LIVE_CORRECTION,
+    FORCE_ZENZ_LIVE_CORRECTION_WITHOUT_FEEDBACK,
     IME_OFF,
     IME_ON,
     INSERT_CHARACTER,
@@ -156,6 +157,7 @@ struct ConversionState {
   enum Commands {
     NONE = 0,
     FORCE_ZENZ_LIVE_CORRECTION,
+    FORCE_ZENZ_LIVE_CORRECTION_WITHOUT_FEEDBACK,
     REVERT_ZENZ_TO_MOZC,  // Restore the underlying ordinary conversion.
     BACKSPACE,  // Edit the underlying reading, not the rendered surface.
     IME_OFF,

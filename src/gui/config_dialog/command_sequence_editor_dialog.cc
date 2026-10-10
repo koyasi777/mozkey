@@ -150,7 +150,8 @@ CommandSequenceEditorDialog::CommandSequenceEditorDialog(
       }
       if ((i == 0 && raw.startsWith(QStringLiteral("Delay("))) ||
           (i + 1 < sequence_list_->count() &&
-           raw == QStringLiteral("ForceZenzLiveCorrection"))) {
+           (raw == QStringLiteral("ForceZenzLiveCorrection") ||
+            raw == QStringLiteral("ForceZenzLiveCorrectionWithoutFeedback")))) {
         QMessageBox::warning(
             this,
             QCoreApplication::translate("mozc::gui::KeyMapEditorDialog",

@@ -277,7 +277,11 @@
     </message>
     <message>
         <source>ForceZenzLiveCorrection</source>
-        <translation>Zenz補正を実行（未確定文字に対して）</translation>
+        <translation>Zenz補正を未確定文字に対し実行</translation>
+    </message>
+    <message>
+        <source>ForceZenzLiveCorrectionWithoutFeedback</source>
+        <translation>Zenz補正を未確定文字に対し実行（フィードバック学習を無視）</translation>
     </message>
     <message>
         <source>Delay</source>
