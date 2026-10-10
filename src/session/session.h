@@ -499,6 +499,9 @@ class Session {
     absl::Time issued_at;
     bool pending = false;
     bool submitted = false;
+    // Snapshot manual invocation policy for asynchronous responses.
+    bool forced = false;
+    bool bypass_automatic_feedback = false;
     uint32_t poll_count = 0;
   };
 
@@ -788,9 +791,12 @@ class Session {
   // zenz live correction.
   bool MaybeApplyZenzFeedbackLiveCorrection(
       mozc::commands::Command* command);
-  bool MaybeScheduleZenzLiveCorrection(mozc::commands::Command* command,
-                                       bool forced = false);
-  bool ForceZenzLiveCorrection(mozc::commands::Command* command);
+  bool MaybeScheduleZenzLiveCorrection(
+      mozc::commands::Command* command, bool forced = false,
+      bool bypass_automatic_feedback = false);
+  bool ForceZenzLiveCorrection(
+      mozc::commands::Command* command,
+      bool bypass_automatic_feedback = false);
   bool ResumeCommandSequence(mozc::commands::Command* command);
   void AttachZenzLiveCorrectionStartCallback(
       mozc::commands::Command* command) const;

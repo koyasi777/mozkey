@@ -277,7 +277,11 @@
     </message>
     <message>
         <source>ForceZenzLiveCorrection</source>
-        <translation>Force Zenz correction (uncommitted text)</translation>
+        <translation>Run Zenz correction on uncommitted text</translation>
+    </message>
+    <message>
+        <source>ForceZenzLiveCorrectionWithoutFeedback</source>
+        <translation>Run Zenz correction on uncommitted text (ignore feedback learning)</translation>
     </message>
     <message>
         <source>Delay</source>

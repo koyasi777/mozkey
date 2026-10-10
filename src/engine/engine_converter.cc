@@ -202,12 +202,21 @@ bool EngineConverter::Convert(const composer::Composer& composer,
   ConversionRequest::Options options;
   options.enable_user_history_for_conversion = preferences.use_history;
   SetRequestType(ConversionRequest::CONVERSION, options);
+  // Keep this override request-local. Do not mutate the shared config or
+  // disable native Mozc user history while bypassing Zenz feedback.
+  config::Config request_config;
+  const config::Config* effective_config = config_.get();
+  if (preferences.ignore_zenz_feedback) {
+    request_config = *config_;
+    request_config.set_use_zenz_feedback_reuse(false);
+    effective_config = &request_config;
+  }
   const ConversionRequest conversion_request =
       ConversionRequestBuilder()
           .SetComposer(composer)
           .SetRequestView(*request_)
           .SetContextView(context)
-          .SetConfigView(*config_)
+          .SetConfigView(*effective_config)
           .SetOptions(std::move(options))
           .Build();
 
@@ -1018,6 +1027,29 @@ bool EngineConverter::ConfirmExternalConversionLearning(uint64_t revert_id) {
 
   converter_->DiscardConversionRevertState(&*it);
   external_learning_revert_segments_.erase(it);
+  return true;
+}
+
+// The successful successor and the old owner share the same backing
+// converter. Move opaque rollback tokens exactly once; Clone() must
+// continue to drop ownership in ordinary snapshots/Undo contexts.
+bool EngineConverter::TransferExternalConversionLearningOwnershipTo(
+    EngineConverterInterface* successor) {
+  if (successor == nullptr || successor == this) {
+    return false;
+  }
+  return successor->ReceiveExternalConversionLearningOwnership(
+      converter_.get(), &external_learning_revert_segments_);
+}
+
+bool EngineConverter::ReceiveExternalConversionLearningOwnership(
+    const ConverterInterface* source_backend,
+    std::vector<Segments>* handles) {
+  if (source_backend == nullptr || source_backend != converter_.get() ||
+      handles == nullptr || !external_learning_revert_segments_.empty()) {
+    return false;
+  }
+  external_learning_revert_segments_ = std::move(*handles);
   return true;
 }
 

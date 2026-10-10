@@ -1974,6 +1974,145 @@ CreateRecordingExternalLearningConverter(MockEngine* mock_engine) {
   return converter;
 }
 
+// Reproduction of a pending Zenz/Mozc learning rollback surviving a client
+// reverse-conversion followed by the feedback-bypass manual command.
+TEST_F(SessionTest, ZenzBypassAfterReverseConversionPreservesExternalLearningRevert) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(7);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tShift Space\tForceZenzLiveCorrectionWithoutFeedback\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+
+  // State immediately after Zenz commit: a reversible Mozc-learning handle
+  // exists and the next user action has not yet confirmed that learning.
+  peer.SetPendingZenzFeedbackAccepted("かれはてんてきです", "empty", "彼は天敵です");
+  peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+  ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+  ASSERT_TRUE(peer.pending_zenz_feedback_().mozc_history_learning_applied);
+  ASSERT_EQ(peer.pending_zenz_feedback_().mozc_history_revert_ids.size(), 1);
+  const uint64_t revert_id =
+      peer.pending_zenz_feedback_().mozc_history_revert_ids.front();
+  ASSERT_EQ(converter->learn_call_count, 1);
+
+  // SendCommand(CONVERT_REVERSE) enters CONVERSION without confirming the
+  // pending learning. This is a real client-command path, not peer mutation.
+  SetupMockForReverseConversion("彼は点滴です", "かれはてんてきです", converter.get());
+  commands::Command command;
+  SetupCommandForReverseConversion("彼は点滴です", command.mutable_input());
+  ASSERT_TRUE(session.SendCommand(&command));
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("かれはてんてきです");
+  AddCandidate("かれはてんてきです", "彼は点滴です", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+  ASSERT_TRUE(peer.pending_zenz_live_().bypass_automatic_feedback);
+
+  // Regression guard: v4 lost the rollback token on clone adoption.
+  // The v5 ownership handoff must preserve the exact handle.
+  peer.DiscardPendingZenzFeedback("ownership_probe_rollback");
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(converter->revert_call_count, 1)
+      << "MOZKEY_CLONE_REVERT_HANDLE_LOST";
+  if (!converter->reverted_ids.empty()) {
+    EXPECT_EQ(converter->reverted_ids.front(), revert_id);
+  }
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+// Failed re-conversion must NOT transfer ownership away from the original
+// EngineConverter. The caller can still undo pending accepted Zenz learning.
+TEST_F(SessionTest, ZenzBypassFailedReconversionKeepsExternalLearningRevert) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tShift Space\tForceZenzLiveCorrectionWithoutFeedback\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+
+  peer.SetPendingZenzFeedbackAccepted("かれはてんてきです", "empty", "彼は天敵です");
+  peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+  ASSERT_EQ(peer.pending_zenz_feedback_().mozc_history_revert_ids.size(), 1);
+  const uint64_t revert_id =
+      peer.pending_zenz_feedback_().mozc_history_revert_ids.front();
+
+  SetupMockForReverseConversion("彼は点滴です", "かれはてんてきです", converter.get());
+  commands::Command command;
+  SetupCommandForReverseConversion("彼は点滴です", command.mutable_input());
+  ASSERT_TRUE(session.SendCommand(&command));
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+
+  // The tentative clone's conversion fails. The active context remains owner.
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(Return(false));
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_FALSE(peer.pending_zenz_live_().pending);
+
+  peer.DiscardPendingZenzFeedback("ownership_probe_failed_reconversion");
+  EXPECT_EQ(converter->revert_call_count, 1)
+      << "MOZKEY_FAILED_RECONVERSION_LOST_REVERT_HANDLE";
+  if (!converter->reverted_ids.empty()) {
+    EXPECT_EQ(converter->reverted_ids.front(), revert_id);
+  }
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
 TEST_F(SessionTest, ZenzMozcHistoryLearningRequiresIndependentHistoryPermission) {
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
@@ -16778,6 +16917,361 @@ TEST_F(SessionTest, ActualLiveInputZenzReplyRevertThenPhysicalBackspace) {
     EXPECT_PREEDIT("亜", command);
     EXPECT_FALSE(command.output().has_result());
   }
+}
+
+
+// Explicit bypass is request-local. It keeps Mozc history enabled, ignores
+// Zenz's automatic feedback during baseline conversion, and bypasses the
+// automatic minimum-reading-length gate without weakening output validation.
+TEST_F(SessionTest, ManualZenzWithoutFeedbackUsesRequestLocalPolicy) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+#endif
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_zenz_feedback_reuse(true);
+  config.set_use_zenz_auto_block_rejected_correction(true);
+  config.set_zenz_auto_block_reject_threshold(1);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
+  config.set_use_zenz_feedback_min_key_length(false);
+  config.set_use_zenz_feedback_recording(false);
+  config.set_use_zenz_mozc_history_learning(false);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(7);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tShift Space\tForceZenzLiveCorrectionWithoutFeedback\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+  // This persisted rejection would auto-block the Zenz output in the
+  // ordinary path. Explicit bypass must not consult that statistical veto.
+  peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "explicit_conversion_after_zenz");
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(Invoke([&segments](const ConversionRequest& request,
+                                   Segments* output) {
+        EXPECT_FALSE(request.config().use_zenz_feedback_reuse());
+        EXPECT_TRUE(request.options().enable_user_history_for_conversion);
+        *output = segments;
+        return true;
+      }));
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+  ASSERT_TRUE(peer.pending_zenz_live_().pending);
+  EXPECT_TRUE(peer.pending_zenz_live_().forced);
+  EXPECT_TRUE(peer.pending_zenz_live_().bypass_automatic_feedback);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+  command.Clear();
+  ASSERT_TRUE(peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_PREEDIT("亜衣", command);
+}
+
+
+// A bypass from an existing conversion is transactional and does not reset
+// the temporary composer input mode (e.g. a pending shifted ASCII chunk).
+TEST_F(SessionTest, ManualZenzBypassFromConversionKeepsInputMode) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(7);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tShift Space\tForceZenzLiveCorrectionWithoutFeedback\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)))
+      .WillOnce(Invoke([&segments](const ConversionRequest& request,
+                                   Segments* output) {
+        EXPECT_FALSE(request.config().use_zenz_feedback_reuse());
+        EXPECT_TRUE(request.options().enable_user_history_for_conversion);
+        *output = segments;
+        return true;
+      }));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  command.Clear();
+  ASSERT_TRUE(session.Convert(&command));
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  peer.context_()->mutable_composer()->SetTemporaryInputMode(
+      transliteration::HALF_ASCII);
+  ASSERT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HALF_ASCII);
+
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_TRUE(session.context().converter().CheckState(
+      engine::EngineConverterInterface::CONVERSION));
+  EXPECT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HALF_ASCII);
+  EXPECT_TRUE(command.output().zenz_live_correction_pending());
+  EXPECT_TRUE(peer.pending_zenz_live_().bypass_automatic_feedback);
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+// Failed re-conversion must not destroy the original candidates, the engine
+// state, or the current composer mode.  This is a new path unique to bypass.
+TEST_F(SessionTest, ManualZenzBypassFailedReconversionKeepsOldCandidates) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tShift Space\tForceZenzLiveCorrectionWithoutFeedback\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)))
+      .WillOnce(Return(false));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  command.Clear();
+  ASSERT_TRUE(session.Convert(&command));
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  peer.context_()->mutable_composer()->SetTemporaryInputMode(
+      transliteration::HALF_ASCII);
+
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_TRUE(session.context().converter().CheckState(
+      engine::EngineConverterInterface::CONVERSION));
+  EXPECT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HALF_ASCII);
+  EXPECT_PREEDIT("愛", command);
+  EXPECT_FALSE(command.output().zenz_live_correction_pending());
+  EXPECT_FALSE(peer.pending_zenz_live_().pending);
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+// Statistical bypass must not override an explicit human hard-block.
+TEST_F(SessionTest, ManualZenzBypassPreservesExplicitHardBlock) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_zenz_feedback_reuse(true);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(7);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tShift Space\tForceZenzLiveCorrectionWithoutFeedback\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+  peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "manual_hard_reject");
+  ASSERT_TRUE(peer.zenz_feedback_store_().IsManuallyBlocked(
+      "あい", "empty", "亜衣"));
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+  ASSERT_TRUE(peer.pending_zenz_live_().bypass_automatic_feedback);
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+  command.Clear();
+  ASSERT_TRUE(peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "feedback_hard_rejected");
+  EXPECT_PREEDIT("愛", command);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+// The original manual command still applies statistical auto-blocks.
+TEST_F(SessionTest, ManualZenzNormalCommandPreservesAutoBlock) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_zenz_feedback_reuse(true);
+  config.set_use_zenz_feedback_min_key_length(false);
+  config.set_use_zenz_auto_block_rejected_correction(true);
+  config.set_zenz_auto_block_reject_threshold(1);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(7);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tShift Space\tForceZenzLiveCorrection\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+  peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "explicit_conversion_after_zenz");
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+  ASSERT_TRUE(peer.pending_zenz_live_().forced);
+  EXPECT_FALSE(peer.pending_zenz_live_().bypass_automatic_feedback);
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+  command.Clear();
+  ASSERT_TRUE(peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "feedback_auto_blocked");
+  EXPECT_PREEDIT("愛", command);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+// Bypassing past feedback does not disable newly-recorded acceptance.
+TEST_F(SessionTest, ManualZenzBypassRecordsAcceptedWhenEnabled) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_zenz_feedback_reuse(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(false);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(7);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tShift Space\tForceZenzLiveCorrectionWithoutFeedback\n"
+      "Conversion\tEnter\tCommit\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+  command.Clear();
+  ASSERT_TRUE(peer.ApplyZenzLiveCorrectionResult(response, &command));
+  ASSERT_TRUE(command.output().zenz_live_correction_applied());
+  ASSERT_TRUE(SendKey("Enter", &session, &command));
+  EXPECT_RESULT_AND_KEY("亜衣", "あい", command);
+  peer.ConfirmPendingZenzFeedback();
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].accepted_count, 1);
+  EXPECT_EQ(entries[0].rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
 }
 
 // A manual Zenz command is not equivalent to a live-composition origin.

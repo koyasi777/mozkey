@@ -43,6 +43,7 @@
 #include "absl/types/span.h"
 #include "composer/composer.h"
 #include "converter/converter_interface.h"
+#include "converter/segments.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "transliteration/transliteration.h"
@@ -64,6 +65,10 @@ struct ConversionPreferences {
   // TODO(hidehiko,komatsu): Remove this flag, when the full EngineConverter
   //   refactoring is done and gets safer for future development/extensions.
   bool request_suggestion;
+
+  // Skip only Zenz feedback reuse on this conversion request. Ordinary
+  // Mozc user history and user dictionary remain available.
+  bool ignore_zenz_feedback = false;
 };
 
 // Class handling ConverterInterface with a session state.  This class
@@ -246,6 +251,28 @@ class EngineConverterInterface {
     return false;
   }
   virtual bool ConfirmExternalConversionLearning(uint64_t revert_id) {
+    return false;
+  }
+
+  // After a successfully completed detached re-conversion, move (never
+  // copy) any pending rollback handles to its successor. On failure the
+  // original converter must retain full ownership. Unsupported converter
+  // implementations fail closed.
+  [[nodiscard]]
+  virtual bool TransferExternalConversionLearningOwnershipTo(
+      EngineConverterInterface* successor) {
+    (void)successor;
+    return false;
+  }
+
+  // Internal half of the ownership handoff. Receivers must verify
+  // identical backing ConverterInterface identity and reject nonempty
+  // destination ownership before moving any handles.
+  virtual bool ReceiveExternalConversionLearningOwnership(
+      const ConverterInterface* source_backend,
+      std::vector<Segments>* handles) {
+    (void)source_backend;
+    (void)handles;
     return false;
   }
 

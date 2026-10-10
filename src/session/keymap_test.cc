@@ -251,6 +251,12 @@ TEST_F(KeyMapTest, ZenzManualCommandAndDelayGrammar) {
   EXPECT_TRUE(peer.AddCommand(
       "Conversion", "Ctrl Shift Enter",
       "ForceZenzLiveCorrection"));
+  EXPECT_TRUE(peer.AddCommand(
+      "Composition", "Ctrl Shift Space",
+      "ForceZenzLiveCorrectionWithoutFeedback"));
+  EXPECT_TRUE(peer.AddCommand(
+      "Conversion", "Ctrl Shift Space",
+      "ForceZenzLiveCorrectionWithoutFeedback"));
 
   commands::KeyEvent key;
   ASSERT_TRUE(KeyParser::ParseKey("Ctrl Shift Space", &key));
@@ -274,6 +280,9 @@ TEST_F(KeyMapTest, ZenzManualCommandAndDelayGrammar) {
                                 "ForceZenzLiveCorrection|Delay(700)|Commit"));
   EXPECT_FALSE(peer.AddCommand("Conversion", "Ctrl Shift F11",
                                 "ConvertNext|ForceZenzLiveCorrection|Commit"));
+  EXPECT_FALSE(peer.AddCommand(
+      "Conversion", "Ctrl Shift F11",
+      "ConvertNext|ForceZenzLiveCorrectionWithoutFeedback|Commit"));
   EXPECT_TRUE(peer.AddCommand("Composition", "Ctrl Shift F11",
                                "Convert|Delay(700)|ForceZenzLiveCorrection"));
   EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Enter",

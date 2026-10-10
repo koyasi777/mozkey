@@ -154,6 +154,12 @@ class EngineConverter : public EngineConverterInterface {
   bool RevertExternalConversionLearning(uint64_t revert_id) override;
   bool ConfirmExternalConversionLearning(uint64_t revert_id) override;
 
+  bool TransferExternalConversionLearningOwnershipTo(
+      EngineConverterInterface* successor) override;
+  bool ReceiveExternalConversionLearningOwnership(
+      const ConverterInterface* source_backend,
+      std::vector<Segments>* handles) override;
+
   [[nodiscard]]
   bool ResolveExternalConversionSegments(
       absl::string_view key, absl::string_view value,
