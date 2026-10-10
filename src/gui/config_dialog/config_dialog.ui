@@ -1869,14 +1869,33 @@
                   </property>
                  </widget>
                 </item>
-                <item row="33" column="0" colspan="3">
+                <item row="33" column="0" colspan="8">
+                 <widget class="QCheckBox" name="zenzFeedbackMinKeyLengthCheckBox">
+                  <property name="text"><string>短い読みでは Zenz feedback を自動適用しない</string></property>
+                  <property name="toolTip"><string>読み全体が設定文字数未満の場合、採用・却下は記録しますが、候補順位の補正・保存済み補正の再利用・自動ブロックを行いません。明示的な手動ブロックは有効です。</string></property>
+                 </widget>
+                </item>
+                <item row="34" column="0" colspan="3">
+                 <widget class="QLabel" name="zenzFeedbackMinKeyLengthLabel">
+                  <property name="text"><string>feedback を適用する最小読み文字数</string></property>
+                 </widget>
+                </item>
+                <item row="34" column="3" colspan="5">
+                 <widget class="QSpinBox" name="zenzFeedbackMinKeyLengthSpinBox">
+                  <property name="minimum"><number>1</number></property>
+                  <property name="maximum"><number>20</number></property>
+                  <property name="value"><number>7</number></property>
+                  <property name="suffix"><string> 文字以上</string></property>
+                 </widget>
+                </item>
+                <item row="35" column="0" colspan="3">
                  <widget class="QLabel" name="zenzFeedbackDataLabel">
                   <property name="text">
                    <string>Zenz 学習データ</string>
                   </property>
                  </widget>
                 </item>
-                <item row="33" column="3" colspan="5">
+                <item row="35" column="3" colspan="5">
                  <widget class="QPushButton" name="editZenzFeedbackButton">
                   <property name="toolTip">
                    <string>保存された Zenz 学習データを確認、検索、インポート、エクスポート、削除します。通常の変換履歴に反映済みの学習は、この画面の削除対象には含まれません。</string>
@@ -3604,6 +3623,8 @@
   <tabstop>zenzLiveCorrectionRightContextCheckBox</tabstop>
   <tabstop>zenzLiveCorrectionRightContextLengthSpinBox</tabstop>
   <tabstop>zenzFeedbackLearningCheckBox</tabstop>
+  <tabstop>zenzFeedbackMinKeyLengthCheckBox</tabstop>
+  <tabstop>zenzFeedbackMinKeyLengthSpinBox</tabstop>
   <tabstop>zenzFeedbackAutoBlockCheckBox</tabstop>
   <tabstop>zenzFeedbackAutoBlockRejectThresholdSpinBox</tabstop>
   <tabstop>editZenzFeedbackButton</tabstop>

@@ -165,6 +165,12 @@ void ApplyMozkeyProductDefaults(Config* config) {
   if (!config->has_use_zenz_feedback_learning()) {
     config->set_use_zenz_feedback_learning(true);
   }
+  if (!config->has_use_zenz_feedback_min_key_length()) {
+    config->set_use_zenz_feedback_min_key_length(true);
+  }
+  if (!config->has_zenz_feedback_min_key_length()) {
+    config->set_zenz_feedback_min_key_length(7);
+  }
   if (!config->has_use_zenz_auto_block_rejected_correction()) {
     config->set_use_zenz_auto_block_rejected_correction(true);
   }

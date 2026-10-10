@@ -175,13 +175,18 @@ void FillSyntheticCandidate(const converter::Candidate& base_candidate,
   candidate->display_value.clear();
 }
 
-session::ZenzFeedbackAutoBlockPolicy GetZenzFeedbackAutoBlockPolicy(
+session::ZenzFeedbackReusePolicy GetZenzFeedbackReusePolicy(
     const config::Config& config) {
-  session::ZenzFeedbackAutoBlockPolicy policy;
-  policy.enabled = config.use_zenz_auto_block_rejected_correction();
-  policy.minimum_reject_count =
+  session::ZenzFeedbackReusePolicy policy;
+  policy.minimum_key_length_enabled =
+      config.use_zenz_feedback_min_key_length();
+  policy.minimum_key_length =
+      std::clamp<uint32_t>(config.zenz_feedback_min_key_length(), 1, 20);
+  policy.auto_block_policy.enabled =
+      config.use_zenz_auto_block_rejected_correction();
+  policy.auto_block_policy.minimum_reject_count =
       static_cast<int>(config.zenz_auto_block_reject_threshold());
-  policy.minimum_reject_percentage = static_cast<int>(
+  policy.auto_block_policy.minimum_reject_percentage = static_cast<int>(
       config.zenz_auto_block_minimum_reject_percentage());
   return policy;
 }
@@ -244,7 +249,7 @@ bool ZenzFeedbackCandidateRewriter::Rewrite(
   const std::vector<session::ZenzFeedbackCandidate> ranked_candidates =
       store.GetRankedCandidates(
           full_key, kContextClass,
-          GetZenzFeedbackAutoBlockPolicy(request.config()));
+          GetZenzFeedbackReusePolicy(request.config()));
 
   if (ranked_candidates.empty()) {
     return false;

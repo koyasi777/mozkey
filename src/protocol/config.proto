@@ -390,6 +390,12 @@ message Config {
   // ConfigHandler.
   optional bool use_zenz_feedback_learning = 1011 [default = false];
 
+  // Exclude short full-sequence readings from automatic Zenz feedback
+  // promotion, fast reuse, and rejection. Explicit manual hard blocks
+  // remain effective. Recording and Mozc history are not affected.
+  optional bool use_zenz_feedback_min_key_length = 1039 [default = true];
+  optional uint32 zenz_feedback_min_key_length = 1040 [default = 7];
+
   // When enabled, repeated divergent commits of the same full-sequence Zenz
   // correction dynamically suppress that correction as an effective block.
   // This does not write an irreversible hard-reject record; changing the

@@ -985,13 +985,18 @@ bool CanPersistZenzFeedbackPersonalization(const ImeContext& context) {
   return !context.client_context().is_private_input();
 }
 
-ZenzFeedbackAutoBlockPolicy GetZenzFeedbackAutoBlockPolicy(
+ZenzFeedbackReusePolicy GetZenzFeedbackReusePolicy(
     const config::Config& config) {
-  ZenzFeedbackAutoBlockPolicy policy;
-  policy.enabled = config.use_zenz_auto_block_rejected_correction();
-  policy.minimum_reject_count =
+  ZenzFeedbackReusePolicy policy;
+  policy.minimum_key_length_enabled =
+      config.use_zenz_feedback_min_key_length();
+  policy.minimum_key_length =
+      std::clamp<uint32_t>(config.zenz_feedback_min_key_length(), 1, 20);
+  policy.auto_block_policy.enabled =
+      config.use_zenz_auto_block_rejected_correction();
+  policy.auto_block_policy.minimum_reject_count =
       static_cast<int>(config.zenz_auto_block_reject_threshold());
-  policy.minimum_reject_percentage = static_cast<int>(
+  policy.auto_block_policy.minimum_reject_percentage = static_cast<int>(
       config.zenz_auto_block_minimum_reject_percentage());
   return policy;
 }
@@ -6473,7 +6478,7 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
   const std::vector<ZenzFeedbackCandidate> feedback_candidates =
       zenz_feedback_store_.GetAcceptedCandidates(
           live_conversion_key_, context_class,
-          GetZenzFeedbackAutoBlockPolicy(config));
+          GetZenzFeedbackReusePolicy(config));
 
   if (feedback_candidates.empty()) {
     return false;
@@ -7398,7 +7403,7 @@ bool Session::ApplyZenzLiveCorrectionResult(
     const ZenzFeedbackDecision feedback_decision =
         zenz_feedback_store_.Decide(
             pending_zenz_live_.key, context_class, zenz_value,
-            GetZenzFeedbackAutoBlockPolicy(config));
+            GetZenzFeedbackReusePolicy(config));
 
     feedback_reason = feedback_decision.reason;
 
