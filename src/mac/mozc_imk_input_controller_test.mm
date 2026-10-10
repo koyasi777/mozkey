@@ -51,6 +51,15 @@
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 
+// Converts a Y coordinate in Cocoa's global screen coordinates to the
+// renderer's coordinate system, whose origin is the left-top of the primary
+// screen.  Falls back to a 768pt screen when no screen is available.
+static int FlippedY(CGFloat cocoa_y) {
+  NSArray<NSScreen *> *screens = [NSScreen screens];
+  const CGFloat height = screens.count > 0 ? NSHeight([screens[0] frame]) : 768;
+  return static_cast<int>(height - cocoa_y);
+}
+
 @interface MockIMKServer : NSObject <ServerCallback> {
   // The controller which accepts user's clicks
   __weak id<ControllerCallback> expectedController_;
@@ -599,7 +608,7 @@ TEST_F(MozcImkInputControllerTest, UpdateCandidates) {
   // setup the cursor position
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
   [controller_ updateCandidates:&output];
   // Run the runloop so "delayedUpdateCandidates" can be called
   [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
@@ -610,9 +619,9 @@ TEST_F(MozcImkInputControllerTest, UpdateCandidates) {
   const commands::RendererCommand::Rectangle &preedit_rectangle =
       rendererCommand.preedit_rectangle();
   EXPECT_EQ(preedit_rectangle.left(), 50);
-  EXPECT_EQ(preedit_rectangle.top(), 708);
+  EXPECT_EQ(preedit_rectangle.top(), FlippedY(60));
   EXPECT_EQ(preedit_rectangle.right(), 51);
-  EXPECT_EQ(preedit_rectangle.bottom(), 718);
+  EXPECT_EQ(preedit_rectangle.bottom(), FlippedY(50));
 
   // reshow the candidate window again -- but cursor position has changed.
   mock_client_.expectedCursor = NSMakeRect(60, 50, 1, 10);
@@ -687,7 +696,7 @@ TEST_F(MozcImkInputControllerTest,
 
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
 
   [controller_ updateCandidates:&output];
   [[NSRunLoop currentRunLoop]
@@ -719,7 +728,7 @@ TEST_F(MozcImkInputControllerTest,
 
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
 
   [controller_ updateCandidates:&output];
   [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
@@ -753,7 +762,7 @@ TEST_F(MozcImkInputControllerTest,
 
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
 
   EXPECT_CALL(*mock_mozc_client_,
               SendKeyWithContext(
@@ -798,7 +807,7 @@ TEST_F(MozcImkInputControllerTest,
 
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
 
   EXPECT_CALL(*mock_mozc_client_,
               SendKeyWithContext(
@@ -815,6 +824,41 @@ TEST_F(MozcImkInputControllerTest,
       controller_.rendererCommand.output().candidate_window().focused_index(),
       1);
 }
+TEST_F(MozcImkInputControllerTest,
+       UpdateCandidatesUsesPrimaryScreenForNonPrimaryDisplay) {
+  if ([NSScreen screens].count == 0) {
+    GTEST_SKIP() << "No screen is available.";
+  }
+
+  commands::Output output;
+  commands::CandidateWindow *candidate_window =
+      output.mutable_candidate_window();
+  candidate_window->set_focused_index(0);
+  candidate_window->set_size(1);
+  commands::CandidateWindow::Candidate *candidate =
+      candidate_window->add_candidate();
+  candidate->set_index(0);
+  candidate->set_value("abc");
+
+  // The composition is on a display placed at the upper left of the primary
+  // display.  IMKBaseline is flipped with the height of that display (1440)
+  // instead of the primary display, so it must not be used for Y.
+  mock_client_.expectedCursor = NSMakeRect(-1500, 1200, 1, 10);
+  mock_client_.expectedAttributes = @{
+    @"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(-1500, 1440 - 1200)]
+  };
+  [controller_ updateCandidates:&output];
+  [[NSRunLoop currentRunLoop]
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+
+  const commands::RendererCommand::Rectangle &preedit_rectangle =
+      controller_.rendererCommand.preedit_rectangle();
+  EXPECT_EQ(preedit_rectangle.left(), -1500);
+  EXPECT_EQ(preedit_rectangle.top(), FlippedY(1210));
+  EXPECT_EQ(preedit_rectangle.right(), -1499);
+  EXPECT_EQ(preedit_rectangle.bottom(), FlippedY(1200));
+}
+
 TEST_F(MozcImkInputControllerTest, UpdateCandidatesForLiveConversionWithoutCandidateWindow) {
   commands::Output output;
   output.set_live_conversion(true);
@@ -829,7 +873,7 @@ TEST_F(MozcImkInputControllerTest, UpdateCandidatesForLiveConversionWithoutCandi
 
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
 
   [controller_ updateCandidates:&output];
   [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
@@ -844,9 +888,9 @@ TEST_F(MozcImkInputControllerTest, UpdateCandidatesForLiveConversionWithoutCandi
   const commands::RendererCommand::Rectangle &preedit_rectangle =
       rendererCommand.preedit_rectangle();
   EXPECT_EQ(preedit_rectangle.left(), 50);
-  EXPECT_EQ(preedit_rectangle.top(), 708);
+  EXPECT_EQ(preedit_rectangle.top(), FlippedY(60));
   EXPECT_EQ(preedit_rectangle.right(), 51);
-  EXPECT_EQ(preedit_rectangle.bottom(), 718);
+  EXPECT_EQ(preedit_rectangle.bottom(), FlippedY(50));
 }
 
 TEST_F(
@@ -878,7 +922,7 @@ TEST_F(
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
       @{@"IMKBaseline" :
-            [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+            [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
 
   [controller_ updateCandidates:&output];
 
@@ -904,18 +948,18 @@ TEST_F(
   ASSERT_TRUE(controller_.rendererCommand.has_ruby_preedit_rectangle());
 
   EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().left(), 50);
-  EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().top(), 708);
+  EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().top(), FlippedY(60));
   EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().right(), 51);
-  EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().bottom(), 718);
+  EXPECT_EQ(controller_.rendererCommand.preedit_rectangle().bottom(), FlippedY(50));
 
   EXPECT_EQ(
       controller_.rendererCommand.ruby_preedit_rectangle().left(), 50);
   EXPECT_EQ(
-      controller_.rendererCommand.ruby_preedit_rectangle().top(), 708);
+      controller_.rendererCommand.ruby_preedit_rectangle().top(), FlippedY(60));
   EXPECT_EQ(
       controller_.rendererCommand.ruby_preedit_rectangle().right(), 51);
   EXPECT_EQ(
-      controller_.rendererCommand.ruby_preedit_rectangle().bottom(), 718);
+      controller_.rendererCommand.ruby_preedit_rectangle().bottom(), FlippedY(50));
 }
 
 TEST_F(MozcImkInputControllerTest, LiveConversionRecalculatesRendererPosition) {
@@ -932,7 +976,7 @@ TEST_F(MozcImkInputControllerTest, LiveConversionRecalculatesRendererPosition) {
 
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
   [controller_ updateCandidates:&output];
   [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
 
@@ -942,7 +986,7 @@ TEST_F(MozcImkInputControllerTest, LiveConversionRecalculatesRendererPosition) {
 
   mock_client_.expectedCursor = NSMakeRect(70, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(70, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(70, FlippedY(50))]};
   [controller_ updateCandidates:&output];
   [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
 
@@ -969,7 +1013,7 @@ TEST_F(MozcImkInputControllerTest,
 
   mock_client_.expectedCursor = NSMakeRect(50, 50, 10, 1);
   mock_client_.expectedAttributes = @{
-    @"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(60, 718)],
+    @"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(60, FlippedY(50))],
     IMKTextOrientationName : @(NO),
   };
 
@@ -1023,7 +1067,7 @@ TEST_F(MozcImkInputControllerTest,
   // interpret as vertical.  Explicit IMK orientation must win.
   mock_client_.expectedCursor = NSMakeRect(50, 50, 10, 1);
   mock_client_.expectedAttributes = @{
-    @"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(60, 718)],
+    @"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(60, FlippedY(50))],
     IMKTextOrientationName : @(YES),
   };
 
@@ -1058,7 +1102,7 @@ TEST_F(MozcImkInputControllerTest,
 
   mock_client_.expectedCursor = NSMakeRect(50, 50, 1, 10);
   mock_client_.expectedAttributes =
-      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, 718)]};
+      @{@"IMKBaseline" : [NSValue valueWithPoint:NSMakePoint(50, FlippedY(50))]};
 
   [controller_ updateCandidates:&output];
   [[NSRunLoop currentRunLoop]
