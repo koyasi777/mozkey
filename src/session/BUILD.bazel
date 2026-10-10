@@ -969,6 +969,7 @@ mozc_cc_test(
         ":keymap",
         "//composer",
         "//composer:table",
+        "//config:character_form_manager",
         "//config:config_handler",
         "//converter:converter_interface",
         "//converter:converter_mock",

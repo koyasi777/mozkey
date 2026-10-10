@@ -189,6 +189,8 @@ void KeyMapManager::Reset() {
   keymap_precomposition_.Clear();
   keymap_composition_.Clear();
   keymap_conversion_.Clear();
+  keymap_live_conversion_.Clear();
+  keymap_zenz_conversion_.Clear();
   keymap_zero_query_suggestion_.Clear();
   keymap_suggestion_.Clear();
   keymap_prediction_.Clear();
@@ -382,6 +384,12 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
         i + 1 != command_sequence.size()) {
       return false;
     }
+    // Switching the visible presentation to ordinary conversion is a
+    // stand-alone action. Do not silently discard later macro steps from
+    // SendKeyConversionState's special-case dispatch.
+    if (command == "RevertZenzToMozc" && command_sequence.size() != 1) {
+      return false;
+    }
   }
 
   commands::KeyEvent key_event;
@@ -432,6 +440,28 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
 
     keymap_conversion_.AddRule(key_event, command, command_sequence,
                                 key_event_name);
+    return true;
+  }
+
+  if (state_name == "LiveConversion") {
+    ConversionState::Commands command;
+    if (!ParseCommandConversion(first_command_name, &command)) {
+      return false;
+    }
+
+    keymap_live_conversion_.AddRule(key_event, command, command_sequence,
+                                    key_event_name);
+    return true;
+  }
+
+  if (state_name == "ZenzConversion") {
+    ConversionState::Commands command;
+    if (!ParseCommandConversion(first_command_name, &command)) {
+      return false;
+    }
+
+    keymap_zenz_conversion_.AddRule(key_event, command, command_sequence,
+                                    key_event_name);
     return true;
   }
 
@@ -755,6 +785,9 @@ void KeyMapManager::InitCommandData() {
   // Conversion
   RegisterConversionCommand("ForceZenzLiveCorrection",
                             ConversionState::FORCE_ZENZ_LIVE_CORRECTION);
+  RegisterConversionCommand("RevertZenzToMozc",
+                            ConversionState::REVERT_ZENZ_TO_MOZC);
+  RegisterConversionCommand("Backspace", ConversionState::BACKSPACE);
   RegisterConversionCommand("IMEOff", ConversionState::IME_OFF);
   RegisterConversionCommand("IMEOn", ConversionState::IME_ON);
   RegisterConversionCommand("InsertCharacter",
@@ -990,6 +1023,52 @@ bool KeyMapManager::GetCommandSequenceComposition(
 bool KeyMapManager::GetCommandSequenceConversion(
     const commands::KeyEvent& key_event,
     CommandSequence* commands) const {
+  return keymap_conversion_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequenceLiveConversion(
+    const commands::KeyEvent& key_event, CommandSequence* commands,
+    bool* specialized_override) const {
+  if (specialized_override != nullptr) {
+    *specialized_override = false;
+  }
+  if (keymap_live_conversion_.GetCommandSequence(key_event, commands)) {
+    if (specialized_override != nullptr) {
+      *specialized_override = true;
+    }
+    return true;
+  }
+  return keymap_conversion_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequenceZenzLiveConversion(
+    const commands::KeyEvent& key_event, CommandSequence* commands,
+    bool* specialized_override) const {
+  if (specialized_override != nullptr) {
+    *specialized_override = false;
+  }
+  if (keymap_zenz_conversion_.GetCommandSequence(key_event, commands)) {
+    if (specialized_override != nullptr) {
+      *specialized_override = true;
+    }
+    return true;
+  }
+  return GetCommandSequenceLiveConversion(key_event, commands,
+                                          specialized_override);
+}
+
+bool KeyMapManager::GetCommandSequenceZenzConversion(
+    const commands::KeyEvent& key_event, CommandSequence* commands,
+    bool* zenz_override) const {
+  if (zenz_override != nullptr) {
+    *zenz_override = false;
+  }
+  if (keymap_zenz_conversion_.GetCommandSequence(key_event, commands)) {
+    if (zenz_override != nullptr) {
+      *zenz_override = true;
+    }
+    return true;
+  }
   return keymap_conversion_.GetCommandSequence(key_event, commands);
 }
 

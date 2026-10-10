@@ -62,6 +62,7 @@ class KeyMapManagerTestPeer : public testing::TestPeer<KeyMapManager> {
       : testing::TestPeer<KeyMapManager>(manager) {}
 
   PEER_METHOD(AddCommand);
+  PEER_METHOD(Reset);
   PEER_METHOD(LoadStream);
   PEER_METHOD(LoadStreamWithErrors);
   PEER_METHOD(ParseCommandDirect);
@@ -277,6 +278,177 @@ TEST_F(KeyMapTest, ZenzManualCommandAndDelayGrammar) {
                                "Convert|Delay(700)|ForceZenzLiveCorrection"));
   EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Enter",
                                "Delay(700)|Commit"));
+}
+
+TEST_F(KeyMapTest, ZenzConversionOverridesAndInheritsConversion) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer peer(manager);
+  EXPECT_TRUE(peer.AddCommand("Conversion", "Space", "ConvertNext"));
+  EXPECT_TRUE(peer.AddCommand("Conversion", "Ctrl Enter", "Commit"));
+  EXPECT_TRUE(peer.AddCommand("ZenzConversion", "Space", "RevertZenzToMozc"));
+  EXPECT_FALSE(peer.AddCommand("UnknownZenzState", "Space", "Commit"));
+  EXPECT_FALSE(peer.AddCommand("ZenzConversion", "Space", "NoSuchCommand"));
+  EXPECT_FALSE(peer.AddCommand("ZenzConversion", "Alt Space",
+                               "RevertZenzToMozc|IMEOff"));
+
+  commands::KeyEvent space;
+  ASSERT_TRUE(KeyParser::ParseKey("Space", &space));
+  CommandSequence sequence;
+  ASSERT_TRUE(manager.GetCommandSequenceConversion(space, &sequence));
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence[0], "ConvertNext");
+
+  ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(space, &sequence));
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence[0], "RevertZenzToMozc");
+
+  commands::KeyEvent enter;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Enter", &enter));
+  ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(enter, &sequence));
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence[0], "Commit");
+}
+
+TEST_F(KeyMapTest, LiveAndZenzConversionPrecedenceAndFallback) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer peer(manager);
+  peer.Reset();
+  EXPECT_TRUE(peer.AddCommand("Conversion", "Backspace", "Cancel"));
+  EXPECT_TRUE(peer.AddCommand("Conversion", "Ctrl Enter", "Commit"));
+  EXPECT_TRUE(peer.AddCommand("LiveConversion", "Backspace", "Backspace"));
+  EXPECT_TRUE(peer.AddCommand("ZenzConversion", "Backspace", "IMEOff"));
+
+  commands::KeyEvent key;
+  ASSERT_TRUE(KeyParser::ParseKey("Backspace", &key));
+  CommandSequence sequence;
+  bool specialized = false;
+  ASSERT_TRUE(manager.GetCommandSequenceLiveConversion(key, &sequence,
+                                                       &specialized));
+  EXPECT_TRUE(specialized);
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence[0], "Backspace");
+
+  ASSERT_TRUE(manager.GetCommandSequenceZenzLiveConversion(
+      key, &sequence, &specialized));
+  EXPECT_TRUE(specialized);
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence[0], "IMEOff");
+
+  key.Clear();
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Enter", &key));
+  ASSERT_TRUE(manager.GetCommandSequenceZenzLiveConversion(
+      key, &sequence, &specialized));
+  EXPECT_FALSE(specialized);
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence[0], "Commit");
+
+  EXPECT_FALSE(peer.AddCommand("LiveConverion", "Space", "ConvertNext"));
+}
+
+TEST_F(KeyMapTest, ZenzLiveInheritsLiveWhileManualZenzInheritsOrdinary) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer peer(manager);
+  peer.Reset();
+  EXPECT_TRUE(peer.AddCommand("Conversion", "Backspace", "Cancel"));
+  EXPECT_TRUE(peer.AddCommand("LiveConversion", "Backspace", "Backspace"));
+  commands::KeyEvent key;
+  ASSERT_TRUE(KeyParser::ParseKey("Backspace", &key));
+  CommandSequence sequence;
+  bool specialized = false;
+  ASSERT_TRUE(manager.GetCommandSequenceZenzLiveConversion(
+      key, &sequence, &specialized));
+  EXPECT_TRUE(specialized);
+  EXPECT_EQ(sequence.front(), "Backspace");
+  ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(
+      key, &sequence, &specialized));
+  EXPECT_FALSE(specialized);
+  EXPECT_EQ(sequence.front(), "Cancel");
+}
+
+TEST_F(KeyMapTest, BuiltinKeymapsExplicitlyBindZenzSpaceRevert) {
+  commands::KeyEvent space;
+  ASSERT_TRUE(KeyParser::ParseKey("Space", &space));
+  for (const config::Config::SessionKeymap kind :
+       {config::Config::ATOK, config::Config::MSIME, config::Config::KOTOERI,
+        config::Config::MOBILE, config::Config::CHROMEOS}) {
+    KeyMapManager manager(GetDefaultConfig(kind));
+    CommandSequence ordinary;
+    ASSERT_TRUE(manager.GetCommandSequenceConversion(space, &ordinary));
+    ASSERT_EQ(ordinary.size(), 1);
+    EXPECT_EQ(ordinary.front(), "ConvertNext");
+
+    CommandSequence zenz;
+    ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(space, &zenz));
+    ASSERT_EQ(zenz.size(), 1);
+    EXPECT_EQ(zenz.front(), "RevertZenzToMozc");
+  }
+}
+
+TEST_F(KeyMapTest, BuiltinKeymapsInheritZenzBackspaceFromOrigin) {
+  commands::KeyEvent backspace;
+  ASSERT_TRUE(KeyParser::ParseKey("Backspace", &backspace));
+  for (const config::Config::SessionKeymap kind :
+       {config::Config::ATOK, config::Config::MSIME, config::Config::KOTOERI,
+        config::Config::MOBILE, config::Config::CHROMEOS}) {
+    KeyMapManager manager(GetDefaultConfig(kind));
+    CommandSequence ordinary;
+    ASSERT_TRUE(manager.GetCommandSequenceConversion(backspace, &ordinary));
+    EXPECT_EQ(ordinary.front(), "Cancel");
+    CommandSequence live;
+    ASSERT_TRUE(manager.GetCommandSequenceLiveConversion(backspace, &live));
+    EXPECT_EQ(live.front(), "Backspace");
+    CommandSequence zenz;
+    bool specialized = true;
+    ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(
+        backspace, &zenz, &specialized));
+    EXPECT_FALSE(specialized);
+    EXPECT_EQ(zenz.front(), "Cancel");
+    ASSERT_TRUE(manager.GetCommandSequenceZenzLiveConversion(
+        backspace, &zenz, &specialized));
+    EXPECT_TRUE(specialized);
+    EXPECT_EQ(zenz.front(), "Backspace");
+  }
+}
+
+TEST_F(KeyMapTest, ZenzConversionBackspaceCommandAndOverrideFlag) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer peer(manager);
+  // Start from a known-empty keymap; platform defaults can bind Ctrl Enter.
+  peer.Reset();
+  EXPECT_TRUE(peer.AddCommand("Conversion", "Backspace", "Cancel"));
+  EXPECT_TRUE(peer.AddCommand("ZenzConversion", "Space", "Backspace"));
+  EXPECT_TRUE(peer.AddCommand("ZenzConversion", "Backspace", "Commit"));
+
+  commands::KeyEvent key;
+  CommandSequence sequence;
+  bool overridden = false;
+  ASSERT_TRUE(KeyParser::ParseKey("Space", &key));
+  ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(key, &sequence,
+                                                       &overridden));
+  EXPECT_TRUE(overridden);
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence.front(), "Backspace");
+
+  key.Clear();
+  ASSERT_TRUE(KeyParser::ParseKey("Backspace", &key));
+  ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(key, &sequence,
+                                                       &overridden));
+  EXPECT_TRUE(overridden);
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence.front(), "Commit");
+
+  key.Clear();
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Enter", &key));
+  EXPECT_FALSE(manager.GetCommandSequenceZenzConversion(key, &sequence,
+                                                        &overridden));
+  EXPECT_FALSE(overridden);
+
+  EXPECT_TRUE(peer.AddCommand("Conversion", "Ctrl Enter", "Commit"));
+  ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(key, &sequence,
+                                                       &overridden));
+  EXPECT_FALSE(overridden);
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence.front(), "Commit");
 }
 
 TEST_F(KeyMapTest, AddCommandSequenceRejectsInvalidFirstCommand) {

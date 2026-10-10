@@ -4,6 +4,14 @@
 <context>
     <name>mozc::gui::KeyMapEditorDialog</name>
     <message>
+        <source>LiveConversion</source>
+        <translation>ライブ変換中</translation>
+    </message>
+    <message>
+        <source>ZenzConversion</source>
+        <translation>Zenz補正中</translation>
+    </message>
+    <message>
         <source>Conversion</source>
         <translation>変換中</translation>
     </message>
@@ -258,6 +266,14 @@
     <message>
         <source>DeleteSelectedCandidate</source>
         <translation>選択候補を履歴から削除／候補を非表示</translation>
+    </message>
+    <message>
+        <source>RevertZenzToMozc</source>
+        <translation>通常のMozc変換に戻す</translation>
+    </message>
+    <message>
+        <source>Return to Mozc conversion must be used alone.</source>
+        <translation>通常のMozc変換に戻す操作は単独で指定してください。</translation>
     </message>
     <message>
         <source>ForceZenzLiveCorrection</source>

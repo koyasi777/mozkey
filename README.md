@@ -474,9 +474,30 @@ Conversion + Shift Space -> ForceZenzLiveCorrection
 - `ForceZenzLiveCorrection` はコマンド列の**最後**にのみ配置できます。たとえば `ForceZenzLiveCorrection|Delay(700)|Commit` は設定できません。Zenz の非同期応答処理を後続コマンドで上書きしないための制約です。
 - Space / Shift+Space に別のコマンドが既に割り当てられている場合は、同じ入力状態の既存行を**置き換えて**ください（重複行を追加しない）。特に Shift+Space は従来の別種の空白入力などを置き換える可能性があり、他のアプリケーションや OS のショートカットに先取りされる場合もあります。
 - 待機中に別のキー操作、候補のマウス選択、入力先の切り替えなどが行われた場合、古いコマンド列が後から入力へ作用しないよう、保留していた再開処理を無効化します。
-- 手動補正後も Space で通常の Mozc 変換へ戻れます。再度手動補正を実行するには、変換中に割り当てたキーを使用します。専用の「変換中（Zenz）」キー設定モードは現時点ではありません。
+- 手動補正後も Space で通常の Mozc 変換へ戻れます。再度手動補正を実行するには、変換中に割り当てたキーを使用します。「Zenz補正中」専用キー設定が追加されており、Zenz補正結果が表示中はその設定が優先されます。
 
-**OS 別の実装・検証状況**: `ForceZenzLiveCorrection` と `Delay(ms)` のコア実装は Windows 専用ではなく、共通の Session 層にあります。macOS の IMK クライアントにも遅延コールバック処理がありますが、現時点では保留タイマーを1本だけ保持する実装であり、自動 Zenz 処理など複数の非同期処理が重なる場合の互換性は未確認です。このため、今回の手動補正・遅延ワークフローは **Windows で実機確認済み、macOS は未検証・動作保証なし**です。Linux も未検証です。なお、選択文字列の `ReconvertSelectionOrInsertSpace` は Windows TSF クライアント固有の処理であり、上記1行目の選択再変換マクロは macOS 対応ではありません。
+※ 選択文字列の再変換（`ReconvertSelectionOrInsertSpace`）は Windows 専用です。手動 Zenz 補正と遅延コマンド列の組み合わせについては、macOS・Linux での動作を保証していません。
+
+### ライブ変換・Zenz補正中のキー設定
+
+キー設定には「ライブ変換中」（`LiveConversion`）と「Zenz補正中」（`ZenzConversion`）があります。前者は Mozc のライブ変換中、後者は Zenz の補正結果が表示されている間に適用されます。
+
+標準キー設定での Backspace の動作は次のとおりです。
+
+| 入力状態 | Backspace の動作 |
+| --- | --- |
+| 通常の変換中 | 変換をキャンセルして読みへ戻る |
+| ライブ変換中 | 左の読みを1文字削除して再変換する |
+| ライブ変換から移行した Zenz補正中 | 左の読みを1文字削除して再変換する |
+| 通常変換から手動で移行した Zenz補正中 | 補正をキャンセルして読みへ戻る |
+
+Zenz補正中は、標準キー設定の Space で補正結果を確定せずに元の Mozc 変換結果へ戻せます。ライブ変換から移行した場合は、戻った後も読みを編集するとライブ変換が続きます。通常変換から手動で補正した場合は、通常変換に戻ります。
+
+```text
+ZenzConversion + Space -> RevertZenzToMozc
+```
+
+「通常のMozc変換に戻す」（`RevertZenzToMozc`）は、キー設定エディタで別のキーにも割り当てられます。このコマンドは単独で指定してください。カスタムキー設定で明示的に割り当てた操作がある場合は、その設定が優先されます。
 
 ### 候補の履歴削除・非表示
 
@@ -1469,9 +1490,30 @@ The first binding is **Windows TSF-specific**: with selected committed text, Spa
 - `ForceZenzLiveCorrection` must be the **last** step; `ForceZenzLiveCorrection|Delay(700)|Commit` is invalid. This prevents subsequent commands from replacing an asynchronous Zenz callback.
 - If Space or Shift+Space already has a command in the same input state, **replace** that binding rather than adding a duplicate row. In particular, Shift+Space may replace an existing alternate-space action, and OS/application shortcuts can intercept keys before Mozkey receives them.
 - A different key action, mouse candidate selection, or input-context change while waiting invalidates the pending continuation so that an old delayed command does not act on the new input.
-- Space can still switch a visible Zenz correction back to ordinary Mozc conversion. A separately bound manual Zenz action can request another correction from conversion state. There is not yet a dedicated `Conversion (Zenz)` keymap mode.
+- Space can still switch a visible Zenz correction back to ordinary Mozc conversion. A separately bound manual Zenz action can request another correction from conversion state. The `ZenzConversion` keymap state now allows Zenz-specific bindings.
 
-**Platform implementation and verification:** `ForceZenzLiveCorrection` and `Delay(ms)` are implemented in the shared Session layer, not exclusively in Windows code. The macOS IMK client also handles delayed callbacks, but currently retains only one pending timer; coexistence with other asynchronous callbacks such as automatic Zenz processing has not been verified. Therefore the manual-correction/delay workflow is **runtime-tested on Windows, not validated or guaranteed on macOS**. Linux is also untested. `ReconvertSelectionOrInsertSpace` is implemented specifically by the Windows TSF client, so the selected-text reconversion sequence in the first example is not supported on macOS.
+Note: Selected-text reconversion (`ReconvertSelectionOrInsertSpace`) is Windows-only. Manual Zenz correction combined with delayed key sequences is not guaranteed to work on macOS or Linux.
+
+### Key bindings during live conversion and Zenz correction
+
+The keymap editor includes **Live converting** (`LiveConversion`) and **Zenz correction** (`ZenzConversion`). The first applies while Mozc live conversion is active; the second applies while a Zenz correction is displayed.
+
+With the built-in keymaps, Backspace behaves as follows:
+
+| Input state | Backspace action |
+| --- | --- |
+| Ordinary conversion | Cancel conversion and restore the reading |
+| Live conversion | Delete one character from the reading and reconvert |
+| Zenz correction originating from live conversion | Delete one character from the reading and reconvert |
+| Manual Zenz correction originating from ordinary conversion | Cancel the correction and restore the reading |
+
+With the built-in keymaps, Space during Zenz correction restores the underlying Mozc result without committing the Zenz result. If the correction originated from live conversion, you can continue editing the reading with live conversion. Manual Zenz correction originating from ordinary conversion returns to ordinary conversion.
+
+```text
+ZenzConversion + Space -> RevertZenzToMozc
+```
+
+**Return to ordinary Mozc conversion** (`RevertZenzToMozc`) can also be assigned to another key. Configure it as a single command, not as part of a command sequence. Explicit bindings in CUSTOM keymaps take precedence.
 
 ### Delete candidate history / hide candidate
 

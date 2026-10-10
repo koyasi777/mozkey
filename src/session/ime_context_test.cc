@@ -36,6 +36,7 @@
 #include "absl/time/time.h"
 #include "composer/composer.h"
 #include "composer/table.h"
+#include "config/character_form_manager.h"
 #include "config/config_handler.h"
 #include "converter/candidate.h"
 #include "converter/converter_interface.h"
@@ -106,6 +107,21 @@ TEST(ImeContextTest, BasicTest) {
 }
 
 TEST(ImeContextTest, CopyContext) {
+  // Character-form rules come from the persisted profile through a global
+  // manager. Pin the pending Roman character width so this copy-semantics
+  // test is deterministic, then restore the previous rules on scope exit.
+  const config::Config original_config = config::ConfigHandler::GetCopiedConfig();
+  struct RestoreCharacterFormRules {
+    const config::Config& original;
+    ~RestoreCharacterFormRules() {
+      config::CharacterFormManager::GetCharacterFormManager()->ReloadConfig(
+          original);
+    }
+  };
+  const RestoreCharacterFormRules restore{original_config};
+  config::CharacterFormManager::GetCharacterFormManager()->AddPreeditRule(
+      "A", config::Config::FULL_WIDTH);
+
   auto table = std::make_shared<composer::Table>();
   table->AddRule("a", "あ", "");
   table->AddRule("n", "ん", "");
