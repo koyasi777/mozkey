@@ -819,12 +819,15 @@ class SessionTest : public testing::TestWithTempUserProfile {
     session->SetConfig(config);
   }
 
-  void EnableZenzLiveCorrectionWithFeedbackLearning(Session* session) {
+  void EnableZenzLiveCorrectionWithFeedbackLearning(
+      Session* session, bool enable_feedback_min_key_length = true) {
     config::Config config;
     config::ConfigHandler::GetDefaultConfig(&config);
     config.set_use_live_conversion(true);
     config.set_use_zenz_live_correction(true);
     config.set_use_zenz_feedback_learning(true);
+    config.set_use_zenz_feedback_min_key_length(
+        enable_feedback_min_key_length);
     config.set_use_zenz_synthetic_candidate(true);
     config.set_zenz_live_correction_min_key_length(2);
     session->SetConfig(config);
@@ -3857,7 +3860,8 @@ TEST_F(SessionTest,
   Session session(engine);
   SessionTestPeer session_peer(session);
   InitSessionToPrecomposition(&session);
-  EnableZenzLiveCorrectionWithFeedbackLearning(&session);
+  EnableZenzLiveCorrectionWithFeedbackLearning(
+      &session, false);  // Test punctuation repair, not the min7 gate.
 
   // Session-level feedback fast path is intentionally limited to
   // multi-segment live conversion. With no preceding client context in this
@@ -6925,6 +6929,9 @@ TEST_F(SessionTest, AutoBlockedZenzResultRecordsMatchingShadowCommitAsAccepted) 
   config.set_zenz_live_correction_delay_msec(1000);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_min_key_length(false);
+  // The historical shadow-comparison test explicitly exercises
+  // auto-block even for a two-character reading.
   config.set_use_zenz_auto_block_rejected_correction(true);
   config.set_zenz_auto_block_reject_threshold(1);
   config.set_zenz_auto_block_minimum_reject_percentage(50);
@@ -7006,6 +7013,9 @@ TEST_F(SessionTest,
   config.set_zenz_live_correction_delay_msec(1000);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_min_key_length(false);
+  // The historical shadow-comparison test explicitly exercises
+  // auto-block even for a two-character reading.
   config.set_use_zenz_auto_block_rejected_correction(true);
   config.set_zenz_auto_block_reject_threshold(1);
   config.set_zenz_auto_block_minimum_reject_percentage(50);
@@ -7057,6 +7067,73 @@ TEST_F(SessionTest,
   ASSERT_EQ(entries.size(), 1);
   EXPECT_EQ(entries[0].accepted_count, 0);
   EXPECT_EQ(entries[0].rejected_count, 2);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest, ShortReadingAutoBlockDoesNotOverrideFreshZenzByDefault) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  ASSERT_TRUE(config.use_zenz_feedback_min_key_length());
+  ASSERT_EQ(config.zenz_feedback_min_key_length(), 7);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_auto_block_rejected_correction(true);
+  config.set_zenz_auto_block_reject_threshold(1);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
+  session.SetConfig(config);
+
+  // With the same observations as the historical auto-block tests, the
+  // 2-character reading is now deliberately ineligible for automatic reject.
+  session_peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "space_revert_zenz_to_mozc");
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_PREEDIT("亜衣", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_NE(command.output().zenz_live_correction_debug(),
+            "feedback_auto_blocked");
+
+  const std::vector<ZenzFeedbackEntry> entries =
+      session_peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].rejected_count, 1);
 #else
   GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif

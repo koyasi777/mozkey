@@ -129,6 +129,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - deferred 表示中の Enter / Shift による英字入力では、裏側の Mozc baseline ではなく、その時点でユーザーに見えている presentation を確定。Enter 確定後の Undo でも同じ presentation を復元
 - Zenz 出力が確定済み左文脈の長い suffix を現在入力の先頭へ反復する context echo を検出して拒否し、通常の Mozc ライブ変換結果へフォールバック
 - Zenz 補正結果のローカル feedback learning を追加。設定画面から ON/OFF 可能
+- 同音異義語が多く文脈によって適切な表記が変わりやすい短い読みで、Zenz feedback の過剰な学習反映を避けるため、保存済み feedback の自動適用を既定では読み全体が 7 文字以上の場合に限定。設定画面から ON/OFF と最小読み文字数（1～20 文字）を変更可能。短い読みの採用・却下履歴は記録・保持し、手動ブロックは引き続き有効
 - シークレットモードでは Zenz のローカル推論を継続したまま Zenz feedback personalization（学習・保存済み feedback の再利用）を無効化。新しい feedback は保存せず、既存 feedback 自体は削除しない
 - Zenz feedback の自動ブロック設定を追加。同じ読み全体・同じ文脈クラス・同じ補正結果について、通常却下回数が「最低拒否回数」と「採用回数 + 通常却下回数に占める最低拒否割合」の両方に達した場合だけ自動ブロックする。未保存の設定では既定で有効、最低拒否回数は 1 回、最低拒否割合は 50%。自動ブロックは TSV に hard reject を固定保存せず、現在の設定と既存 feedback から動的に再評価する
 - 自動ブロック中も Zenz 推論は shadow observation として継続する。同じ読みで非表示の Zenz 結果と最終確定値が一致すれば accepted feedback を加算して自己回復でき、拒否割合がしきい値を下回れば自動的にブロックを解除する。同じ読みで異なる値が確定した場合は通常却下を加算し、入力継続などで最終的な読みが変わった場合は neutral として扱う。明示的な hard reject はこの自己回復の対象外
@@ -314,6 +315,16 @@ Windows TSF の password input scope と macOS の Secure Event Input では、a
 
 Zenz feedback learning は任意機能です。有効な場合でも、Zenz 補正結果が表示されただけでは保存されません。Enter や句読点・記号の単打確定などで、表示中の Zenz 結果が明示的に確定された時点で、その full-sequence accepted feedback をローカル TSV に即時保存します。
 
+#### 短い読みの Zenz feedback 自動適用制限
+
+短い読みは同音異義語が多く、適切な表記が前後の文脈によって変わりやすいため、少数の Zenz feedback を一般的な表記選好として強く再利用すると、別の文脈でも特定の候補が過度に優先・抑制されるおそれがあります。これを防ぐため、**feedback の記録は継続しながら、短い読みへの自動的な学習反映を控える**設計にしています。7 文字は同音異義性の有無を厳密に判定する境界ではなく、誤った優先・抑制の影響を抑えるための調整可能な初期値です。
+
+初期設定では「短い読みでは Zenz feedback を自動適用しない」が **ON**、最小読み文字数は **7 文字**です。判定はローマ字の打鍵数や UTF-8 バイト数ではなく、feedback の読み全体に含まれる Unicode コードポイント数（Unicode scalar value に相当）で行います。たとえば `あしたはあめ`（6 文字）は対象外、`おねがいします`（7 文字）は対象です。設定画面では制限の ON/OFF と最小値（1～20 文字）を変更できます。
+
+対象外の読みでも、Zenz 補正の新規推論および採用・却下 feedback の記録は継続します。ただし、**保存済み feedback に基づく通常候補の順位調整・補正の即時再利用・自動ブロック**には利用しません。読みの長さにかかわらず、ユーザーが明示した **手動ブロック（hard reject）は有効**です。記録そのものは削除されず、制限を OFF にするか最小文字数を下げると、保存済みの履歴が再び自動適用の判定対象になります。
+
+これは「Zenz 補正を開始する最小文字数」とは別の設定です。新規推論の開始条件、通常の Mozc 変換・ユーザー履歴学習、確定済み Zenz 結果から Mozc 履歴へ学習する別経路を、この feedback 再利用制限だけで停止するものではありません。
+
 シークレットモード中は例外で、Zenz 推論は通常どおり利用できますが、Zenz feedback personalization の読み取り・書き込みを停止します。保存済み feedback による candidate ranking、複数文節 live correction の fast path、auto-block を含む feedback decision は適用せず、新しい feedback record も保存しません。シークレットモードを解除すると、削除せず保持していた既存 feedback を再び利用します。
 
 明示的確定後は、その accepted に対する短い rollback window を session 内に保持します。次の実テキスト入力や確定後の context transition で window が閉じる前に Backspace、Escape、Revert、Undo、Ctrl+Z などの修正操作が入った場合は、保存済み accepted を削除・上書きする代わりに `accepted_rollback` を append し、直前の accepted 1 件を補償します。`accepted_rollback` は rejected feedback ではないため、通常却下回数や auto-block の negative evidence を増やしません。IMEOff / MakeSureIMEOff は取り消しではなく確定後のモード変更として扱い、accepted を保持したまま rollback window を閉じます。表示中の Zenz 補正から Space や候補移動などの通常変換操作へ移った場合は別で、その Zenz 結果を rejected feedback として扱います。ただし Space などの通常操作由来の rejected feedback は、候補を永久に抑止する hard reject ではなく、以後の candidate ranking で順位を下げるための negative signal として扱います。
@@ -334,7 +345,7 @@ Zenz feedback の再利用方法は、単文節と複数文節で異なります
 
 `sensitive_like` context で得られた feedback は、通常文脈への候補 ranking / reuse には使いません。
 
-Zenz 学習データは設定画面から管理できます。管理画面では、学習済みエントリを読み取り専用 table で表示し、検索、インポート、エクスポート、選択項目削除、全削除を行えます。ユーザーが TSV ファイルを直接編集する必要はありません。
+Zenz 学習データは設定画面から管理できます。管理画面では、学習済みエントリを読み取り専用 table で表示し、検索、インポート、エクスポート、選択項目削除、全削除を行えます。ユーザーが TSV ファイルを直接編集する必要はありません。短い読みの履歴も残り、管理画面の「feedback適用」列には「対象外（記録のみ）」、明示的な手動ブロックでは「手動ブロック有効」と表示されます。
 
 また、選択した補正を「この補正をブロック」から明示的にブロックできます。ブロック済みの補正は再ブロックできません。ブロックを解除したい場合は、該当エントリを削除してから必要に応じて再学習します。
 
@@ -968,6 +979,7 @@ Main features added in this fork
 - Commits the presentation that is actually visible to the user, rather than a hidden Mozc baseline, when Enter or Shift-based ASCII input ends a deferred presentation; Undo after Enter restores the same visible presentation
 - Detects and rejects likely context echo where Zenz repeats a long suffix of already committed left context at the beginning of the current output, then falls back to the normal Mozc live-conversion result
 - Adds optional local feedback learning for Zenz correction results
+- Limits automatic reuse of stored Zenz feedback to full readings of at least 7 Unicode code points by default, to avoid over-applying learned preferences to short readings with many homophones and context-dependent interpretations. The threshold (1–20) and the gate can be configured; shorter readings are still recorded, and explicit manual hard blocks still apply
 - In Secret / Incognito mode, keeps local Zenz inference enabled while disabling Zenz feedback personalization; stored feedback is not reused or consulted for decisions, no new feedback is persisted, and existing feedback is left intact
 - Adds adaptive Zenz feedback auto-blocking. For the same full reading, context class, and correction value, auto-blocking activates only when both the minimum ordinary-reject count and the minimum reject percentage over accepted plus ordinary-rejected observations are met. For configurations without a saved value, auto-blocking defaults to enabled with a minimum of 1 rejection and 50%. Auto-blocking does not persist irreversible hard-reject rows; it is re-evaluated dynamically from the current settings and stored feedback.
 - Keeps evaluating an auto-blocked Zenz result as a hidden shadow observation. If the final committed value for the same reading matches that hidden Zenz value, accepted feedback is added so the entry can recover automatically once its reject percentage falls below the threshold. A different final value for the same reading adds an ordinary rejection; a changed final reading is neutral. Explicit hard rejects are not eligible for shadow recovery.
@@ -1201,6 +1213,30 @@ Zenz result, such as by pressing Enter or by using a direct-commit
 punctuation/symbol, Mozkey immediately appends the accepted full-sequence
 feedback to the local TSV.
 
+#### Minimum reading length for automatic Zenz feedback reuse
+
+Short Japanese readings often have many homophones, and the appropriate spelling can depend heavily on context. Reusing a small number of feedback observations as a strong general preference could over-promote or suppress a candidate in unrelated contexts. This gate **continues recording feedback while limiting its automatic influence on short readings**. The seven-character default is a configurable precaution, not a claim that length alone resolves ambiguity.
+
+For new or otherwise unset configurations, **automatic reuse of stored Zenz
+feedback is enabled only for full-sequence readings of 7 or more Unicode code
+points**. This counts characters in the full reading, not UTF-8 bytes or Roman
+keystrokes. The setting is enabled by default and can be disabled or adjusted
+from 1 to 20 characters in the config dialog. For example, `あしたはあめ` (6)
+is excluded and `おねがいします` (7) is eligible.
+
+Shorter readings still undergo fresh Zenz inference, and their accepted and
+rejected observations are still recorded. However, stored feedback for those
+readings is not used to adjust normal candidate ranking, immediately replay a
+previous correction, or automatically block a fresh Zenz result. Explicit
+manual hard rejects remain effective regardless of reading length. Records are
+not removed: disabling the gate or lowering the threshold makes previously
+recorded feedback eligible for reuse again.
+
+This is **separate from the minimum length required to initiate fresh Zenz
+correction**. It does not disable ordinary Mozc conversion or Mozc user-history
+learning, including the separate history-learning path for committed Zenz
+results.
+
 Secret / Incognito mode is an exception: local Zenz inference remains active,
 but Zenz feedback personalization stops both reading and writing. Stored
 feedback is not applied to candidate ranking, the multi-segment live-correction
@@ -1327,7 +1363,9 @@ Feedback learned in a `sensitive_like` context is not reused for ordinary-contex
 Zenz feedback data can be managed from the config dialog. The management dialog
 shows learned entries in a read-only table and supports search, import, export,
 single-entry deletion, and full deletion. This avoids requiring users to edit the
-TSV file directly.
+TSV file directly. The `feedback applicability` column identifies shorter
+readings as `対象外（記録のみ）` (record only) and explicit manual hard blocks as
+`手動ブロック有効` (manual block active).
 
 The management dialog can also explicitly block a selected Zenz correction.
 Already blocked corrections cannot be blocked again. To unblock a correction,

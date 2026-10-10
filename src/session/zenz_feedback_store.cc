@@ -33,6 +33,21 @@ namespace {
 
 constexpr int kAcceptThreshold = 1;
 
+// Count Unicode scalar values, not UTF-8 bytes or Roman keystrokes.
+// Persisted feedback keys are UTF-8 validated by the store.
+bool ExcludesAutomaticFeedback(absl::string_view key,
+                               const ZenzFeedbackReusePolicy& policy) {
+  if (!policy.minimum_key_length_enabled ||
+      policy.minimum_key_length <= 1) {
+    return false;
+  }
+  const size_t char_count = std::count_if(
+      key.begin(), key.end(), [](unsigned char c) {
+        return (c & 0xC0) != 0x80;
+      });
+  return char_count < policy.minimum_key_length;
+}
+
 // Stored records are full-sequence observations for one Zenz request/response
 // pair.  Do not add segment-local or lexical-unit records here; those should be
 // learned through Mozc history so phrase-boundary and dictionary semantics stay
@@ -1312,6 +1327,15 @@ ZenzFeedbackDecision ZenzFeedbackStore::Decide(
     absl::string_view context_class,
     absl::string_view value,
     const ZenzFeedbackAutoBlockPolicy& auto_block_policy) const {
+  ZenzFeedbackReusePolicy policy;
+  policy.auto_block_policy = auto_block_policy;
+  return Decide(key, context_class, value, policy);
+}
+
+ZenzFeedbackDecision ZenzFeedbackStore::Decide(
+    absl::string_view key, absl::string_view context_class,
+    absl::string_view value,
+    const ZenzFeedbackReusePolicy& reuse_policy) const {
   const std::map<FeedbackKey, Counts> counts = LoadCounts();
 
   const std::string normalized_key(key);
@@ -1347,8 +1371,16 @@ ZenzFeedbackDecision ZenzFeedbackStore::Decide(
   }
 
   ZenzFeedbackDecision decision = BuildDecisionFromCounts(aggregated);
+  if (ExcludesAutomaticFeedback(key, reuse_policy)) {
+    // Explicit manual hard blocks are intentionally exempt.
+    if (!decision.hard_rejected) {
+      decision.action = ZenzFeedbackAction::kNeutral;
+      decision.reason = "feedback_key_length_excluded";
+    }
+    return decision;
+  }
   ApplyRejectDominanceDecision(exact, &decision);
-  ApplyAutoBlockDecision(exact, auto_block_policy, &decision);
+  ApplyAutoBlockDecision(exact, reuse_policy.auto_block_policy, &decision);
   return decision;
 }
 
@@ -1363,6 +1395,17 @@ std::vector<ZenzFeedbackCandidate> ZenzFeedbackStore::GetRankedCandidates(
     absl::string_view key,
     absl::string_view context_class,
     const ZenzFeedbackAutoBlockPolicy& auto_block_policy) const {
+  ZenzFeedbackReusePolicy policy;
+  policy.auto_block_policy = auto_block_policy;
+  return GetRankedCandidates(key, context_class, policy);
+}
+
+std::vector<ZenzFeedbackCandidate> ZenzFeedbackStore::GetRankedCandidates(
+    absl::string_view key, absl::string_view context_class,
+    const ZenzFeedbackReusePolicy& reuse_policy) const {
+  if (ExcludesAutomaticFeedback(key, reuse_policy)) {
+    return {};
+  }
   const std::map<FeedbackKey, Counts> counts = LoadCounts();
 
   const std::string normalized_key(key);
@@ -1409,7 +1452,7 @@ std::vector<ZenzFeedbackCandidate> ZenzFeedbackStore::GetRankedCandidates(
         exact_it == exact_value_counts.end() ? Counts() : exact_it->second;
 
     if (c.hard_rejected ||
-        IsAutoBlockedByPolicy(exact_counts, auto_block_policy) ||
+        IsAutoBlockedByPolicy(exact_counts, reuse_policy.auto_block_policy) ||
         IsRejectCountDominant(exact_counts) ||
         c.accepted < kAcceptThreshold ||
         TotalScore(c) <= 0) {
@@ -1461,12 +1504,25 @@ std::vector<ZenzFeedbackCandidate> ZenzFeedbackStore::GetAcceptedCandidates(
   return GetRankedCandidates(key, context_class, auto_block_policy);
 }
 
+std::vector<ZenzFeedbackCandidate> ZenzFeedbackStore::GetAcceptedCandidates(
+    absl::string_view key, absl::string_view context_class,
+    const ZenzFeedbackReusePolicy& reuse_policy) const {
+  return GetRankedCandidates(key, context_class, reuse_policy);
+}
+
 std::vector<ZenzFeedbackEntry> ZenzFeedbackStore::ListEntries() const {
   return ListEntries(ZenzFeedbackAutoBlockPolicy());
 }
 
 std::vector<ZenzFeedbackEntry> ZenzFeedbackStore::ListEntries(
     const ZenzFeedbackAutoBlockPolicy& auto_block_policy) const {
+  ZenzFeedbackReusePolicy policy;
+  policy.auto_block_policy = auto_block_policy;
+  return ListEntries(policy);
+}
+
+std::vector<ZenzFeedbackEntry> ZenzFeedbackStore::ListEntries(
+    const ZenzFeedbackReusePolicy& reuse_policy) const {
   const std::map<FeedbackKey, Counts> counts = LoadCounts();
 
   std::vector<ZenzFeedbackEntry> entries;
@@ -1477,7 +1533,7 @@ std::vector<ZenzFeedbackEntry> ZenzFeedbackStore::ListEntries(
     const Counts& c = item.second;
     ZenzFeedbackDecision decision = BuildDecisionFromCounts(c);
     ApplyRejectDominanceDecision(c, &decision);
-    ApplyAutoBlockDecision(c, auto_block_policy, &decision);
+    ApplyAutoBlockDecision(c, reuse_policy.auto_block_policy, &decision);
 
     ZenzFeedbackEntry entry;
     entry.key = std::get<0>(feedback_key);
@@ -1489,6 +1545,8 @@ std::vector<ZenzFeedbackEntry> ZenzFeedbackStore::ListEntries(
     entry.auto_block_reject_percentage = AutoBlockRejectPercentage(c);
     entry.hard_rejected = decision.hard_rejected;
     entry.auto_blocked = decision.auto_blocked;
+    entry.reuse_excluded = !decision.hard_rejected &&
+        ExcludesAutomaticFeedback(entry.key, reuse_policy);
     entry.reason = decision.reason;
     entries.push_back(std::move(entry));
   }

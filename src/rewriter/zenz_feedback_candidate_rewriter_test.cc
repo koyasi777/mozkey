@@ -113,9 +113,11 @@ void AddSegment(absl::string_view key,
   candidate->attributes = converter::Attribute::BEST_CANDIDATE;
 }
 
-ConversionRequest CreateZenzFeedbackConversionRequest() {
+ConversionRequest CreateZenzFeedbackConversionRequest(
+    bool enable_minimum_key_length = true) {
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_min_key_length(enable_minimum_key_length);
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
 
   ConversionRequest::Options options;
@@ -161,6 +163,22 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "彼は");
   EXPECT_EQ(segments.conversion_segment(1).key(), "てんてきです");
   EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "点滴です");
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     ShortReadingDoesNotReuseFeedbackWithDefaultSevenCharacterPolicy) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("はし", "empty", "橋");
+
+  Segments segments;
+  AddSegment("はし", "箸", &segments);
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  ASSERT_EQ(segments.conversion_segment(0).candidates_size(), 1);
+  EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "箸");
 }
 
 TEST(ZenzFeedbackCandidateRewriterTest,
@@ -653,7 +671,9 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   Segments segments;
   AddSegment("あしたはあめ", "明日は飴", &segments);
 
-  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  // Verify the original safety/repair behavior independently of the
+  // newly enabled default minimum-key-length gate.
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest(false);
 
   ZenzFeedbackCandidateRewriter rewriter;
   EXPECT_TRUE(rewriter.Rewrite(request, &segments));
@@ -675,7 +695,9 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   Segments segments;
   AddSegment("するな", "するな", &segments);
 
-  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  // Verify the original safety/repair behavior independently of the
+  // newly enabled default minimum-key-length gate.
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest(false);
 
   ZenzFeedbackCandidateRewriter rewriter;
   EXPECT_FALSE(rewriter.Rewrite(request, &segments));
@@ -720,7 +742,9 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   Segments segments;
   AddSegment("とうきょう", "東京", &segments);
 
-  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  // Verify the original safety/repair behavior independently of the
+  // newly enabled default minimum-key-length gate.
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest(false);
 
   ZenzFeedbackCandidateRewriter rewriter;
   EXPECT_FALSE(rewriter.Rewrite(request, &segments));

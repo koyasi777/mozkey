@@ -396,6 +396,11 @@ ConfigDialog::ConfigDialog()
   zenzLiveCorrectionRightContextLengthSpinBox->setSpecialValueText(
       QString::fromUtf8("使わない"));
 
+  zenzFeedbackMinKeyLengthSpinBox->setRange(1, 20);
+  zenzFeedbackMinKeyLengthSpinBox->setSingleStep(1);
+  zenzFeedbackMinKeyLengthSpinBox->setSuffix(
+      QString::fromUtf8(" 文字以上"));
+
   zenzFeedbackAutoBlockRejectThresholdSpinBox->setRange(1, 999);
   zenzFeedbackAutoBlockRejectThresholdSpinBox->setSingleStep(1);
   zenzFeedbackAutoBlockRejectThresholdSpinBox->setSuffix(
@@ -551,6 +556,11 @@ ConfigDialog::ConfigDialog()
   QObject::connect(zenzFeedbackLearningCheckBox,
                    SIGNAL(stateChanged(int)), this,
                    SLOT(SelectZenzFeedbackLearningSetting(int)));
+  QObject::connect(zenzFeedbackMinKeyLengthCheckBox,
+                   &QCheckBox::stateChanged, this, [this](int) {
+                     SelectZenzFeedbackLearningSetting(
+                         zenzFeedbackLearningCheckBox->isChecked());
+                   });
   QObject::connect(zenzFeedbackAutoBlockCheckBox,
                    SIGNAL(stateChanged(int)), this,
                    SLOT(SelectZenzFeedbackAutoBlockSetting(int)));
@@ -1614,13 +1624,17 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
 
   session::ZenzFeedbackStore store;
 
-  session::ZenzFeedbackAutoBlockPolicy auto_block_policy;
-  auto_block_policy.enabled =
+  session::ZenzFeedbackReusePolicy reuse_policy;
+  reuse_policy.minimum_key_length_enabled =
+      current_config.use_zenz_feedback_min_key_length();
+  reuse_policy.minimum_key_length = std::clamp<uint32_t>(
+      current_config.zenz_feedback_min_key_length(), 1, 20);
+  reuse_policy.auto_block_policy.enabled =
       current_config.use_zenz_auto_block_rejected_correction();
-  auto_block_policy.minimum_reject_count =
+  reuse_policy.auto_block_policy.minimum_reject_count =
       static_cast<int>(current_config.zenz_auto_block_reject_threshold());
-  auto_block_policy.minimum_reject_percentage = static_cast<int>(
-      current_config.zenz_auto_block_minimum_reject_percentage());
+  reuse_policy.auto_block_policy.minimum_reject_percentage =
+      static_cast<int>(current_config.zenz_auto_block_minimum_reject_percentage());
 
   QVBoxLayout* root_layout = new QVBoxLayout(&dialog);
 
@@ -1715,6 +1729,11 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                              "解除したい場合は、該当エントリを削除して必要に応じて"
                              "再学習してください。\n"
                              "中立: 優先にもブロックにも使うだけの有効な信号がない状態です。\n\n"
+                             "【短い読みの自動 feedback 制限】\n"
+                             "既定では7文字未満の読みは採用・却下履歴を集計しますが、"
+                             "保存済み補正の優先・即時適用・自動ブロックには使いません。"
+                             "手動ブロックだけは文字数に関係なく有効です。"
+                             "対象外かどうかは現在の設定から動的に決まります。\n\n"
                              "【通常の変換履歴との違い】\n"
                              "Zenz の結果を確定した場合、条件によっては通常の変換履歴にも"
                              "反映されます。また、安全に判断できる場合は、直前の通常 Mozc "
@@ -1737,7 +1756,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
   root_layout->addLayout(search_layout);
 
   QTableWidget* table = new QTableWidget(&dialog);
-  table->setColumnCount(7);
+  table->setColumnCount(8);
   table->setHorizontalHeaderLabels(QStringList()
                                    << QString::fromUtf8("読み")
                                    << QString::fromUtf8("候補")
@@ -1745,7 +1764,8 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                                    << QString::fromUtf8("採用")
                                    << QString::fromUtf8("却下")
                                    << QString::fromUtf8("拒否割合")
-                                   << QString::fromUtf8("状態"));
+                                   << QString::fromUtf8("状態")
+                                   << QString::fromUtf8("feedback適用"));
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
   table->setSelectionMode(QAbstractItemView::SingleSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1828,7 +1848,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
   auto reload_table = [&]() {
     const QString filter = search_edit->text();
     const std::vector<session::ZenzFeedbackEntry> entries =
-        store.ListEntries(auto_block_policy);
+        store.ListEntries(reuse_policy);
 
     table->setRowCount(0);
 
@@ -1859,7 +1879,22 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
               ? QString::fromUtf8("-")
               : QString::fromUtf8("%1 %")
                     .arg(entry.auto_block_reject_percentage));
-      SetTableItem(table, row, 6, FeedbackReasonLabel(entry.reason));
+      QString feedback_status = FeedbackReasonLabel(entry.reason);
+      if (entry.reuse_excluded && entry.auto_blocked) {
+        feedback_status = QString::fromUtf8("自動ブロック条件成立");
+      }
+      SetTableItem(table, row, 6, feedback_status);
+      SetTableItem(
+          table, row, 7,
+          entry.hard_rejected
+              ? QString::fromUtf8("手動ブロック有効")
+              : entry.reuse_excluded
+                    ? QString::fromUtf8("対象外（記録のみ）")
+                    : QString::fromUtf8("有効"));
+      if (entry.reuse_excluded) {
+        table->item(row, 0)->setToolTip(QString::fromUtf8(
+            "短い読みのため自動 feedback 適用対象外。記録・集計は継続します。"));
+      }
 
       table->item(row, 0)->setData(Qt::UserRole, key);
       table->item(row, 1)->setData(Qt::UserRole, value);
@@ -1872,17 +1907,23 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
     table->resizeColumnsToContents();
 
     const QString auto_block_status =
-        auto_block_policy.enabled
+        reuse_policy.auto_block_policy.enabled
             ? QString::fromUtf8(
                   " / 自動ブロック条件 最低拒否 %1 回 / %2 %")
-                  .arg(auto_block_policy.minimum_reject_count)
-                  .arg(auto_block_policy.minimum_reject_percentage)
+                  .arg(reuse_policy.auto_block_policy.minimum_reject_count)
+                  .arg(reuse_policy.auto_block_policy.minimum_reject_percentage)
             : QString::fromUtf8(" / 自動ブロック OFF");
+    const QString min_key_status =
+        reuse_policy.minimum_key_length_enabled
+            ? QString::fromUtf8(" / 自動feedback %1文字以上")
+                  .arg(reuse_policy.minimum_key_length)
+            : QString::fromUtf8(" / 読み文字数制限 OFF");
     status_label->setText(
-        QString::fromUtf8("表示 %1 件 / 全 %2 件%3")
+        QString::fromUtf8("表示 %1 件 / 全 %2 件%3%4")
             .arg(visible_count)
             .arg(static_cast<int>(entries.size()))
-            .arg(auto_block_status));
+            .arg(auto_block_status)
+            .arg(min_key_status));
 
     export_button->setEnabled(!entries.empty());
     clear_button->setEnabled(!entries.empty());
@@ -3571,6 +3612,10 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
       static_cast<int>(zenzLiveCorrectionCheckBox->isChecked()));
 
   SET_CHECKBOX(zenzFeedbackLearningCheckBox, use_zenz_feedback_learning);
+  SET_CHECKBOX(zenzFeedbackMinKeyLengthCheckBox,
+               use_zenz_feedback_min_key_length);
+  zenzFeedbackMinKeyLengthSpinBox->setValue(static_cast<int>(
+      std::clamp<uint32_t>(config.zenz_feedback_min_key_length(), 1, 20)));
 
   SET_CHECKBOX(zenzFeedbackAutoBlockCheckBox,
                use_zenz_auto_block_rejected_correction);
@@ -3899,6 +3944,10 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
           zenzLiveCorrectionRightContextLengthSpinBox->value()));
 
   GET_CHECKBOX(zenzFeedbackLearningCheckBox, use_zenz_feedback_learning);
+  GET_CHECKBOX(zenzFeedbackMinKeyLengthCheckBox,
+               use_zenz_feedback_min_key_length);
+  config->set_zenz_feedback_min_key_length(
+      static_cast<uint32_t>(zenzFeedbackMinKeyLengthSpinBox->value()));
   GET_CHECKBOX(zenzFeedbackAutoBlockCheckBox,
                use_zenz_auto_block_rejected_correction);
   config->set_zenz_auto_block_reject_threshold(
@@ -4949,6 +4998,11 @@ void ConfigDialog::SelectZenzFeedbackLearningSetting(int state) {
       static_cast<bool>(state);
 
   zenzFeedbackAutoBlockCheckBox->setEnabled(enabled);
+  zenzFeedbackMinKeyLengthCheckBox->setEnabled(enabled);
+  const bool min_key_enabled =
+      enabled && zenzFeedbackMinKeyLengthCheckBox->isChecked();
+  zenzFeedbackMinKeyLengthLabel->setEnabled(min_key_enabled);
+  zenzFeedbackMinKeyLengthSpinBox->setEnabled(min_key_enabled);
 
   SelectZenzFeedbackAutoBlockSetting(
       enabled ? static_cast<int>(
