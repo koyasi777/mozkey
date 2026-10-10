@@ -4145,7 +4145,13 @@ bool Session::MaybeStartLiveConversionInternal(
     return true;
   }
 
-  SetSessionState(ImeContext::CONVERSION, context_.get());
+  // Live conversion is a temporary view of the same ongoing composition.
+  // SetSessionState(CONVERSION) also calls Composer::ResetInputMode(), which
+  // marks the next key as a new input. That separates a pending roman suffix
+  // from a following symbol without its own table rule (e.g. n + ')'), even
+  // when the custom table contains a combined rule such as n) -> ん）.
+  // Preserve the composer input mode and chunk continuity for further typing.
+  context_->set_state(ImeContext::CONVERSION);
   live_conversion_active_ = true;
   live_conversion_from_composition_ = true;
 
