@@ -117,6 +117,7 @@ ConversionRequest CreateZenzFeedbackConversionRequest(
     bool enable_minimum_key_length = true) {
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_feedback_min_key_length(enable_minimum_key_length);
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
 
@@ -444,6 +445,7 @@ TEST(ZenzFeedbackCandidateRewriterTest,
 
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
   config.set_use_zenz_auto_block_rejected_correction(true);
   config.set_zenz_auto_block_reject_threshold(2);
@@ -529,6 +531,7 @@ TEST(ZenzFeedbackCandidateRewriterTest,
      IsNotAvailableForIncognitoOrConvertWithoutHistory) {
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
 
   ConversionRequest::Options options;
@@ -560,6 +563,7 @@ TEST(ZenzFeedbackCandidateRewriterTest,
      IsAvailableAcrossMozcHistoryLearningLevels) {
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
 
   ConversionRequest::Options options;
   options.request_type = ConversionRequest::CONVERSION;
@@ -595,6 +599,7 @@ TEST(ZenzFeedbackCandidateRewriterTest,
 
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
 
   ConversionRequest::Options options;
   options.request_type = ConversionRequest::CONVERSION;
@@ -636,12 +641,13 @@ TEST(ZenzFeedbackCandidateRewriterTest,
 }
 
 TEST(ZenzFeedbackCandidateRewriterTest,
-     IsNotAvailableWhenZenzFeedbackLearningIsDisabled) {
+     IsNotAvailableWhenZenzFeedbackReuseIsDisabled) {
   ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
   ASSERT_TRUE(profile.ok());
 
   config::Config config;
-  config.set_use_zenz_feedback_learning(false);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_reuse(false);
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
 
   ConversionRequest::Options options;
@@ -656,6 +662,60 @@ TEST(ZenzFeedbackCandidateRewriterTest,
           .SetKey("かれはてんてきです")
           .Build();
 
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_EQ(rewriter.capability(request), RewriterInterface::NOT_AVAILABLE);
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     ExplicitReuseWorksWithLegacyLearningDisabled) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("かれはてんてきです", "empty", "彼は天敵です");
+
+  config::Config config;
+  config.set_use_zenz_feedback_learning(false);
+  config.set_use_zenz_feedback_reuse(true);
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetConfig(config)
+          .SetOptions(std::move(options))
+          .SetRequestType(ConversionRequest::CONVERSION)
+          .SetKey("かれはてんてきです")
+          .Build();
+
+  Segments segments;
+  AddSegment("かれはてんてきです", "彼は点滴です", &segments);
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_EQ(rewriter.capability(request), RewriterInterface::CONVERSION);
+  EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+  bool found = false;
+  for (const auto& candidate : segments.conversion_segment(0).candidates()) {
+    found |= candidate->value == "彼は天敵です";
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     LegacyLearningOnDoesNotOverrideExplicitReuseOff) {
+  config::Config config;
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_reuse(false);
+  ConversionRequest::Options options;
+  options.request_type = ConversionRequest::CONVERSION;
+  options.enable_user_history_for_conversion = true;
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetConfig(config)
+          .SetOptions(std::move(options))
+          .SetRequestType(ConversionRequest::CONVERSION)
+          .SetKey("かれはてんてきです")
+          .Build();
   ZenzFeedbackCandidateRewriter rewriter;
   EXPECT_EQ(rewriter.capability(request), RewriterInterface::NOT_AVAILABLE);
 }

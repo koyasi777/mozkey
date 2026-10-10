@@ -247,6 +247,16 @@ class ScopedUserProfileForZenzFeedbackSessionTest {
 
   bool ok() const { return ok_; }
 
+  std::wstring feedback_path() const {
+    return JoinPathForZenzFeedbackSessionTest(
+        JoinPathForZenzFeedbackSessionTest(
+            JoinPathForZenzFeedbackSessionTest(
+                JoinPathForZenzFeedbackSessionTest(profile_dir_, L"AppData"),
+                L"LocalLow"),
+            L"Mozc"),
+        L"zenz_feedback.tsv");
+  }
+
  private:
   bool ok_ = false;
   bool has_old_profile_ = false;
@@ -816,6 +826,9 @@ class SessionTest : public testing::TestWithTempUserProfile {
     config::Config config;
     config::ConfigHandler::GetDefaultConfig(&config);
     config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+    config.set_use_zenz_feedback_reuse(true);
     session->SetConfig(config);
   }
 
@@ -826,6 +839,9 @@ class SessionTest : public testing::TestWithTempUserProfile {
     config.set_use_live_conversion(true);
     config.set_use_zenz_live_correction(true);
     config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+    config.set_use_zenz_feedback_reuse(true);
     config.set_use_zenz_feedback_min_key_length(
         enable_feedback_min_key_length);
     config.set_use_zenz_synthetic_candidate(true);
@@ -844,6 +860,9 @@ class SessionTest : public testing::TestWithTempUserProfile {
     config::ConfigHandler::GetDefaultConfig(&config);
     config.set_session_keymap(config::Config::MSIME);
     config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+    config.set_use_zenz_feedback_reuse(true);
     config.set_use_auto_conversion(false);
     config.set_use_direct_commit(true);
     config.set_direct_commit_key(config::Config::DIRECT_COMMIT_KUTEN);
@@ -892,6 +911,9 @@ class SessionTest : public testing::TestWithTempUserProfile {
     config::ConfigHandler::GetDefaultConfig(&config);
     config.set_session_keymap(config::Config::MSIME);
     config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+    config.set_use_zenz_feedback_reuse(true);
     session->SetConfig(config);
     session->SetKeyMapManager(
         std::make_shared<keymap::KeyMapManager>(config));
@@ -1273,6 +1295,9 @@ TEST_F(SessionTest, KeymapCommandSequenceCommitZenzLiveCorrectionAndImeOff) {
   config.set_use_live_conversion(true);
   config.set_use_zenz_live_correction(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_zenz_live_correction_min_key_length(2);
   session.SetConfig(config);
@@ -1949,7 +1974,7 @@ CreateRecordingExternalLearningConverter(MockEngine* mock_engine) {
   return converter;
 }
 
-TEST_F(SessionTest, ZenzMozcHistoryLearningRequiresFeedbackLearningEnabled) {
+TEST_F(SessionTest, ZenzMozcHistoryLearningRequiresIndependentHistoryPermission) {
   MockEngine engine;
   std::shared_ptr<RecordingExternalLearningConverter> converter =
       CreateRecordingExternalLearningConverter(&engine);
@@ -1961,6 +1986,211 @@ TEST_F(SessionTest, ZenzMozcHistoryLearningRequiresFeedbackLearningEnabled) {
   EXPECT_FALSE(session_peer.MaybeLearnZenzCandidateToMozcHistory(
       "かれはてんきです", "彼は天気です"));
   EXPECT_EQ(converter->learn_call_count, 0);
+}
+
+TEST_F(SessionTest, FailedAcceptedAppendUndoPreservesPriorFeedback) {
+#if defined(_WIN32)
+  for (const bool learn_mozc_history : {false, true}) {
+    SCOPED_TRACE(learn_mozc_history);
+    ScopedUserProfileForZenzFeedbackSessionTest profile;
+    ASSERT_TRUE(profile.ok());
+    MockEngine engine;
+    std::shared_ptr<RecordingExternalLearningConverter> converter =
+        CreateRecordingExternalLearningConverter(&engine);
+    Session session(engine);
+    SessionTestPeer peer(session);
+    InitSessionToPrecomposition(&session);
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_zenz_feedback_recording(true);
+    config.set_use_zenz_mozc_history_learning(learn_mozc_history);
+    session.SetConfig(config);
+
+    constexpr absl::string_view kKey = "かれはてんきです";
+    constexpr absl::string_view kValue = "彼は天気です";
+    ASSERT_TRUE(peer.zenz_feedback_store_().RecordAccepted(
+        kKey, "empty", kValue));
+
+    // Deny all sharing while the second acceptance attempts to append.
+    // The existing accepted observation must survive that failure and Undo.
+    const std::wstring path = profile.feedback_path();
+    HANDLE lock = ::CreateFileW(path.c_str(), GENERIC_READ, 0, nullptr,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(lock, INVALID_HANDLE_VALUE);
+    peer.SetPendingZenzFeedbackAccepted(kKey, "empty", kValue);
+    EXPECT_EQ(converter->learn_call_count, 0);
+    ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+    EXPECT_FALSE(peer.pending_zenz_feedback_()
+                     .feedback_acceptance_write_succeeded);
+    ::CloseHandle(lock);
+
+    peer.DiscardPendingZenzFeedback("failed_append_undo");
+    EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+    const ZenzFeedbackDecision after_failure =
+        peer.zenz_feedback_store_().Decide(kKey, "empty", kValue);
+    EXPECT_EQ(after_failure.accepted_count, 1);
+    EXPECT_EQ(after_failure.rejected_count, 0);
+
+    // A later successful acceptance still receives an exact Undo compensation.
+    peer.SetPendingZenzFeedbackAccepted(kKey, "empty", kValue);
+    ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+    EXPECT_TRUE(peer.pending_zenz_feedback_()
+                    .feedback_acceptance_write_succeeded);
+    peer.DiscardPendingZenzFeedback("successful_append_undo");
+    const ZenzFeedbackDecision after_success =
+        peer.zenz_feedback_store_().Decide(kKey, "empty", kValue);
+    EXPECT_EQ(after_success.accepted_count, 1);
+    EXPECT_EQ(after_success.rejected_count, 0);
+  }
+#else
+  GTEST_SKIP() << "Exclusive file locking regression requires Windows.";
+#endif
+}
+
+TEST_F(SessionTest, IndependentZenzLearningControlsAllEightCombinations) {
+#if defined(_WIN32) || defined(__APPLE__)
+  constexpr absl::string_view kKey = "かれはてんきです";
+  constexpr absl::string_view kValue = "彼は天気です";
+  for (int mask = 0; mask < 8; ++mask) {
+    const bool record = (mask & 1) != 0;
+    const bool reuse = (mask & 2) != 0;
+    const bool learn = (mask & 4) != 0;
+    SCOPED_TRACE(mask);
+    ScopedUserProfileForZenzFeedbackSessionTest profile;
+    ASSERT_TRUE(profile.ok());
+    MockEngine engine;
+    std::shared_ptr<RecordingExternalLearningConverter> converter =
+        CreateRecordingExternalLearningConverter(&engine);
+    Session session(engine);
+    SessionTestPeer peer(session);
+    InitSessionToPrecomposition(&session);
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_zenz_feedback_learning(true);  // Legacy deliberately ON.
+    config.set_use_zenz_feedback_recording(record);
+    config.set_use_zenz_feedback_reuse(reuse);
+    config.set_use_zenz_mozc_history_learning(learn);
+    session.SetConfig(config);
+
+    peer.SetPendingZenzFeedbackAccepted(kKey, "empty", kValue);
+    ASSERT_EQ(peer.pending_zenz_feedback_().pending, record || learn);
+    EXPECT_EQ(peer.zenz_feedback_store_().ListEntries().empty(), !record);
+    if (!record && !learn) {
+      EXPECT_EQ(converter->learn_call_count, 0);
+      continue;
+    }
+    EXPECT_EQ(peer.pending_zenz_feedback_()
+                  .feedback_acceptance_write_succeeded, record);
+    EXPECT_EQ(peer.pending_zenz_feedback_()
+                  .mozc_history_learning_requested, learn);
+    peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+    EXPECT_EQ(converter->learn_call_count, learn ? 1 : 0);
+    peer.ConfirmPendingZenzFeedback();
+    EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+    EXPECT_EQ(converter->learn_call_count, learn ? 1 : 0);
+    EXPECT_EQ(peer.zenz_feedback_store_().ListEntries().empty(), !record);
+  }
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest, IndependentZenzLearningUndoCompensatesRecordedEffects) {
+#if defined(_WIN32) || defined(__APPLE__)
+  constexpr absl::string_view kKey = "かれはてんきです";
+  constexpr absl::string_view kValue = "彼は天気です";
+  for (int mask = 1; mask < 8; ++mask) {
+    const bool record = (mask & 1) != 0;
+    const bool reuse = (mask & 2) != 0;
+    const bool learn = (mask & 4) != 0;
+    if (!record && !learn) continue;
+    SCOPED_TRACE(mask);
+    ScopedUserProfileForZenzFeedbackSessionTest profile;
+    ASSERT_TRUE(profile.ok());
+    MockEngine engine;
+    std::shared_ptr<RecordingExternalLearningConverter> converter =
+        CreateRecordingExternalLearningConverter(&engine);
+    Session session(engine);
+    SessionTestPeer peer(session);
+    InitSessionToPrecomposition(&session);
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_zenz_feedback_learning(true);
+    config.set_use_zenz_feedback_recording(record);
+    config.set_use_zenz_feedback_reuse(reuse);
+    config.set_use_zenz_mozc_history_learning(learn);
+    session.SetConfig(config);
+    peer.SetPendingZenzFeedbackAccepted(kKey, "empty", kValue);
+    peer.ApplyPendingZenzAcceptedMozcHistoryLearning();
+    EXPECT_EQ(converter->learn_call_count, learn ? 1 : 0);
+
+    // Turning both preferences OFF after commit must not orphan an existing
+    // accepted observation or a reversible Mozc history handle.
+    config.set_use_zenz_feedback_recording(false);
+    config.set_use_zenz_mozc_history_learning(false);
+    session.SetConfig(config);
+    peer.DiscardPendingZenzFeedback("independent_learning_undo");
+    EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+    EXPECT_EQ(converter->revert_call_count, learn ? 1 : 0);
+    EXPECT_TRUE(peer.zenz_feedback_store_().ListEntries().empty());
+  }
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest, RecordingOffPreventsDeferredComparisonWithHistoryOn) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(false);
+  config.set_use_zenz_mozc_history_learning(true);
+  session.SetConfig(config);
+  peer.SetPendingZenzFeedbackComparison(
+      "かれはてんきです", "empty", "彼は天気です", "explicit_conversion", false);
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(peer.zenz_feedback_store_().ListEntries().empty());
+  EXPECT_EQ(converter->learn_call_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest, HistoryOnRecordingOffIsDisabledByPrivateInput) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<RecordingExternalLearningConverter> converter =
+      CreateRecordingExternalLearningConverter(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(false);
+  config.set_use_zenz_mozc_history_learning(true);
+  session.SetConfig(config);
+  peer.context_()->mutable_client_context()->set_is_private_input(true);
+  peer.SetPendingZenzFeedbackAccepted(
+      "かれはてんきです", "empty", "彼は天気です");
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_FALSE(peer.MaybeLearnZenzCandidateToMozcHistory(
+      "かれはてんきです", "彼は天気です"));
+  EXPECT_EQ(converter->learn_call_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
 }
 
 TEST_F(SessionTest, ZenzMozcHistoryLearningPassesFullSequenceToConverter) {
@@ -3899,6 +4129,54 @@ TEST_F(SessionTest,
   EXPECT_EQ(session_peer.zenz_live_mozc_value_(), "明日は飴");
 }
 
+TEST_F(SessionTest, ZenzFeedbackFastPathDisabledByReuseToggle) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_use_zenz_live_correction(true);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(false);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_min_key_length(2);
+  session.SetConfig(config);
+  session_peer.zenz_feedback_store_().RecordAccepted(
+      "かれはてんてきです", "empty", "彼は天敵です");
+
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
+  session_peer.live_conversion_active_() = true;
+  session_peer.live_conversion_key_() = "かれはてんてきです";
+  session_peer.live_conversion_value_() = "彼は点滴です";
+  commands::Preedit& live_preedit =
+      session_peer.live_conversion_preedit_output_();
+  live_preedit.Clear();
+  auto* first = live_preedit.add_segment();
+  first->set_key("かれは");
+  first->set_value("彼は");
+  first->set_value_length(Util::CharsLen("彼は"));
+  auto* second = live_preedit.add_segment();
+  second->set_key("てんてきです");
+  second->set_value("点滴です");
+  second->set_value_length(Util::CharsLen("点滴です"));
+
+  commands::Command command;
+  EXPECT_FALSE(session_peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
+  EXPECT_TRUE(session_peer.zenz_live_value_().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
 TEST_F(SessionTest, ZenzFeedbackFastPathSkipsAutoBlockedCandidate) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -3915,6 +4193,9 @@ TEST_F(SessionTest, ZenzFeedbackFastPathSkipsAutoBlockedCandidate) {
   config.set_use_live_conversion(true);
   config.set_use_zenz_live_correction(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_zenz_live_correction_min_key_length(2);
   config.set_use_zenz_auto_block_rejected_correction(true);
@@ -3978,6 +4259,9 @@ TEST_F(SessionTest, ZenzFeedbackFastPathSkipsRejectDominantCandidate) {
   config.set_use_live_conversion(true);
   config.set_use_zenz_live_correction(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_zenz_live_correction_min_key_length(2);
   config.set_use_zenz_auto_block_rejected_correction(false);
@@ -4332,6 +4616,9 @@ TEST_F(SessionTest,
   config::ConfigHandler::GetDefaultConfig(&config);
   config.set_session_keymap(config::Config::MSIME);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_auto_conversion(false);
   config.set_use_direct_commit(true);
   config.set_direct_commit_key(config::Config::DIRECT_COMMIT_KUTEN);
@@ -4395,6 +4682,9 @@ TEST_F(SessionTest,
   config::ConfigHandler::GetDefaultConfig(&config);
   config.set_session_keymap(config::Config::MSIME);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_auto_conversion(false);
   config.set_use_direct_commit(true);
   config.set_direct_commit_key(config::Config::DIRECT_COMMIT_KUTEN);
@@ -4655,6 +4945,9 @@ TEST_F(SessionTest,
   config.set_live_conversion_min_key_length(2);
   config.set_use_zenz_live_correction(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_zenz_live_correction_min_key_length(2);
   session.SetConfig(config);
@@ -6864,6 +7157,9 @@ TEST_F(SessionTest, ConfigIncognitoModeIgnoresStoredZenzFeedbackDecision) {
   config.set_zenz_live_correction_delay_msec(1000);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_auto_block_rejected_correction(true);
   config.set_zenz_auto_block_reject_threshold(1);
   config.set_zenz_auto_block_minimum_reject_percentage(50);
@@ -6929,6 +7225,9 @@ TEST_F(SessionTest, AutoBlockedZenzResultRecordsMatchingShadowCommitAsAccepted) 
   config.set_zenz_live_correction_delay_msec(1000);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_feedback_min_key_length(false);
   // The historical shadow-comparison test explicitly exercises
   // auto-block even for a two-character reading.
@@ -7013,6 +7312,9 @@ TEST_F(SessionTest,
   config.set_zenz_live_correction_delay_msec(1000);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_feedback_min_key_length(false);
   // The historical shadow-comparison test explicitly exercises
   // auto-block even for a two-character reading.
@@ -7096,6 +7398,9 @@ TEST_F(SessionTest, ShortReadingAutoBlockDoesNotOverrideFreshZenzByDefault) {
   config.set_zenz_live_correction_delay_msec(1000);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_auto_block_rejected_correction(true);
   config.set_zenz_auto_block_reject_threshold(1);
   config.set_zenz_auto_block_minimum_reject_percentage(50);
@@ -7139,6 +7444,113 @@ TEST_F(SessionTest, ShortReadingAutoBlockDoesNotOverrideFreshZenzByDefault) {
 #endif
 }
 
+TEST_F(SessionTest, FeedbackAutoReuseOffIgnoresAutoBlockForFreshZenz) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(false);
+  config.set_use_zenz_feedback_min_key_length(false);
+  config.set_use_zenz_auto_block_rejected_correction(true);
+  config.set_zenz_auto_block_reject_threshold(1);
+  config.set_zenz_auto_block_minimum_reject_percentage(50);
+  session.SetConfig(config);
+
+  session_peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "space_revert_zenz_to_mozc");
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_PREEDIT("亜衣", command);
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+  EXPECT_NE(command.output().zenz_live_correction_debug(),
+            "feedback_auto_blocked");
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest, ManualHardRejectAppliesWhenAutomaticReuseOff) {
+#if defined(_WIN32) || defined(__APPLE__)
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_defer_live_conversion_display_until_zenz_result(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_use_zenz_feedback_learning(false);
+  config.set_use_zenz_feedback_reuse(false);
+  session.SetConfig(config);
+
+  session_peer.zenz_feedback_store_().RecordRejected(
+      "あい", "empty", "亜衣", "hard_reject");
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  ZenzLiveResponse response;
+  response.ok = true;
+  response.value = "亜衣";
+  command.Clear();
+  ASSERT_TRUE(session_peer.ApplyZenzLiveCorrectionResult(response, &command));
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_EQ(command.output().zenz_live_correction_debug(),
+            "feedback_hard_rejected");
+  EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
 TEST_F(SessionTest, HardRejectedZenzResultDoesNotCreateShadowFeedback) {
 #if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
@@ -7161,6 +7573,9 @@ TEST_F(SessionTest, HardRejectedZenzResultDoesNotCreateShadowFeedback) {
   config.set_zenz_live_correction_delay_msec(1000);
   config.set_use_zenz_synthetic_candidate(true);
   config.set_use_zenz_feedback_learning(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(true);
+  config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_auto_block_rejected_correction(true);
   config.set_zenz_auto_block_reject_threshold(1);
   config.set_zenz_auto_block_minimum_reject_percentage(50);

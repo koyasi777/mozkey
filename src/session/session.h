@@ -543,6 +543,11 @@ class Session {
     std::vector<ZenzProjectedLearningSegment>
         reverse_projected_learning_segments;
 
+    // Only a successfully flushed accepted record requires Undo compensation.
+    // Do not compensate earlier accepted records if this append failed.
+    bool feedback_acceptance_write_succeeded = false;
+    bool mozc_history_learning_requested = false;
+
     // Phase 2: generalized Mozc history may be applied at the same explicit
     // commit point as the Zenz acceptance. Each handle corresponds to one
     // reversible external FinishConversion operation and must be reverted in

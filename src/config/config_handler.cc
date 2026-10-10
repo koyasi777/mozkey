@@ -270,6 +270,20 @@ void ApplyMozkeyProductDefaults(Config* config) {
   if (!config->has_use_zenz_feedback_learning()) {
     config->set_use_zenz_feedback_learning(true);
   }
+  // Inherit the original combined preference independently for each field.
+  // Respect explicitly saved new values, even when they disagree with 1011.
+  // A missing legacy preference has just received the Mozkey ON default.
+  const bool legacy_zenz_feedback_learning =
+      config->use_zenz_feedback_learning();
+  if (!config->has_use_zenz_feedback_recording()) {
+    config->set_use_zenz_feedback_recording(legacy_zenz_feedback_learning);
+  }
+  if (!config->has_use_zenz_feedback_reuse()) {
+    config->set_use_zenz_feedback_reuse(legacy_zenz_feedback_learning);
+  }
+  if (!config->has_use_zenz_mozc_history_learning()) {
+    config->set_use_zenz_mozc_history_learning(legacy_zenz_feedback_learning);
+  }
   if (!config->has_use_zenz_feedback_min_key_length()) {
     config->set_use_zenz_feedback_min_key_length(true);
   }

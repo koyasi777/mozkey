@@ -961,28 +961,34 @@ uint32_t GetZenzLiveCorrectionRightContextLength(
                             kMaxZenzLiveCorrectionRightContextLength);
 }
 
-bool UseZenzFeedbackPersonalization(const ImeContext& context) {
-  const config::Config& config = context.GetConfig();
-  if (!config.use_zenz_feedback_learning()) {
-    return false;
-  }
-
-  // Session-level Zenz feedback is persistent personalization. Incognito mode
-  // must neither read nor mutate it. ImeContext owns the session-scoped Config
-  // and Request sources that participate in ConversionRequest::incognito_mode().
-  return !config.incognito_mode() &&
+// Incognito prevents reading as well as writing persistent Zenz observations.
+// Keep this independent from the three user-facing learning switches.
+bool IsZenzPersistentPersonalizationContextAllowed(const ImeContext& context) {
+  return !context.GetConfig().incognito_mode() &&
          !context.GetRequest().is_incognito_mode();
 }
 
-bool CanPersistZenzFeedbackPersonalization(const ImeContext& context) {
-  if (!UseZenzFeedbackPersonalization(context)) {
-    return false;
-  }
+bool CanReuseZenzFeedbackAutomatically(const ImeContext& context) {
+  return context.GetConfig().use_zenz_feedback_reuse() &&
+         IsZenzPersistentPersonalizationContextAllowed(context);
+}
 
-  // A platform-private input may reuse previously stored Zenz feedback, but
-  // text originating from that input must never create new persistent
-  // personalization.
-  return !context.client_context().is_private_input();
+// Private input is read-only, whereas incognito cannot even read user feedback.
+// Password fields must never generate persisted learning observations.
+bool CanPersistZenzLearningFromInput(const ImeContext& context) {
+  return IsZenzPersistentPersonalizationContextAllowed(context) &&
+         !context.client_context().is_private_input() &&
+         context.composer().GetInputFieldType() != commands::Context::PASSWORD;
+}
+
+bool CanRecordZenzFeedback(const ImeContext& context) {
+  return context.GetConfig().use_zenz_feedback_recording() &&
+         CanPersistZenzLearningFromInput(context);
+}
+
+bool CanLearnZenzToMozcHistory(const ImeContext& context) {
+  return context.GetConfig().use_zenz_mozc_history_learning() &&
+         CanPersistZenzLearningFromInput(context);
 }
 
 ZenzFeedbackReusePolicy GetZenzFeedbackReusePolicy(
@@ -4986,7 +4992,7 @@ void Session::RecordZenzLiveCorrectionAccepted(
     absl::string_view key,
     absl::string_view left_context,
     absl::string_view value) {
-  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
+  if (!CanRecordZenzFeedback(*context_)) {
     return;
   }
 
@@ -5038,7 +5044,7 @@ bool Session::MaybeLearnZenzCandidateToMozcHistory(
     absl::string_view key,
     absl::string_view value,
     std::vector<uint64_t>* revert_ids) {
-  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
+  if (!CanLearnZenzToMozcHistory(*context_)) {
     return false;
   }
 
@@ -5106,7 +5112,7 @@ int Session::MaybeLearnZenzReverseSegmentsToMozcHistory(
 int Session::MaybeLearnZenzProjectedSegmentsToMozcHistory(
     const std::vector<ZenzProjectedLearningSegment>& segments,
     std::vector<uint64_t>* revert_ids) {
-  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
+  if (!CanLearnZenzToMozcHistory(*context_)) {
     return 0;
   }
   if (context_->composer().GetInputFieldType() ==
@@ -5233,13 +5239,17 @@ void Session::ApplyPendingZenzAcceptedMozcHistoryLearning() {
   if (!pending_zenz_feedback_.pending ||
       pending_zenz_feedback_.action !=
           PendingZenzFeedback::Action::kAccepted ||
+      !pending_zenz_feedback_.mozc_history_learning_requested ||
       pending_zenz_feedback_.mozc_history_learning_applied) {
     return;
   }
 
-  // Mark the commit point exactly once. If bounded reversible history learning
-  // cannot be applied, do not retry it later after the rollback window closes.
+  // Mark this commit point exactly once. If privacy/configuration now denies
+  // learning, never re-attempt it when the rollback window later closes.
   pending_zenz_feedback_.mozc_history_learning_applied = true;
+  if (!CanLearnZenzToMozcHistory(*context_)) {
+    return;
+  }
   std::vector<uint64_t>* revert_ids =
       &pending_zenz_feedback_.mozc_history_revert_ids;
 
@@ -5302,7 +5312,9 @@ void Session::SetPendingZenzFeedbackAccepted(
     absl::string_view key,
     absl::string_view context_class,
     absl::string_view value) {
-  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
+  const bool record_feedback = CanRecordZenzFeedback(*context_);
+  const bool learn_mozc_history = CanLearnZenzToMozcHistory(*context_);
+  if (!record_feedback && !learn_mozc_history) {
     return;
   }
 
@@ -5343,8 +5355,22 @@ void Session::SetPendingZenzFeedbackAccepted(
   pending_zenz_feedback_.final_committed_value.clear();
   pending_zenz_feedback_.require_final_committed_key_match = false;
   pending_zenz_feedback_.final_committed_key.clear();
+  pending_zenz_feedback_.feedback_acceptance_write_succeeded = false;
+  pending_zenz_feedback_.mozc_history_learning_requested = learn_mozc_history;
   pending_zenz_feedback_.mozc_history_learning_applied = false;
   pending_zenz_feedback_.mozc_history_revert_ids.clear();
+
+  // A=ON/C=OFF records the full sequence without constructing generalized
+  // Mozc-learning segments. A=OFF/C=ON does the converse.
+  if (!learn_mozc_history) {
+    pending_zenz_feedback_.feedback_acceptance_write_succeeded =
+        zenz_feedback_store_.RecordAccepted(
+            pending_zenz_feedback_.key,
+            pending_zenz_feedback_.context_class,
+            pending_zenz_feedback_.value);
+    return;
+  }
+
   ZenzReverseLearningProjection reverse_learning_projection =
       BuildZenzReverseLearningSegmentsFromPreedit(
           live_conversion_preedit_output_, key, value);
@@ -5801,17 +5827,18 @@ void Session::SetPendingZenzFeedbackAccepted(
   pending_zenz_feedback_.reverse_projected_learning_segments =
       reverse_learning_projection.projected_segments;
 
-  // An explicit commit is already authoritative positive evidence. Persist the
-  // exact full-sequence observation now. The pending state remains only as a
-  // rollback window and as a carrier for the broader Mozc-history
-  // generalization performed on confirmation.
-  zenz_feedback_store_.RecordAccepted(
-      pending_zenz_feedback_.key,
-      pending_zenz_feedback_.context_class,
-      pending_zenz_feedback_.value);
+  // An explicit commit is authoritative positive evidence for A, independent
+  // of whether C will add a Mozc history observation.
+  if (record_feedback) {
+    pending_zenz_feedback_.feedback_acceptance_write_succeeded =
+        zenz_feedback_store_.RecordAccepted(
+            pending_zenz_feedback_.key,
+            pending_zenz_feedback_.context_class,
+            pending_zenz_feedback_.value);
+  }
 
   ZenzDebugOutput(absl::StrCat(
-      "[zenz-feedback] accepted persisted with rollback window ",
+      "[zenz-feedback] accepted pending with rollback window ",
       ZenzRedactedTextStats("key", key),
       " ", ZenzRedactedTextStats("value", value),
       " context_class=", pending_zenz_feedback_.context_class));
@@ -5823,7 +5850,7 @@ void Session::SetPendingZenzFeedbackComparison(
     absl::string_view value,
     absl::string_view reason,
     bool require_final_committed_key_match) {
-  if (!CanPersistZenzFeedbackPersonalization(*context_)) {
+  if (!CanRecordZenzFeedback(*context_)) {
     return;
   }
 
@@ -5867,6 +5894,8 @@ void Session::SetPendingZenzFeedbackComparison(
   pending_zenz_feedback_.final_committed_key.clear();
   pending_zenz_feedback_.reverse_learning_segments.clear();
   pending_zenz_feedback_.reverse_projected_learning_segments.clear();
+  pending_zenz_feedback_.feedback_acceptance_write_succeeded = false;
+  pending_zenz_feedback_.mozc_history_learning_requested = false;
   pending_zenz_feedback_.mozc_history_learning_applied = false;
   pending_zenz_feedback_.mozc_history_revert_ids.clear();
 
@@ -5941,7 +5970,7 @@ void Session::ConfirmPendingZenzFeedback() {
     return;
   }
 
-  if (!UseZenzFeedbackPersonalization(*context_)) {
+  if (!IsZenzPersistentPersonalizationContextAllowed(*context_)) {
     for (const uint64_t revert_id :
          pending_zenz_feedback_.mozc_history_revert_ids) {
       context_->mutable_converter()->ConfirmExternalConversionLearning(
@@ -5972,9 +6001,10 @@ void Session::ConfirmPendingZenzFeedback() {
           "[zenz-feedback] confirm commit-point mozc history handles=",
           confirmed_count,
           " context_class=", pending_zenz_feedback_.context_class));
-    } else {
-      // Compatibility/fail-safe path for internal callers that prepare a
-      // pending acceptance without passing through a real direct commit.
+    } else if (pending_zenz_feedback_.mozc_history_learning_requested &&
+               CanLearnZenzToMozcHistory(*context_)) {
+      // Compatibility path for callers that prepare a pending acceptance
+      // without a commit-point callback. C remains authoritative here.
       const int projected_segment_learning_count =
           MaybeLearnZenzProjectedSegmentsToMozcHistory(
               pending_zenz_feedback_.reverse_projected_learning_segments);
@@ -5999,7 +6029,8 @@ void Session::ConfirmPendingZenzFeedback() {
           " context_class=", pending_zenz_feedback_.context_class));
     }
   } else if (pending_zenz_feedback_.action ==
-             PendingZenzFeedback::Action::kCompareFinalCommit) {
+             PendingZenzFeedback::Action::kCompareFinalCommit &&
+             CanRecordZenzFeedback(*context_)) {
     if (!pending_zenz_feedback_.has_final_committed_value) {
       ZenzDebugOutput(absl::StrCat(
           "[zenz-feedback] neutralize pending comparison without final commit ",
@@ -6059,11 +6090,9 @@ void Session::DiscardPendingZenzFeedback(absl::string_view reason) {
     return;
   }
 
-  // kAccepted is persisted immediately at the explicit commit point. Undo,
-  // Backspace, Escape, and other cancel paths compensate exactly that one
-  // positive observation. This is not negative feedback and must not increase
-  // rejected/auto-block counts. kCompareFinalCommit has not written an
-  // observation yet, so it needs no compensation.
+  // When A recorded an accepted observation, Undo/Backspace/Escape append
+  // its positive-event compensation (not a rejected event). C's independent
+  // reversible handles are reverted even if A was disabled.
   if (pending_zenz_feedback_.action ==
       PendingZenzFeedback::Action::kAccepted) {
     int reverted_mozc_history_count = 0;
@@ -6082,7 +6111,11 @@ void Session::DiscardPendingZenzFeedback(absl::string_view reason) {
         reverted_mozc_history_count,
         " reason=", reason));
 
-    if (UseZenzFeedbackPersonalization(*context_)) {
+    // Only compensate an acceptance successfully appended by A. A failed
+    // append must not subtract a previously accepted observation for this key.
+    // Incognito remains the exception: never write the TSV while active.
+    if (pending_zenz_feedback_.feedback_acceptance_write_succeeded &&
+        IsZenzPersistentPersonalizationContextAllowed(*context_)) {
       zenz_feedback_store_.RecordAcceptedRollback(
           pending_zenz_feedback_.key, pending_zenz_feedback_.context_class,
           pending_zenz_feedback_.value, reason);
@@ -6460,7 +6493,7 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     commands::Command* command) {
   const config::Config& config = context_->GetConfig();
 
-  if (!UseZenzFeedbackPersonalization(*context_)) {
+  if (!CanReuseZenzFeedbackAutomatically(*context_)) {
     return false;
   }
 
@@ -7473,13 +7506,26 @@ bool Session::ApplyZenzLiveCorrectionResult(
                               adopted_value_privacy.reason));
   }
 
-  std::string feedback_reason = "feedback_learning_disabled";
+  std::string feedback_reason = "feedback_reuse_disabled";
 
-  if (UseZenzFeedbackPersonalization(*context_)) {
-    const ZenzFeedbackDecision feedback_decision =
-        zenz_feedback_store_.Decide(
-            pending_zenz_live_.key, context_class, zenz_value,
-            GetZenzFeedbackReusePolicy(config));
+  // An explicit hard reject is a user instruction, not statistical reuse.
+  // It remains effective even with B=OFF, including for short readings.
+  // Incognito must not read persistent feedback of either kind.
+  if (!config.incognito_mode() &&
+      !context_->GetRequest().is_incognito_mode()) {
+    ZenzFeedbackDecision feedback_decision;
+    if (config.use_zenz_feedback_reuse()) {
+      feedback_decision = zenz_feedback_store_.Decide(
+          pending_zenz_live_.key, context_class, zenz_value,
+          GetZenzFeedbackReusePolicy(config));
+    } else if (zenz_feedback_store_.IsManuallyBlocked(
+                   pending_zenz_live_.key, context_class, zenz_value)) {
+      feedback_decision.action = ZenzFeedbackAction::kReject;
+      feedback_decision.reason = "feedback_hard_rejected";
+      feedback_decision.hard_rejected = true;
+    } else {
+      feedback_decision.reason = "feedback_reuse_disabled";
+    }
 
     feedback_reason = feedback_decision.reason;
 

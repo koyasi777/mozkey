@@ -199,7 +199,7 @@ int ZenzFeedbackCandidateRewriter::capability(
     return RewriterInterface::NOT_AVAILABLE;
   }
 
-  if (!request.config().use_zenz_feedback_learning()) {
+  if (!request.config().use_zenz_feedback_reuse()) {
     return RewriterInterface::NOT_AVAILABLE;
   }
 
