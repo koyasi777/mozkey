@@ -37,6 +37,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
@@ -85,6 +86,9 @@ using SetOfString = std::set<std::string, std::less<>>;
 - (void)dispatchSessionCommand:(const SessionCommand *)command client:(id)sender;
 - (void)resetWritingDirection;
 - (void)updateWritingDirectionFromAttributes:(NSDictionary *)attributes;
+- (void)updateCompositionStartCaret;
+- (void)clearCompositionStartCaret;
+- (bool)shouldUseCompositionStartCaretForRect:(const NSRect &)rect atIndex:(int32_t)index;
 @end
 
 namespace {
@@ -250,6 +254,51 @@ void SetRendererRectangle(
   rectangle->set_bottom(baseline.y);
 }
 
+// Returns the composition baseline in the renderer's coordinate system, whose
+// origin is the left-top of the primary (menu bar) screen and whose Y-axis
+// points down.  See GetBaseScreenHeight() in CandidateController.mm.
+//
+// IMKBaseline is already flipped, but the height used for the flip does not
+// always match the primary screen when the client window is on another
+// display, which moves the candidate and ruby windows away from the
+// composition (e.g. to the corner of the screen).  lineHeightRectangle is in
+// Cocoa's global screen coordinates, so the Y coordinate is flipped here with
+// the primary screen height that the renderer uses to restore it.
+NSPoint GetRendererBaseline(NSDictionary *attributes, const NSRect &line_rect) {
+  const NSPoint baseline = [attributes[@"IMKBaseline"] pointValue];
+  NSArray<NSScreen *> *screens = [NSScreen screens];
+  if (screens.count == 0 || NSEqualRects(line_rect, NSZeroRect)) {
+    return baseline;
+  }
+  const CGFloat primary_screen_height = NSHeight([screens[0] frame]);
+  return NSMakePoint(baseline.x, primary_screen_height - NSMinY(line_rect));
+}
+
+// Returns true if |composition_rect|, the line rectangle of the first
+// character in the composition, is too far from |start_caret_rect|, the caret
+// reported just before the composition started, to describe the same place.
+//
+// Both should be at the same position, but Google Docs with Chrome returns
+// the origin of the web content area (e.g. the left-top of the screen) for
+// any character in the composition while it returns the correct caret when
+// there is no composition.
+//
+// A composition which wraps to the next line is not regarded as too far:
+// its first character moves by about one line vertically.
+bool IsCompositionRectFarFromStartCaret(const NSRect &start_caret_rect,
+                                        const NSRect &composition_rect) {
+  const CGFloat line_height = std::max<CGFloat>(
+      {NSHeight(start_caret_rect), NSHeight(composition_rect), 1});
+  const CGFloat dx =
+      std::abs(NSMinX(composition_rect) - NSMinX(start_caret_rect));
+  const CGFloat dy =
+      std::abs(NSMinY(composition_rect) - NSMinY(start_caret_rect));
+  if (dy > line_height * 2) {
+    return true;
+  }
+  return dy <= line_height / 2 && dx > line_height * 2;
+}
+
 NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offset) {
   const NSUInteger length = [text length];
   NSUInteger utf16_offset = 0;
@@ -351,6 +400,9 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   verticalWriting_ = false;
   liveConversionAnchorLeft_ = 0;
   hasLiveConversionAnchorLeft_ = false;
+  compositionStartCaretRect_ = NSZeroRect;
+  compositionStartCaretAttributes_ = nil;
+  hasCompositionStartCaret_ = false;
   useLiveConversion_ = false;
   useZenzContextAcquisition_ = false;
   secureEventInputStateForTest_ = (server == nil) ? 0 : -1;
@@ -855,6 +907,13 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
     return;
   }
 
+  if ([composedString_ length] == 0) {
+    // A new composition starts.  The caret has to be obtained before
+    // setMarkedText: because some clients do not return the position of the
+    // composition correctly.  See IsCompositionRectFarFromStartCaret().
+    [self updateCompositionStartCaret];
+  }
+
   [composedString_ deleteCharactersInRange:NSMakeRange(0, [composedString_ length])];
   cursorPosition_ = -1;
   useUnspecifiedSelectionRange_ = false;
@@ -895,6 +954,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
     [originalString_ setString:@""];
     replacementRange_ = NSMakeRange(NSNotFound, 0);
     [self resetWritingDirection];
+    [self clearCompositionStartCaret];
   }
 
   // Update the composed string of the client applications.
@@ -980,6 +1040,54 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
       ->set_vertical_writing(verticalWriting_);
 }
 
+- (void)updateCompositionStartCaret {
+  [self clearCompositionStartCaret];
+
+  NSRect caretRect = NSZeroRect;
+  NSDictionary *caretAttributes = nil;
+  // Some applications throw an exception from
+  // attributesForCharacterIndex:lineHeightRectangle:.
+  @try {
+    caretAttributes = [[self client] attributesForCharacterIndex:0
+                                             lineHeightRectangle:&caretRect];
+  } @catch (NSException *exception) {
+    LOG(ERROR) << "Exception from [" << clientBundle_ << "] " << [[exception name] UTF8String]
+               << "," << [[exception reason] UTF8String];
+    return;
+  }
+  if (NSEqualRects(caretRect, NSZeroRect)) {
+    return;
+  }
+
+  compositionStartCaretRect_ = caretRect;
+  compositionStartCaretAttributes_ = caretAttributes;
+  hasCompositionStartCaret_ = true;
+}
+
+- (void)clearCompositionStartCaret {
+  compositionStartCaretRect_ = NSZeroRect;
+  compositionStartCaretAttributes_ = nil;
+  hasCompositionStartCaret_ = false;
+}
+
+// Returns true if |rect|, the line rectangle of the character at |index| in
+// the composition reported by the client, should be replaced with the caret
+// at the composition start.
+- (bool)shouldUseCompositionStartCaretForRect:(const NSRect &)rect atIndex:(int32_t)index {
+  if (!hasCompositionStartCaret_) {
+    return false;
+  }
+
+  // Only the first character of the composition is comparable with the caret
+  // at the composition start.
+  NSRect firstCharacterRect = rect;
+  if (index != 0) {
+    firstCharacterRect = NSZeroRect;
+    [[self client] attributesForCharacterIndex:0 lineHeightRectangle:&firstCharacterRect];
+  }
+  return IsCompositionRectFarFromStartCaret(compositionStartCaretRect_, firstCharacterRect);
+}
+
 - (void)delayedUpdateCandidates {
   if (!mozcRenderer_) {
     return;
@@ -1024,10 +1132,14 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
     NSDictionary *clientData =
         [[self client] attributesForCharacterIndex:position
                               lineHeightRectangle:&preeditRect];
+    if ([self shouldUseCompositionStartCaretForRect:preeditRect atIndex:position]) {
+      preeditRect = compositionStartCaretRect_;
+      clientData = compositionStartCaretAttributes_;
+    }
     [self updateWritingDirectionFromAttributes:clientData];
 
-    // IMKBaseline is the left-bottom coordinate of the requested character.
-    const NSPoint baseline = [clientData[@"IMKBaseline"] pointValue];
+    // The left-bottom coordinate of the requested character.
+    const NSPoint baseline = GetRendererBaseline(clientData, preeditRect);
 
     int candidate_left = baseline.x;
     if (HasLiveConversionReading(output)) {
@@ -1056,9 +1168,13 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
         NSDictionary *rubyClientData =
             [[self client] attributesForCharacterIndex:0
                                   lineHeightRectangle:&rubyPreeditRect];
+        if ([self shouldUseCompositionStartCaretForRect:rubyPreeditRect atIndex:0]) {
+          rubyPreeditRect = compositionStartCaretRect_;
+          rubyClientData = compositionStartCaretAttributes_;
+        }
         [self updateWritingDirectionFromAttributes:rubyClientData];
         const NSPoint rubyBaseline =
-            [rubyClientData[@"IMKBaseline"] pointValue];
+            GetRendererBaseline(rubyClientData, rubyPreeditRect);
 
         SetRendererRectangle(
             rubyPreeditRect, rubyBaseline,
