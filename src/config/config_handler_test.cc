@@ -87,6 +87,9 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_direct_commit_key(kExpectedMozkeyDirectCommitKey);
   config->set_use_zenz_live_correction(true);
   config->set_use_zenz_feedback_learning(true);
+  config->set_use_zenz_feedback_recording(true);
+  config->set_use_zenz_feedback_reuse(true);
+  config->set_use_zenz_mozc_history_learning(true);
   config->set_use_zenz_feedback_min_key_length(true);
   config->set_zenz_feedback_min_key_length(7);
   config->set_use_zenz_auto_block_rejected_correction(true);
@@ -120,6 +123,9 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.zenz_live_correction_left_context_length(), 24);
   EXPECT_TRUE(config.use_zenz_synthetic_candidate());
   EXPECT_TRUE(config.use_zenz_feedback_learning());
+  EXPECT_TRUE(config.use_zenz_feedback_recording());
+  EXPECT_TRUE(config.use_zenz_feedback_reuse());
+  EXPECT_TRUE(config.use_zenz_mozc_history_learning());
   EXPECT_TRUE(config.use_zenz_feedback_min_key_length());
   EXPECT_EQ(config.zenz_feedback_min_key_length(), 7);
   EXPECT_TRUE(config.use_zenz_auto_block_rejected_correction());
@@ -710,6 +716,9 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   input.set_direct_commit_key(0);
   input.set_use_zenz_live_correction(false);
   input.set_use_zenz_feedback_learning(false);
+  input.set_use_zenz_feedback_recording(false);
+  input.set_use_zenz_feedback_reuse(true);
+  input.set_use_zenz_mozc_history_learning(false);
   input.set_use_zenz_feedback_min_key_length(false);
   input.set_zenz_feedback_min_key_length(4);
   input.set_use_zenz_auto_block_rejected_correction(false);
@@ -735,6 +744,9 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_EQ(output.direct_commit_key(), 0);
   EXPECT_FALSE(output.use_zenz_live_correction());
   EXPECT_FALSE(output.use_zenz_feedback_learning());
+  EXPECT_FALSE(output.use_zenz_feedback_recording());
+  EXPECT_TRUE(output.use_zenz_feedback_reuse());
+  EXPECT_FALSE(output.use_zenz_mozc_history_learning());
   EXPECT_FALSE(output.use_zenz_feedback_min_key_length());
   EXPECT_EQ(output.zenz_feedback_min_key_length(), 4);
   EXPECT_FALSE(output.use_zenz_auto_block_rejected_correction());
@@ -748,6 +760,156 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_FALSE(output.use_custom_preedit_target_underline_color());
   EXPECT_EQ(output.preedit_target_underline_color(), 0x445566);
 #endif  // _WIN32
+}
+
+// A legacy on-disk config may contain only field 1011. Normalization must
+// preserve that choice for all three new fields without rewriting the file.
+TEST_F(ConfigHandlerTest, LegacyZenzFeedbackSettingsMigrateWithoutDiskRewrite) {
+  for (const bool legacy_enabled : std::array{false, true}) {
+    TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+    const std::string config_file = FileUtil::JoinPath(
+        temp_dir.path(), "zenz_legacy_feedback_config.db");
+    Config legacy;
+    legacy.set_use_zenz_feedback_learning(legacy_enabled);
+    {
+      std::ofstream ofs(config_file, std::ios::binary | std::ios::trunc);
+      ASSERT_TRUE(ofs);
+      const std::string serialized = legacy.SerializeAsString();
+      ofs.write(serialized.data(), serialized.size());
+      ASSERT_TRUE(ofs);
+    }
+
+    ConfigHandler::SetConfigFileNameForTesting(config_file);
+    const Config migrated = ConfigHandler::GetCopiedConfig();
+    EXPECT_EQ(migrated.use_zenz_feedback_learning(), legacy_enabled);
+    EXPECT_EQ(migrated.use_zenz_feedback_recording(), legacy_enabled);
+    EXPECT_EQ(migrated.use_zenz_feedback_reuse(), legacy_enabled);
+    EXPECT_EQ(migrated.use_zenz_mozc_history_learning(), legacy_enabled);
+    EXPECT_TRUE(migrated.has_use_zenz_feedback_recording());
+    EXPECT_TRUE(migrated.has_use_zenz_feedback_reuse());
+    EXPECT_TRUE(migrated.has_use_zenz_mozc_history_learning());
+
+    std::ifstream ifs(config_file, std::ios::binary);
+    ASSERT_TRUE(ifs);
+    Config persisted;
+    ASSERT_TRUE(persisted.ParseFromIstream(&ifs));
+    EXPECT_EQ(persisted.use_zenz_feedback_learning(), legacy_enabled);
+    EXPECT_FALSE(persisted.has_use_zenz_feedback_recording());
+    EXPECT_FALSE(persisted.has_use_zenz_feedback_reuse());
+    EXPECT_FALSE(persisted.has_use_zenz_mozc_history_learning());
+  }
+}
+
+TEST_F(ConfigHandlerTest, PartialZenzFeedbackMigrationHonorsNewFields) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file = FileUtil::JoinPath(
+      temp_dir.path(), "zenz_partial_feedback_config.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  // An explicit new ON overrides old OFF. Missing siblings inherit old OFF.
+  Config input;
+  input.set_use_zenz_feedback_learning(false);
+  input.set_use_zenz_feedback_recording(true);
+  ConfigHandler::SetConfig(input);
+  const Config output = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(output.use_zenz_feedback_learning());
+  EXPECT_TRUE(output.use_zenz_feedback_recording());
+  EXPECT_FALSE(output.use_zenz_feedback_reuse());
+  EXPECT_FALSE(output.use_zenz_mozc_history_learning());
+
+  // The three preferences are not synchronized back to the old field.
+  ConfigHandler::Reload();
+  const Config reloaded = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(reloaded.use_zenz_feedback_learning());
+  EXPECT_TRUE(reloaded.use_zenz_feedback_recording());
+  EXPECT_FALSE(reloaded.use_zenz_feedback_reuse());
+  EXPECT_FALSE(reloaded.use_zenz_mozc_history_learning());
+
+  // Explicit new OFF must also override old ON (proto2 presence matters).
+  Config opposite;
+  opposite.set_use_zenz_feedback_learning(true);
+  opposite.set_use_zenz_feedback_recording(false);
+  ConfigHandler::SetConfig(opposite);
+  ConfigHandler::Reload();
+  const Config opposite_reloaded = ConfigHandler::GetCopiedConfig();
+  EXPECT_TRUE(opposite_reloaded.use_zenz_feedback_learning());
+  EXPECT_FALSE(opposite_reloaded.use_zenz_feedback_recording());
+  EXPECT_TRUE(opposite_reloaded.use_zenz_feedback_reuse());
+  EXPECT_TRUE(opposite_reloaded.use_zenz_mozc_history_learning());
+}
+
+TEST_F(ConfigHandlerTest, AllZenzLearningToggleCombinationsRoundTrip) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file = FileUtil::JoinPath(
+      temp_dir.path(), "zenz_all_toggle_combinations.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  // A/B/C must be independently persisted for all eight combinations.
+  for (int mask = 0; mask < 8; ++mask) {
+    const bool recording = (mask & 1) != 0;
+    const bool reuse = (mask & 2) != 0;
+    const bool mozc_history = (mask & 4) != 0;
+    Config config = ConfigHandler::GetCopiedConfig();
+    config.set_use_zenz_feedback_learning(false);
+    config.set_use_zenz_feedback_recording(recording);
+    config.set_use_zenz_feedback_reuse(reuse);
+    config.set_use_zenz_mozc_history_learning(mozc_history);
+    ConfigHandler::SetConfig(config);
+    ConfigHandler::Reload();
+
+    const Config actual = ConfigHandler::GetCopiedConfig();
+    EXPECT_FALSE(actual.use_zenz_feedback_learning()) << "mask=" << mask;
+    EXPECT_EQ(actual.use_zenz_feedback_recording(), recording)
+        << "mask=" << mask;
+    EXPECT_EQ(actual.use_zenz_feedback_reuse(), reuse) << "mask=" << mask;
+    EXPECT_EQ(actual.use_zenz_mozc_history_learning(), mozc_history)
+        << "mask=" << mask;
+  }
+}
+
+TEST_F(ConfigHandlerTest, ZenzFeedbackIndependentSettingsSurviveReload) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file = FileUtil::JoinPath(
+      temp_dir.path(), "zenz_independent_feedback_config.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config input;
+  input.set_use_zenz_feedback_learning(false);
+  input.set_use_zenz_feedback_recording(true);
+  input.set_use_zenz_feedback_reuse(false);
+  input.set_use_zenz_mozc_history_learning(true);
+  ConfigHandler::SetConfig(input);
+
+  Config normalized = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(normalized.use_zenz_feedback_learning());
+  EXPECT_TRUE(normalized.use_zenz_feedback_recording());
+  EXPECT_FALSE(normalized.use_zenz_feedback_reuse());
+  EXPECT_TRUE(normalized.use_zenz_mozc_history_learning());
+
+  // Changing B must not modify A, C, or the legacy preference.
+  normalized.set_use_zenz_feedback_reuse(true);
+  ConfigHandler::SetConfig(normalized);
+  ConfigHandler::Reload();
+  const Config reloaded = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(reloaded.use_zenz_feedback_learning());
+  EXPECT_TRUE(reloaded.use_zenz_feedback_recording());
+  EXPECT_TRUE(reloaded.use_zenz_feedback_reuse());
+  EXPECT_TRUE(reloaded.use_zenz_mozc_history_learning());
+
+  std::ifstream ifs(config_file, std::ios::binary);
+  ASSERT_TRUE(ifs);
+  Config persisted;
+  ASSERT_TRUE(persisted.ParseFromIstream(&ifs));
+  EXPECT_TRUE(persisted.has_use_zenz_feedback_recording());
+  EXPECT_TRUE(persisted.has_use_zenz_feedback_reuse());
+  EXPECT_TRUE(persisted.has_use_zenz_mozc_history_learning());
+  EXPECT_FALSE(persisted.use_zenz_feedback_learning());
+  EXPECT_TRUE(persisted.use_zenz_feedback_recording());
+  EXPECT_TRUE(persisted.use_zenz_feedback_reuse());
+  EXPECT_TRUE(persisted.use_zenz_mozc_history_learning());
 }
 
 TEST_F(ConfigHandlerTest, SetMetadata) {
@@ -888,6 +1050,9 @@ TEST_F(ConfigHandlerTest, GetDefaultConfig) {
   EXPECT_FALSE(output.has_direct_commit_key());
   EXPECT_FALSE(output.has_use_zenz_live_correction());
   EXPECT_FALSE(output.has_use_zenz_feedback_learning());
+  EXPECT_FALSE(output.has_use_zenz_feedback_recording());
+  EXPECT_FALSE(output.has_use_zenz_feedback_reuse());
+  EXPECT_FALSE(output.has_use_zenz_mozc_history_learning());
   EXPECT_FALSE(output.has_use_zenz_live_correction_right_context());
   EXPECT_FALSE(output.has_use_realtime_conversion());
   EXPECT_EQ(output.live_conversion_min_key_length(), 2);

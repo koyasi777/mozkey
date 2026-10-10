@@ -553,13 +553,13 @@ ConfigDialog::ConfigDialog()
   QObject::connect(zenzLiveCorrectionRightContextCheckBox,
                    SIGNAL(stateChanged(int)), this,
                    SLOT(SelectZenzRightContextSetting(int)));
-  QObject::connect(zenzFeedbackLearningCheckBox,
+  QObject::connect(zenzFeedbackReuseCheckBox,
                    SIGNAL(stateChanged(int)), this,
-                   SLOT(SelectZenzFeedbackLearningSetting(int)));
+                   SLOT(SelectZenzFeedbackReuseSetting(int)));
   QObject::connect(zenzFeedbackMinKeyLengthCheckBox,
                    &QCheckBox::stateChanged, this, [this](int) {
-                     SelectZenzFeedbackLearningSetting(
-                         zenzFeedbackLearningCheckBox->isChecked());
+                     SelectZenzFeedbackReuseSetting(
+                         zenzFeedbackReuseCheckBox->isChecked());
                    });
   QObject::connect(zenzFeedbackAutoBlockCheckBox,
                    SIGNAL(stateChanged(int)), this,
@@ -1619,7 +1619,7 @@ std::wstring BuildRestoreDefaultImeScript() {
 void ShowZenzFeedbackManagementDialog(QWidget* parent,
                                       const config::Config& current_config) {
   QDialog dialog(parent);
-  dialog.setWindowTitle(QString::fromUtf8("Zenz 学習データの管理"));
+  dialog.setWindowTitle(QString::fromUtf8("Zenz フィードバック学習データの管理"));
   dialog.resize(760, 440);
 
   session::ZenzFeedbackStore store;
@@ -1645,9 +1645,9 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
 
   QLabel* description_label = new QLabel(
       QString::fromUtf8(
-          "Zenz 補正の学習データを管理します。"
-          "ここでは、補正結果として保存された読みと候補の記録を"
-          "安全に確認・削除できます。"),
+          "Zenz 補正の採用・却下・手動ブロックの記録を管理します。"
+          "記録は次回以降の候補順位や自動ブロックの判定に使われます。"
+          "Mozc の通常変換履歴とは別に保存されています。"),
       &dialog);
   description_label->setWordWrap(true);
 
@@ -1655,7 +1655,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
       new QPushButton(QString::fromUtf8("詳しく..."), &dialog);
   details_button->setFixedWidth(84);
   details_button->setToolTip(QString::fromUtf8(
-      "状態ラベル、Zenz 学習の記録条件、通常の変換履歴との違いを表示します"));
+      "状態ラベル、フィードバック学習の記録条件、通常の変換履歴との違いを表示します"));
 
   description_layout->addWidget(description_label, 1);
   description_layout->addWidget(details_button, 0, Qt::AlignTop);
@@ -1671,7 +1671,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                              "読み全体、補正後の候補、文脈クラス、採用/却下の記録です。"
                              "表示された Zenz 補正だけでなく、自動ブロック中に内部で"
                              "生成された同じ補正も、最終確定との比較対象になります。\n\n"
-                             "Zenz 学習データは full-sequence 単位です。"
+                             "フィードバック学習データは full-sequence 単位です。"
                              "単語や文節ごとの学習ではなく、同じ読み全体、同じ文脈クラス、"
                              "同じ補正結果の組み合わせごとに集計します。"
                              "左文脈そのものは保存せず、empty / japanese_only / "
@@ -1700,7 +1700,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                              "弱いマイナス信号です。\n\n"
                              "【記録されない操作】\n"
                              "対応する visible / hidden Zenz 観測がない通常変換、通常候補の"
-                             "選択、通常変換の確定は、この画面の Zenz 学習スコアには"
+                             "選択、通常変換の確定は、この画面のフィードバック学習スコアには"
                              "影響しません。hidden Zenz の読みより入力が伸びた場合も、"
                              "別の full-sequence として扱い、その古い観測は数えません。"
                              "また、Zenz が通常 Mozc と同じ値を返した場合、"
@@ -1740,7 +1740,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                              "ライブ変換文節列へ逆投影し、文節列全体を通常変換履歴に近い形で"
                              "反映します。このとき、Zenz が実際に直した文節だけを"
                              "強い選択履歴として扱います。\n\n"
-                             "そのため、この画面で Zenz 学習データを削除しても、"
+                             "そのため、この画面でフィードバック学習データを削除しても、"
                              "通常の変換履歴にすでに反映された内容は削除されません。"
                              "通常の変換履歴を消したい場合は、設定画面の辞書タブ内にある"
                              "学習履歴のクリアを使用してください。"));
@@ -1947,7 +1947,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                    &dialog, [&]() {
                      const QString path = QFileDialog::getSaveFileName(
                          &dialog,
-                         QString::fromUtf8("Zenz 学習データをエクスポート"),
+                         QString::fromUtf8("フィードバック学習データをエクスポート"),
                          QStringLiteral("zenz_feedback.tsv"),
                          QString::fromUtf8(
                              "TSV ファイル (*.tsv);;すべてのファイル (*)"));
@@ -1959,21 +1959,21 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                        ShowJapaneseCritical(
                            &dialog, dialog.windowTitle(),
                            QString::fromUtf8(
-                               "Zenz 学習データをエクスポートできませんでした。"));
+                               "フィードバック学習データをエクスポートできませんでした。"));
                        return;
                      }
 
                      ShowJapaneseInformation(
                          &dialog, dialog.windowTitle(),
                          QString::fromUtf8(
-                             "Zenz 学習データをエクスポートしました。"));
+                             "フィードバック学習データをエクスポートしました。"));
                    });
 
   QObject::connect(import_button, &QPushButton::clicked,
                    &dialog, [&]() {
                      const QString path = QFileDialog::getOpenFileName(
                          &dialog,
-                         QString::fromUtf8("Zenz 学習データをインポート"),
+                         QString::fromUtf8("フィードバック学習データをインポート"),
                          QString(),
                          QString::fromUtf8(
                              "TSV ファイル (*.tsv);;すべてのファイル (*)"));
@@ -1985,10 +1985,10 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                      message_box.setWindowTitle(dialog.windowTitle());
                      message_box.setIcon(QMessageBox::Question);
                      message_box.setText(
-                         QString::fromUtf8("Zenz 学習データをインポートします。"));
+                         QString::fromUtf8("フィードバック学習データをインポートします。"));
                      message_box.setInformativeText(
                          QString::fromUtf8(
-                             "既存の Zenz 学習データに追加しますか？\n\n"
+                             "既存のフィードバック学習データに追加しますか？\n\n"
                              "「追加」: 既存データに追加\n"
                              "「置き換え」: 既存データを削除してから取り込み\n"
                              "「キャンセル」: 中止"));
@@ -2020,7 +2020,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                        ShowJapaneseCritical(
                            &dialog, dialog.windowTitle(),
                            QString::fromUtf8(
-                               "Zenz 学習データをインポートできませんでした。\n"
+                               "フィードバック学習データをインポートできませんでした。\n"
                                "ファイル形式が壊れているか、未対応の行が含まれています。"));
                        return;
                      }
@@ -2030,7 +2030,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                      ShowJapaneseInformation(
                          &dialog, dialog.windowTitle(),
                          QString::fromUtf8(
-                             "Zenz 学習データをインポートしました。"));
+                             "フィードバック学習データをインポートしました。"));
                    });
 
   QObject::connect(block_button, &QPushButton::clicked,
@@ -2125,7 +2125,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                      message_box.setWindowTitle(dialog.windowTitle());
                      message_box.setIcon(QMessageBox::Warning);
                      message_box.setText(
-                         QString::fromUtf8("選択した Zenz 学習エントリを削除しますか？"));
+                         QString::fromUtf8("選択したフィードバック学習エントリを削除しますか？"));
                      message_box.setInformativeText(
                          QString::fromUtf8("読み: %1\n候補: %2\n文脈クラス: %3")
                              .arg(key, value, context_class));
@@ -2151,7 +2151,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                        ShowJapaneseCritical(
                            &dialog, dialog.windowTitle(),
                            QString::fromUtf8(
-                               "Zenz 学習エントリを削除できませんでした。"));
+                               "フィードバック学習エントリを削除できませんでした。"));
                        return;
                      }
 
@@ -2164,9 +2164,11 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                      message_box.setWindowTitle(dialog.windowTitle());
                      message_box.setIcon(QMessageBox::Warning);
                      message_box.setText(
-                         QString::fromUtf8("Zenz 学習データをすべて削除しますか？"));
+                         QString::fromUtf8("フィードバック学習データをすべて削除しますか？"));
                      message_box.setInformativeText(
-                         QString::fromUtf8("この操作は元に戻せません。"));
+                         QString::fromUtf8(
+                             "この操作は元に戻せません。\n"
+                             "Mozc の通常変換履歴に追加学習した内容は削除されません。"));
 
                      QPushButton* clear_confirm_button =
                          message_box.addButton(QString::fromUtf8("すべて削除"),
@@ -2186,7 +2188,7 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                        ShowJapaneseCritical(
                            &dialog, dialog.windowTitle(),
                            QString::fromUtf8(
-                               "Zenz 学習データを削除できませんでした。"));
+                               "フィードバック学習データを削除できませんでした。"));
                        return;
                      }
 
@@ -3611,7 +3613,10 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   SelectZenzLiveCorrectionSetting(
       static_cast<int>(zenzLiveCorrectionCheckBox->isChecked()));
 
-  SET_CHECKBOX(zenzFeedbackLearningCheckBox, use_zenz_feedback_learning);
+  SET_CHECKBOX(zenzFeedbackRecordingCheckBox, use_zenz_feedback_recording);
+  SET_CHECKBOX(zenzFeedbackReuseCheckBox, use_zenz_feedback_reuse);
+  SET_CHECKBOX(zenzMozcHistoryLearningCheckBox,
+               use_zenz_mozc_history_learning);
   SET_CHECKBOX(zenzFeedbackMinKeyLengthCheckBox,
                use_zenz_feedback_min_key_length);
   zenzFeedbackMinKeyLengthSpinBox->setValue(static_cast<int>(
@@ -3637,8 +3642,8 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
           std::clamp(zenz_auto_block_minimum_reject_percentage,
                      kMinZenzAutoBlockMinimumRejectPercentage,
                      kMaxZenzAutoBlockMinimumRejectPercentage)));
-  SelectZenzFeedbackLearningSetting(
-      static_cast<int>(zenzFeedbackLearningCheckBox->isChecked()));
+  SelectZenzFeedbackReuseSetting(
+      static_cast<int>(zenzFeedbackReuseCheckBox->isChecked()));
 
   SET_CHECKBOX(useAutoConversion, use_auto_conversion);
   kutenCheckBox->setChecked(config.auto_conversion_key() &
@@ -3943,7 +3948,10 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
       static_cast<uint32_t>(
           zenzLiveCorrectionRightContextLengthSpinBox->value()));
 
-  GET_CHECKBOX(zenzFeedbackLearningCheckBox, use_zenz_feedback_learning);
+  GET_CHECKBOX(zenzFeedbackRecordingCheckBox, use_zenz_feedback_recording);
+  GET_CHECKBOX(zenzFeedbackReuseCheckBox, use_zenz_feedback_reuse);
+  GET_CHECKBOX(zenzMozcHistoryLearningCheckBox,
+               use_zenz_mozc_history_learning);
   GET_CHECKBOX(zenzFeedbackMinKeyLengthCheckBox,
                use_zenz_feedback_min_key_length);
   config->set_zenz_feedback_min_key_length(
@@ -4976,9 +4984,11 @@ void ConfigDialog::SelectZenzLiveCorrectionSetting(int state) {
       enabled ? static_cast<int>(
                     zenzLiveCorrectionRightContextCheckBox->isChecked())
               : 0);
-  zenzFeedbackLearningCheckBox->setEnabled(enabled);
-  SelectZenzFeedbackLearningSetting(
-      enabled ? static_cast<int>(zenzFeedbackLearningCheckBox->isChecked()) : 0);
+  // Recording, automatic reuse, and external Mozc history learning are
+  // independent preferences. Keep their controls available even when live
+  // correction is disabled: the feedback candidate rewriter also operates
+  // on normal conversion, and turning live correction back on must not
+  // silently change any of the three persisted choices.
 }
 
 void ConfigDialog::SelectZenzDeferredPresentationSetting(int state) {
@@ -4991,11 +5001,8 @@ void ConfigDialog::SelectZenzDeferredPresentationSetting(int state) {
   zenzDeferredPresentationTimeoutSpinBox->setEnabled(enabled);
 }
 
-void ConfigDialog::SelectZenzFeedbackLearningSetting(int state) {
-  const bool enabled =
-      liveConversionCheckBox->isChecked() &&
-      zenzLiveCorrectionCheckBox->isChecked() &&
-      static_cast<bool>(state);
+void ConfigDialog::SelectZenzFeedbackReuseSetting(int state) {
+  const bool enabled = static_cast<bool>(state);
 
   zenzFeedbackAutoBlockCheckBox->setEnabled(enabled);
   zenzFeedbackMinKeyLengthCheckBox->setEnabled(enabled);
@@ -5012,10 +5019,7 @@ void ConfigDialog::SelectZenzFeedbackLearningSetting(int state) {
 
 void ConfigDialog::SelectZenzFeedbackAutoBlockSetting(int state) {
   const bool enabled =
-      liveConversionCheckBox->isChecked() &&
-      zenzLiveCorrectionCheckBox->isChecked() &&
-      zenzFeedbackLearningCheckBox->isChecked() &&
-      static_cast<bool>(state);
+      zenzFeedbackReuseCheckBox->isChecked() && static_cast<bool>(state);
 
   zenzFeedbackAutoBlockRejectThresholdLabel->setEnabled(enabled);
   zenzFeedbackAutoBlockRejectThresholdSpinBox->setEnabled(enabled);

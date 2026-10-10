@@ -1225,7 +1225,7 @@ bool WriteFeedbackRecordsAtomically(
 }
 #endif
 
-void AppendRecord(absl::string_view action,
+bool AppendRecord(absl::string_view action,
                   absl::string_view key,
                   absl::string_view context_class,
                   absl::string_view value,
@@ -1244,7 +1244,7 @@ void AppendRecord(absl::string_view action,
         " context_class=", record.context_class,
         " ", RedactedStats("value", value),
         " reason=", reason));
-    return;
+    return false;
   }
 
 #if defined(_WIN32)
@@ -1260,7 +1260,7 @@ void AppendRecord(absl::string_view action,
 
   if (dir_w.empty() || path_w.empty()) {
     StoreDebugOutput("append failed: empty path");
-    return;
+    return false;
   }
 
   const DWORD dir_attr = ::GetFileAttributesW(dir_w.c_str());
@@ -1269,7 +1269,7 @@ void AppendRecord(absl::string_view action,
     if (!EnsureDirectoryExists(dir_w)) {
       StoreDebugOutput(
           "append failed: directory does not exist and cannot be created");
-      return;
+      return false;
     }
   }
 
@@ -1277,7 +1277,7 @@ void AppendRecord(absl::string_view action,
 #elif defined(__APPLE__)
   const std::string path = GetFeedbackPath();
   if (path.empty()) {
-    return;
+    return false;
   }
   OutputFileStream file(path, std::ios::out | std::ios::binary | std::ios::app);
 #else
@@ -1292,7 +1292,7 @@ void AppendRecord(absl::string_view action,
 #else
     StoreDebugOutput("append open failed");
 #endif
-    return;
+    return false;
   }
 
   WriteRecordToStream(record, &file);
@@ -1300,7 +1300,7 @@ void AppendRecord(absl::string_view action,
 
   if (!file) {
     StoreDebugOutput("append write/flush failed");
-    return;
+    return false;
   }
 
   InvalidateFeedbackRecordsCache();
@@ -1311,6 +1311,7 @@ void AppendRecord(absl::string_view action,
       " context_class=", record.context_class,
       " ", RedactedStats("value", value),
       " reason=", reason));
+  return true;
 }
 
 }  // namespace
@@ -1382,6 +1383,28 @@ ZenzFeedbackDecision ZenzFeedbackStore::Decide(
   ApplyRejectDominanceDecision(exact, &decision);
   ApplyAutoBlockDecision(exact, reuse_policy.auto_block_policy, &decision);
   return decision;
+}
+
+bool ZenzFeedbackStore::IsManuallyBlocked(
+    absl::string_view key, absl::string_view context_class,
+    absl::string_view value) const {
+  const std::string normalized_key(key);
+  const std::string normalized_context_class =
+      NormalizeContextClass(context_class);
+  const std::string normalized_value(value);
+  const std::map<FeedbackKey, Counts> counts = LoadCounts();
+  for (const auto& item : counts) {
+    const FeedbackKey& feedback_key = item.first;
+    if (!item.second.hard_rejected || std::get<0>(feedback_key) != normalized_key ||
+        std::get<2>(feedback_key) != normalized_value) {
+      continue;
+    }
+    if (IsDecisionCompatibleContextClass(normalized_context_class,
+                                         std::get<1>(feedback_key))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 std::vector<ZenzFeedbackCandidate> ZenzFeedbackStore::GetRankedCandidates(
@@ -1697,13 +1720,13 @@ bool ZenzFeedbackStore::ClearAll() {
   return WriteFeedbackRecordsAtomically({});
 }
 
-void ZenzFeedbackStore::RecordAccepted(
+bool ZenzFeedbackStore::RecordAccepted(
     absl::string_view key,
     absl::string_view context_class,
     absl::string_view value) {
   // The caller is responsible for passing the complete Zenz reading/correction
   // pair.  This store must not synthesize or persist segment-local derivatives.
-  AppendRecord("accepted", key, context_class, value, "");
+  return AppendRecord("accepted", key, context_class, value, "");
 }
 
 void ZenzFeedbackStore::RecordAcceptedRollback(

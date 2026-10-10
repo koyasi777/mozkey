@@ -103,6 +103,14 @@ class ZenzFeedbackStore {
       absl::string_view value,
       const ZenzFeedbackReusePolicy& reuse_policy) const;
 
+  // Explicit hard rejects are user-managed exclusions, not automatic feedback
+  // ranking. They apply even when automatic reuse is disabled and are exempt
+  // from the minimum-reading-length filter. Incognito/privacy must be checked
+  // by the caller before consulting this persistent store.
+  bool IsManuallyBlocked(absl::string_view key,
+                         absl::string_view context_class,
+                         absl::string_view value) const;
+
   // Returns feedback-scored values for the given key/context_class.
   //
   // Compatible non-sensitive context classes are aggregated, as in Decide().
@@ -179,7 +187,9 @@ class ZenzFeedbackStore {
   bool ClearAll();
 
   // Records one accepted full-sequence Zenz correction.
-  void RecordAccepted(absl::string_view key,
+  // Returns true only when the append was validated and flushed successfully.
+  // The caller may compensate this acceptance on Undo only after true.
+  bool RecordAccepted(absl::string_view key,
                       absl::string_view context_class,
                       absl::string_view value);
 

@@ -214,6 +214,23 @@ TEST(ZenzFeedbackStoreTest, GetAcceptedCandidatesAllowsSingleAcceptedAndSorts) {
   EXPECT_EQ(candidates[3].reason, "feedback_preferred");
 }
 
+TEST(ZenzFeedbackStoreTest,
+     ManualHardRejectBypassesAutomaticLengthAndRespectsContext) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+  ZenzFeedbackStore store;
+  store.RecordRejected("あい", "japanese_only", "亜衣", "hard_reject");
+  store.RecordRejected("あい", "sensitive_like", "愛", "hard_reject");
+  store.RecordRejected("あい", "empty", "藍", "space_revert_zenz_to_mozc");
+
+  EXPECT_TRUE(store.IsManuallyBlocked("あい", "empty", "亜衣"));
+  EXPECT_TRUE(store.IsManuallyBlocked("あい", "japanese_only", "亜衣"));
+  EXPECT_FALSE(store.IsManuallyBlocked("あい", "empty", "愛"));
+  EXPECT_TRUE(store.IsManuallyBlocked("あい", "sensitive_like", "愛"));
+  EXPECT_FALSE(store.IsManuallyBlocked("あい", "empty", "藍"));
+  EXPECT_FALSE(store.IsManuallyBlocked("あい", "empty", "青"));
+}
+
 TEST(ZenzFeedbackStoreTest, DecideTreatsOrdinaryRejectedAsSoftSignal) {
   ScopedUserProfileForZenzFeedbackStoreTest profile;
   ASSERT_TRUE(profile.ok());
@@ -721,6 +738,36 @@ TEST(ZenzFeedbackStoreTest,
   EXPECT_EQ(entries[0].accepted_count, 1);
   EXPECT_EQ(entries[0].rejected_count, 1);
 }
+
+TEST(ZenzFeedbackStoreTest, AcceptedAppendReportsSuccessAndValidationFailure) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+  ZenzFeedbackStore store;
+  EXPECT_TRUE(store.RecordAccepted("k", "empty", "v"));
+  // An unsafe record cannot be appended or later compensated.
+  EXPECT_FALSE(store.RecordAccepted("bad\nkey", "empty", "v"));
+  const ZenzFeedbackDecision decision = store.Decide("k", "empty", "v");
+  EXPECT_EQ(decision.accepted_count, 1);
+}
+
+#if defined(_WIN32)
+TEST(ZenzFeedbackStoreTest, AcceptedAppendReportsExclusiveFileLockFailure) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+  ZenzFeedbackStore store;
+  ASSERT_TRUE(store.RecordAccepted("k", "empty", "v"));
+
+  const std::wstring path = profile.feedback_path();
+  HANDLE lock = ::CreateFileW(path.c_str(), GENERIC_READ, 0, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  ASSERT_NE(lock, INVALID_HANDLE_VALUE);
+  EXPECT_FALSE(store.RecordAccepted("k", "empty", "v"));
+  ::CloseHandle(lock);
+
+  const ZenzFeedbackDecision decision = store.Decide("k", "empty", "v");
+  EXPECT_EQ(decision.accepted_count, 1);
+}
+#endif  // _WIN32
 
 TEST(ZenzFeedbackStoreTest, AcceptedRollbackCancelsOnlyOneAcceptedObservation) {
   ScopedUserProfileForZenzFeedbackStoreTest profile;
