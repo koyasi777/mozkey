@@ -9612,6 +9612,118 @@ TEST_F(SessionTest,
   Mock::VerifyAndClearExpectations(converter.get());
 }
 
+TEST_F(SessionTest, LiveConversionPreservesPendingRomanBeforeCustomSymbol) {
+  struct TestCase {
+    absl::string_view input;
+    absl::string_view query;
+    absl::string_view value;
+  };
+  constexpr TestCase kCases[] = {
+      {"an)", "あん)", "あん）"},
+      {"ain)", "あいん)", "あいん）"},
+      {"ann)", "あん)", "あん）"},
+      {"ana", "あな", "あな"},
+  };
+
+  for (const uint32_t delay_msec : {0, 100}) {
+    for (const TestCase& test_case : kCases) {
+      SCOPED_TRACE(absl::StrCat(test_case.input, " delay=", delay_msec));
+      MockEngine engine;
+      std::shared_ptr<MockConverter> converter =
+          CreateEngineConverterMock(&engine);
+      Session session(engine);
+      InitSessionToPrecomposition(&session);
+
+      config::Config config;
+      config::ConfigHandler::GetDefaultConfig(&config);
+      config.set_use_live_conversion(true);
+      config.set_live_conversion_delay_msec(delay_msec);
+      config.set_live_conversion_min_key_length(2);
+      config.set_use_direct_commit(false);
+      config.set_use_zenz_live_correction(false);
+      // Deliberately omit a standalone ')' rule. The combined n) rule must
+      // still receive the pending n across an intervening live conversion.
+      config.set_custom_roman_table(
+          "a\tあ\n"
+          "i\tい\n"
+          "n\tん\n"
+          "nn\tん\n"
+          "na\tな\n"
+          "n)\tん）\n");
+      session.SetConfig(config);
+      auto table = std::make_shared<composer::Table>();
+      ASSERT_TRUE(table->InitializeWithRequestAndConfig(
+          commands::Request::default_instance(), config));
+      session.SetTable(table);
+
+      EXPECT_CALL(*converter, StartConversion(_, _))
+          .Times(AtLeast(1))
+          .WillRepeatedly(
+              [](const ConversionRequest& request, Segments* segments) {
+                segments->Clear();
+                Segment* segment = segments->add_segment();
+                segment->set_key(request.key());
+                std::string value(request.key());
+                if (value.ends_with(')')) {
+                  value.replace(value.size() - 1, 1, "）");
+                }
+                AddCandidate(request.key(), value, segment);
+                return true;
+              });
+
+      commands::Command command;
+      for (const char key : test_case.input) {
+        ASSERT_TRUE(SendKey(std::string(1, key), &session, &command));
+        if (command.output().has_callback() &&
+            command.output().callback().session_command().type() ==
+                commands::SessionCommand::APPLY_LIVE_CONVERSION) {
+          const commands::SessionCommand callback =
+              command.output().callback().session_command();
+          command.Clear();
+          command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+          *command.mutable_input()->mutable_command() = callback;
+          ASSERT_TRUE(session.SendCommand(&command));
+        }
+        if (command.output().live_conversion() &&
+            !command.output().live_conversion_pending()) {
+          EXPECT_FALSE(session.context().composer().is_new_input());
+        }
+      }
+      EXPECT_EQ(session.context().composer().GetQueryForConversion(),
+                test_case.query);
+      EXPECT_TRUE(EnsurePreedit(test_case.value, command));
+      EXPECT_FALSE(command.output().has_result());
+      ASSERT_TRUE(
+          SendSpecialKey(commands::KeyEvent::ENTER, &session, &command));
+      EXPECT_RESULT(test_case.value, command);
+      EXPECT_EQ(command.output().result().key(), test_case.query);
+    }
+  }
+}
+
+TEST_F(SessionTest, ExplicitConversionStillStartsNewComposerInput) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あん");
+  AddCandidate("あん", "あん", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  commands::Command command;
+  InsertCharacterChars("an", &session, &command);
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::SPACE, &session, &command));
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_TRUE(session.context().composer().is_new_input());
+}
+
 TEST_F(SessionTest,
        DeferredZenzShiftAsciiCommitsVisiblePresentationBeforeAsciiInput) {
   MockEngine engine;
