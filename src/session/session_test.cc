@@ -18849,6 +18849,130 @@ TEST_F(SessionTest, Issue2223755) {
   }
 }
 
+TEST_F(SessionTest, ImeOnRestoresShiftAsciiWithoutCommittingPreedit) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(false);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("G", &session, &command));
+  ASSERT_TRUE(SendKey("o", &session, &command));
+  ASSERT_TRUE(SendKey("o", &session, &command));
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HALF_ASCII);
+  ASSERT_EQ(session.context().composer().GetComebackInputMode(),
+            transliteration::HIRAGANA);
+  EXPECT_PREEDIT("Goo", command);
+
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ON, &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_PREEDIT("Goo", command);
+  EXPECT_EQ(command.output().mode(), commands::HIRAGANA);
+  ASSERT_TRUE(command.output().has_status());
+  EXPECT_TRUE(command.output().status().activated());
+  EXPECT_EQ(command.output().status().mode(), commands::HIRAGANA);
+  EXPECT_EQ(command.output().status().comeback_mode(), commands::HIRAGANA);
+
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_PREEDIT("Gooあ", command);
+}
+
+TEST_F(SessionTest, ImeOnRestoresHiraganaFromShiftAsciiAfterKatakana) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(false);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command command;
+  ASSERT_TRUE(session.CompositionModeFullKatakana(&command));
+  ASSERT_TRUE(SendKey("G", &session, &command));
+  ASSERT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HALF_ASCII);
+  ASSERT_EQ(session.context().composer().GetComebackInputMode(),
+            transliteration::FULL_KATAKANA);
+
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ON, &session, &command));
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_PREEDIT("G", command);
+  EXPECT_EQ(command.output().mode(), commands::HIRAGANA);
+  EXPECT_EQ(command.output().status().comeback_mode(), commands::HIRAGANA);
+}
+
+TEST_F(SessionTest, ImeOnKeepsExplicitHalfAsciiModeAndPreedit) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(false);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command command;
+  ASSERT_TRUE(session.CompositionModeHalfASCII(&command));
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  EXPECT_PREEDIT("a", command);
+  ASSERT_EQ(session.context().composer().GetComebackInputMode(),
+            transliteration::HALF_ASCII);
+
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ON, &session, &command));
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_PREEDIT("a", command);
+  EXPECT_EQ(command.output().mode(), commands::HALF_ASCII);
+  EXPECT_EQ(command.output().status().mode(), commands::HALF_ASCII);
+}
+
+TEST_F(SessionTest, ImeOnDoesNotCommitExistingHiraganaPreedit) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(false);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  EXPECT_PREEDIT("あ", command);
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ON, &session, &command));
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_PREEDIT("あ", command);
+  EXPECT_EQ(command.output().mode(), commands::HIRAGANA);
+}
+
 TEST_F(SessionTest, Issue2269058) {
   // This is a unittest against http://b/2269058.
   // - Temporary input mode should not be overridden by a permanent

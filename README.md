@@ -91,6 +91,7 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 - MS-IME 風キー設定では、確定済み文字列を選択した状態で Space を押すと再変換し、未選択時は従来どおり空白を入力
 - Windows 版のキー設定で、Ctrl / Shift の左右条件を独立して「左右どちらでも / 左のみ / 右のみ」から選択可能。従来の汎用 Ctrl / Shift 割り当ても維持し、競合する異なるコマンドの割り当ては保存時に検出
 - Windows 版で IMEOn / IMEOff に割り当てたキーを押した場合、すでに同じ状態でも IME モードインジケータを表示
+- Windows 版で Shift などによる一時的な半角英数字入力中に `IMEOn` を押すと、未確定文字列を確定せずにひらがな入力へ復帰
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
 - Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（ライト・ダーク対応）/ モノクロ（黒）/ モノクロ（白）から選択可能
 - Windows Search などの immersive TSF ホストでは、候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビをホストプロセス内の renderer 経路で表示し、前面表示とマウス操作を安定化。未選択のサジェストは mouse-down だけで通常変換へ移行せず、mouse-up で実際に押したサジェストを確定
@@ -586,6 +587,14 @@ CapsLock が有効な場合も、左右指定の照合と汎用ショートカ�
 
 これにより、IME 有効化・無効化キーを「状態を切り替えるキー」としてだけでなく、現在状態を視覚的に確認するためのキーとしても使えます。
 
+### 一時英数字入力から IME ON でひらがなへ復帰（Windows）
+
+Shift などによって半角英数字の**一時入力モード**に切り替わっている場合、`IMEOn` に割り当てられたキーを押すと、既存の未確定文字列を確定せずに入力モードだけをひらがなへ変更します。タスクバーの入力モード表示も「あ」に更新されます。
+
+たとえば、Shift による一時英数字切り替えが有効な設定で `Shift+G` → `o` → `o` → `IMEOn` → `a` と入力すると、`Gooあ` を同じ未確定文字列のまま入力できます。カタカナ入力から一時的に英数字へ切り替えた場合も、`IMEOn` の復帰先はひらがなです。
+
+対象は、現在の入力モードが半角英数字で、復帰先として異なる入力モードが保持されている場合です。通常のひらがな入力中や、復帰先も半角英数字である明示的な半角英数字入力中は、従来どおり `IMEOn` で入力モードを変更しません。`IMEOff` による直接入力への切り替えも従来どおりです。
+
 ### Windows 既定 IME 設定
 
 Windows 版では、設定画面の「その他の設定」→「既定の IME」から、Mozkey を Windows の既定 IME として明示的に設定できます。
@@ -958,6 +967,7 @@ Main features added in this fork
 - In the MS-IME style keymap, pressing Space while committed text is selected reconverts that selection; with no selection, Space still inserts a normal space
 - On Windows, allows independently selecting Either side / Left only / Right only for Ctrl and Shift in the keybinding editor; generic Ctrl/Shift shortcuts remain supported, while conflicting bindings for different commands are rejected when saving
 - Shows the IME mode indicator even when a key assigned to IMEOn or IMEOff is pressed while Mozc is already in that state
+- On Windows, pressing `IMEOn` during temporary half-width ASCII input restores hiragana input without committing the existing preedit
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Light/Dark), Monochrome (Black), and Monochrome (White) in the config dialog
 - Supports candidate, suggestion, and live-conversion ruby rendering in immersive TSF hosts such as Windows Search through an in-process renderer path, keeping the UI above the host presentation layer and preserving correct mouse selection; an unfocused passive suggestion does not enter normal conversion on mouse-down, and mouse-up commits the suggestion that was actually clicked
@@ -1632,6 +1642,14 @@ Simultaneous left-and-right modifier presses, particularly TSF key-up timing for
 When a key is explicitly assigned to `IMEOn` or `IMEOff`, the mode indicator is also shown even if Mozc is already in the requested state. For example, pressing an `IMEOff` key while IME is already off still shows the direct-input indicator.
 
 This lets you use an IME on/off key not only to change the input mode, but also to visually confirm the current mode.
+
+### Return to hiragana from temporary ASCII input with IME ON (Windows)
+
+When temporary half-width ASCII input is active (for example, after a Shift-triggered mode switch), pressing a key mapped to `IMEOn` changes the input mode to hiragana **without committing the current preedit**. The Windows taskbar mode indicator updates to hiragana (`あ`).
+
+With Shift-based temporary ASCII input enabled, typing `Shift+G` → `o` → `o` → `IMEOn` → `a` keeps `Gooあ` in the same uncommitted composition. The return mode is hiragana even if the temporary ASCII input was entered from katakana.
+
+This applies only while the current mode is half-width ASCII and the stored comeback mode differs from it. Pressing `IMEOn` in ordinary hiragana input or in explicit half-width ASCII input whose comeback mode is also half-width ASCII keeps the previous behavior. `IMEOff` still switches to direct input as before.
 
 ### Windows default IME setting
 
