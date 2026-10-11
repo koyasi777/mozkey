@@ -2522,7 +2522,7 @@ bool Session::ExecutePrecompositionCommand(
     case keymap::PrecompositionState::IME_OFF:
       return IMEOff(command);
     case keymap::PrecompositionState::IME_ON:
-      return DoNothing(command);
+      return IMEOnWhenAlreadyOn(command);
 
     case keymap::PrecompositionState::COMPOSITION_MODE_HIRAGANA:
       return CompositionModeHiragana(command);
@@ -2640,7 +2640,7 @@ bool Session::ExecuteCompositionCommand(
       return IMEOff(command);
 
     case keymap::CompositionState::IME_ON:
-      return DoNothing(command);
+      return IMEOnWhenAlreadyOn(command);
 
     case keymap::CompositionState::CONVERT_TO_HIRAGANA:
       return ConvertToHiragana(command);
@@ -2794,7 +2794,7 @@ bool Session::ExecuteConversionCommand(
       return IMEOff(command);
 
     case keymap::ConversionState::IME_ON:
-      return DoNothing(command);
+      return IMEOnWhenAlreadyOn(command);
 
     case keymap::ConversionState::CONVERT_TO_HIRAGANA:
       return ConvertToHiragana(command);
@@ -3259,6 +3259,18 @@ bool Session::IMEOn(commands::Command* command) {
   }
   OutputMode(command);
   return true;
+}
+
+bool Session::IMEOnWhenAlreadyOn(commands::Command* command) {
+  const composer::Composer& composer = context_->composer();
+  // Shift-triggered ASCII mode is temporary.  Restore Japanese input without
+  // committing the existing preedit, which may contain both ASCII and kana.
+  // An explicitly selected HALF_ASCII mode has no distinct comeback mode.
+  if (composer.GetInputMode() == transliteration::HALF_ASCII &&
+      composer.GetComebackInputMode() != composer.GetInputMode()) {
+    return CompositionModeHiragana(command);
+  }
+  return DoNothing(command);
 }
 
 bool Session::IMEOff(commands::Command* command) {

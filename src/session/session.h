@@ -903,6 +903,10 @@ class Session {
       mozc::keymap::DirectInputState::Commands key_command,
       mozc::commands::Command* command);
 
+  // An IME ON key can restore hiragana from temporary Shift ASCII without
+  // committing composition. Keep other already-on input modes unchanged.
+  bool IMEOnWhenAlreadyOn(mozc::commands::Command* command);
+
   bool ExecutePrecompositionCommand(
       mozc::keymap::PrecompositionState::Commands key_command,
       mozc::commands::Command* command);
