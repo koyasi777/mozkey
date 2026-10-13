@@ -2345,8 +2345,58 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
 
+          # Diagnostic-only change: distinguish msiexec's own lifetime from
+          # Start-Process -Wait (which can wait for process descendants).
+          # No Mozkey binaries, TSF settings, or installer code are changed.
+          $diag = Join-Path $env:RUNNER_TEMP "tsf-host-msiexec-diag"
+          New-Item -ItemType Directory -Force -Path $diag | Out-Null
           $uninstallLog = Join-Path $env:RUNNER_TEMP "tsf-host-uninstall.log"
-          $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+          $summary = Join-Path $diag "summary.txt"
+          $started = Get-Date
+          $budgetSeconds = 240
+
+          function Save-DiagnosticSnapshot([string]$Phase) {
+            $destFile = Join-Path $diag "processes-$Phase.csv"
+            try {
+              Get-CimInstance Win32_Process -ErrorAction Stop |
+                Where-Object {
+                  $_.Name -match '^(msiexec|ctfmon|dllhost|conhost|explorer|pwsh|svchost|mozc[^.]*)\.exe$'
+                } |
+                Select-Object Name, ProcessId, ParentProcessId, CreationDate, ExecutablePath |
+                Export-Csv -LiteralPath $destFile -NoTypeInformation -Encoding utf8
+            } catch {
+              "process snapshot $Phase failed: $($_.Exception.Message)" |
+                Add-Content -LiteralPath $summary -Encoding utf8
+            }
+            try {
+              Get-CimInstance Win32_Service -Filter "Name='MozcCacheService'" -ErrorAction Stop |
+                Select-Object Name, State, ProcessId, StartMode, PathName |
+                Format-List | Out-File (Join-Path $diag "service-$Phase.txt") -Encoding utf8
+            } catch {
+              "service snapshot $Phase failed: $($_.Exception.Message)" |
+                Add-Content -LiteralPath $summary -Encoding utf8
+            }
+            if (Test-Path -LiteralPath $uninstallLog -PathType Leaf) {
+              try {
+                Get-Content -LiteralPath $uninstallLog -Tail 120 -ErrorAction Stop |
+                  Set-Content -LiteralPath (Join-Path $diag "msi-log-tail-$Phase.txt") -Encoding utf8
+              } catch {
+                "msi log tail $Phase failed: $($_.Exception.Message)" |
+                  Add-Content -LiteralPath $summary -Encoding utf8
+              }
+            }
+          }
+
+          "started_utc=$($started.ToUniversalTime().ToString('o'))" |
+            Set-Content -LiteralPath $summary -Encoding utf8
+          "budget_seconds=$budgetSeconds" | Add-Content -LiteralPath $summary -Encoding utf8
+          "msi_sha256=$((Get-FileHash -LiteralPath $env:MSI -Algorithm SHA256).Hash)" |
+            Add-Content -LiteralPath $summary -Encoding utf8
+          Save-DiagnosticSnapshot 'before'
+
+          # Deliberately omit -Wait: the observed hang might be process-tree
+          # waiting rather than msiexec itself. Bound the client process wait.
+          $process = Start-Process msiexec.exe -PassThru -ArgumentList @(
             "/x",
             "`"$env:MSI`"",
             "/qn",
@@ -2354,10 +2404,43 @@ jobs:
             "/l*v",
             "`"$uninstallLog`""
           )
+          "client_pid=$($process.Id)" | Add-Content -LiteralPath $summary -Encoding utf8
+          Write-Host "Diagnostic msiexec client PID=$($process.Id), timeout=${budgetSeconds}s"
 
-          Write-Host "msiexec uninstall exit = $($process.ExitCode)"
-          if ($process.ExitCode -notin @(0, 1605, 3010)) {
-            throw "ARM64 MSI uninstall failed with exit code $($process.ExitCode)"
+          $completed = $process.WaitForExit($budgetSeconds * 1000)
+          $process.Refresh()
+          Save-DiagnosticSnapshot 'after-wait'
+          "client_exited=$completed" | Add-Content -LiteralPath $summary -Encoding utf8
+          "elapsed_seconds=$([int]((Get-Date) - $started).TotalSeconds)" |
+            Add-Content -LiteralPath $summary -Encoding utf8
+
+          try {
+            $events = @(Get-WinEvent -FilterHashtable @{
+              LogName='Application'
+              ProviderName='MsiInstaller'
+              StartTime=$started.AddMinutes(-2)
+            } -MaxEvents 100 -ErrorAction Stop)
+            $events | Select-Object TimeCreated, Id, LevelDisplayName, Message |
+              Format-List | Out-File (Join-Path $diag 'msi-events.txt') -Encoding utf8
+          } catch {
+            "event log query: $($_.Exception.Message)" |
+              Add-Content -LiteralPath $summary -Encoding utf8
+          }
+
+          if (-not $completed) {
+            "result=MSI_CLIENT_TIMEOUT" | Add-Content -LiteralPath $summary -Encoding utf8
+            Write-Host "MSI_CLIENT_TIMEOUT: client has not exited after ${budgetSeconds}s"
+            # Intentionally do not kill Windows Installer; the ephemeral runner
+            # will be reclaimed. Preserve logs for the always() artifact step.
+            throw "ARM64 MSI uninstall timed out; inspect diagnostic artifact"
+          }
+
+          $exitCode = $process.ExitCode
+          "client_exit_code=$exitCode" | Add-Content -LiteralPath $summary -Encoding utf8
+          "result=MSI_CLIENT_EXITED" | Add-Content -LiteralPath $summary -Encoding utf8
+          Write-Host "MSI_CLIENT_EXITED: exit=$exitCode"
+          if ($exitCode -notin @(0, 1605, 3010)) {
+            throw "ARM64 MSI uninstall failed with exit code $exitCode"
           }
 
       - name: Upload TSF application-host evidence
@@ -2369,6 +2452,7 @@ jobs:
             ${{ runner.temp }}/tsf-application-host-foundation.log
             ${{ runner.temp }}/tsf-host-install.log
             ${{ runner.temp }}/tsf-host-uninstall.log
+            ${{ runner.temp }}/tsf-host-msiexec-diag/
           if-no-files-found: warn
           retention-days: 7
 
