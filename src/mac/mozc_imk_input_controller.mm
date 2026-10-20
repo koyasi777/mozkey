@@ -250,6 +250,26 @@ void SetRendererRectangle(
   rectangle->set_bottom(baseline.y);
 }
 
+// Returns the composition baseline in the renderer's coordinate system, whose
+// origin is the left-top of the primary (menu bar) screen and whose Y-axis
+// points down.  See GetBaseScreenHeight() in CandidateController.mm.
+//
+// IMKBaseline is already flipped, but the height used for the flip does not
+// always match the primary screen when the client window is on another
+// display, which moves the candidate and ruby windows away from the
+// composition (e.g. to the corner of the screen).  lineHeightRectangle is in
+// Cocoa's global screen coordinates, so the Y coordinate is flipped here with
+// the primary screen height that the renderer uses to restore it.
+NSPoint GetRendererBaseline(NSDictionary *attributes, const NSRect &line_rect) {
+  const NSPoint baseline = [attributes[@"IMKBaseline"] pointValue];
+  NSArray<NSScreen *> *screens = [NSScreen screens];
+  if (screens.count == 0 || NSEqualRects(line_rect, NSZeroRect)) {
+    return baseline;
+  }
+  const CGFloat primary_screen_height = NSHeight([screens[0] frame]);
+  return NSMakePoint(baseline.x, primary_screen_height - NSMinY(line_rect));
+}
+
 NSUInteger CodePointOffsetToUtf16Offset(NSString *text, uint32_t code_point_offset) {
   const NSUInteger length = [text length];
   NSUInteger utf16_offset = 0;
@@ -1026,8 +1046,8 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
                               lineHeightRectangle:&preeditRect];
     [self updateWritingDirectionFromAttributes:clientData];
 
-    // IMKBaseline is the left-bottom coordinate of the requested character.
-    const NSPoint baseline = [clientData[@"IMKBaseline"] pointValue];
+    // The left-bottom coordinate of the requested character.
+    const NSPoint baseline = GetRendererBaseline(clientData, preeditRect);
 
     int candidate_left = baseline.x;
     if (HasLiveConversionReading(output)) {
@@ -1058,7 +1078,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
                                   lineHeightRectangle:&rubyPreeditRect];
         [self updateWritingDirectionFromAttributes:rubyClientData];
         const NSPoint rubyBaseline =
-            [rubyClientData[@"IMKBaseline"] pointValue];
+            GetRendererBaseline(rubyClientData, rubyPreeditRect);
 
         SetRendererRectangle(
             rubyPreeditRect, rubyBaseline,
