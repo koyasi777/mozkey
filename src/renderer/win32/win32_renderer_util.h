@@ -177,6 +177,11 @@ class WindowPositionInterface {
   // This method wraps API call of GetWindowRect.
   virtual bool GetWindowRect(HWND window_handle, RECT* rect) = 0;
 
+  // Returns the same window bounds in physical screen coordinates.
+  // The default implementation supports emulators; the native implementation
+  // queries PMv2 bounds without depending on point-conversion boundary checks.
+  virtual bool GetWindowRectInPhysicalCoords(HWND window_handle, RECT* rect);
+
   // This method wraps API call of GetClientRect.
   virtual bool GetClientRect(HWND window_handle, RECT* rect) = 0;
 
@@ -233,8 +238,8 @@ class LayoutManager {
   // DPI-aware applications.  When the LogicalToPhysicalPoint API is not
   // available in the target platform, this function simply copies |point|
   // into |result|.  If LogicalToPhysicalPoint API fails due to some
-  // limitations, this function tries to emulate the result assuming the
-  // scaling factor is one dimension and scaling center is (0, 0).
+  // limitations, this function maps relative to the root window's logical
+  // and physical bounds, including nonzero and negative monitor origins.
   // See remarks of the following document for details about the limitations.
   // http://msdn.microsoft.com/en-us/library/ms633533.aspx
   // This method is thread-safe.

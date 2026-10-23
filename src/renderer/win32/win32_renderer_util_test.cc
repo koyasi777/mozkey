@@ -35,6 +35,7 @@
 
 #include <bit>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <vector>
 
@@ -565,6 +566,169 @@ TEST(Win32RendererUtilTest, TSF_HighDPI) {
       layout_mgr.LayoutCandidateWindow(app_info, &candidate_window_layout));
   EXPECT_EXCLUDE_CANDIDATE_WINDOW_LAYOUT(172, 284, 172, 244, 174, 284,
                                          candidate_window_layout);
+}
+
+namespace {
+
+// Explicit screen origins exercise fallback mapping independently of the
+// emulator's primary-monitor-only scaling model.
+class OffsetWindowPosition : public WindowPositionInterface {
+ public:
+  OffsetWindowPosition(RECT logical, RECT physical, bool available = true)
+      : logical_(logical), physical_(physical), available_(available) {}
+  bool LogicalToPhysicalPoint(HWND, const POINT&, POINT*) override {
+    return false;  // Native boundary/API failure.
+  }
+  bool GetWindowRect(HWND, RECT* rect) override {
+    *rect = logical_;
+    return available_;
+  }
+  bool GetWindowRectInPhysicalCoords(HWND, RECT* rect) override {
+    *rect = physical_;
+    return available_;
+  }
+  bool GetClientRect(HWND, RECT*) override { return false; }
+  bool ClientToScreen(HWND, POINT*) override { return false; }
+  bool IsWindow(HWND) override { return available_; }
+  HWND GetRootWindow(HWND hwnd) override { return hwnd; }
+
+ private:
+  RECT logical_;
+  RECT physical_;
+  bool available_;
+};
+
+class TestDpiContext {
+ public:
+  explicit TestDpiContext(DPI_AWARENESS_CONTEXT context)
+      : old_(::SetThreadDpiAwarenessContext(context)) {}
+  ~TestDpiContext() {
+    if (old_ != nullptr) ::SetThreadDpiAwarenessContext(old_);
+  }
+  bool valid() const { return old_ != nullptr; }
+
+ private:
+  DPI_AWARENESS_CONTEXT old_;
+};
+
+class TestWindow {
+ public:
+  explicit TestWindow(HWND hwnd) : hwnd_(hwnd) {}
+  ~TestWindow() {
+    if (hwnd_) ::DestroyWindow(hwnd_);
+  }
+  HWND get() const { return hwnd_; }
+
+ private:
+  HWND hwnd_;
+};
+
+}  // namespace
+
+TEST(Win32RendererUtilTest, FallbackAtNonzeroAndNegativeOrigins) {
+  for (const int percent : {100, 125, 150, 200}) {
+    for (const int origin : {-2400, 1600}) {
+      SCOPED_TRACE(::testing::Message() << percent << "% origin=" << origin);
+      const CRect logical(origin + 100, 300, origin + 900, 700);
+      const CRect physical(origin + 100, 450, origin + 100 + 8 * percent,
+                           450 + 4 * percent);
+      LayoutManager layout(
+          std::make_unique<OffsetWindowPosition>(logical, physical));
+      CPoint result;
+      layout.GetPointInPhysicalCoords(
+          nullptr, CPoint(logical.left - 20, logical.top + 500), &result);
+      EXPECT_EQ(result, CPoint(physical.left - percent / 5,
+                               physical.top + 5 * percent));
+      EXPECT_DOUBLE_EQ(layout.GetScalingFactor(nullptr), percent / 100.0);
+    }
+  }
+}
+
+TEST(Win32RendererUtilTest, FallbackFailurePreservesInput) {
+  LayoutManager unavailable(std::make_unique<OffsetWindowPosition>(
+      CRect(0, 0, 100, 100), CRect(0, 0, 150, 150), false));
+  LayoutManager empty(std::make_unique<OffsetWindowPosition>(
+      CRect(7, 9, 7, 9), CRect(10, 14, 10, 14)));
+  for (const LayoutManager* layout : {&unavailable, &empty}) {
+    CPoint result;
+    layout->GetPointInPhysicalCoords(nullptr, CPoint(-17, 234), &result);
+    EXPECT_EQ(result, CPoint(-17, 234));
+    EXPECT_DOUBLE_EQ(layout->GetScalingFactor(nullptr), 1.0);
+  }
+}
+
+TEST(Win32RendererUtilTest, NativeDpiContextsAndWindowBoundaries) {
+  const TestDpiContext caller(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  ASSERT_TRUE(caller.valid());
+  const auto caller_context = ::GetThreadDpiAwarenessContext();
+  for (const auto target_context :
+       {DPI_AWARENESS_CONTEXT_UNAWARE, DPI_AWARENESS_CONTEXT_SYSTEM_AWARE,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2}) {
+    HWND hwnd;
+    {
+      const TestDpiContext target(target_context);
+      ASSERT_TRUE(target.valid());
+      hwnd = ::CreateWindowExW(
+          WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED, L"STATIC", L"",
+          WS_POPUP | WS_DISABLED, 1004, 603, 552, 185, nullptr, nullptr,
+          ::GetModuleHandle(nullptr), nullptr);
+    }
+    const TestWindow window(hwnd);
+    ASSERT_NE(hwnd, nullptr);
+    ASSERT_TRUE(::SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA));
+    ::ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    CPoint logical_origin(0, 0);
+    CRect logical_client;
+    {
+      const TestDpiContext target(target_context);
+      ASSERT_TRUE(::ClientToScreen(hwnd, &logical_origin));
+      ASSERT_TRUE(::GetClientRect(hwnd, &logical_client));
+    }
+    CPoint physical_origin(0, 0);
+    CRect physical_client;
+    ASSERT_TRUE(::ClientToScreen(hwnd, &physical_origin));
+    ASSERT_TRUE(::GetClientRect(hwnd, &physical_client));
+    ASSERT_GT(logical_client.Width(), 0);
+    const double scale =
+        static_cast<double>(physical_client.Width()) / logical_client.Width();
+    LayoutManager layout;
+    // The expected mapping uses independently measured client origins/sizes,
+    // including points rejected by LogicalToPhysicalPointForPerMonitorDPI.
+    for (const CPoint offset :
+         {CPoint(0, 0), CPoint(84, 50),
+          CPoint(logical_client.Width() - 1, logical_client.Height() - 1),
+          CPoint(-20, -20),
+          CPoint(logical_client.Width() + 20, logical_client.Height() + 20)}) {
+      CPoint result;
+      layout.GetPointInPhysicalCoords(hwnd, logical_origin + offset, &result);
+      EXPECT_NEAR(result.x, physical_origin.x + offset.x * scale, 1.0);
+      EXPECT_NEAR(result.y, physical_origin.y + offset.y * scale, 1.0);
+      EXPECT_TRUE(::AreDpiAwarenessContextsEqual(
+          ::GetThreadDpiAwarenessContext(), caller_context));
+    }
+    ApplicationInfo app_info;
+    AppInfoUtil::SetBasicApplicationInfo(&app_info, hwnd,
+                                         ApplicationInfo::ShowCandidateWindow,
+                                         ApplicationInfo::TSF);
+    AppInfoUtil::SetCompositionTarget(
+        &app_info, 0, logical_origin.x + 84, logical_origin.y + 50, 12,
+        logical_origin.x, logical_origin.y,
+        logical_origin.x + logical_client.Width(),
+        logical_origin.y + logical_client.Height());
+    CandidateWindowLayout candidate;
+    ASSERT_TRUE(layout.LayoutCandidateWindow(app_info, &candidate));
+    EXPECT_NEAR(candidate.position().x, physical_origin.x + 84 * scale, 1.0);
+    EXPECT_NEAR(candidate.position().y, physical_origin.y + 62 * scale, 1.0);
+    EXPECT_NEAR(layout.GetScalingFactor(hwnd), scale, 0.01);
+    EXPECT_TRUE(::AreDpiAwarenessContextsEqual(::GetThreadDpiAwarenessContext(),
+                                               caller_context));
+  }
+  LayoutManager layout;
+  CPoint result;
+  layout.GetPointInPhysicalCoords(nullptr, CPoint(11, 23), &result);
+  EXPECT_EQ(result, CPoint(11, 23));
+  EXPECT_TRUE(::AreDpiAwarenessContextsEqual(::GetThreadDpiAwarenessContext(),
+                                             caller_context));
 }
 
 }  // namespace win32

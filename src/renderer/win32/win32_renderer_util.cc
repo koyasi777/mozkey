@@ -259,6 +259,24 @@ bool GetWorkingAreaFromPointImpl(const POINT& point, RECT* working_area) {
   return true;
 }
 
+// Keep DPI virtualization local to each API call. Renderer windows remain PMv2.
+class ScopedThreadDpiContext {
+ public:
+  explicit ScopedThreadDpiContext(DPI_AWARENESS_CONTEXT context)
+      : previous_(::SetThreadDpiAwarenessContext(context)) {}
+  ScopedThreadDpiContext(const ScopedThreadDpiContext&) = delete;
+  ScopedThreadDpiContext& operator=(const ScopedThreadDpiContext&) = delete;
+  ~ScopedThreadDpiContext() {
+    if (previous_ != nullptr) {
+      ::SetThreadDpiAwarenessContext(previous_);
+    }
+  }
+  bool valid() const { return previous_ != nullptr; }
+
+ private:
+  DPI_AWARENESS_CONTEXT previous_;
+};
+
 class NativeWindowPositionAPI : public WindowPositionInterface {
  public:
   NativeWindowPositionAPI() = default;
@@ -293,6 +311,11 @@ class NativeWindowPositionAPI : public WindowPositionInterface {
     // DPI-unaware process are logical coordinates.  You can copy these
     // coordinates to a DPI-aware process and convert them to physical screen
     // coordinates by LogicalToPhysicalPoint API.
+    const ScopedThreadDpiContext context(
+        ::GetWindowDpiAwarenessContext(root_window_handle));
+    if (!context.valid()) {
+      return false;
+    }
     *physical_coordinate = logical_coordinate;
 
     // Despite its name, LogicalToPhysicalPoint API no longer converts
@@ -305,7 +328,15 @@ class NativeWindowPositionAPI : public WindowPositionInterface {
 
   // This method is not const to implement Win32WindowInterface.
   virtual bool GetWindowRect(HWND window_handle, RECT* rect) {
-    return (::GetWindowRect(window_handle, rect) != FALSE);
+    const ScopedThreadDpiContext context(
+        ::GetWindowDpiAwarenessContext(window_handle));
+    return context.valid() && ::GetWindowRect(window_handle, rect) != FALSE;
+  }
+
+  bool GetWindowRectInPhysicalCoords(HWND window_handle, RECT* rect) override {
+    const ScopedThreadDpiContext context(
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    return context.valid() && ::GetWindowRect(window_handle, rect) != FALSE;
   }
 
   // This method is not const to implement Win32WindowInterface.
@@ -988,6 +1019,21 @@ void IndicatorWindowLayout::Clear() {
   ::SetRect(&window_rect, 0, 0, 0, 0);
 }
 
+bool WindowPositionInterface::GetWindowRectInPhysicalCoords(HWND window_handle,
+                                                            RECT* rect) {
+  CRect logical;
+  CPoint top_left;
+  CPoint bottom_right;
+  if (rect == nullptr || !GetWindowRect(window_handle, &logical) ||
+      !LogicalToPhysicalPoint(window_handle, logical.TopLeft(), &top_left) ||
+      !LogicalToPhysicalPoint(window_handle, logical.BottomRight(),
+                              &bottom_right)) {
+    return false;
+  }
+  *rect = CRect(top_left, bottom_right);
+  return true;
+}
+
 void LayoutManager::GetPointInPhysicalCoords(HWND window_handle,
                                              const POINT& point,
                                              POINT* result) const {
@@ -1000,13 +1046,30 @@ void LayoutManager::GetPointInPhysicalCoords(HWND window_handle,
     return;
   }
 
-  // LogicalToPhysicalPoint API failed for some reason.
-  // Emulate the result based on the scaling factor.
-  const HWND root_window_handle =
-      window_position_->GetRootWindow(window_handle);
-  const double scale_factor = GetScalingFactor(root_window_handle);
-  result->x = point.x * scale_factor;
-  result->y = point.y * scale_factor;
+  // The native API rejects points outside the root window. Use an affine
+  // mapping anchored at that window, not at the primary monitor's (0, 0).
+  // This also handles monitors with negative/nonzero screen origins.
+  *result = point;
+  const HWND root = window_position_->GetRootWindow(window_handle);
+  CRect logical;
+  CRect physical;
+  if (!window_position_->GetWindowRect(root, &logical) ||
+      !window_position_->GetWindowRectInPhysicalCoords(root, &physical)) {
+    return;
+  }
+  const bool use_width = logical.Width() > logical.Height();
+  const int logical_extent = use_width ? logical.Width() : logical.Height();
+  const int physical_extent = use_width ? physical.Width() : physical.Height();
+  if (logical_extent <= 0 || physical_extent <= 0) {
+    return;
+  }
+  const double scale = static_cast<double>(physical_extent) / logical_extent;
+  result->x = physical.left +
+              static_cast<LONG>(std::lround(
+                  (static_cast<double>(point.x) - logical.left) * scale));
+  result->y =
+      physical.top + static_cast<LONG>(std::lround(
+                         (static_cast<double>(point.y) - logical.top) * scale));
 }
 
 void LayoutManager::GetRectInPhysicalCoords(HWND window_handle,
@@ -1178,20 +1241,11 @@ double LayoutManager::GetScalingFactor(HWND window_handle) const {
     return kDefaultValue;
   }
 
-  CPoint top_left_in_physical_coord;
-  if (!window_position_->LogicalToPhysicalPoint(
-          window_handle, window_rect_in_logical_coord.TopLeft(),
-          &top_left_in_physical_coord)) {
+  CRect window_rect_in_physical_coord;
+  if (!window_position_->GetWindowRectInPhysicalCoords(
+          window_handle, &window_rect_in_physical_coord)) {
     return kDefaultValue;
   }
-  CPoint bottom_right_in_physical_coord;
-  if (!window_position_->LogicalToPhysicalPoint(
-          window_handle, window_rect_in_logical_coord.BottomRight(),
-          &bottom_right_in_physical_coord)) {
-    return kDefaultValue;
-  }
-  const CRect window_rect_in_physical_coord(top_left_in_physical_coord,
-                                            bottom_right_in_physical_coord);
 
   if (window_rect_in_physical_coord == window_rect_in_logical_coord) {
     // No scaling.
