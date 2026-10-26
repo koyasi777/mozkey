@@ -1,0 +1,205 @@
+// Copyright 2010-2012, Google Inc.
+// Copyright 2012~2013, Weng Xuetian <wengxt@gmail.com>
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+#include "unix/fcitx/mozc_connection.h"
+
+#include <string>
+
+#include "absl/log/check.h"
+#include "base/vlog.h"
+#include "base/util.h"
+#include "client/client.h"
+#include "protocol/commands.pb.h"
+#include "unix/fcitx/fcitx_key_event_handler.h"
+#include "unix/fcitx/surrounding_text_util.h"
+
+namespace mozc {
+namespace fcitx {
+
+MozcConnectionInterface::~MozcConnectionInterface() {
+}
+
+std::unique_ptr<mozc::client::ClientInterface> CreateAndConfigureClient() {
+  auto client = client::ClientFactory::NewClient();
+  // Currently client capability is fixed.
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  client->set_client_capability(capability);
+  return client;
+}
+
+MozcConnection::MozcConnection()
+    : handler_(new KeyEventHandler),
+      preedit_method_(mozc::config::Config::ROMAN) {
+  MOZC_VLOG(1) << "MozcConnection is created";
+  auto client = CreateAndConfigureClient();
+  client_ = std::move(client);
+
+  if (client_->EnsureConnection()) {
+    UpdatePreeditMethod();
+  }
+  MOZC_VLOG(1)
+      << "Current preedit method is "
+      << (preedit_method_ == mozc::config::Config::ROMAN ? "Roman" : "Kana");
+}
+
+MozcConnection::~MozcConnection() {
+  client_->SyncData();
+  MOZC_VLOG(1) << "MozcConnection is destroyed";
+}
+
+void MozcConnection::UpdatePreeditMethod() {
+  mozc::config::Config config;
+  if (!client_->GetConfig(&config)) {
+    LOG(ERROR) << "GetConfig failed";
+    return;
+  }
+  preedit_method_ = config.has_preedit_method() ?
+      config.preedit_method() : config::Config::ROMAN;
+}
+
+bool MozcConnection::TrySendKeyEvent(
+    FcitxInstance* instance,
+    FcitxKeySym sym, uint32_t keycode, uint32_t state,
+    mozc::commands::CompositionMode composition_mode,
+    bool layout_is_jp,
+    bool is_key_up,
+    mozc::commands::Output *out,
+    std::string *out_error) const {
+  DCHECK(out);
+  DCHECK(out_error);
+
+  // Call EnsureConnection just in case MozcConnection::MozcConnection() fails
+  // to establish the server connection.
+  if (!client_->EnsureConnection()) {
+    *out_error = "EnsureConnection failed";
+    MOZC_VLOG(1) << "EnsureConnection failed";
+    return false;
+  }
+
+  mozc::commands::KeyEvent event;
+  if (!handler_->GetKeyEvent(sym, keycode, state, preedit_method_, layout_is_jp, is_key_up, &event))
+      return false;
+
+  if ((composition_mode == mozc::commands::DIRECT) &&
+      !client_->IsDirectModeCommand(event)) {
+    MOZC_VLOG(1) << "In DIRECT mode. Not consumed.";
+    return false;  // not consumed.
+  }
+
+  commands::Context context;
+  SurroundingTextInfo surrounding_text_info;
+  if (GetSurroundingText(instance,
+                         &surrounding_text_info)) {
+    context.set_preceding_text(surrounding_text_info.preceding_text);
+    context.set_following_text(surrounding_text_info.following_text);
+  }
+
+  MOZC_VLOG(1) << "TrySendKeyEvent: " << std::endl << event.DebugString();
+  if (!client_->SendKeyWithContext(event, context, out)) {
+    *out_error = "SendKey failed";
+    MOZC_VLOG(1) << "ERROR";
+    return false;
+  }
+  MOZC_VLOG(1) << "OK: " << std::endl << out->DebugString();
+  return true;
+}
+
+bool MozcConnection::TrySendClick(int32_t unique_id,
+                                  mozc::commands::Output *out,
+                                  std::string *out_error) const {
+  DCHECK(out);
+  DCHECK(out_error);
+
+  mozc::commands::SessionCommand command;
+  command.set_type(mozc::commands::SessionCommand::SELECT_CANDIDATE);
+  command.set_id(unique_id);
+  return TrySendRawCommand(command, out, out_error);
+}
+
+bool MozcConnection::TrySendCompositionMode(
+    mozc::commands::CompositionMode mode,
+    mozc::commands::CompositionMode old_mode,
+    mozc::commands::Output *out,
+    std::string *out_error) const {
+  DCHECK(out);
+  DCHECK(out_error);
+
+  mozc::commands::SessionCommand command;
+  if (mode == mozc::commands::DIRECT) {
+    command.set_type(mozc::commands::SessionCommand::TURN_OFF_IME);
+    command.set_composition_mode(old_mode);
+  } else {
+    command.set_type(mozc::commands::SessionCommand::SWITCH_COMPOSITION_MODE);
+    command.set_composition_mode(mode);
+  }
+  return TrySendRawCommand(command, out, out_error);
+}
+
+bool MozcConnection::TrySendCommand(
+    mozc::commands::SessionCommand::CommandType type,
+    mozc::commands::Output *out,
+    std::string *out_error) const {
+  DCHECK(out);
+  DCHECK(out_error);
+
+  mozc::commands::SessionCommand command;
+  command.set_type(type);
+  return TrySendRawCommand(command, out, out_error);
+}
+
+
+
+bool MozcConnection::TrySendRawCommand(
+    const mozc::commands::SessionCommand& command,
+    mozc::commands::Output *out,
+    std::string *out_error) const {
+  MOZC_VLOG(1) << "TrySendRawCommand: " << std::endl << command.DebugString();
+  if (!client_->SendCommand(command, out)) {
+    *out_error = "SendCommand failed";
+    MOZC_VLOG(1) << "ERROR";
+    return false;
+  }
+  MOZC_VLOG(1) << "OK: " << std::endl << out->DebugString();
+  return true;
+}
+
+mozc::client::ClientInterface* MozcConnection::GetClient()
+{
+    return client_.get();
+}
+
+MozcConnection *MozcConnection::CreateMozcConnection() {
+  return new MozcConnection;
+}
+
+}  // namespace fcitx
+
+}  // namespace mozc
