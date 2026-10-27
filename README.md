@@ -5,23 +5,21 @@
 <h1 align="center">Mozkey（もずきー）</h1>
 
 <p align="center">
-  <strong>Mozc をベースに、遅延付きライブ変換・ローカル Zenz 補正・外観カスタマイズ機能<br>句読点単打確定・文脈を見た変換補正などを統合した、ローカルファーストな日本語入力 fork です。</strong>
+  <strong>Mozc をベースに、通常変換・遅延付きライブ変換・ローカル Zenz 補正を組み合わせ、<br>縦書き対応・外観カスタマイズ・柔軟な入力操作と学習制御を備えた日本語入力ソフトウェアです。</strong>
 </p>
 
 <p align="center">
   <a href="https://github.com/koyasi777/mozkey/releases"><img alt="Releases" src="https://img.shields.io/github/v/release/koyasi777/mozkey?include_prereleases&label=release"></a>
   <img alt="Based on Mozc" src="https://img.shields.io/badge/based%20on-Mozc-88A2DD">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-Zenz-53D4C7">
-  <img alt="Release build" src="https://img.shields.io/badge/release-Windows%20MSI-178B8B">
-  <img alt="macOS status" src="https://img.shields.io/badge/macOS-tested-2EA44F">
-  <img alt="Linux status" src="https://img.shields.io/badge/Linux-untested-lightgrey">
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-178B8B">
 </p>
 
 <br>
 
 Mozkey（もずきー）は [google/mozc](https://github.com/google/mozc) をベースにした非公式フォークです。
 
-本 fork は、主に自分の Windows / macOS 環境で日常的に使うために、Mozc に入力補助・ライブ変換・文脈補正・ローカル Zenz 補正・オフライン配布向けの調整を加えたものです。
+Mozkey は、Mozc の通常変換を基盤に、遅延付きライブ変換、ローカル Zenz による文脈補正、縦書き対応、柔軟な外観・入力操作のカスタマイズを組み合わせた日本語入力ソフトウェアです。Mozc の変換資産を活かしながら、候補の表示方法から学習の仕組みまで、使い手に合わせて調整できます。
 
 本プロジェクトは Google 日本語入力ではありません。
 Google または google/mozc の公式配布物ではありません。
@@ -30,45 +28,46 @@ Google によるサポートや品質保証の対象ではありません。
 upstream Mozc との追従性および既存インストールとの互換性を保つため、
 一部の内部実行ファイル名、パス、実装上の識別子には `mozc` / `Mozc` 名が残ります。
 
+### Mozkey の特徴
+
+- **遅延付きライブ変換とルビ表示：** スペースキーを押す前から未確定文字列を変換。開始までの待機時間や文字数、読みを示すルビ風の表示を調整できます。
+- **Mozc と Zenz の二層構成：** Mozc の通常変換を維持しながら、ローカルの Zenz で文脈に応じた補正を追加。補正が適さない場合は Mozc の結果へ戻せます。
+- **文脈と表記を尊重する補正：** 前後の文脈を利用し、助詞・機能語や文節のつながりを改善。ユーザー辞書、英字・技術用語、数字、記号の表記を不用意に置き換えないための保護も備えています。
+- **選べる Zenz の表示タイミング：** 通常のライブ変換結果を先に表示する動作に加え、Zenz の応答を一定時間待ってから表示する方式も選択できます。
+- **学習と候補のコントロール：** Zenz の採用・却下フィードバック、保存済み結果の再利用、Mozc 変換履歴への学習を個別に設定。学習データの管理、候補の履歴削除・非表示、確定直後の取り消しにも対応します。
+- **縦書きに対応した入力 UI（Windows / macOS）：** 候補・サジェスト・用例・ルビを縦書きに合わせて配置し、対応するキー設定では候補や文節の移動方向も調整します。
+- **幅広い外観カスタマイズ：** 候補・サジェスト・ルビの配色（ライト／ダーク／自動／カスタム）、サイズ、角丸、透明度、影を個別に設定。Windows ではフォント・文字の太さ・未確定文字の色や下線、IME インジケータも調整できます。
+- **柔軟なローマ字入力とキー設定：** ローマ字テーブルの編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
+- **日本語の変換品質と辞書の拡張：** 日常語彙・固有名詞・口語表現を補強し、文節分割や不自然な漢字化を抑制。日付・曜日の変換候補も拡張しています。
+- **ローカルファーストと OS 連携：** Zenz の推論はローカルで実行し、利用統計の送信機能を無効化。シークレット入力への配慮や、Windows Search などの入力欄での候補表示にも対応しています。
+
+詳しい仕様・設定項目は、下記の「主な追加機能」と「修正詳細」で説明しています。
+
 <br>
 
 ダウンロード / インストール
 --------------------------
 
-現時点で Releases から公開しているビルド済みパッケージは Windows 向けです。
+インストーラーは [GitHub Releases](https://github.com/koyasi777/mozkey/releases) から入手できます。公開されているファイルは、各 Release の Assets を確認してください。
 
-Windows に加え、macOS でもこの fork を実機で検証しています。macOS についても、ビルドだけでなく、実際の PKG / install / runtime / 入力・表示経路まで確認しています。
+- **Windows x64:** x64 向け MSI を使用してください。
+- **Windows ARM64:** ARM64 向け MSI を使用してください。Mozkey 本体と Zenz runtime は ARM64 ネイティブ構成です。
+- **macOS:** Intel / Apple Silicon に対応する Universal PKG を使用してください。
+- **Linux:** このフォーク固有の機能は対応・検証を進めている段階であり、現在はインストーラーを配布していません。
 
-Linux については、upstream Mozc 自体は対応していますが、この fork 固有の Zenz 構成や追加機能はまだ実機確認できていません。
+Zenz 同梱パッケージにはローカル推論 runtime と GGUF モデルが含まれるため、ファイルサイズが大きくなります。Windows 向け MSI には、ローカル生成した `daily` 辞書を含む場合があります。辞書・モデル・runtime の出典とライセンスは [Third-party notices](THIRD_PARTY_NOTICES.md) を参照してください。
 
-Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mozkey/releases) からダウンロードできます。
+> [!NOTE]
+> Mozkey は Google または google/mozc の公式配布物ではありません。Windows 向け配布物には Authenticode 署名、macOS 向け配布物には Apple Developer ID 署名・公証を行っていません。OS によっては警告や追加の確認操作が必要です。macOS については [Apple の案内](https://support.apple.com/ja-jp/102445) を参照してください。
 
-- 通常の x64 Windows では、Releases にある最新の `Mozkey_v*_x64.msi` を使用してください。
-- Windows on Arm（ARM64）では、その release に ARM64 と明記された MSI が含まれる場合は ARM64 版を使用してください。ARM64 MSI は Mozkey 本体、`mozc_zenz_scorer.exe`、`llama-server.exe` を native ARM64 payload として構成します。
-- `universal` MSI は x64 / ARM64 の全実行ファイルを dual-native 化した whole-product package ではありません。通常の配布選択では architecture-specific な x64 / ARM64 MSI を優先してください。
-- 本 fork のリリースは個人用の experimental build として公開しています。
-- Zenz 同梱版は、ローカル推論 runtime と GGUF model を含むため、従来の offline MSI よりファイルサイズが大きくなります。
-- Windows 向けリリース MSI には、ローカル生成した `daily` system dictionary profile を同梱する場合があります。
-- `daily` profile には、Mozc 標準辞書に加えて、merge-ut-dictionaries、dic-nico-intersection-pixiv、mozcdic-ut-personal-names、Mozkey syntax / expressive kana guard dictionary 由来の生成辞書が含まれます。
-- 外部辞書・同梱 runtime・model の出典とライセンス note については [Third-party notices](THIRD_PARTY_NOTICES.md) を参照してください。
+### macOS の初期設定
 
-> [!WARNING]
-> このビルドは google/mozc の公式配布物ではありません。
-> 個人用 fork の experimental / pre-release build です。
-> MSI は署名されていないため、Windows の警告が表示される場合があります。
+1. PKG をインストールしたら、「システム設定」→「キーボード」→「テキスト入力」の「編集」を開きます。
+2. 「Hiragana (Mozkey)」（環境によっては「ひらがな（Mozkey）」）が登録されているか確認します。なければ「+」→「日本語」から追加します。
+3. メニューバーの入力メニューで Mozkey のひらがな入力ソースを選択します。
+4. 入力ソースが表示されない場合は、macOS からログアウトして再ログインし、もう一度確認してください。
 
-### macOSでの初期設定（開発用PKG）
-
-現在、macOS用のビルド済みPKGはReleasesで公開していません。以下は、検証済みのインストール可能な開発用PKGを導入した場合の手順です。通常のOSSビルドで生成されるguarded PKGはインストールできません。ビルド条件については[macOS Zenz対応Universal PKGのビルド](#macos-zenz-対応-universal-pkg-のビルド)を参照してください。
-
-1. インストール後、macOSからログアウトし、再ログインします。
-2. 「システム設定」→「キーボード」→「テキスト入力」の「編集」を開きます。
-3. 入力ソースに「Hiragana (Mozkey)」（表示言語によっては「ひらがな（Mozkey）」）が登録されていれば追加は不要です。登録されていない場合は「+」→「日本語」からMozkeyのひらがな入力ソースを探して追加します。
-4. メニューバーの入力メニューからMozkeyのひらがな入力ソースを選択します。
-
-macOS 0.7.7の実機検証では、インストール直後に入力メニューへ表示されなくても、ログアウト・再ログイン後に「Hiragana (Mozkey)」が利用可能になりました。入力ソースの反映に時間がかかる原因は未確定であり、すべての環境で同じ手順・結果になると保証するものではありません。
-
-macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27)も参照してください。
+詳しくは [Apple の入力ソース設定ガイド](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) を参照してください。
 
 <br>
 
@@ -828,77 +827,59 @@ daily local 辞書は主に以下を元に生成できます。
 * [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 
-### macOS Zenz 対応 Universal PKG のビルド
+### 開発者向けドキュメント
 
-配布用の macOS Zenz runtime は、追跡済みの
-`src/mac/installer/zenz_runtime/build_universal_runtime.zsh` から生成し、
-`stage_runtime_assets.zsh` で staging してから Universal PKG をビルドします。
-`llama-server` と `mozc_zenz_scorer` はどちらも `arm64` / `x86_64`
-を含む同一パスの Universal executable として扱います。
+ソースからのビルド、Zenz runtime の同梱、インストーラーの検証は、以下の文書を参照してください。
 
-```bash
-src/mac/installer/zenz_runtime/build_universal_runtime.zsh \
-  "$HOME/Downloads/mozkey-macos-zenz-runtime"
-
-src/mac/installer/zenz_runtime/stage_runtime_assets.zsh \
-  "$HOME/Downloads/mozkey-macos-zenz-runtime"
-
-cd src
-
-bazelisk build \
-  --config=oss_macos \
-  --config=release_build \
-  --macos_cpus=x86_64,arm64 \
-  --define=macos_zenz_runtime=1 \
-  //mac:package \
-  --verbose_failures
-```
-
-`--define=macos_zenz_runtime=1` を付けない generic package build は、
-Zenz runtime を含む配布用 macOS PKG としては扱いません。
-
-**インストール可否は Zenz 同梱の有無とは別の制御です。** 上記コマンドは、誤インストールを防ぐため、ビルドは可能でもインストール禁止の guarded PKG を生成します。実機インストール用のPKGを明示的に生成する場合に限り、監査後、上記 `bazelisk build` に `--define=MOZKEY_INSTALLABLE=1` を追加してください。この指定は `--config=oss_macos` と併用し、生成PKGから実際の preinstall と receipt バージョンを確認する必要があります。判定条件と27ケースの回帰テストは [macOSインストーラー検証手順](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md) を参照してください。
-
-macOS 0.7.7（内部インストールバージョン `100.7.7`）の実機検証では、正規アンインストール後にreceiptだけが残った状態から、`pkgutil --forget` なしで再インストールできました。ただし、GUIインストール直後に「Hiragana (Mozkey)」が入力ソースへ表示されない場合、ログアウト・再ログインで反映されることを確認しています。検証に使用した開発用PKGはパッケージレベルでは未署名・未公証であり、一般向けのmacOS配布物としてはまだ公開していません。
-
-正式な architecture/runtime gate では、最終 `.pkg` を Apple Silicon で検証し、
-同一 SHA-256 の package artifact を native Intel runner に渡して、
-同じ package-level verifier で `mozc_zenz_scorer -> llama-server -> model`
-の実リクエストまで検証します。詳細な source pin、BUILD-CONTRACT、staging、
-署名境界、検証手順は
-[`src/mac/installer/zenz_runtime/README.md`](src/mac/installer/zenz_runtime/README.md)
-を参照してください。
-
-Note
-----
-
-This fork is primarily maintained for personal use.
-Upstream-oriented changes are organized in `pr/*` branches.
-
-この fork は主に個人利用向けに保守しています。
-upstream 提案向けの変更は `pr/*` branches に整理しています。
-
-<br>
+- [Windows ビルド手順](docs/build_mozc_in_windows.md)
+- [macOS Universal Zenz runtime / PKG ビルド手順](src/mac/installer/zenz_runtime/README.md)
+- [macOS インストーラーの検証手順](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md)
+- [Linux ビルド手順](docs/build_mozc_for_linux.md)
 
 # English
 
-This repository is my personal fork of [google/mozc](https://github.com/google/mozc).
+Mozkey is an unofficial fork of [google/mozc](https://github.com/google/mozc). It preserves the standard Mozc conversion engine while adding delayed live conversion, context-aware correction with local Zenz inference, vertical-writing support, extensive appearance customization, and flexible input and learning controls.
 
-This fork is mainly maintained for my own Windows / macOS environments and adds input assistance, live conversion, context-aware conversion, local Zenz correction, system-theme-aware renderer appearance, and offline-distribution-oriented adjustments to Mozc.
+Mozkey is not an official Google Japanese Input or google/mozc distribution.
 
-This build is not an official google/mozc distribution.
+### Key features
 
-macOS initial setup (development PKGs)
---------------------------------------
+- **Delayed live conversion and reading overlay:** Converts compositions before Space is pressed, with adjustable debounce delay, minimum length, and ruby-like display of the reading.
+- **Layered Mozc + Zenz conversion:** Keeps normal Mozc conversion as the baseline and adds optional local Zenz correction, falling back to Mozc when a correction is not adopted.
+- **Context-aware correction with spelling safeguards:** Uses available preceding and following context while protecting user-dictionary entries, Latin/technical spellings, numeric literals, and punctuation choices.
+- **Optional deferred presentation:** Choose whether to display Mozc live conversion immediately or briefly wait for Zenz before showing a result.
+- **Controllable learning and candidates:** Configure Zenz accept/reject recording, feedback reuse, and Mozc-history learning independently; manage feedback, hide unwanted candidates, and undo recent commits.
+- **Vertical-writing UI on Windows and macOS:** Candidate, suggestion, infolist, and ruby layouts adapt to vertical text; supported keymaps can follow the visual navigation direction.
+- **Extensive appearance customization:** Configure colors (light/dark/system/custom), dimensions, rounded corners, opacity, and shadows per window. Windows additionally supports font/weight, preedit colors and underlines, and IME-indicator styling.
+- **Customizable romaji and shortcuts:** Edit romaji rules, show intermediate output for ambiguous sequences, commit punctuation with one key, and assign ordered key commands with delays.
+- **Improved Japanese conversion and dictionaries:** Enhances everyday expressions and names, reduces unwanted segmentation and kanji conversion, and adds date and weekday suggestions.
+- **Local-first operation and OS integration:** Runs Zenz inference locally, disables inherited usage-statistics reporting, supports privacy-aware input behavior, and improves candidate display in Windows Search and other immersive TSF hosts.
 
-Prebuilt macOS PKGs are not currently published in Releases. The following steps apply after installing an audited, explicitly installable development PKG; ordinary guarded OSS PKGs intentionally refuse installation. See [Building a Zenz-enabled Universal macOS PKG](#building-a-zenz-enabled-universal-macos-pkg) for build and installation-gate details.
+For implementation details and settings, see the feature list and detailed explanations below.
 
-1. Log out of macOS and log back in after installation.
-2. Open **System Settings → Keyboard → Text Input → Edit**.
-3. If **Hiragana (Mozkey)** is already in the input-source list, do not add it again. Otherwise, click **+**, select **Japanese**, and look for the Mozkey Hiragana input source to add. The name may be localized.
-4. Select the Mozkey Hiragana input source from the menu-bar input menu.
+Download / platform availability
+--------------------------------
 
-On the tested macOS 0.7.7 installation, Hiragana (Mozkey) became selectable after logging out and back in, despite not appearing immediately after the GUI install. The cause of the delay is not yet established, and behavior may vary between systems. See the [Apple input-source settings guide](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) for the settings path.
+Installers are available from [GitHub Releases](https://github.com/koyasi777/mozkey/releases). Check each release's assets for the packages currently published.
+
+- **Windows x64:** Use the x64 MSI.
+- **Windows ARM64:** Use the ARM64 MSI with native ARM64 Mozkey and Zenz runtime components.
+- **macOS:** Use the Universal PKG for Apple Silicon and Intel Macs.
+- **Linux:** Fork-specific functionality is still being validated; no Linux installer is currently distributed.
+
+Zenz-enabled packages include a local inference runtime and GGUF model. Windows packages may include a locally generated `daily` dictionary. See [Third-party notices](THIRD_PARTY_NOTICES.md) for licensing and attribution.
+
+Windows packages are not Authenticode-signed, and macOS packages are not Developer ID-signed or notarized. Your operating system may show warnings or require additional confirmation; see [Apple's guidance](https://support.apple.com/ja-jp/102445) for macOS.
+
+macOS initial setup
+-------------------
+
+1. After installing the PKG, open **System Settings → Keyboard → Text Input → Edit**.
+2. If **Hiragana (Mozkey)** is not listed, click **+**, choose **Japanese**, and add the Mozkey Hiragana input source. The name may be localized.
+3. Select Mozkey's Hiragana input source in the menu-bar input menu.
+4. If it does not appear, log out of macOS and log back in, then check again.
+
+See [Apple's input-source settings guide](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) for details.
 
 Privacy / Network Access
 ------------------------
@@ -2042,123 +2023,15 @@ See:
 * [Koyasi Dictionary Data](src/data/dictionary_koyasi/README.md)
 * [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-### Building a Zenz-enabled Universal macOS PKG
+### Developer documentation
 
-The distributable macOS Zenz runtime is generated by the tracked
-`src/mac/installer/zenz_runtime/build_universal_runtime.zsh` builder and staged
-with `stage_runtime_assets.zsh` before building the Universal package.
-Both `llama-server` and `mozc_zenz_scorer` are same-path Universal executables
-containing `arm64` and `x86_64` slices.
+For source builds, Zenz runtime packaging, and installer validation, consult:
 
-```bash
-src/mac/installer/zenz_runtime/build_universal_runtime.zsh \
-  "$HOME/Downloads/mozkey-macos-zenz-runtime"
+- [Windows build instructions](docs/build_mozc_in_windows.md)
+- [macOS Universal Zenz runtime / PKG build guide](src/mac/installer/zenz_runtime/README.md)
+- [macOS installer regression test guide](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md)
+- [Linux build instructions](docs/build_mozc_for_linux.md)
 
-src/mac/installer/zenz_runtime/stage_runtime_assets.zsh \
-  "$HOME/Downloads/mozkey-macos-zenz-runtime"
+### Upstream and licensing
 
-cd src
-
-bazelisk build \
-  --config=oss_macos \
-  --config=release_build \
-  --macos_cpus=x86_64,arm64 \
-  --define=macos_zenz_runtime=1 \
-  //mac:package \
-  --verbose_failures
-```
-
-A generic package built without `--define=macos_zenz_runtime=1` should not be
-treated as a distributable Zenz-enabled macOS PKG.
-
-**Zenz bundling and installability are separate controls.** The command above generates a guarded package whose installation is intentionally blocked. Only when deliberately preparing an audited, installable package, add `--define=MOZKEY_INSTALLABLE=1` to that Bazel command together with `--config=oss_macos`. Inspect the packaged preinstall script and receipt version before installation. See the [macOS installer test guide](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md) for the safety contract and 27 regression cases.
-
-On a physical Mac, Mozkey 0.7.7 (internal installer version `100.7.7`) was reinstalled over a verified orphan receipt without `pkgutil --forget`. The input-source menu required logout/login before `Hiragana (Mozkey)` became available after GUI installation. The tested development PKGs were unsigned at the package level and not notarized; a public macOS installer is not yet provided in Releases.
-
-The formal architecture/runtime gate verifies the final `.pkg` on Apple
-Silicon, transfers that exact SHA-256-identical package artifact to a native
-Intel runner, and runs the same package-level verifier through a real
-`mozc_zenz_scorer -> llama-server -> model` request. See
-[`src/mac/installer/zenz_runtime/README.md`](src/mac/installer/zenz_runtime/README.md)
-for the exact source pin, BUILD-CONTRACT, staging, signing boundary, and
-verification contract.
-
-Note
-----
-
-This fork is primarily maintained for personal use.
-Upstream-oriented changes are organized in `pr/*` branches.
-
-以下は upstream の README です。
-
-[Mozc - a Japanese Input Method Editor designed for multi-platform](https://github.com/google/mozc)
-===================================
-
-Copyright 2010-2026 Google LLC
-
-Mozc is a Japanese Input Method Editor (IME) designed for multi-platform such as
-Android OS, Apple macOS, Chromium OS, GNU/Linux and Microsoft Windows.  This
-OpenSource project originates from
-[Google Japanese Input](http://www.google.com/intl/ja/ime/).
-
-Mozc is not an officially supported Google product.
-
-
-What's Mozc?
-------------
-For historical reasons, the project name *Mozc* has two different meanings:
-
-1. Internal code name of Google Japanese Input that is still commonly used
-   inside Google.
-2. Project name to release a subset of Google Japanese Input in the form of
-   source code under OSS license without any warranty nor user support.
-
-In this repository, *Mozc* means the second definition unless otherwise noted.
-
-Detailed differences between Google Japanese Input and Mozc are described in [About Branding](docs/about_branding.md).
-
-Build Instructions
-------------------
-
-* [How to build Mozc for Android](docs/build_mozc_for_android.md): for Android library (`libmozc.so`)
-* [How to build Mozc for Linux](docs/build_mozc_for_linux.md): for Linux desktop
-* [How to build Mozc for macOS](docs/build_mozc_in_osx.md): for macOS build
-* [How to build Mozc for Windows](docs/build_mozc_in_windows.md): for Windows
-
-Release Plan
-------------
-
-tl;dr. **There is no stable version.**
-
-As described in [About Branding](docs/about_branding.md) page, Google does
-not promise any official QA for OSS Mozc project.  Because of this,
-Mozc does not have a concept of *Stable Release*.  Instead we change version
-number every time when we introduce non-trivial change.  If you are
-interested in packaging Mozc source code, or developing your own products
-based on Mozc, feel free to pick up any version.  They should be equally
-stable (or equally unstable) in terms of no official QA process.
-
-[Release History](docs/release_history.md) page may have additional
-information and useful links about recent changes.
-
-License
--------
-
-All Mozc code written by Google is released under
-[The BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause).
-For third party code under [src/third_party](src/third_party) directory,
-see each sub directory to find the copyright notice.  Note also that
-outside [src/third_party](src/third_party) following directories contain
-third party code.
-
-### [src/data/dictionary_oss/](src/data/dictionary_oss)
-Mixed.
-See [src/data/dictionary_oss/README.txt](src/data/dictionary_oss/README.txt)
-
-### [src/data/test/dictionary/](src/data/test/dictionary)
-The same as [src/data/dictionary_oss/](src/data/dictionary_oss).
-See [src/data/dictionary_oss/README.txt](src/data/dictionary_oss/README.txt)
-
-### [src/data/test/stress_test/](src/data/test/stress_test)
-Public Domain.  See the comment in
-[src/data/test/stress_test/sentences.txt](src/data/test/stress_test/sentences.txt)
+Mozkey is based on [Mozc](https://github.com/google/mozc). For the original upstream README and upstream release policy, see [google/mozc](https://github.com/google/mozc). License and attribution information is preserved in [LICENSE](LICENSE), [AUTHORS](AUTHORS), [CONTRIBUTORS](CONTRIBUTORS), and [Third-party notices](THIRD_PARTY_NOTICES.md).
