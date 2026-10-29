@@ -12,6 +12,8 @@ EXPECTED_LLAMA_TAG="b10268"
 EXPECTED_LLAMA_COMMIT="6b5224cfccdb9caf4c0a0a87692fddad22c7e969"
 EXPECTED_PATCH_SHA256="6db5c11b2da8415d6b37200ec6aa4f3fdcdde8efb1e7a71375fe331a7b0e829a"
 EXPECTED_PATCHED_SOURCE_SHA256="36d8d6db0603a511ea4a490a8f0da28e2054327e3d4fe9b9e1481a2150eb1317"
+EXPECTED_DUAL_LIVENESS_PATCH_SHA256="3267e978f61456c32dfb83b15bf0f3a75393c5f98c946ee7a2846f7121b36dda"
+EXPECTED_PATCHED_LLAMA_MAIN_SHA256="2197ffc83775b865b97b35528a99f1daa692cf25eb4e952509e46e2cfebbf976"
 
 EXPECTED_MODEL_REPOSITORY="Miwa-Keita/zenz-v3.2-small-gguf"
 EXPECTED_MODEL_REVISION="c67e03e07d215c869f591b274c1631170d3e11fe"
@@ -98,6 +100,15 @@ check_tokenizer_marker() {
       >/dev/null
 }
 
+# mozc_zenz_guard always passes this switch, so a worker without it exits
+# immediately and the scorer can never become ready.
+check_dual_liveness_marker() {
+  /usr/bin/strings "$1" |
+    /usr/bin/grep -F -- \
+      '--mozkey-zenz-dual-liveness-v1' \
+      >/dev/null
+}
+
 script_path="${0:A}"
 script_dir="${script_path:h}"
 builder="$script_dir/build_universal_runtime.zsh"
@@ -143,6 +154,12 @@ patch_sha="$(contract_value "$source_contract" zenz_patch_sha256)"
 patched_source_sha="$(
   contract_value "$source_contract" patched_llama_vocab_sha256
 )"
+dual_liveness_patch_sha="$(
+  contract_value "$source_contract" mozkey_dual_liveness_patch_sha256
+)"
+patched_llama_main_sha="$(
+  contract_value "$source_contract" patched_llama_server_main_sha256
+)"
 model_repository="$(contract_value "$source_contract" model_repository)"
 model_revision="$(contract_value "$source_contract" model_revision)"
 model_remote_file="$(contract_value "$source_contract" model_remote_file)"
@@ -177,6 +194,12 @@ signing="$(contract_value "$source_contract" signing)"
 
 [[ "$patched_source_sha" == "$EXPECTED_PATCHED_SOURCE_SHA256" ]] ||
   die "Unexpected patched llama-vocab.cpp identity"
+
+[[ "$dual_liveness_patch_sha" == "$EXPECTED_DUAL_LIVENESS_PATCH_SHA256" ]] ||
+  die "Unexpected dual-liveness patch identity"
+
+[[ "$patched_llama_main_sha" == "$EXPECTED_PATCHED_LLAMA_MAIN_SHA256" ]] ||
+  die "Unexpected patched llama-server main.cpp identity"
 
 [[ "$model_repository" == "$EXPECTED_MODEL_REPOSITORY" ]] ||
   die "Unexpected model repository"
@@ -272,6 +295,9 @@ for thin in "$arm" "$x86"; do
 
   check_tokenizer_marker "$thin" ||
     die "Runtime slice tokenizer marker missing: $thin"
+
+  check_dual_liveness_marker "$thin" ||
+    die "Runtime slice dual-liveness marker missing: $thin"
 done
 
 echo "Source runtime identity = EXACT"
@@ -355,6 +381,7 @@ echo "Architectures          = arm64 + x86_64"
 echo "Minimum macOS          = $EXPECTED_MINIMUM_MACOS"
 echo "Dynamic libraries      = SYSTEM ONLY"
 echo "Tokenizer marker       = PRESENT BOTH SLICES"
+echo "Dual-liveness marker   = PRESENT BOTH SLICES"
 echo "BUILD-CONTRACT staged  = YES"
 echo
 echo "Formal macOS Zenz Universal runtime assets staged successfully."

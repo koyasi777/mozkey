@@ -12,10 +12,17 @@ config_setting(
     },
 )
 
+exports_files(
+    ["llama-server"],
+    visibility = ["//mac/installer/zenz_runtime/checked:__pkg__"],
+)
+
 filegroup(
     name = "llama_server",
     srcs = select({
-        ":macos_with_runtime": ["llama-server"],
+        ":macos_with_runtime": [
+            "//mac/installer/zenz_runtime/checked:llama_server_checked",
+        ],
         "//conditions:default": [],
     }),
     target_compatible_with = [

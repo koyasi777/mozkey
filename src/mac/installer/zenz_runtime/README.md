@@ -214,6 +214,7 @@ arm64 + x86_64 architecture presence
 macOS 12.0 deployment target on both slices
 system-only dynamic-library dependencies
 Zenz tokenizer compatibility marker on both slices
+dual-liveness patch identity and worker marker on both slices
 Git-ignore state of llama-server, model, and BUILD-CONTRACT.txt
 ```
 

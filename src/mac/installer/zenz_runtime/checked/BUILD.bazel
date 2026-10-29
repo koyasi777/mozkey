@@ -1,0 +1,23 @@
+package(default_visibility = ["//visibility:private"])
+
+# mozc_zenz_guard always launches the worker with the dual-liveness switch, so
+# a llama-server staged before that patch exits immediately and the scorer can
+# never start. Fail the package build instead of shipping such a stale runtime.
+#
+# This lives in its own package so that the output keeps the bundle-relative
+# path "llama-server", which is where mozc_zenz_scorer looks for the worker.
+genrule(
+    name = "llama_server_checked",
+    srcs = ["//mac/installer/zenz_runtime:llama-server"],
+    outs = ["llama-server"],
+    cmd = " ".join([
+        "if ! /usr/bin/grep -a -q -F -- '--mozkey-zenz-dual-liveness-v1' $<;",
+        "then echo 'ERROR: staged llama-server lacks the dual-liveness patch;'",
+        "'rebuild it with build_universal_runtime.zsh and re-stage it' >&2;",
+        "exit 1; fi;",
+        "/bin/cp $< $@ && /bin/chmod 0755 $@",
+    ]),
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+    visibility = ["//mac/installer/zenz_runtime:__pkg__"],
+)
