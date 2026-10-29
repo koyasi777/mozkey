@@ -146,6 +146,7 @@ macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://su
 - Zenz が必要とする preceding / following の長さを Server から Client へ通知し、Windows TSF / macOS IMK では要求された方向・長さだけ surrounding text を追加取得。右文脈は有効時に設定可能で、取得長の既定は 6 文字
 - Zenz の前方・後方文脈を用途に応じて独立して選択し、Unicode-aware な文字種判定と privacy filtering を共通処理として適用
 - Windows 版では、Zenz 補正を `mozc_server` から named pipe 経由で `mozc_zenz_scorer.exe` に依頼し、`llama-server.exe` の localhost endpoint でローカル推論
+- Windows の Zenz named pipe では、同名パイプの先取りとリモート接続を拒否し、クライアントが接続先 scorer のセッション・ユーザー SID・実行イメージパスを入力送信前に照合。検証できない接続先にはプロンプトを送信しない
 - Zenz 補正開始までの遅延時間を設定画面から変更可能。新規・未設定時のデフォルトは 700 ms（保存済みの設定値は維持）
 - Zenz 補正開始の最小文字数を設定画面から変更可能
 - 「Zenz 補正結果が返るまで通常のライブ変換結果を表示しない」opt-in 設定を追加。待機中は直前まで安定して表示されていた Zenz 補正部分を可能な範囲で維持し、未解決のローマ字 suffix はその表示へ追従。Zenz が採用されない場合は現在の Mozc ライブ変換結果へフォールバック
@@ -324,6 +325,10 @@ Windows 版では、追加のオフライン防御層として、インストー
 Windows 版では、Zenz request は `mozc_server` から Windows named pipe 経由で `mozc_zenz_scorer.exe` に送られます。scorer は同梱された `llama-server.exe` の localhost endpoint を呼び出し、ローカル推論を行います。この localhost 通信は固定 endpoint に依存しないようにし、内部 request も誤接続を避けるための保護を加えています。
 
 Windows の Zenz named-pipe 通信は、接続・request/response I/O を有限の deadline で扱い、停止時には待機中の I/O を明示的に解除します。scorer または peer が応答しない場合でも Zenz worker / scorer が無期限に待機せず、stall から復帰した後は次の request を処理できるようにしています。macOS の Unix-domain socket 経路でも、停止時に待機中の poll を明示的に解除します。
+
+Windows の scorer は `FILE_FLAG_FIRST_PIPE_INSTANCE` で同名のパイプが先に作成されていた場合の起動を拒否し、`PIPE_REJECT_REMOTE_CLIENTS` でリモート接続を拒否します。パイプのアクセス制御は SYSTEM と現在のユーザーに限定します。クライアント側では、接続したパイプハンドルから Windows が返すサーバープロセス ID を取得し、同じ Windows セッション・ユーザー SID と、Mozkey の実行ディレクトリにある `mozc_zenz_scorer.exe` の実行イメージパスを照合してから要求ヘッダーと入力プロンプトを送信します。照合に失敗した場合は送信を中止し、Zenz 補正を採用しません。scorer が停止している場合は、後続の補正要求で再起動を試みます。
+
+この保護は OS が報告するプロセス情報と、一般ユーザーが実行ファイルを置き換えられないインストール先を前提とします。同一ユーザー権限での任意コード実行や管理者権限の侵害に対する完全な認証ではありません。Windows x64 では通常変換・scorer 自動復旧・別プロセスによる偽サーバー拒否を検証していますが、この変更の Windows ARM64 実機検証は未実施です。
 
 Zenz に渡す surrounding context は、通常 Mozc の generic context とは分離した専用 field を使用します。Server は Zenz 補正に必要な preceding / following length を Client へ通知し、Windows TSF と macOS IMK は要求された方向・長さだけを追加取得して、`zenz_preceding_text` / `zenz_following_text` として渡します。通常 Mozc の surrounding text semantics は変更しません。
 
@@ -1091,6 +1096,7 @@ Main features added in this fork
 - Lets the Server request the required preceding / following lengths and lets Windows TSF / macOS IMK acquire only the requested directions and lengths; right-context acquisition is configurable and defaults to 6 characters when enabled
 - Selects preceding and following Zenz context independently and applies shared Unicode-aware script analysis and privacy filtering
 - On Windows, sends Zenz correction requests from `mozc_server` to `mozc_zenz_scorer.exe` through a named pipe and performs local inference through the localhost endpoint of `llama-server.exe`
+- Hardens the Windows Zenz named pipe against pre-existing same-name pipe instances and remote clients; before sending input, the client verifies the scorer process session, user SID, and executable image path, and sends no prompt to an untrusted peer
 - Allows configuring the Zenz correction debounce delay from the config dialog. The default is 700 ms for new or otherwise unset profiles; explicitly saved delay values are preserved
 - Allows configuring the minimum number of characters to start Zenz correction
 - Adds an opt-in `Do not show the normal live-conversion result until Zenz correction returns` mode. While waiting, Mozkey preserves the previously stable Zenz-corrected presentation when possible and appends unresolved raw-romaji suffixes to that visible presentation; if Zenz is not adopted, it falls back to the current Mozc live-conversion result
@@ -1241,6 +1247,23 @@ A stalled scorer or peer therefore cannot leave the Zenz worker or scorer
 waiting indefinitely, and the scorer can recover to serve subsequent requests.
 The macOS Unix-domain socket path likewise wakes pending poll operations during
 shutdown.
+
+On Windows, the scorer uses `FILE_FLAG_FIRST_PIPE_INSTANCE` to refuse pipe
+creation if an instance already exists under the same name, and
+`PIPE_REJECT_REMOTE_CLIENTS` to reject remote clients. Its pipe ACL is limited
+to SYSTEM and the current user. Before sending the request header or input
+prompt, the client obtains the server PID from the connected pipe handle and
+checks the Windows session, user SID, and executable image path against the
+expected `mozc_zenz_scorer.exe` beside the Mozkey executable. If these checks
+fail, it sends no prompt and does not adopt a Zenz correction. A stopped scorer
+can be relaunched on a subsequent correction request.
+
+This defense relies on OS-reported process identity and a protected install
+directory where ordinary users cannot replace the executable. It is not
+complete authentication against arbitrary code execution as the same user or
+an administrator compromise. Normal conversion, scorer restart, and rejection
+of a separate-process fake server have been tested on Windows x64; this change
+has not yet been validated on Windows ARM64 hardware.
 
 Surrounding context for Zenz uses dedicated fields separate from the normal Mozc
 generic context. The Server reports the required preceding / following lengths

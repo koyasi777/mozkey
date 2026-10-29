@@ -16,6 +16,7 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#pragma comment(lib, "Advapi32.lib")
 #endif  // _WIN32
 
 namespace mozc {
@@ -300,6 +301,84 @@ std::wstring JoinPath(const std::wstring& dir, const std::wstring& file) {
   return dir + L"\\" + file;
 }
 
+// The pipe name is predictable, so bind the connected handle to the server's
+// kernel-reported process image, session, and user SID before sending input.
+// Do not canonicalize a path from an untrusted process by reopening it: a
+// same-user attacker could swap the path/symlink between launch and checking.
+bool ReadTokenUser(HANDLE process, std::vector<BYTE>* data) {
+  HANDLE raw_token = nullptr;
+  if (!::OpenProcessToken(process, TOKEN_QUERY, &raw_token)) {
+    return false;
+  }
+  ScopedWinHandle token(raw_token);
+  DWORD bytes = 0;
+  if (::GetTokenInformation(token.get(), TokenUser, nullptr, 0, &bytes) ||
+      ::GetLastError() != ERROR_INSUFFICIENT_BUFFER ||
+      bytes < sizeof(TOKEN_USER) || bytes > 65536) {
+    return false;
+  }
+  data->resize(bytes);
+  return ::GetTokenInformation(token.get(), TokenUser, data->data(), bytes,
+                               &bytes) != FALSE;
+}
+
+bool IsTrustedScorerPipeServer(HANDLE pipe) {
+  ULONG server_pid = 0;
+  if (!::GetNamedPipeServerProcessId(pipe, &server_pid) || server_pid == 0 ||
+      server_pid == ::GetCurrentProcessId()) {
+    return false;
+  }
+
+  ScopedWinHandle server_process(
+      ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, server_pid));
+  if (server_process.get() == nullptr) {
+    return false;
+  }
+
+  DWORD client_session = 0;
+  DWORD server_session = 0;
+  if (!::ProcessIdToSessionId(::GetCurrentProcessId(), &client_session) ||
+      !::ProcessIdToSessionId(server_pid, &server_session) ||
+      client_session != server_session) {
+    return false;
+  }
+
+  std::vector<BYTE> client_token_user;
+  std::vector<BYTE> server_token_user;
+  if (!ReadTokenUser(::GetCurrentProcess(), &client_token_user) ||
+      !ReadTokenUser(server_process.get(), &server_token_user)) {
+    return false;
+  }
+  const auto* client_user =
+      reinterpret_cast<const TOKEN_USER*>(client_token_user.data());
+  const auto* server_user =
+      reinterpret_cast<const TOKEN_USER*>(server_token_user.data());
+  if (!::EqualSid(client_user->User.Sid, server_user->User.Sid)) {
+    return false;
+  }
+
+  std::wstring image_path(32768, L'\0');
+  DWORD image_chars = static_cast<DWORD>(image_path.size());
+  if (!::QueryFullProcessImageNameW(server_process.get(), 0,
+                                   image_path.data(), &image_chars) ||
+      image_chars == 0) {
+    return false;
+  }
+  image_path.resize(image_chars);
+
+  const std::wstring module_dir = GetCurrentModuleDirectory();
+  if (module_dir.empty() || module_dir == L".") {
+    return false;
+  }
+  const std::wstring expected_path =
+      JoinPath(module_dir, L"mozc_zenz_scorer.exe");
+  // Compare the process's image name captured by Windows, not the contents of
+  // a path that can be redirected after the process started. A protected
+  // installation directory is a necessary part of this security boundary.
+  return ::CompareStringOrdinal(expected_path.c_str(), -1,
+                                image_path.c_str(), -1, TRUE) == CSTR_EQUAL;
+}
+
 bool LaunchZenzScorerIfNeeded() {
   // Do not make scorer launch a one-shot decision.  The scorer process may be
   // killed independently from mozc_server.exe during development, upgrade, or
@@ -502,6 +581,15 @@ ZenzNamedPipeClient::ZenzNamedPipeClient(
     : transport_safety_timeout_msec_(
           std::max<uint32_t>(1, transport_safety_timeout_msec)) {}
 
+#if defined(_WIN32)
+ZenzNamedPipeClient::ZenzNamedPipeClient(
+    uint32_t transport_safety_timeout_msec,
+    PeerVerifierForTesting verifier_for_testing)
+    : ZenzNamedPipeClient(transport_safety_timeout_msec) {
+  verifier_for_testing_ = verifier_for_testing;
+}
+#endif
+
 bool ZenzNamedPipeClient::IsAvailable() const {
 #if defined(_WIN32)
   return true;
@@ -569,6 +657,17 @@ ZenzLiveResponse ZenzNamedPipeClient::Convert(
     response.timeout = RemainingMsec(transport_deadline) == 0;
     response.debug =
         response.timeout ? "pipe_open_timeout" : "pipe_open_failed";
+    return response;
+  }
+
+  // Authenticate the bound server endpoint before sending a header or a
+  // single byte of the user's input. Never retry against an untrusted pipe.
+  const bool trusted = verifier_for_testing_ != nullptr
+                           ? verifier_for_testing_(pipe.get())
+                           : IsTrustedScorerPipeServer(pipe.get());
+  if (!trusted) {
+    ZenzPipeDebugOutput(L"pipe server identity verification failed");
+    response.debug = "pipe_peer_untrusted";
     return response;
   }
 
