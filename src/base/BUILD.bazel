@@ -540,6 +540,7 @@ mozc_cc_library(
         apple = ["//base/mac:mac_util"],
         windows = [
             ":vlog",
+            "//base/win32:ntdll_dll",
             "//base/win32:wide_char",
             "@com_microsoft_wil//:wil",
         ],

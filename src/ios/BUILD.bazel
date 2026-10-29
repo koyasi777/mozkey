@@ -31,6 +31,7 @@ load(
     "//:build_defs.bzl",
     "mozc_cc_binary",
     "mozc_cc_library",
+    "mozc_cc_test",
     "mozc_select",
 )
 
@@ -42,6 +43,7 @@ mozc_cc_library(
     ],
     deps = [
         "//base:util",
+        "//client:character_renderability",
         "//config:config_handler",
         "//data_manager",
         "//engine",
@@ -53,6 +55,20 @@ mozc_cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/synchronization",
+    ],
+)
+
+mozc_cc_test(
+    name = "ios_engine_test",
+    size = "small",
+    srcs = ["ios_engine_test.cc"],
+    data = ["//data_manager/oss:mozc.data"],
+    deps = [
+        ":ios_engine",
+        "//client:character_renderability",
+        "//protocol:commands_cc_proto",
+        "//testing:gunit_main",
+        "//testing:mozctest",
     ],
 )
 

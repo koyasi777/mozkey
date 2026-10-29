@@ -36,6 +36,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
@@ -45,6 +46,9 @@ class WinUtil {
  public:
   WinUtil() = delete;
   ~WinUtil() = delete;
+
+  // OS major version and build number via RtlGetVersion.
+  static std::pair<int, int> GetOSVersion();
 
   // Retrieve whether the calling thread hold loader lock or not.
   // Return true if the state is retrieved successfully.
