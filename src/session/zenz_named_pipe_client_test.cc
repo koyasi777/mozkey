@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "testing/gunit.h"
 #include "zenz/zenz_wire_protocol.h"
@@ -18,6 +19,10 @@ namespace session {
 namespace {
 
 #if defined(_WIN32)
+
+bool AllowSyntheticPipePeer(void* handle) {
+  return handle != nullptr && handle != INVALID_HANDLE_VALUE;
+}
 
 using ::mozc::zenz::kZenzWireKindRequest;
 using ::mozc::zenz::kZenzWireKindResponse;
@@ -126,7 +131,9 @@ TEST(ZenzNamedPipeClientTest, StopInterruptsMissingResponseAndJoinsWorker) {
     }
     ::CloseHandle(server);
   });
-  auto client = std::make_unique<ZenzNamedPipeClient>();
+  auto client = std::make_unique<ZenzNamedPipeClient>(
+      ZenzNamedPipeClient::kDefaultTransportSafetyTimeoutMsec,
+      &AllowSyntheticPipePeer);
   auto* client_ptr = client.get();
   ZenzLiveCorrector corrector(std::move(client));
   corrector.Submit(MakeRequest(name, 101));
@@ -199,7 +206,7 @@ TEST(ZenzNamedPipeClientTest, ImmediateFullResponseSucceeds) {
     ::CloseHandle(server);
   });
 
-  ZenzNamedPipeClient client(1000);
+  ZenzNamedPipeClient client(1000, &AllowSyntheticPipePeer);
   const ZenzLiveResponse response = client.Convert(MakeRequest(name, 73));
   client_done = true;
   server_thread.join();
@@ -228,7 +235,7 @@ TEST(ZenzNamedPipeClientTest, MissingResponseHeaderTimesOut) {
     ::CloseHandle(server);
   });
 
-  ZenzNamedPipeClient client(200);
+  ZenzNamedPipeClient client(200, &AllowSyntheticPipePeer);
   const auto started = std::chrono::steady_clock::now();
   const ZenzLiveResponse response = client.Convert(MakeRequest(name, 74));
   const auto elapsed = std::chrono::steady_clock::now() - started;
@@ -268,7 +275,7 @@ TEST(ZenzNamedPipeClientTest, PartialResponsePayloadTimesOut) {
     ::CloseHandle(server);
   });
 
-  ZenzNamedPipeClient client(200);
+  ZenzNamedPipeClient client(200, &AllowSyntheticPipePeer);
   const ZenzLiveResponse response = client.Convert(MakeRequest(name, 75));
   server_thread.join();
 
@@ -304,7 +311,7 @@ TEST(ZenzNamedPipeClientTest, OversizedResponsePayloadIsRejected) {
     ::CloseHandle(server);
   });
 
-  ZenzNamedPipeClient client(500);
+  ZenzNamedPipeClient client(500, &AllowSyntheticPipePeer);
   const ZenzLiveResponse response = client.Convert(MakeRequest(name, 76));
   server_thread.join();
 
@@ -312,6 +319,150 @@ TEST(ZenzNamedPipeClientTest, OversizedResponsePayloadIsRejected) {
   EXPECT_FALSE(response.ok);
   EXPECT_FALSE(response.timeout);
   EXPECT_EQ(response.debug, "pipe_response_payload_too_large");
+}
+
+TEST(ZenzNamedPipeClientTest, SpoofedPipeIsRejectedBeforeAnyPromptBytes) {
+  const TestPipeName name = MakeTestPipeName();
+  HANDLE server = CreateServerPipe(name.wide);
+  ASSERT_NE(server, INVALID_HANDLE_VALUE);
+
+  std::atomic<bool> received_prompt{false};
+  std::thread server_thread([&] {
+    if (ConnectServer(server)) {
+      char byte = 0;
+      DWORD bytes_read = 0;
+      if (::ReadFile(server, &byte, 1, &bytes_read, nullptr) &&
+          bytes_read > 0) {
+        received_prompt = true;
+      }
+    }
+    ::CloseHandle(server);
+  });
+
+  // This fake server runs in the test process, not mozc_zenz_scorer.exe.
+  // The real verifier must reject it before WriteFile is called.
+  ZenzNamedPipeClient client(500);
+  const ZenzLiveResponse response = client.Convert(MakeRequest(name, 78));
+  server_thread.join();
+
+  // The client may close immediately after rejecting the peer. In that
+  // case ConnectNamedPipe can return ERROR_NO_DATA even though CreateFileW
+  // successfully connected; the peer rejection result is the invariant.
+  EXPECT_FALSE(received_prompt.load());
+  EXPECT_FALSE(response.ok);
+  EXPECT_EQ(response.debug, "pipe_peer_untrusted");
+}
+
+TEST(ZenzNamedPipeClientTest, FirstPipeInstanceRejectsExistingPipeName) {
+  const TestPipeName name = MakeTestPipeName();
+  HANDLE first = CreateServerPipe(name.wide);
+  ASSERT_NE(first, INVALID_HANDLE_VALUE);
+
+  HANDLE second = ::CreateNamedPipeW(
+      name.wide.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+          PIPE_REJECT_REMOTE_CLIENTS,
+      1, 4096, 4096, 0, nullptr);
+  EXPECT_EQ(second, INVALID_HANDLE_VALUE);
+  if (second != INVALID_HANDLE_VALUE) {
+    ::CloseHandle(second);
+  }
+  ::CloseHandle(first);
+}
+
+// Resolve a separately built test helper, not a server running in this test
+// process. Bazel may place data dependencies in runfiles instead of the binary
+// output directory, so check both locations.
+std::wstring ExternalFakeServerHelperPath() {
+  const wchar_t helper_name[] =
+      L"zenz_named_pipe_fake_server_test_helper.exe";
+  wchar_t module_path[32768] = {};
+  const DWORD len = ::GetModuleFileNameW(nullptr, module_path, 32768);
+  if (len > 0 && len < 32768) {
+    const std::wstring current(module_path, len);
+    const size_t separator = current.find_last_of(L"\\/");
+    if (separator != std::wstring::npos) {
+      const std::wstring sibling =
+          current.substr(0, separator + 1) + helper_name;
+      if (::GetFileAttributesW(sibling.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return sibling;
+      }
+    }
+  }
+
+  wchar_t runfiles[32768] = {};
+  wchar_t workspace[1024] = {};
+  const DWORD runfiles_len =
+      ::GetEnvironmentVariableW(L"TEST_SRCDIR", runfiles, 32768);
+  const DWORD workspace_len =
+      ::GetEnvironmentVariableW(L"TEST_WORKSPACE", workspace, 1024);
+  if (runfiles_len == 0 || runfiles_len >= 32768 ||
+      workspace_len == 0 || workspace_len >= 1024) {
+    return L"";
+  }
+  const std::wstring path = std::wstring(runfiles, runfiles_len) + L"\\" +
+                            std::wstring(workspace, workspace_len) +
+                            L"\\session\\" + helper_name;
+  return ::GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES
+             ? path
+             : L"";
+}
+
+TEST(ZenzNamedPipeClientTest, ExternalProcessSpoofRejectedBeforeAnyBytes) {
+  const TestPipeName name = MakeTestPipeName();
+  const std::wstring helper_path = ExternalFakeServerHelperPath();
+  ASSERT_FALSE(helper_path.empty()) << "Separate fake pipe helper not found";
+
+  std::wstring command_line =
+      L"\"" + helper_path + L"\" \"" + name.wide + L"\"";
+  std::vector<wchar_t> command_chars(command_line.begin(),
+                                    command_line.end());
+  command_chars.push_back(L'\0');
+  STARTUPINFOW startup = {};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION process = {};
+  ASSERT_NE(::CreateProcessW(helper_path.c_str(), command_chars.data(),
+                             nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                             nullptr, nullptr, &startup, &process), FALSE)
+      << "Cannot start external fake server: " << ::GetLastError();
+  ::CloseHandle(process.hThread);
+
+  // No launch of the real scorer is needed: a random, test-specific pipe name
+  // is provided explicitly. Wait for the fake process to claim the name.
+  bool ready = false;
+  for (int i = 0; i < 500; ++i) {
+    if (::WaitNamedPipeW(name.wide.c_str(), 0)) {
+      ready = true;
+      break;
+    }
+    if (::WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0) {
+      break;
+    }
+    ::Sleep(10);
+  }
+
+  ZenzLiveResponse response;
+  if (ready) {
+    ZenzNamedPipeClient client(1000);  // Genuine production verifier.
+    response = client.Convert(MakeRequest(name, 79));
+  }
+
+  const DWORD wait = ::WaitForSingleObject(process.hProcess, 5000);
+  if (wait != WAIT_OBJECT_0) {
+    ::TerminateProcess(process.hProcess, 99);
+    ::WaitForSingleObject(process.hProcess, 5000);
+  }
+  DWORD exit_code = 0;
+  const bool exit_code_ok =
+      ::GetExitCodeProcess(process.hProcess, &exit_code) != FALSE;
+  ::CloseHandle(process.hProcess);
+
+  ASSERT_TRUE(ready) << "External helper did not claim the test pipe";
+  EXPECT_EQ(wait, WAIT_OBJECT_0) << "External helper did not finish";
+  ASSERT_TRUE(exit_code_ok);
+  EXPECT_EQ(exit_code, 0u) << "Fake server observed bytes or failed";
+  EXPECT_FALSE(response.ok);
+  EXPECT_EQ(response.debug, "pipe_peer_untrusted");
 }
 
 TEST(ZenzNamedPipeClientTest, OversizedPromptIsRejectedBeforePipeOpen) {

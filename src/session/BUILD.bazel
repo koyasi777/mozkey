@@ -279,10 +279,20 @@ mozc_cc_test(
     ],
 )
 
+mozc_cc_binary(
+    name = "zenz_named_pipe_fake_server_test_helper",
+    srcs = ["zenz_named_pipe_fake_server_test_helper.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
 mozc_cc_test(
     name = "zenz_named_pipe_client_test",
     size = "small",
     srcs = ["zenz_named_pipe_client_test.cc"],
+    data = select({
+        "@platforms//os:windows": [":zenz_named_pipe_fake_server_test_helper"],
+        "//conditions:default": [],
+    }),
     deps = [
         ":session",
         "//testing:gunit_main",
