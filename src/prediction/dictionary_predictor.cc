@@ -196,10 +196,7 @@ void DictionaryPredictor::RewriteResultsForPrediction(
   }
 
   MaybeFixRealtimeTopCost(request, results);
-
-  if (!is_mixed_conversion) {
-    RemoveMissSpelledCandidates(request, results);
-  }
+  RemoveMissSpelledCandidates(request, results);
 }
 
 std::vector<Result>
@@ -601,16 +598,18 @@ void DictionaryPredictor::SetPredictionCostForMixedConversion(
 // static
 void DictionaryPredictor::RemoveMissSpelledCandidates(
     const ConversionRequest& request, absl::Span<Result> results) {
-  const size_t request_key_len = Util::CharsLen(request.key());
-
   if (results.size() <= 1) {
     return;
   }
 
+  const bool is_mixed_conversion = IsMixedConversionEnabled(request);
+  const size_t request_key_len = Util::CharsLen(request.key());
+
   int spelling_correction_size = 5;
   for (size_t i = 0; i < results.size(); ++i) {
-    const Result& result = results[i];
-    if (!(result.attributes & Attribute::SPELLING_CORRECTION)) {
+    Result& result = results[i];
+    if (result.removed ||
+        !(result.attributes & Attribute::SPELLING_CORRECTION)) {
       continue;
     }
 
@@ -626,7 +625,8 @@ void DictionaryPredictor::RemoveMissSpelledCandidates(
         continue;
       }
       const Result& target_result = results[j];
-      if (target_result.attributes & Attribute::SPELLING_CORRECTION) {
+      if (target_result.removed ||
+          (target_result.attributes & Attribute::SPELLING_CORRECTION)) {
         continue;
       }
       if (target_result.key == result.key) {
@@ -639,24 +639,30 @@ void DictionaryPredictor::RemoveMissSpelledCandidates(
 
     // delete same_key_index and same_value_index
     if (!same_key_index.empty() && !same_value_index.empty()) {
-      results[i].removed = true;
-      MOZC_WORD_LOG(results[i], "Removed. same_(key|value)_index.");
-      for (const size_t k : same_key_index) {
-        results[k].removed = true;
-        MOZC_WORD_LOG(results[k], "Removed. same_(key|value)_index.");
+      result.removed = true;
+      MOZC_WORD_LOG(result, "Removed. same_(key|value)_index.");
+      // Keep literal same-key candidates (e.g., "ビックバン") on mobile.
+      if (!is_mixed_conversion) {
+        for (const size_t k : same_key_index) {
+          results[k].removed = true;
+          MOZC_WORD_LOG(results[k], "Removed. same_(key|value)_index.");
+        }
       }
     } else if (same_key_index.empty() && !same_value_index.empty()) {
-      results[i].removed = true;
-      MOZC_WORD_LOG(results[i], "Removed. same_value_index.");
+      result.removed = true;
+      MOZC_WORD_LOG(result, "Removed. same_value_index.");
     } else if (!same_key_index.empty() && same_value_index.empty()) {
-      for (const size_t k : same_key_index) {
-        results[k].removed = true;
-        MOZC_WORD_LOG(results[k], "Removed. same_key_index.");
+      // Keep literal same-key candidates (e.g., "ビックバン") on mobile.
+      if (!is_mixed_conversion) {
+        for (const size_t k : same_key_index) {
+          results[k].removed = true;
+          MOZC_WORD_LOG(results[k], "Removed. same_key_index.");
+        }
       }
       if (request_key_len <=
           filter::GetMissSpelledPosition(result.key, result.value)) {
-        results[i].removed = true;
-        MOZC_WORD_LOG(results[i], "Removed. Invalid MissSpelledPosition.");
+        result.removed = true;
+        MOZC_WORD_LOG(result, "Removed. Invalid MissSpelledPosition.");
       }
     }
   }

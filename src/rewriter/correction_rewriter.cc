@@ -138,12 +138,16 @@ void CorrectionRewriter::SetCandidate(
   candidate->attributes |= Attribute::SPELLING_CORRECTION;
 
   // Assigns display_value when the client supports it.
+  // Try Katakana diff first so Katakana entries in reading_correction.tsv
+  // (e.g., "サイゼリヤ") also get diff-highlighted ("サイゼリ*ヤ*").
   if (capability == commands::Request::PLAIN_TEXT) {
-    std::optional<std::string> display_value;
-    if (!item.correction.empty()) {
+    std::optional<std::string> display_value =
+        GetDisplayValueForKatakana(*candidate);
+    if (!display_value.has_value() && !item.correction.empty()) {
       display_value = GetDisplayValueForReadingCorrection(item);
-    } else {
-      display_value = GetDisplayValueForKatakana(*candidate);
+      if (display_value.has_value()) {
+        absl::StrAppend(&*display_value, candidate->functional_value());
+      }
     }
 
     if (display_value.has_value()) {
@@ -220,26 +224,26 @@ bool CorrectionRewriter::Rewrite(const ConversionRequest& request,
       // In this case, update the candidate description.
       const converter::Candidate& candidate = segment.candidate(j);
 
+      if (LookupCorrection(candidate.content_key, candidate.content_value,
+                           &results)) {
+        CHECK_GT(results.size(), 0);
+        // results.size() should be 1, but we don't check it here.
+        Candidate* mutable_candidate = segment.mutable_candidate(j);
+        DCHECK(mutable_candidate);
+        SetCandidate(results[0], capability, mutable_candidate);
+        modified = true;
+        continue;
+      }
+
       // Handles the spelling correction defined in the system dictionary.
       // mostly they are Katakana to Katakana correction.
       if (candidate.attributes & Attribute::SPELLING_CORRECTION) {
         // Sets empty correction item.
         SetCandidate(ReadingCorrectionItem{"", "", ""}, capability,
                      segment.mutable_candidate(j));
+        modified = true;
         continue;
       }
-
-      if (!LookupCorrection(candidate.content_key, candidate.content_value,
-                            &results)) {
-        continue;
-      }
-
-      CHECK_GT(results.size(), 0);
-      // results.size() should be 1, but we don't check it here.
-      Candidate* mutable_candidate = segment.mutable_candidate(j);
-      DCHECK(mutable_candidate);
-      SetCandidate(results[0], capability, mutable_candidate);
-      modified = true;
     }
 
     // Add correction candidates that have the same key as the top candidate.
@@ -254,17 +258,49 @@ bool CorrectionRewriter::Rewrite(const ConversionRequest& request,
     // the system dictionary.
     const size_t kInsertPosition =
         std::min<size_t>(3, segment.candidates_size());
-    const Candidate& top_candidate = segment.candidate(0);
+    const Candidate top_candidate = segment.candidate(0);
     if (!LookupCorrection(top_candidate.content_key, "", &results)) {
       continue;
     }
-    for (const ReadingCorrectionItem result : results) {
+    // Entries in reading_correction.tsv are added to the system dictionary with
+    // a high cost penalty (+2302), so they may be ranked low or cut off from
+    // `segment`. Ensure each correction for `top_candidate.content_key` is
+    // placed within `kInsertPosition` without duplicating an existing
+    // candidate:
+    // - If a SPELLING_CORRECTION candidate with the same value already exists
+    //   at a lower rank, promote it to `kInsertPosition`.
+    // - If a non-SPELLING_CORRECTION candidate with the same value already
+    //   exists (e.g., from typing correction), keep it as-is without
+    //   duplicating or adding SPELLING_CORRECTION annotations.
+    // - If no candidate with the same value exists in `segment`, insert a new
+    //   SPELLING_CORRECTION candidate at `kInsertPosition`.
+    for (const ReadingCorrectionItem& result : results) {
+      const std::string value =
+          absl::StrCat(result.value, top_candidate.functional_value());
+      int existing_index = -1;
+      for (size_t j = 0; j < segment.candidates_size(); ++j) {
+        if (segment.candidate(j).value == value) {
+          existing_index = j;
+          break;
+        }
+      }
+      if (existing_index >= 0) {
+        if ((segment.candidate(existing_index).attributes &
+             Attribute::SPELLING_CORRECTION) &&
+            existing_index > kInsertPosition) {
+          segment.move_candidate(existing_index, kInsertPosition);
+          modified = true;
+        }
+        continue;
+      }
+
       auto new_candidate = std::make_unique<Candidate>(top_candidate);
       DCHECK(new_candidate);
       new_candidate->key =
           absl::StrCat(result.error, top_candidate.functional_key());
-      new_candidate->value =
-          absl::StrCat(result.value, top_candidate.functional_value());
+      new_candidate->value = value;
+      new_candidate->content_key = result.error;
+      new_candidate->content_value = result.value;
       new_candidate->inner_segment_boundary.clear();
       SetCandidate(result, capability, new_candidate.get());
 

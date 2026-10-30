@@ -111,10 +111,9 @@ class CorrectionRewriterTest : public ::testing::Test {
 };
 
 TEST_F(CorrectionRewriterTest, RewriteTest) {
-  std::unique_ptr<engine::Modules> modules =
-      engine::ModulesPresetBuilder()
-          .Build(std::make_unique<testing::MockDataManager>())
-          .value();
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<engine::Modules> modules,
+                       engine::ModulesPresetBuilder().Build(
+                           std::make_unique<testing::MockDataManager>()));
 
   std::unique_ptr<CorrectionRewriter> rewriter =
       CreateRewriter(*modules, {"TSUKIGIME"}, {"gekkyoku"}, {"tsukigime"});
@@ -162,6 +161,100 @@ TEST_F(CorrectionRewriterTest, RewriteTest) {
             converter::Attribute::SPELLING_CORRECTION);
   EXPECT_EQ(segments.conversion_segment(0).candidate(2).description,
             "<もしかして>");
+  // "TSUKIGIMEwo" already exists at index 0, so no duplicate is inserted.
+  EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 3);
+}
+
+TEST_F(CorrectionRewriterTest, InsertOrPromoteCorrectionCandidateTest) {
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<engine::Modules> modules,
+                       engine::ModulesPresetBuilder().Build(
+                           std::make_unique<testing::MockDataManager>()));
+
+  std::unique_ptr<CorrectionRewriter> rewriter =
+      CreateRewriter(*modules, {"サイゼリヤ"}, {"さいぜりあ"}, {"さいぜりや"});
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_spelling_correction(true);
+  commands::Request request;
+  request.set_display_value_capability(commands::Request::PLAIN_TEXT);
+
+  {
+    // Corrected candidate is not in the segment: insert at kInsertPosition.
+    Segments segments;
+    Segment* segment = AddSegment("さいぜりあ", &segments);
+    AddCandidate("さいぜりあ", "サイゼリア", "さいぜりあ", "サイゼリア",
+                 segment);
+    EXPECT_TRUE(rewriter->Rewrite(ConvReq(config, request), &segments));
+    ASSERT_EQ(segments.conversion_segment(0).candidates_size(), 2);
+    EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "サイゼリア");
+    EXPECT_EQ(segments.conversion_segment(0).candidate(1).value, "サイゼリヤ");
+    EXPECT_EQ(segments.conversion_segment(0).candidate(1).content_key,
+              "さいぜりあ");
+    EXPECT_EQ(segments.conversion_segment(0).candidate(1).content_value,
+              "サイゼリヤ");
+    EXPECT_TRUE(segments.conversion_segment(0).candidate(1).attributes &
+                converter::Attribute::SPELLING_CORRECTION);
+  }
+
+  {
+    // Corrected candidate already exists at index 4 (> kInsertPosition = 3)
+    // from typing correction (with key "さいぜりやを" != error "さいぜりあ"):
+    // do not insert a duplicate, do not promote to kInsertPosition, and do not
+    // attach SPELLING_CORRECTION annotations.
+    Segments segments;
+    Segment* segment = AddSegment("さいぜりあを", &segments);
+    AddCandidate("さいぜりあを", "サイゼリアを", "さいぜりあ", "サイゼリア",
+                 segment);
+    AddCandidate("さいぜりあを", "さいぜりあを", "さいぜりあ", "さいぜりあ",
+                 segment);
+    AddCandidate("さいぜりあを", "ｻｲｾﾞﾘｱを", "さいぜりあ", "ｻｲｾﾞﾘｱ", segment);
+    AddCandidate("さいぜりあを", "Saizeriyaを", "さいぜりあ", "Saizeriya",
+                 segment);
+    converter::Candidate* existing =
+        AddCandidate("さいぜりやを", "サイゼリヤを", "さいぜりやを",
+                     "サイゼリヤを", segment);
+    existing->inner_segment_boundary.push_back(1);
+    EXPECT_FALSE(rewriter->Rewrite(ConvReq(config, request), &segments));
+    ASSERT_EQ(segments.conversion_segment(0).candidates_size(), 5);
+    EXPECT_EQ(segments.conversion_segment(0).candidate(0).value,
+              "サイゼリアを");
+    EXPECT_EQ(segments.conversion_segment(0).candidate(3).value, "Saizeriyaを");
+    EXPECT_EQ(segments.conversion_segment(0).candidate(4).key, "さいぜりやを");
+    EXPECT_EQ(segments.conversion_segment(0).candidate(4).content_key,
+              "さいぜりやを");
+    EXPECT_EQ(segments.conversion_segment(0).candidate(4).value,
+              "サイゼリヤを");
+    EXPECT_EQ(segments.conversion_segment(0).candidate(4).content_value,
+              "サイゼリヤを");
+    EXPECT_FALSE(segments.conversion_segment(0)
+                     .candidate(4)
+                     .inner_segment_boundary.empty());
+    EXPECT_FALSE(segments.conversion_segment(0).candidate(4).attributes &
+                 converter::Attribute::SPELLING_CORRECTION);
+    EXPECT_TRUE(
+        segments.conversion_segment(0).candidate(4).display_value.empty());
+  }
+
+  {
+    // Corrected candidate exists at index 4 (> kInsertPosition = 3): promote to
+    // index 3 without inserting a duplicate.
+    Segments segments;
+    Segment* segment = AddSegment("さいぜりあ", &segments);
+    AddCandidate("さいぜりあ", "サイゼリア", "さいぜりあ", "サイゼリア",
+                 segment);
+    AddCandidate("さいぜりあ", "さいぜりあ", "さいぜりあ", "さいぜりあ",
+                 segment);
+    AddCandidate("さいぜりあ", "ｻｲｾﾞﾘｱ", "さいぜりあ", "ｻｲｾﾞﾘｱ", segment);
+    AddCandidate("さいぜりあ", "Saizeriya", "さいぜりあ", "Saizeriya", segment);
+    AddCandidate("さいぜりあ", "サイゼリヤ", "さいぜりあ", "サイゼリヤ",
+                 segment);
+    EXPECT_TRUE(rewriter->Rewrite(ConvReq(config, request), &segments));
+    ASSERT_EQ(segments.conversion_segment(0).candidates_size(), 5);
+    EXPECT_EQ(segments.conversion_segment(0).candidate(3).value, "サイゼリヤ");
+    EXPECT_TRUE(segments.conversion_segment(0).candidate(3).attributes &
+                converter::Attribute::SPELLING_CORRECTION);
+  }
 }
 
 TEST_F(CorrectionRewriterTest,
@@ -196,11 +289,11 @@ TEST_F(CorrectionRewriterTest,
             return {};
           });
 
-  std::unique_ptr<engine::Modules> modules =
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<engine::Modules> modules,
       engine::ModulesPresetBuilder()
           .PresetSupplementalModel(std::move(mock))
-          .Build(std::make_unique<testing::MockDataManager>())
-          .value();
+          .Build(std::make_unique<testing::MockDataManager>()));
 
   std::unique_ptr<CorrectionRewriter> rewriter = CreateRewriter(
       *modules, {"巣窟", "雰囲気", "凡例"}, {"すくつ", "ふいんき", "ぼんれい"},
@@ -240,6 +333,24 @@ TEST_F(CorrectionRewriterTest,
         rewrite("ふいんき", "雰囲気", commands::Request::PLAIN_TEXT);
     EXPECT_TRUE(candidate.description.empty());
     EXPECT_EQ(candidate.display_value, "雰囲気(ふんいき)");
+  }
+
+  {
+    // Even if SPELLING_CORRECTION is already set from the system dictionary,
+    // reading_correction.tsv entry still populates the reading correction
+    // display_value and preserves functional_value().
+    Segments segments;
+    Segment* segment = AddSegment("すくつを", &segments);
+    converter::Candidate* candidate =
+        AddCandidate("すくつを", "巣窟を", "すくつ", "巣窟", segment);
+    candidate->attributes |= converter::Attribute::SPELLING_CORRECTION;
+    commands::Request request;
+    request.set_display_value_capability(commands::Request::PLAIN_TEXT);
+    EXPECT_TRUE(rewriter->Rewrite(ConvReq(config, request), &segments));
+    EXPECT_TRUE(
+        segments.conversion_segment(0).candidate(0).description.empty());
+    EXPECT_EQ(segments.conversion_segment(0).candidate(0).display_value,
+              "巣(そう)窟を");
   }
 
   {
