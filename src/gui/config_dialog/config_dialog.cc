@@ -40,15 +40,25 @@
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFontDatabase>
+#include <QFont>
+#include <QCheckBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLocale>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPaintEvent>
+#include <QLinearGradient>
+#include <QFontMetrics>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QResizeEvent>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QStyle>
@@ -59,6 +69,7 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <istream>
 #include <iterator>
@@ -88,6 +99,7 @@
 #include "gui/config_dialog/keymap_editor.h"
 #include "gui/config_dialog/roman_table_editor.h"
 #include "protocol/config.pb.h"
+#include "renderer/conversion_status_indicator.h"
 #include "session/keymap.h"
 #include "session/zenz_feedback_store.h"
 
@@ -2722,6 +2734,242 @@ void ConfigDialog::InitializeWindowsImeIconStyleControls() {
 // TODO(taku)
 // Actually ConvertFromProto and ConvertToProto are almost the same.
 // The difference only SET_ and GET_. We would like to unify the twos.
+namespace {
+// Follow the Qt application's translation where provided. Existing .qm files
+// predate this dynamically created section; Japanese OS users still receive a
+// native Japanese fallback without forcing Japanese on English installations.
+QString StatusUiText(const char* english, const char* japanese) {
+  const QString translated = QCoreApplication::translate("ConfigDialog", english);
+  if (translated != QString::fromUtf8(english)) return translated;
+  return QLocale::system().language() == QLocale::Japanese
+             ? QString::fromUtf8(japanese) : translated;
+}
+
+// Presets own the entire style, except the enabled state.  Default font and
+// automatic placement are intentional parts of each preset.
+config::Config::ConversionStatusIndicatorStyle ConversionStatusPreset(int preset) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  if (preset == 1) {
+    style.set_shape(config::Config::CONVERSION_STATUS_CIRCLE);
+    style.set_label(config::Config::CONVERSION_STATUS_COLOR_ONLY);
+    style.set_height(14);
+    style.set_opacity_percent(90);
+    style.set_shadow_size(0);
+    style.set_shadow_opacity_percent(0);
+    style.set_shadow_distance(0);
+  } else if (preset == 2) {
+    style.set_width(84);
+    style.set_height(27);
+    style.set_font_size(13);
+  }
+  return style;
+}
+
+// Compare logical values, not SerializeAsString(): proto2 field presence is
+// different for freshly created defaults and settings saved by the UI.
+bool SameConversionStatusStyle(
+    const config::Config::ConversionStatusIndicatorStyle& a,
+    const config::Config::ConversionStatusIndicatorStyle& b) {
+  return a.shape() == b.shape() && a.label() == b.label() &&
+         a.placement() == b.placement() &&
+         a.mozc_color() == b.mozc_color() &&
+         a.zenz_pending_color() == b.zenz_pending_color() &&
+         a.zenz_color() == b.zenz_color() &&
+         a.reading_color() == b.reading_color() &&
+         a.text_color() == b.text_color() &&
+         a.border_color() == b.border_color() &&
+         a.width() == b.width() && a.height() == b.height() &&
+         a.font_size() == b.font_size() &&
+         a.font_family() == b.font_family() &&
+         a.corner_radius() == b.corner_radius() &&
+         a.border_width() == b.border_width() &&
+         a.opacity_percent() == b.opacity_percent() &&
+         a.shadow_size() == b.shadow_size() &&
+         a.shadow_opacity_percent() == b.shadow_opacity_percent() &&
+         a.shadow_angle_degrees() == b.shadow_angle_degrees() &&
+         a.shadow_distance() == b.shadow_distance() &&
+         a.offset_x() == b.offset_x() && a.offset_y() == b.offset_y() &&
+         a.gap() == b.gap();
+}
+
+class ConversionStatusPreviewWidget final : public QWidget {
+ public:
+  explicit ConversionStatusPreviewWidget(QWidget* parent) : QWidget(parent) {
+    setFixedHeight(98);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setAutoFillBackground(false);
+  }
+  void Configure(const config::Config::ConversionStatusIndicatorStyle& style) {
+    style_.CopyFrom(style);
+    update();
+  }
+
+ protected:
+  void resizeEvent(QResizeEvent* event) override {
+    QWidget::resizeEvent(event);
+    const int desired = width() < 520 ? 166 : 98;
+    if (height() != desired) setFixedHeight(desired);
+  }
+  void paintEvent(QPaintEvent*) override {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+    const QColor canvas = palette().color(QPalette::Base);
+    QColor edge = palette().color(QPalette::Mid);
+    edge.setAlpha(90);
+    p.setPen(Qt::NoPen);
+    p.setBrush(canvas);
+    p.drawRoundedRect(QRectF(rect()), 9, 9);
+    p.setPen(QPen(edge, 1));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 9, 9);
+
+    // Four independent status samples.  At narrow widths, flow into two rows.
+    // Neither the host application's preedit nor ruby affects this preview.
+    const int columns = width() < 520 ? 2 : 4;
+    const int rows = 4 / columns;
+    const double cell_width = (width() - 20.0) / columns;
+    const double cell_height = (height() - 12.0) / rows;
+    const QString labels[4] = {
+        StatusUiText("Reading", "入力中"), QStringLiteral("Mozc"),
+        StatusUiText("Zenz processing", "Zenz処理中"),
+        StatusUiText("Zenz applied", "Zenz適用済み")};
+    const char* words[4] = {"入力中", "Mozc", "Zenz…", "Zenz"};
+    const char* symbols[4] = {"あ", "M", "…", "Z"};
+    const uint32_t colors[4] = {
+        style_.reading_color(), style_.mozc_color(),
+        style_.zenz_pending_color(), style_.zenz_color()};
+    const auto shape = style_.shape();
+    const auto mode = shape == config::Config::CONVERSION_STATUS_CIRCLE &&
+                              style_.label() == config::Config::CONVERSION_STATUS_FULL_LABEL
+                          ? config::Config::CONVERSION_STATUS_SYMBOL : style_.label();
+    QFont label_font = font();
+    if (!style_.font_family().empty()) {
+      label_font.setFamily(QString::fromStdString(style_.font_family()));
+    }
+    label_font.setPointSize(std::clamp(static_cast<int>(style_.font_size()), 8, 24));
+    label_font.setWeight(QFont::Medium);
+    const QFontMetrics metrics(label_font);
+    const int h = std::clamp(static_cast<int>(style_.height()), 12, 100);
+    const int stroke = std::clamp(static_cast<int>(style_.border_width()), 0, 5);
+    const int rgb_text = static_cast<int>(style_.text_color());
+    const QColor foreground((rgb_text >> 16) & 255, (rgb_text >> 8) & 255,
+                            rgb_text & 255);
+    const int shadow_size = std::clamp(static_cast<int>(style_.shadow_size()), 0, 15);
+    const int shadow_alpha = std::clamp(static_cast<int>(style_.shadow_opacity_percent()), 0, 100);
+    const double angle = style_.shadow_angle_degrees() * 3.141592653589793 / 180.0;
+    const double distance = style_.shadow_distance();
+    const QPointF shadow_shift(std::cos(angle) * distance,
+                               std::sin(angle) * distance);
+    for (int state = 0; state < 4; ++state) {
+      const int col = state % columns;
+      const int row = state / columns;
+      const QRectF cell(10.0 + col * cell_width,
+                        6.0 + row * cell_height, cell_width, cell_height);
+      p.save();
+      p.setClipRect(cell.adjusted(1, 1, -1, -1));
+      QFont caption_font = font();
+      caption_font.setPointSizeF(std::max(8.0, caption_font.pointSizeF() - 1.0));
+      p.setFont(caption_font);
+      p.setPen(palette().color(QPalette::Text));
+      p.drawText(QRectF(cell.left() + 3, cell.top() + 2, cell.width() - 6, 18),
+                 Qt::AlignHCenter | Qt::AlignVCenter, labels[state]);
+      const QString title = mode == config::Config::CONVERSION_STATUS_COLOR_ONLY
+          ? QString() : QString::fromUtf8(
+                mode == config::Config::CONVERSION_STATUS_SYMBOL ? symbols[state] : words[state]);
+      int w = std::clamp(static_cast<int>(style_.width()), 12, 240);
+      if (shape == config::Config::CONVERSION_STATUS_CIRCLE) {
+        w = h;
+      } else if (!title.isEmpty()) {
+        w = std::max(w, metrics.horizontalAdvance(title) + 28);
+      }
+      // Scale only when a user-selected chip exceeds its cell.  This keeps
+      // four large custom labels visible instead of clipping them.
+      const double zoom = std::min({1.0,
+          (cell.width() - 14) / (w + shadow_size + std::abs(shadow_shift.x()) + 2.0),
+          (cell.height() - 30) / (h + shadow_size + std::abs(shadow_shift.y()) + 2.0)});
+      p.translate(cell.center().x(), cell.top() + cell.height() / 2 + 10);
+      p.scale(std::max(0.1, zoom), std::max(0.1, zoom));
+      QRectF chip(-w / 2.0, -h / 2.0, w, h);
+      const int radius = shape == config::Config::CONVERSION_STATUS_CIRCLE ||
+                                 shape == config::Config::CONVERSION_STATUS_PILL
+          ? h / 2 : std::clamp(static_cast<int>(style_.corner_radius()), 0, h / 2);
+      if (shadow_size > 0 && shadow_alpha > 0) {
+        for (int i = shadow_size; i > 0; --i) {
+          QColor shadow(0, 0, 0,
+              std::clamp(shadow_alpha * (shadow_size - i + 1) /
+                        (shadow_size * 2), 0, 80));
+          p.setPen(Qt::NoPen);
+          p.setBrush(shadow);
+          p.drawRoundedRect(chip.adjusted(-i / 2.0, -i / 2.0,
+                                          i / 2.0, i / 2.0).translated(shadow_shift),
+                            radius + i / 2.0, radius + i / 2.0);
+        }
+      }
+      p.save();
+      p.setOpacity(std::clamp(style_.opacity_percent(), 20u, 100u) / 100.0);
+      const uint32_t rgb = colors[state];
+      const QColor base((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+      QLinearGradient gradient(chip.topLeft(), chip.bottomLeft());
+      gradient.setColorAt(0, base.lighter(113));
+      gradient.setColorAt(1, base);
+      p.setBrush(gradient);
+      if (stroke > 0) {
+        const uint32_t border = style_.border_color();
+        p.setPen(QPen(QColor((border >> 16) & 255, (border >> 8) & 255,
+                             border & 255), stroke));
+      } else {
+        p.setPen(Qt::NoPen);
+      }
+      p.drawRoundedRect(chip, radius, radius);
+      if (!title.isEmpty()) {
+        QRectF label_rect = chip;
+        if (shape != config::Config::CONVERSION_STATUS_CIRCLE &&
+            mode == config::Config::CONVERSION_STATUS_FULL_LABEL) {
+          p.setPen(Qt::NoPen);
+          QColor dot = foreground;
+          dot.setAlpha(215);
+          p.setBrush(dot);
+          p.drawEllipse(QPointF(chip.left() + 12, chip.center().y()), 2.5, 2.5);
+          label_rect.adjust(17, 0, -3, 0);
+        }
+        p.setPen(foreground);
+        p.setFont(label_font);
+        p.drawText(label_rect, Qt::AlignCenter, title);
+      }
+      p.restore();
+      p.restore();
+    }
+  }
+
+ private:
+  config::Config::ConversionStatusIndicatorStyle style_;
+};
+}  // namespace
+
+void ConfigDialog::UpdateConversionStatusPreview() {
+  if (!conversion_status_preview_) return;
+  config::Config config;
+  ConvertRendererAppearanceToProto(&config);
+  const auto& style = config.conversion_status_indicator_style();
+  auto* preview = static_cast<ConversionStatusPreviewWidget*>(conversion_status_preview_);
+  preview->Configure(style);
+  if (QComboBox* preset = FindComboBox(this, "conversionStatusPresetComboBox")) {
+    int matching = -1;  // Custom, including custom font and placement.
+    for (int i = 0; i < 3; ++i) {
+      if (SameConversionStatusStyle(style, ConversionStatusPreset(i))) {
+        matching = i;
+        break;
+      }
+    }
+    const QSignalBlocker block(preset);
+    SetComboCurrentData(preset, matching);
+    if (QPushButton* apply =
+            findChild<QPushButton*>("conversionStatusApplyPresetButton")) {
+      apply->setEnabled(matching >= 0);
+    }
+  }
+}
+
 void ConfigDialog::InitializeRendererAppearanceControls() {
 #if !defined(_WIN32) && !defined(__APPLE__)
   return;
@@ -2730,6 +2978,308 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   useDarkModeCandidateWindow->hide();
   candidateRubyFontLabel->hide();
   candidateRubyFontComboBox->hide();
+
+  // A self-contained editor: it never depends on the ruby-visibility checkbox.
+  auto* status_group = new QFrame(inputAppearanceScrollAreaWidgetContents);
+  status_group->setObjectName(QStringLiteral("conversionStatusAppearanceGroupBox"));
+  status_group->setFrameShape(QFrame::NoFrame);
+  status_group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  auto* status_root = new QVBoxLayout(status_group);
+  status_root->setContentsMargins(0, 18, 0, 9);
+  status_root->setSpacing(9);
+
+  // Match the existing Input mode indicator section, including its header
+  // baseline and horizontal separator instead of a one-off bold heading.
+  auto* header_widget = new QWidget(status_group);
+  auto* header = new QHBoxLayout(header_widget);
+  header->setContentsMargins(9, 9, 9, 9);
+  header->setSpacing(0);
+  auto* status_heading = new QLabel(
+      StatusUiText("Conversion status indicator", "変換状態インジケータ"),
+      header_widget);
+  status_heading->setObjectName(QStringLiteral("conversionStatusHeaderLabel"));
+  header->addWidget(status_heading, 0, Qt::AlignVCenter);
+  header->addSpacing(8);
+  auto* header_line = new QFrame(header_widget);
+  header_line->setObjectName(QStringLiteral("conversionStatusHeaderLine"));
+  header_line->setFrameShape(QFrame::HLine);
+  header_line->setFrameShadow(QFrame::Sunken);
+  header->addWidget(header_line, 1, Qt::AlignVCenter);
+  status_root->addWidget(header_widget);
+
+  auto* enabled = new QCheckBox(
+      StatusUiText("Show near composition", "未確定文字の近くに表示する"),
+      status_group);
+  enabled->setObjectName(QStringLiteral("conversionStatusEnabledCheckBox"));
+  auto* enabled_row = new QWidget(status_group);
+  auto* enabled_layout = new QHBoxLayout(enabled_row);
+  enabled_layout->setContentsMargins(24, 0, 12, 0);
+  enabled_layout->addWidget(enabled);
+  status_root->addWidget(enabled_row);
+
+  // The preview is deliberately above the controls and never hidden when the
+  // production overlay is disabled: users can design the indicator offline.
+  auto* preview_section = new QFrame(status_group);
+  auto* preview_layout = new QVBoxLayout(preview_section);
+  preview_layout->setContentsMargins(16, 0, 16, 0);
+  preview_layout->setSpacing(6);
+  auto* preview_title = new QLabel(
+      StatusUiText("Live preview", "プレビュー"), preview_section);
+  preview_title->setContentsMargins(8, 0, 0, 0);
+  preview_layout->addWidget(preview_title);
+  auto* preview_widget = new ConversionStatusPreviewWidget(preview_section);
+  preview_widget->setObjectName(QStringLiteral("conversionStatusLivePreview"));
+  conversion_status_preview_ = preview_widget;
+  preview_layout->addWidget(preview_widget);
+  status_root->addWidget(preview_section);
+
+  QComboBox* preset_combo = nullptr;
+  QPushButton* preset_button = nullptr;
+  auto make_section = [&](const QString& title, bool is_basic = false) -> QGridLayout* {
+    auto* section = new QFrame(status_group);
+    auto* layout = new QVBoxLayout(section);
+    // Match the small gaps above the preedit color subsections.
+    // Basic follows the preview directly; subsequent subsections get 8 px
+    // more breathing room without enlarging their internal controls.
+    layout->setContentsMargins(0, is_basic ? 2 : 10, 0, 0);
+    layout->setSpacing(5);
+    auto* section_header = new QHBoxLayout;
+    section_header->setContentsMargins(24, 0, 16, 0);
+    section_header->setSpacing(9);
+    auto* name = new QLabel(title, section);
+    section_header->addWidget(name);
+    if (is_basic) {
+      preset_combo = new QComboBox(section);
+      preset_combo->setObjectName(QStringLiteral("conversionStatusPresetComboBox"));
+      preset_combo->addItem(StatusUiText("Custom", "カスタム"), -1);
+      preset_combo->addItem(StatusUiText("Standard", "標準"), 0);
+      preset_combo->addItem(StatusUiText("Minimal", "ミニマル"), 1);
+      preset_combo->addItem(StatusUiText("Detailed", "詳細"), 2);
+      preset_combo->setMinimumWidth(114);
+      preset_combo->setToolTip(StatusUiText("Select a preset, then apply it.",
+                                            "プリセットを選び、適用ボタンを押してください。"));
+      preset_button = new QPushButton(
+          StatusUiText("Apply", "適用"), section);
+      preset_button->setObjectName(QStringLiteral("conversionStatusApplyPresetButton"));
+      preset_button->setEnabled(false);
+      preset_button->setToolTip(StatusUiText("Apply only the indicator style preset.",
+                                              "変換状態インジケータの外観だけを変更します。"));
+      section_header->addWidget(
+          new QLabel(StatusUiText("Preset", "プリセット"), section));
+      section_header->addWidget(preset_combo);
+      section_header->addWidget(preset_button);
+      QObject::connect(preset_combo,
+                       QOverload<int>::of(&QComboBox::currentIndexChanged),
+                       preset_button, [preset_combo, preset_button](int) {
+                         preset_button->setEnabled(preset_combo->currentData().toInt() >= 0);
+                       });
+    }
+    section_header->addStretch();
+    layout->addLayout(section_header);
+    auto* grid = new QGridLayout;
+    grid->setContentsMargins(24, 3, 16, 3);
+    grid->setHorizontalSpacing(9);
+    grid->setVerticalSpacing(7);
+    layout->addLayout(grid);
+    status_root->addWidget(section);
+    return grid;
+  };
+  auto add_combo = [&](QGridLayout* grid, int row, int column,
+                       const QString& label, const char* id) {
+    auto* widget = new QComboBox(status_group);
+    widget->setObjectName(QString::fromLatin1(id));
+    widget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    grid->addWidget(new QLabel(label, status_group), row, column * 2);
+    grid->addWidget(widget, row, column * 2 + 1);
+    QObject::connect(widget, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                     this, [this](int) {
+                       UpdateConversionStatusPreview();
+                       EnableApplyButton();
+                     });
+    return widget;
+  };
+  auto add_spin = [&](QGridLayout* grid, int row, int column,
+                      const QString& label, const char* id,
+                      int min, int max, int def, const QString& suffix) {
+    auto* spin = new QSpinBox(status_group);
+    spin->setObjectName(QString::fromLatin1(id));
+    spin->setRange(min, max);
+    spin->setValue(def);
+    spin->setSuffix(suffix);
+    spin->setMinimumWidth(88);
+    spin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    grid->addWidget(new QLabel(label, status_group), row, column * 2);
+    grid->addWidget(spin, row, column * 2 + 1);
+    QObject::connect(spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                     this, [this](int) {
+                       UpdateConversionStatusPreview();
+                       EnableApplyButton();
+                     });
+    return spin;
+  };
+
+  auto* basic = make_section(StatusUiText("Basic", "基本"), true);
+  auto* shape = add_combo(basic, 0, 0, StatusUiText("Shape", "形状"),
+                          "conversionStatusShapeComboBox");
+  shape->addItem(StatusUiText("Capsule", "カプセル"),
+                 static_cast<int>(config::Config::CONVERSION_STATUS_PILL));
+  shape->addItem(StatusUiText("Circle", "円形"),
+                 static_cast<int>(config::Config::CONVERSION_STATUS_CIRCLE));
+  shape->addItem(StatusUiText("Rounded rectangle", "角丸四角形"),
+                 static_cast<int>(config::Config::CONVERSION_STATUS_ROUNDED_RECT));
+  auto* label = add_combo(basic, 0, 1, StatusUiText("Label", "ラベル"),
+                          "conversionStatusLabelComboBox");
+  label->addItem(StatusUiText("Name", "名称を表示"),
+                 static_cast<int>(config::Config::CONVERSION_STATUS_FULL_LABEL));
+  label->addItem(StatusUiText("Symbol", "記号のみ"),
+                 static_cast<int>(config::Config::CONVERSION_STATUS_SYMBOL));
+  label->addItem(StatusUiText("Color only", "色のみ"),
+                 static_cast<int>(config::Config::CONVERSION_STATUS_COLOR_ONLY));
+  auto* placement = add_combo(basic, 1, 0,
+                              StatusUiText("Position", "表示位置"),
+                              "conversionStatusPlacementComboBox");
+  placement->addItem(StatusUiText("Automatic", "自動（重なりを回避）"),
+                     static_cast<int>(config::Config::CONVERSION_STATUS_AUTO));
+  placement->addItem(StatusUiText("Beside ruby", "ルビの横"),
+                     static_cast<int>(config::Config::CONVERSION_STATUS_RUBY_SIDE));
+  placement->addItem(StatusUiText("Above ruby", "ルビの上"),
+                     static_cast<int>(config::Config::CONVERSION_STATUS_RUBY_ABOVE));
+  placement->addItem(StatusUiText("Above text", "未確定文字の上"),
+                     static_cast<int>(config::Config::CONVERSION_STATUS_PREEDIT_ABOVE));
+  placement->addItem(StatusUiText("Below text", "未確定文字の下"),
+                     static_cast<int>(config::Config::CONVERSION_STATUS_PREEDIT_BELOW));
+  placement->setToolTip(StatusUiText(
+      "Fixed positions stay on the selected side. If no non-overlapping "
+      "position exists, the indicator is hidden.",
+      "位置を指定した場合、別の方向には移動しません。空きがなければ非表示になります。"));
+  auto* status_font = add_combo(basic, 1, 1,
+                                StatusUiText("Font", "フォント"),
+                                "conversionStatusFontComboBox");
+  status_font->clear();
+  status_font->addItem(StatusUiText("System default", "既定（OS標準）"), QString());
+  QFontDatabase font_database;
+  for (const QString& family : font_database.families()) {
+    if (!family.startsWith(QLatin1Char('@'))) {
+      status_font->addItem(family, family);
+    }
+  }
+  status_font->setToolTip(StatusUiText("Default uses the system font.",
+                                      "既定ではOSの標準フォントを使用します。"));
+  basic->setColumnStretch(1, 1);
+  basic->setColumnStretch(3, 1);
+
+  auto* colors = make_section(StatusUiText("Status colors", "状態別の色"));
+  const struct { const char* english; const char* japanese;
+                 const char* id; uint32_t rgb; } color_items[] = {
+      {"Mozc", "Mozc", "conversionStatusMozcColorButton", 0x586b85},
+      {"Zenz processing", "Zenz処理中", "conversionStatusPendingColorButton", 0x847438},
+      {"Zenz applied", "Zenz適用済み", "conversionStatusZenzColorButton", 0x338d85},
+      {"Reading", "入力中", "conversionStatusReadingColorButton", 0x747d8c},
+      {"Text", "文字", "conversionStatusTextColorButton", 0xffffff},
+      {"Border", "枠線", "conversionStatusBorderColorButton", 0x354357},
+  };
+  for (int i = 0; i < 6; ++i) {
+    const int row = i / 2;
+    const int col = (i % 2) * 2;
+    auto* button = new QPushButton(status_group);
+    button->setObjectName(QString::fromLatin1(color_items[i].id));
+    button->setFixedWidth(96);
+    button->setMinimumHeight(26);
+    SetColorButton(button, color_items[i].rgb);
+    colors->addWidget(new QLabel(StatusUiText(color_items[i].english,
+                                              color_items[i].japanese),
+                                 status_group), row, col);
+    colors->addWidget(button, row, col + 1, Qt::AlignLeft);
+    QObject::connect(button, SIGNAL(clicked()), this,
+                     SLOT(SelectRendererAppearanceColor()));
+  }
+  colors->setColumnStretch(1, 1);
+  colors->setColumnStretch(3, 1);
+
+  auto* geometry = make_section(StatusUiText("Size and appearance", "サイズと外観"));
+  add_spin(geometry, 0, 0, StatusUiText("Minimum width", "最小幅"),
+           "conversionStatusWidthSpinBox", 12, 240, 58, QStringLiteral(" px"));
+  add_spin(geometry, 0, 1, StatusUiText("Height", "高さ"),
+           "conversionStatusHeightSpinBox", 12, 100, 24, QStringLiteral(" px"));
+  add_spin(geometry, 1, 0, StatusUiText("Font size", "文字サイズ"),
+           "conversionStatusFontSizeSpinBox", 8, 24, 12, QStringLiteral(" pt"));
+  add_spin(geometry, 1, 1, StatusUiText("Opacity", "透明度"),
+           "conversionStatusOpacitySpinBox", 20, 100, 93, QStringLiteral(" %"));
+  add_spin(geometry, 2, 0, StatusUiText("Corner radius", "角丸"),
+           "conversionStatusCornerSpinBox", 0, 50, 7, QStringLiteral(" px"));
+  add_spin(geometry, 2, 1, StatusUiText("Border width", "枠線の太さ"),
+           "conversionStatusBorderWidthSpinBox", 0, 5, 0, QStringLiteral(" px"));
+  geometry->setColumnStretch(1, 1);
+  geometry->setColumnStretch(3, 1);
+
+  auto* detail = make_section(StatusUiText("Shadow and placement", "影と位置の微調整"));
+  add_spin(detail, 0, 0, StatusUiText("Shadow blur", "影のぼかし"),
+           "conversionStatusShadowSizeSpinBox", 0, 24, 3, QStringLiteral(" px"));
+  add_spin(detail, 0, 1, StatusUiText("Shadow opacity", "影の濃さ"),
+           "conversionStatusShadowOpacitySpinBox", 0, 100, 12, QStringLiteral(" %"));
+  add_spin(detail, 1, 0, StatusUiText("Shadow angle", "影の方向"),
+           "conversionStatusShadowAngleSpinBox", 0, 359, 45, QStringLiteral(" °"));
+  add_spin(detail, 1, 1, StatusUiText("Shadow distance", "影の距離"),
+           "conversionStatusShadowDistanceSpinBox", 0, 24, 2, QStringLiteral(" px"));
+  add_spin(detail, 2, 0, StatusUiText("Horizontal offset", "水平方向の補正"),
+           "conversionStatusOffsetXSpinBox", -100, 100, 0, QStringLiteral(" px"));
+  add_spin(detail, 2, 1, StatusUiText("Vertical offset", "垂直方向の補正"),
+           "conversionStatusOffsetYSpinBox", -100, 100, 0, QStringLiteral(" px"));
+  add_spin(detail, 3, 0, StatusUiText("Spacing", "文字との間隔"),
+           "conversionStatusGapSpinBox", 0, 60, 5, QStringLiteral(" px"));
+  detail->setColumnStretch(1, 1);
+  detail->setColumnStretch(3, 1);
+
+  inputAppearanceContentLayout->insertWidget(1, status_group);
+
+  QObject::connect(enabled, &QCheckBox::toggled, this, [this](bool) {
+    UpdateConversionStatusPreview();
+    EnableApplyButton();
+  });
+  QObject::connect(preset_button, &QPushButton::clicked, this,
+                   [this, preset_combo]() {
+    const int preset = preset_combo->currentData().toInt();
+    if (preset < 0 || preset > 2) return;
+    const auto style = ConversionStatusPreset(preset);
+    auto set_spin = [this](const char* id, int value) {
+      if (QSpinBox* spin = FindSpinBox(this, id)) spin->setValue(value);
+    };
+    auto set_color = [this](const char* id, uint32_t rgb) {
+      SetColorButton(findChild<QPushButton*>(id), rgb);
+    };
+    SetComboCurrentData(FindComboBox(this, "conversionStatusShapeComboBox"),
+                        static_cast<int>(style.shape()));
+    SetComboCurrentData(FindComboBox(this, "conversionStatusLabelComboBox"),
+                        static_cast<int>(style.label()));
+    SetComboCurrentData(FindComboBox(this, "conversionStatusPlacementComboBox"),
+                        static_cast<int>(style.placement()));
+    SetComboBoxCurrentFontNameOrAdd(
+        FindComboBox(this, "conversionStatusFontComboBox"),
+        QString::fromStdString(style.font_family()));
+    set_spin("conversionStatusWidthSpinBox", style.width());
+    set_spin("conversionStatusHeightSpinBox", style.height());
+    set_spin("conversionStatusFontSizeSpinBox", style.font_size());
+    set_spin("conversionStatusCornerSpinBox", style.corner_radius());
+    set_spin("conversionStatusBorderWidthSpinBox", style.border_width());
+    set_spin("conversionStatusOpacitySpinBox", style.opacity_percent());
+    set_spin("conversionStatusShadowSizeSpinBox", style.shadow_size());
+    set_spin("conversionStatusShadowOpacitySpinBox", style.shadow_opacity_percent());
+    set_spin("conversionStatusShadowAngleSpinBox", style.shadow_angle_degrees());
+    set_spin("conversionStatusShadowDistanceSpinBox", style.shadow_distance());
+    set_spin("conversionStatusOffsetXSpinBox", style.offset_x());
+    set_spin("conversionStatusOffsetYSpinBox", style.offset_y());
+    set_spin("conversionStatusGapSpinBox", style.gap());
+    set_color("conversionStatusMozcColorButton", style.mozc_color());
+    set_color("conversionStatusPendingColorButton", style.zenz_pending_color());
+    set_color("conversionStatusZenzColorButton", style.zenz_color());
+    set_color("conversionStatusReadingColorButton", style.reading_color());
+    set_color("conversionStatusTextColorButton", style.text_color());
+    set_color("conversionStatusBorderColorButton", style.border_color());
+    UpdateConversionStatusPreview();
+    EnableApplyButton();
+  });
+  UpdateConversionStatusPreview();
+
 
 #ifdef _WIN32
   // Keep the input-mode indicator controls together with renderer appearance.
@@ -4271,6 +4821,58 @@ void ConfigDialog::ConvertRendererAppearanceFromProto(
   return;
 #endif  // !defined(_WIN32) && !defined(__APPLE__)
 
+  if (QCheckBox* check = findChild<QCheckBox*>("conversionStatusEnabledCheckBox"))
+    check->setChecked(config.show_conversion_status_indicator());
+  const auto& status = config.conversion_status_indicator_style();
+  SetComboCurrentData(FindComboBox(this, "conversionStatusShapeComboBox"),
+                      static_cast<int>(status.shape()));
+  SetComboCurrentData(FindComboBox(this, "conversionStatusLabelComboBox"),
+                      static_cast<int>(status.label()));
+  SetComboCurrentData(FindComboBox(this, "conversionStatusPlacementComboBox"),
+                      static_cast<int>(status.placement()));
+  SetComboBoxCurrentFontNameOrAdd(
+      FindComboBox(this, "conversionStatusFontComboBox"),
+      QString::fromStdString(status.font_family()));
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusMozcColorButton"))
+    SetColorButton(button, status.mozc_color());
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusPendingColorButton"))
+    SetColorButton(button, status.zenz_pending_color());
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusZenzColorButton"))
+    SetColorButton(button, status.zenz_color());
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusReadingColorButton"))
+    SetColorButton(button, status.reading_color());
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusTextColorButton"))
+    SetColorButton(button, status.text_color());
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusBorderColorButton"))
+    SetColorButton(button, status.border_color());
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusWidthSpinBox"))
+    spin->setValue(static_cast<int>(status.width()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusHeightSpinBox"))
+    spin->setValue(static_cast<int>(status.height()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusFontSizeSpinBox"))
+    spin->setValue(static_cast<int>(status.font_size()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusCornerSpinBox"))
+    spin->setValue(static_cast<int>(status.corner_radius()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusBorderWidthSpinBox"))
+    spin->setValue(static_cast<int>(status.border_width()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusOpacitySpinBox"))
+    spin->setValue(static_cast<int>(status.opacity_percent()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusShadowSizeSpinBox"))
+    spin->setValue(static_cast<int>(status.shadow_size()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusShadowOpacitySpinBox"))
+    spin->setValue(static_cast<int>(status.shadow_opacity_percent()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusShadowAngleSpinBox"))
+    spin->setValue(static_cast<int>(status.shadow_angle_degrees()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusShadowDistanceSpinBox"))
+    spin->setValue(static_cast<int>(status.shadow_distance()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusOffsetXSpinBox"))
+    spin->setValue(static_cast<int>(status.offset_x()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusOffsetYSpinBox"))
+    spin->setValue(static_cast<int>(status.offset_y()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusGapSpinBox"))
+    spin->setValue(static_cast<int>(status.gap()));
+  UpdateConversionStatusPreview();
+
   const int candidate_color_theme =
       config.has_candidate_window_color_theme()
           ? static_cast<int>(config.candidate_window_color_theme())
@@ -4409,6 +5011,57 @@ void ConfigDialog::ConvertRendererAppearanceToProto(
   }
   return;
 #endif  // !defined(_WIN32) && !defined(__APPLE__)
+
+  if (const QCheckBox* check = findChild<QCheckBox*>("conversionStatusEnabledCheckBox"))
+    config->set_show_conversion_status_indicator(check->isChecked());
+  auto* status = config->mutable_conversion_status_indicator_style();
+  status->set_shape(static_cast<config::Config::ConversionStatusIndicatorShape>(
+      GetComboCurrentData(FindComboBox(this, "conversionStatusShapeComboBox"), 0)));
+  status->set_label(static_cast<config::Config::ConversionStatusIndicatorLabel>(
+      GetComboCurrentData(FindComboBox(this, "conversionStatusLabelComboBox"), 0)));
+  status->set_placement(static_cast<config::Config::ConversionStatusIndicatorPlacement>(
+      GetComboCurrentData(FindComboBox(this, "conversionStatusPlacementComboBox"), 0)));
+  if (const QComboBox* font = FindComboBox(this, "conversionStatusFontComboBox")) {
+    status->set_font_family(font->currentData().toString().toStdString());
+  }
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusMozcColorButton"))
+    status->set_mozc_color(GetColorButtonRgb(button, status->mozc_color()));
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusPendingColorButton"))
+    status->set_zenz_pending_color(GetColorButtonRgb(button, status->zenz_pending_color()));
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusZenzColorButton"))
+    status->set_zenz_color(GetColorButtonRgb(button, status->zenz_color()));
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusReadingColorButton"))
+    status->set_reading_color(GetColorButtonRgb(button, status->reading_color()));
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusTextColorButton"))
+    status->set_text_color(GetColorButtonRgb(button, status->text_color()));
+  if (QPushButton* button = findChild<QPushButton*>("conversionStatusBorderColorButton"))
+    status->set_border_color(GetColorButtonRgb(button, status->border_color()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusWidthSpinBox"))
+    status->set_width(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusHeightSpinBox"))
+    status->set_height(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusFontSizeSpinBox"))
+    status->set_font_size(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusCornerSpinBox"))
+    status->set_corner_radius(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusBorderWidthSpinBox"))
+    status->set_border_width(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusOpacitySpinBox"))
+    status->set_opacity_percent(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusShadowSizeSpinBox"))
+    status->set_shadow_size(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusShadowOpacitySpinBox"))
+    status->set_shadow_opacity_percent(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusShadowAngleSpinBox"))
+    status->set_shadow_angle_degrees(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusShadowDistanceSpinBox"))
+    status->set_shadow_distance(static_cast<uint32_t>(spin->value()));
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusOffsetXSpinBox"))
+    status->set_offset_x(spin->value());
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusOffsetYSpinBox"))
+    status->set_offset_y(spin->value());
+  if (QSpinBox* spin = FindSpinBox(this, "conversionStatusGapSpinBox"))
+    status->set_gap(static_cast<uint32_t>(spin->value()));
 
   const int candidate_color_theme = GetComboCurrentData(
       FindComboBox(this, "candidateWindowColorThemeComboBox"),
@@ -4709,6 +5362,7 @@ void ConfigDialog::SelectRendererAppearanceColor() {
     return;
   }
   SetColorButton(button, QColorToRgbHex(selected_color));
+  UpdateConversionStatusPreview();
   EnableApplyButton();
 }
 

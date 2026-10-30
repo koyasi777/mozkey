@@ -103,6 +103,7 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   bool SetConfig(const config::Config &config);
   void ConvertToProto(config::Config *config) const;
   void InitializeRendererAppearanceControls();
+  void UpdateConversionStatusPreview();
   void InitializeWindowsImeIconStyleControls();
   void ConvertRendererAppearanceFromProto(const config::Config &config);
   void ConvertRendererAppearanceToProto(config::Config *config) const;
@@ -113,6 +114,7 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   void RecordCurrentStateAsApplied();
   bool IsModified() const;
 
+  QWidget* conversion_status_preview_ = nullptr;
   std::unique_ptr<client::ClientInterface> client_;
   std::string custom_keymap_table_;
   std::string custom_roman_table_;

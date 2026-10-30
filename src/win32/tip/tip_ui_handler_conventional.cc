@@ -44,6 +44,7 @@
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
+#include "config/config_handler.h"
 #include "renderer/win32/win32_renderer_client.h"
 #include "win32/base/input_state.h"
 #include "win32/tip/tip_composition_util.h"
@@ -252,6 +253,9 @@ bool FillVisibility(ITfUIElementMgr* ui_element_manager,
   bool suggest_window_visible = false;
   bool candidate_window_visible = false;
   bool ruby_window_visible = false;
+  const bool conversion_indicator_visible =
+      config::ConfigHandler::GetSharedConfig()->show_conversion_status_indicator() &&
+      output.has_preedit() && output.preedit().segment_size() > 0;
 
   // The live-conversion reading overlay can be visible before actual live
   // conversion starts, and pending live conversion may have no candidate
@@ -278,7 +282,7 @@ bool FillVisibility(ITfUIElementMgr* ui_element_manager,
   }
 
   if (candidate_window_visible || suggest_window_visible ||
-      ruby_window_visible) {
+      ruby_window_visible || conversion_indicator_visible) {
     command->set_visible(true);
   }
 

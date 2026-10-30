@@ -735,6 +735,61 @@ message Config {
   optional WindowsImeIconStyle windows_ime_icon_style = 163
       [default = WINDOWS_IME_ICON_DEFAULT];
 
+  // Independent conversion status overlay, shared by Windows and macOS.
+  // Field numbers are Mozkey-specific and must never be reused.
+  enum ConversionStatusIndicatorShape {
+    CONVERSION_STATUS_PILL = 0;
+    CONVERSION_STATUS_CIRCLE = 1;
+    CONVERSION_STATUS_ROUNDED_RECT = 2;
+  }
+  enum ConversionStatusIndicatorLabel {
+    CONVERSION_STATUS_FULL_LABEL = 0;
+    CONVERSION_STATUS_SYMBOL = 1;
+    CONVERSION_STATUS_COLOR_ONLY = 2;
+  }
+  enum ConversionStatusIndicatorPlacement {
+    CONVERSION_STATUS_AUTO = 0;
+    CONVERSION_STATUS_RUBY_SIDE = 1;
+    CONVERSION_STATUS_RUBY_ABOVE = 2;
+    CONVERSION_STATUS_PREEDIT_ABOVE = 3;
+    CONVERSION_STATUS_PREEDIT_BELOW = 4;
+  }
+  message ConversionStatusIndicatorStyle {
+    optional ConversionStatusIndicatorShape shape = 1
+        [default = CONVERSION_STATUS_PILL];
+    optional ConversionStatusIndicatorLabel label = 2
+        [default = CONVERSION_STATUS_FULL_LABEL];
+    optional ConversionStatusIndicatorPlacement placement = 3
+        [default = CONVERSION_STATUS_AUTO];
+    // Colors are 0xRRGGBB. "Pending" describes the asynchronous operation,
+    // not necessarily the provenance of the visible preedit.
+    optional uint32 mozc_color = 4 [default = 0x586b85];
+    optional uint32 zenz_pending_color = 5 [default = 0x847438];
+    optional uint32 zenz_color = 6 [default = 0x338d85];
+    optional uint32 reading_color = 7 [default = 0x747d8c];
+    optional uint32 text_color = 8 [default = 0xffffff];
+    optional uint32 border_color = 9 [default = 0x354357];
+    optional uint32 width = 10 [default = 58];
+    optional uint32 height = 11 [default = 24];
+    optional uint32 font_size = 12 [default = 12];
+    optional uint32 corner_radius = 13 [default = 7];
+    optional uint32 border_width = 14 [default = 0];
+    optional uint32 opacity_percent = 15 [default = 93];
+    optional uint32 shadow_size = 16 [default = 3];
+    optional uint32 shadow_opacity_percent = 17 [default = 12];
+    optional uint32 shadow_angle_degrees = 18 [default = 45];
+    optional uint32 shadow_distance = 19 [default = 2];
+    optional int32 offset_x = 20 [default = 0];
+    optional int32 offset_y = 21 [default = 0];
+    optional uint32 gap = 22 [default = 5];
+    // Empty selects the native system font; UTF-8 family name otherwise.
+    optional string font_family = 23 [default = ""];
+  }
+  // Enabled by default only when the setting is absent. An explicitly saved
+  // false value continues to be honored for existing user configurations.
+  optional bool show_conversion_status_indicator = 1045 [default = true];
+  optional ConversionStatusIndicatorStyle conversion_status_indicator_style = 1046;
+
   //////////////////////////////////////////////////////////////
   //
   // Cloud (300-319)

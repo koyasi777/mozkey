@@ -35,6 +35,8 @@
 #include "protocol/commands.pb.h"
 #include "renderer/mac/CandidateController.h"
 #include "renderer/mac/CandidateWindow.h"
+#include "renderer/mac/ConversionStatusWindow.h"
+#include "config/config_handler.h"
 #include "renderer/mac/InfolistWindow.h"
 #include "renderer/mac/RubyWindow.h"
 #include "renderer/mac/mac_candidate_interaction.h"
@@ -114,13 +116,15 @@ CandidateController::CandidateController()
     : candidate_window_(new mac::CandidateWindow),
       cascading_window_(new mac::CandidateWindow),
       infolist_window_(new mac::InfolistWindow),
-      ruby_window_(new mac::RubyWindow) {
+      ruby_window_(new mac::RubyWindow),
+      conversion_status_window_(new mac::ConversionStatusWindow) {
   candidate_window_->SetWindowLevel(NSPopUpMenuWindowLevel);
   // Cascading window should be over the normal candidate window.
   cascading_window_->SetWindowLevel(NSPopUpMenuWindowLevel + 1);
   // Infolist window should be under the normal candidate window.
   infolist_window_->SetWindowLevel(NSPopUpMenuWindowLevel - 1);
   ruby_window_->SetWindowLevel(NSPopUpMenuWindowLevel + 2);
+  conversion_status_window_->SetWindowLevel(NSPopUpMenuWindowLevel + 3);
 }
 
 CandidateController::~CandidateController() {
@@ -128,6 +132,7 @@ CandidateController::~CandidateController() {
   delete cascading_window_;
   delete infolist_window_;
   delete ruby_window_;
+  delete conversion_status_window_;
 }
 
 bool CandidateController::Activate() {
@@ -161,6 +166,7 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
     cascading_window_->Hide();
     infolist_window_->Hide();
     ruby_window_->Hide();
+    conversion_status_window_->Hide();
     has_candidate_rect_ = false;
     return true;
   }
@@ -197,6 +203,7 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
     } else {
       ruby_window_->Hide();
     }
+    UpdateConversionStatus();
     return true;
   }
 
@@ -215,10 +222,22 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
     } else {
       ruby_window_->Hide();
     }
+    UpdateConversionStatus();
     return true;
   }
 
   ruby_window_->Hide();
+
+  if (!command_.has_output() ||
+      !command_.output().has_candidate_window() ||
+      command_.output().candidate_window().candidate_size() == 0) {
+    candidate_window_->Hide();
+    cascading_window_->Hide();
+    infolist_window_->Hide();
+    has_candidate_rect_ = false;
+    UpdateConversionStatus();
+    return true;
+  }
 
   candidate_window_->SetCandidateWindow(command_.output().candidate_window());
 
@@ -264,7 +283,61 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
     infolist_window_->Hide();
   }
 
+  UpdateConversionStatus();
   return true;
+}
+
+void CandidateController::UpdateConversionStatus() {
+  // Match the ruby overlay: passive suggestions may accompany live
+  // composition, but focused candidate lists take precedence.
+  if (candidate_window_->IsVisible() &&
+      (!command_.has_output() ||
+       ShouldHideConversionStatusForCandidate(command_.output(), true))) {
+    conversion_status_window_->Hide();
+    return;
+  }
+  if (!conversion_status_window_->Update(
+          command_, IsVerticalWriting(writing_direction_)) ||
+      !command_.has_preedit_rectangle()) {
+    conversion_status_window_->Hide();
+    return;
+  }
+  const auto& cfg = config::ConfigHandler::GetSharedConfig();
+  const auto& style = cfg->conversion_status_indicator_style();
+  const mozc::Rect preedit(
+      command_.preedit_rectangle().left(),
+      command_.preedit_rectangle().top() - GetBaseScreenHeight(),
+      command_.preedit_rectangle().right() - command_.preedit_rectangle().left(),
+      command_.preedit_rectangle().bottom() - command_.preedit_rectangle().top());
+  mozc::Rect ruby_rect;
+  const mozc::Rect *ruby_ptr = nullptr;
+  if (ruby_window_->IsVisible()) {
+    // RubyWindow uses Cocoa bottom-left coordinates.
+    const NSRect frame = ruby_window_->GetWindowFrame();
+    ruby_rect = RectInMozcCoord(frame);
+    ruby_ptr = &ruby_rect;
+  }
+  const mozc::Rect display = GetNearestDisplayRect(preedit);
+  const mozc::Size size = conversion_status_window_->GetWindowSize();
+  // AlignWindows() stores the actual candidate geometry in candidate_rect_.
+  // Do not pass a fresh empty rectangle: passive suggestions remain visible
+  // with the status and must be excluded from placement.
+  const mozc::Rect* obstacle = has_candidate_rect_ && candidate_window_->IsVisible()
+      ? &candidate_rect_ : nullptr;
+  mozc::Rect target;
+  if (!PlaceConversionStatusIndicator(preedit, ruby_ptr, obstacle, display,
+        size, IsVerticalWriting(writing_direction_), style, &target)) {
+    conversion_status_window_->Hide();
+    return;
+  }
+  const NSPoint next_origin = OriginPointInCocoaCoord(target);
+  const NSPoint old_origin = conversion_status_window_->GetWindowFrame().origin;
+  if (old_origin.x != next_origin.x || old_origin.y != next_origin.y) {
+    conversion_status_window_->MoveWindow(next_origin);
+  }
+  if (!conversion_status_window_->IsVisible()) {
+    conversion_status_window_->Show();
+  }
 }
 
 void CandidateController::AlignWindows() {
