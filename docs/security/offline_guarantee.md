@@ -82,10 +82,14 @@ do not import common networking DLLs such as:
 - dnsapi.dll
 
 `mozc_zenz_scorer.exe` is a narrow local-only exception. It may import
-`winhttp.dll` only to call the bundled `llama-server.exe` through a
-`127.0.0.1` localhost endpoint. It must not use WinHTTP for external network
-access, must not use a release-build environment override for the runtime or
-model path, and must not expose the local inference endpoint externally.
+`winhttp.dll` to request inference from the bundled `llama-server.exe` on
+`127.0.0.1`, and `ws2_32.dll` to bind `127.0.0.1:0` temporarily for selecting
+a non-fixed loopback port. These exceptions apply only to the scorer; all
+other prohibited DLLs remain denied, including those imported by other Mozc
+runtime binaries. The scorer must not contact external hosts, accept a
+release-build environment override for runtime/model paths, or expose the
+inference endpoint externally. DLL import checks alone cannot prove this:
+the installed-MSI native ARM64 loopback and connection audits remain required.
 
 The check is implemented by:
 
