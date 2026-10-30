@@ -35,11 +35,14 @@ FORBIDDEN_DLLS = {
 }
 
 ALLOWED_FORBIDDEN_DLLS_BY_BINARY = {
-    # mozc_zenz_scorer.exe uses WinHTTP only to talk to the bundled
-    # llama-server.exe through a localhost endpoint for local Zenz inference.
-    # This is not telemetry, updater, crash upload, or external network access.
+    # Narrow exception for the Windows Zenz scorer only:
+    # - WinHTTP requests go to the bundled llama-server on 127.0.0.1.
+    # - Winsock binds 127.0.0.1:0 to obtain a non-fixed local port.
+    # Other Mozc runtime binaries and other networking DLLs remain denied.
+    # Imports alone do not prove endpoint restrictions: retain runtime E2E audits.
     "mozc_zenz_scorer.exe": {
         "winhttp.dll",
+        "ws2_32.dll",
     },
 }
 
@@ -227,6 +230,12 @@ def collect_targets(root: Path, explicit_paths: list[Path]) -> list[Path]:
     return sorted(targets)
 
 
+def forbidden_imports(binary_name: str, imported_dlls: set[str]) -> list[str]:
+    """Reject network DLLs except explicit, binary-scoped local-only dependencies."""
+    allowed = ALLOWED_FORBIDDEN_DLLS_BY_BINARY.get(binary_name.lower(), set())
+    return sorted((imported_dlls & FORBIDDEN_DLLS) - allowed)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -268,8 +277,7 @@ def main(argv: list[str]) -> int:
             failed = True
             continue
 
-        allowed_forbidden = ALLOWED_FORBIDDEN_DLLS_BY_BINARY.get(path.name.lower(), set())
-        forbidden = sorted((imported & FORBIDDEN_DLLS) - allowed_forbidden)
+        forbidden = forbidden_imports(path.name, imported)
 
         if forbidden:
             failed = True
