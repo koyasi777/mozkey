@@ -1,0 +1,267 @@
+name: Windows x64 and ARM64 release candidates (unsigned rehearsal)
+
+# Rehearsal ONLY. Never signs files or publishes GitHub Releases.
+# Pull requests execute contract tests only; MSI builds require dispatch from main.
+# Universal MSI remains supported by the regular Windows CI, NOT released here.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-release-candidate.yml'
+      - 'tools/release/**'
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Exact src/version.bzl public version (e.g. 0.7.7; 1.0.0 only after version bump)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unsigned-release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source-contract-tests:
+    name: Source contract regression tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source without write credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+      - name: Run release contract tests
+        run: python3 -B -m unittest discover -s tools/release/tests -v
+
+  prepare-dictionary:
+    name: Prepare one verified dictionary input for both architectures
+    needs: source-contract-tests
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+      EXPECTED_VERSION: ${{ inputs.release_version }}
+      EXPECTED_SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout exact source without write credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.sha }}
+
+      - name: Validate source before generating dictionaries
+        shell: pwsh
+        run: |
+          python tools/release/verify_source_contract.py `
+            --version $env:EXPECTED_VERSION `
+            --expected-sha $env:EXPECTED_SOURCE_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Source contract verification failed.' }
+
+      - name: Generate daily dictionary once on x64 Windows
+        shell: pwsh
+        run: |
+          ./tools/dictionary/prepare_daily_dictionary.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Dictionary preparation failed.' }
+
+      - name: Record generated dictionary bytes and source modifications
+        shell: pwsh
+        run: |
+          python tools/release/capture_dictionary_provenance.py `
+            --repo . `
+            --output "$env:RUNNER_TEMP/dictionary-provenance.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Dictionary evidence capture failed.' }
+
+      # No cache, only source-derived products from the SAME workflow run.
+      - name: Upload dictionary build inputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mozkey-release-dictionary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            src/data/dictionary_koyasi/generated/**
+            dist/dictionary/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload dictionary provenance separately
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mozkey-release-dictionary-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dictionary-provenance.json
+          if-no-files-found: error
+          retention-days: 30
+
+  unsigned-candidate:
+    name: Build and validate unsigned ${{ matrix.arch }} MSI (manual main only)
+    needs: [source-contract-tests, prepare-dictionary]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+            host_arch: AMD64
+          - arch: arm64
+            runner: windows-11-arm
+            host_arch: ARM64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+      TARGET_ARCH: ${{ matrix.arch }}
+      EXPECTED_HOST_ARCH: ${{ matrix.host_arch }}
+      EXPECTED_VERSION: ${{ inputs.release_version }}
+      EXPECTED_SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout exact source without write credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.sha }}
+
+      - name: Validate runner, Git SHA, version, and installer source contract
+        shell: pwsh
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -cne $env:EXPECTED_HOST_ARCH) {
+            throw "Unexpected runner architecture: $env:PROCESSOR_ARCHITECTURE; expected $env:EXPECTED_HOST_ARCH"
+          }
+          python tools/release/verify_source_contract.py `
+            --version $env:EXPECTED_VERSION `
+            --expected-sha $env:EXPECTED_SOURCE_SHA `
+            --output "$env:RUNNER_TEMP/source-contract.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Source contract verification failed.' }
+
+      - name: Verify pinned Windows Zenz runtimes and model
+        shell: pwsh
+        run: |
+          python tools/zenz_runtime/runtime_lock.py check
+          if ($LASTEXITCODE -ne 0) { throw 'Zenz runtime lock verification failed.' }
+
+      - name: Download exact dictionary inputs from this workflow run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mozkey-release-dictionary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .
+
+      - name: Download provenance of the same dictionary inputs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mozkey-release-dictionary-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dictionary-evidence
+
+      - name: Reject missing or changed dictionary input files
+        shell: pwsh
+        run: |
+          python tools/release/capture_dictionary_provenance.py `
+            --repo . `
+            --verify-against "$env:RUNNER_TEMP/dictionary-evidence/dictionary-provenance.json" `
+            --output "$env:RUNNER_TEMP/dictionary-input-verification.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Dictionary input integrity verification failed.' }
+
+      # No actions/cache. update_deps verifies pinned archive checksums.
+      - name: Download and verify pinned build dependencies
+        shell: pwsh
+        working-directory: src
+        run: |
+          python build_tools/update_deps.py
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned dependency retrieval failed.' }
+
+      - name: Build Qt for release target architecture
+        shell: pwsh
+        working-directory: src
+        run: |
+          $qtArgs = @('build_tools/build_qt.py', '--release', '--confirm_license')
+          if ($env:TARGET_ARCH -eq 'arm64') { $qtArgs += '--target_arch=arm64' }
+          python @qtArgs
+          if ($LASTEXITCODE -ne 0) { throw 'Qt release build failed.' }
+
+      - name: Free temporary Qt source space
+        shell: pwsh
+        run: |
+          $qtSrc = 'src/third_party/qt_src'
+          if (Test-Path -LiteralPath $qtSrc -PathType Container) {
+            Remove-Item -LiteralPath $qtSrc -Recurse -Force -ErrorAction Stop
+          }
+
+      - name: Stage CRT required by existing WiX build
+        shell: pwsh
+        run: ./tools/release/Prepare-WindowsCrt.ps1
+
+      - name: Build unsigned native Windows MSI
+        shell: pwsh
+        working-directory: src
+        env:
+          ANDROID_NDK_HOME: ''
+        run: |
+          if ($env:TARGET_ARCH -eq 'arm64') {
+            # Mirror the known-good native ARM64 command in windows.yaml.
+            bazelisk build package --config release_build --verbose_failures
+          } else {
+            bazelisk build --config oss_windows --config release_build package --verbose_failures
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Windows $env:TARGET_ARCH MSI build failed." }
+
+      - name: Validate release security source and compiled imports
+        shell: pwsh
+        run: |
+          python tools/check_no_network_symbols.py
+          if ($LASTEXITCODE -ne 0) { throw 'Prohibited source network symbols found.' }
+          python tools/check_no_network_imports.py --root src/bazel-bin
+          if ($LASTEXITCODE -ne 0) { throw 'Prohibited binary imports found.' }
+          python tools/check_no_network_strings.py --root src/bazel-bin
+          if ($LASTEXITCODE -ne 0) { throw 'Prohibited binary strings found.' }
+
+      - name: Run offline configuration regression tests
+        shell: pwsh
+        working-directory: src
+        run: |
+          if ($env:TARGET_ARCH -eq 'arm64') {
+            bazelisk test --config release_build `
+              --test_output=errors `
+              //config:stats_config_util_test //config:config_handler_test
+          } else {
+            bazelisk test --config oss_windows --config release_build `
+              --test_output=errors `
+              //config:stats_config_util_test //config:config_handler_test
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Offline configuration regression tests failed.' }
+
+      - name: Verify MSI identity, architecture, Zenz hashes and stage candidate
+        shell: pwsh
+        run: |
+          ./tools/release/Verify-WindowsMsiCandidate.ps1 `
+            -Repo $env:GITHUB_WORKSPACE `
+            -SourceMsi "$env:GITHUB_WORKSPACE/src/bazel-bin/win32/installer/Mozc64.msi" `
+            -Architecture $env:TARGET_ARCH `
+            -ReleaseVersion $env:EXPECTED_VERSION `
+            -SourceSha $env:EXPECTED_SOURCE_SHA `
+            -OutputDirectory "$env:RUNNER_TEMP/release-unsigned" `
+            -EvidenceDirectory "$env:RUNNER_TEMP/release-evidence"
+
+      - name: Upload verified unsigned MSI candidate (not a public release)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mozkey-unsigned-${{ matrix.arch }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-unsigned/*.msi
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload architecture-specific verification evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mozkey-unsigned-${{ matrix.arch }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/source-contract.json
+            ${{ runner.temp }}/release-evidence/candidate-manifest.json
+            ${{ runner.temp }}/dictionary-input-verification.json
+          if-no-files-found: error
+          retention-days: 30
