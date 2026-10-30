@@ -96,7 +96,7 @@ class DictionaryPredictor : public PredictorInterface {
   // Given the results aggregated by aggregates, remove
   // miss-spelled results from the |results|.
   // we don't directly remove miss-spelled result but set
-  // result[i].type = NO_PREDICTION.
+  // result[i].removed = true.
   //
   // Here's the basic step of removal:
   // Case1:
@@ -133,6 +133,15 @@ class DictionaryPredictor : public PredictorInterface {
   // } else {
   //   do nothing.
   // }
+  //
+  // In mixed conversion (mobile):
+  // - Do not add candidates to |same_key_index| so that literal candidates
+  //   (e.g., "ビックバン" for "びっくばん", "ビッグカメラ" for "びっぐかめら")
+  //   remain selectable alongside corrected candidates.
+  // - If a candidate with the same value comes from typing correction (e.g.,
+  //   "びっぐばん" => "ビッグバン"), it is added to |same_value_index| so that
+  //   the redundant SPELLING_CORRECTION candidate is removed and typing
+  //   correction takes precedence without SPELLING_CORRECTION annotations.
   static void RemoveMissSpelledCandidates(const ConversionRequest& request,
                                           absl::Span<Result> results);
 

@@ -1792,5 +1792,108 @@ TEST_F(DictionaryPredictorTest, FilterNwpSuffixCandidates) {
   }
 }
 
+
+TEST_F(DictionaryPredictorTest,
+       MobileCorrectionDedupAndLiteralPreservation) {
+  request_test_util::FillMobileRequest(request_.get());
+
+  // The typing-corrected surface is identical to the spelling correction.
+  // Remove only the redundant spelling-correction result; keep the literal.
+  {
+    const ConversionRequest request =
+        CreateConversionRequest(ConversionRequest::PREDICTION, "びっくばん");
+    std::vector<Result> results = {
+        CreateResult4("びっくばん", "ビックバン", prediction::UNIGRAM,
+                      Token::NONE),
+        CreateResult4("びっくばん", "ビッグバン", prediction::UNIGRAM,
+                      Token::SPELLING_CORRECTION),
+        CreateResult4("びっぐばん", "ビッグバン",
+                      prediction::UNIGRAM | prediction::TYPING_CORRECTION,
+                      Token::NONE),
+    };
+    DictionaryPredictorTestPeer::RemoveMissSpelledCandidates(
+        request, absl::MakeSpan(results));
+    EXPECT_FALSE(results[0].removed);
+    EXPECT_TRUE(results[1].removed);
+    EXPECT_FALSE(results[2].removed);
+    EXPECT_TRUE(results[2].attributes & Attribute::TYPING_CORRECTION);
+  }
+
+  // A spelling correction not supplied by typing correction remains
+  // selectable alongside the literal result. Removed entries are ignored.
+  {
+    const ConversionRequest request =
+        CreateConversionRequest(ConversionRequest::PREDICTION, "びっぐかめら");
+    std::vector<Result> results = {
+        CreateResult4("びっぐかめら", "ビッグカメラ", prediction::UNIGRAM,
+                      Token::NONE),
+        CreateResult4("びっぐかめら", "ビックカメラ", prediction::UNIGRAM,
+                      Token::SPELLING_CORRECTION),
+        CreateResult4("びっくかめら", "ビックカメラ", prediction::UNIGRAM,
+                      Token::NONE),
+    };
+    results[2].removed = true;
+    DictionaryPredictorTestPeer::RemoveMissSpelledCandidates(
+        request, absl::MakeSpan(results));
+    EXPECT_FALSE(results[0].removed);
+    EXPECT_FALSE(results[1].removed);
+    EXPECT_TRUE(results[2].removed);
+  }
+
+  // "あぼがど" vs "アボカド" differs at character index 2 (zero-based).
+  // Before the differing character, suppress the spelling correction.
+  {
+    const ConversionRequest request =
+        CreateConversionRequest(ConversionRequest::PREDICTION, "あぼ");
+    std::vector<Result> results = {
+        CreateResult4("あぼがど", "アボカド", prediction::UNIGRAM,
+                      Token::SPELLING_CORRECTION),
+        CreateResult4("あぼがど", "アボガド", prediction::UNIGRAM,
+                      Token::NONE),
+    };
+    DictionaryPredictorTestPeer::RemoveMissSpelledCandidates(
+        request, absl::MakeSpan(results));
+    EXPECT_TRUE(results[0].removed);
+    EXPECT_FALSE(results[1].removed);
+  }
+
+  // Once the differing character is present, this helper alone keeps the
+  // correction; downstream prediction filters may still suppress it.
+  {
+    const ConversionRequest request =
+        CreateConversionRequest(ConversionRequest::PREDICTION, "あぼが");
+    std::vector<Result> results = {
+        CreateResult4("あぼがど", "アボカド", prediction::UNIGRAM,
+                      Token::SPELLING_CORRECTION),
+        CreateResult4("あぼがど", "アボガド", prediction::UNIGRAM,
+                      Token::NONE),
+    };
+    DictionaryPredictorTestPeer::RemoveMissSpelledCandidates(
+        request, absl::MakeSpan(results));
+    EXPECT_FALSE(results[0].removed);
+    EXPECT_FALSE(results[1].removed);
+  }
+}
+
+TEST_F(DictionaryPredictorTest, MixedPredictionFiltersEarlySpellingCorrection) {
+  auto data_and_predictor = std::make_unique<MockDataAndPredictor>();
+  const DictionaryPredictor& predictor = data_and_predictor->predictor();
+  request_test_util::FillMobileRequest(request_.get());
+  config_->set_use_typing_correction(false);
+  MockAggregator* aggregator = data_and_predictor->mutable_aggregator();
+  EXPECT_CALL(*aggregator, AggregateResultsForMixedConversion(_))
+      .WillOnce(Return(std::vector<Result>{
+          CreateResult5("あぼがど", "アボカド", 500, prediction::UNIGRAM,
+                        Token::SPELLING_CORRECTION),
+          CreateResult5("あぼがど", "アボガド", 500, prediction::UNIGRAM,
+                        Token::NONE),
+      }));
+  const ConversionRequest request =
+      CreateConversionRequest(ConversionRequest::PREDICTION, "あぼが");
+  const std::vector<Result> results = predictor.Predict(request);
+  EXPECT_FALSE(FindCandidateByValue(results, "アボカド"));
+  EXPECT_TRUE(FindCandidateByValue(results, "アボガド"));
+}
+
 }  // namespace
 }  // namespace mozc::prediction
