@@ -45,6 +45,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "absl/base/call_once.h"
 #include "absl/log/log.h"
@@ -396,6 +397,18 @@ bool WinUtil::GetProcessInitialNtPath(DWORD pid, std::wstring* nt_path) {
 #ifndef SPI_GETTHREADLOCALINPUTSETTINGS
 #define SPI_GETTHREADLOCALINPUTSETTINGS 0x104E
 #endif  // SPI_GETTHREADLOCALINPUTSETTINGS
+
+extern "C" NTSYSAPI NTSTATUS NTAPI RtlGetVersion(PRTL_OSVERSIONINFOW);
+
+std::pair<int, int> WinUtil::GetOSVersion() {
+  RTL_OSVERSIONINFOW rovi = {0};
+  rovi.dwOSVersionInfoSize = sizeof(rovi);
+  if (RtlGetVersion(&rovi) != 0) {
+    return std::make_pair(0, 0);
+  }
+  return std::make_pair(static_cast<int>(rovi.dwMajorVersion),
+                        static_cast<int>(rovi.dwBuildNumber));
+}
 
 bool WinUtil::IsPerUserInputSettingsEnabled() {
   BOOL is_thread_local = FALSE;
