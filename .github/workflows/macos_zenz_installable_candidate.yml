@@ -136,7 +136,23 @@ jobs:
           python3 - <<'PYCHK'
           import hashlib
           from pathlib import Path
+          import re
           import xml.etree.ElementTree as ET
+
+          # Read the checked-out release version; never trust dispatch labels.
+          source_version = Path('src/version.bzl').read_text(encoding='utf-8')
+          parts = []
+          for component in ('MAJOR', 'MINOR', 'PATCH'):
+              name = f'MOZKEY_RELEASE_VERSION_{component}'
+              found = re.findall(
+                  rf'(?m)^{name}[ \t]*=[ \t]*([0-9]+)[ \t]*$',
+                  source_version)
+              assert len(found) == 1, f'Invalid release version source: {name}'
+              parts.append(int(found[0]))
+          major, minor, patch = parts
+          assert 0 <= major <= 155 and 0 <= minor <= 99 and 0 <= patch <= 99, (
+              f'Invalid macOS installer release version: {parts}')
+          expected_version = f'{100 + major}.{minor}.{patch}'
 
           out = Path('installable-candidate')
           unpacked = out / 'arm64-verify' / 'expanded'
@@ -148,7 +164,7 @@ jobs:
           packaged = preinstall[0].read_bytes()
           assert source == packaged, 'Packaged preinstall differs from Bazel-generated preflight'
           text = packaged.decode('utf-8')
-          assert "_mozkey_target='100.7.7'" in text, 'Unexpected resolved Mozkey installer version'
+          assert f"_mozkey_target='{expected_version}'" in text, 'Unexpected resolved Mozkey installer version'
           assert "_mozkey_pkg_id='org.mozc.pkg.JapaneseInput'" in text, 'Unexpected receipt identity'
           assert '_mozkey_valid_pkg_version' in text, 'Release preflight checks missing'
           assert 'stage-1 PKG is NOT INSTALLABLE' not in text, 'Stage-1 guard unexpectedly packaged'
@@ -157,10 +173,15 @@ jobs:
           assert len(package_infos) == 1, f'Expected one component PackageInfo, got {package_infos}'
           root = ET.parse(package_infos[0]).getroot()
           assert root.attrib.get('identifier') == 'org.mozc.pkg.JapaneseInput', root.attrib
-          assert root.attrib.get('version') == '100.7.7', root.attrib
+          assert root.attrib.get('version') == expected_version, root.attrib
           sha = hashlib.sha256(packaged).hexdigest()
           report = out / 'PREINSTALL-AUDIT.txt'
-          report.write_text('PACKAGED_RELEASE_PREFLIGHT=PASS\nPACKAGE_RECEIPT_VERSION=100.7.7\nPREINSTALL_SOURCE_SHA256=' + sha + '\nPHYSICAL_INSTALL=NOT_PERFORMED\n', encoding='utf-8')
+          report.write_text(
+              'PACKAGED_RELEASE_PREFLIGHT=PASS\n'
+              f'PACKAGE_RECEIPT_VERSION={expected_version}\n'
+              f'PREINSTALL_SOURCE_SHA256={sha}\n'
+              'PHYSICAL_INSTALL=NOT_PERFORMED\n',
+              encoding='utf-8')
           print(report.read_text())
           PYCHK
 
