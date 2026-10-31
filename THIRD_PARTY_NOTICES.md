@@ -5,13 +5,12 @@ dictionary data.
 
 ## Bundled runtime and model notices
 
-Additional notices for bundled Zenz runtime and model files are maintained at:
+Platform-specific notices for bundled Zenz runtime and model files are maintained at:
 
-```text
-src/win32/installer/zenz_runtime/licenses/THIRD_PARTY_NOTICES.md
-```
+- Windows: `src/win32/installer/zenz_runtime/licenses/THIRD_PARTY_NOTICES.md`
+- macOS: `src/mac/installer/zenz_runtime/licenses/THIRD_PARTY_NOTICES.md`
 
-That file covers the bundled Zenz GGUF model, llama.cpp / ggml runtime
+These notices cover the bundled Zenz GGUF model, llama.cpp / ggml runtime
 components, and the local inference privacy note.
 
 ## Generated dictionary data

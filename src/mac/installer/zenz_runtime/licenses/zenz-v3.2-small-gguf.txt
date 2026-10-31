@@ -17,7 +17,7 @@ Source commit observed:
   c67e03e
 
 Notes:
-  Distributed without modification except for file placement, file naming, and packaging into the MSI installer.
+  Distributed without modification except for file placement, file naming, and packaging into the macOS PKG installer.
 
 Required license file:
   Apache-2.0.txt
