@@ -26,27 +26,27 @@ function Get-MsiMetadata([string]$FilePath) {
     $db = $installer.OpenDatabase($FilePath, 0)  # read-only
     $properties = @{}
     $view = $db.OpenView('SELECT `Property`, `Value` FROM `Property`')
-    $view.Execute()
+    $null = $view.Execute()
     while ($true) {
       $record = $view.Fetch()
       if ($null -eq $record) { break }
       $properties[[string]$record.StringData(1)] = [string]$record.StringData(2)
       [void][Runtime.InteropServices.Marshal]::ReleaseComObject($record)
     }
-    $view.Close(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($view); $view = $null
+    $null = $view.Close(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($view); $view = $null
     $files = New-Object 'System.Collections.Generic.List[string]'
     $view = $db.OpenView('SELECT `FileName` FROM `File`')
-    $view.Execute()
+    $null = $view.Execute()
     while ($true) {
       $record = $view.Fetch()
       if ($null -eq $record) { break }
       $files.Add((([string]$record.StringData(1) -split '\|')[-1]))
       [void][Runtime.InteropServices.Marshal]::ReleaseComObject($record)
     }
-    $view.Close(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($view); $view = $null
+    $null = $view.Close(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($view); $view = $null
     return [pscustomobject]@{ Properties=$properties; Files=@($files.ToArray()) }
   } finally {
-    if ($null -ne $view) { try { $view.Close() } catch {}; [void][Runtime.InteropServices.Marshal]::ReleaseComObject($view) }
+    if ($null -ne $view) { try { $null = $view.Close() } catch {}; [void][Runtime.InteropServices.Marshal]::ReleaseComObject($view) }
     if ($null -ne $db) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($db) }
     if ($null -ne $installer) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($installer) }
   }
@@ -99,8 +99,14 @@ $archSpecs = @{
 }
 $archContract = $archSpecs[$Architecture]
 Assert-Condition ($null -ne $archContract) "Unsupported architecture: $Architecture"
-$metadata = Get-MsiMetadata $SourceMsi
+$metadataResults = @(Get-MsiMetadata $SourceMsi)
+Assert-Condition ($metadataResults.Count -eq 1) "Expected exactly one MSI metadata result; got $($metadataResults.Count)"
+$metadata = $metadataResults[0]
+Assert-Condition ($metadata -is [pscustomobject]) 'Unexpected MSI metadata object type'
+Assert-Condition ($null -ne $metadata.PSObject.Properties['Properties']) 'MSI metadata lacks Properties member'
+Assert-Condition ($null -ne $metadata.PSObject.Properties['Files']) 'MSI metadata lacks Files member'
 $props = $metadata.Properties
+Assert-Condition ($props -is [System.Collections.IDictionary]) 'Unexpected MSI Properties type'
 foreach ($p in @('ProductName','ProductVersion','ProductCode','UpgradeCode','Manufacturer')) {
   Assert-Condition ($props.ContainsKey($p) -and -not [string]::IsNullOrEmpty($props[$p])) "Missing MSI Property: $p"
 }
