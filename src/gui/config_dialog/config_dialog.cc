@@ -329,6 +329,37 @@ ConfigDialog::ConfigDialog()
   prepare_scroll_area(inputAppearanceScrollArea,
                       inputAppearanceScrollAreaWidgetContents);
 
+  // Keep short dialog windows usable on every tab. The Advanced and
+  // Appearance pages already have scroll areas in the .ui file; the other
+  // pages must also scroll instead of compressing wrapped explanatory text.
+  // Reparent the existing page layout so generated widget pointers, signal
+  // connections, translations and tab ordering remain unchanged.
+  const auto make_scrollable_tab = [&prepare_scroll_area](
+                                       QWidget* tab, const char* object_name) {
+    QLayout* contents_layout = tab->layout();
+    CHECK(contents_layout != nullptr);
+    auto* contents = new QWidget;
+    contents->setLayout(contents_layout);
+    contents_layout->setSizeConstraint(QLayout::SetMinAndMaxSize);
+
+    auto* area = new QScrollArea(tab);
+    area->setObjectName(QString::fromLatin1(object_name));
+    area->setWidgetResizable(true);
+    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    area->setWidget(contents);
+    prepare_scroll_area(area, contents);
+
+    auto* outer_layout = new QVBoxLayout(tab);
+    outer_layout->setContentsMargins(0, 0, 0, 0);
+    outer_layout->setSpacing(0);
+    outer_layout->addWidget(area);
+  };
+  make_scrollable_tab(basicTab, "basicScrollArea");
+  make_scrollable_tab(dictionaryTab, "dictionaryScrollArea");
+  make_scrollable_tab(suggestionsTab, "suggestionsScrollArea");
+  make_scrollable_tab(privacyTab, "privacyScrollArea");
+  make_scrollable_tab(miscTab, "miscScrollArea");
+
   // Move the existing TSF preedit widgets without recreating them. The
   // existing signal connections, config fields, and translations are reused.
   inputSupportContentLayout->removeWidget(preeditDisplayColorGroupBox);
