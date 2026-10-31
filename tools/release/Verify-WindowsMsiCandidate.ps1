@@ -117,7 +117,7 @@ Assert-Condition ($props.UpgradeCode.Trim('{}') -ieq 'DD94B570-B5E2-4100-9D42-61
 Assert-Condition ([bool]($props.ProductCode -match '^\{?[A-Fa-f0-9]{8}-(?:[A-Fa-f0-9]{4}-){3}[A-Fa-f0-9]{12}\}?$')) 'Invalid ProductCode'
 Assert-Condition ($props.ProductCode -ine $props.UpgradeCode) 'ProductCode equals UpgradeCode'
 
-$mustContain = @('mozc_server.exe','mozc_tool.exe','mozc_renderer.exe','mozc_tip64.dll','mozc_zenz_scorer.exe','llama-server.exe','zenz-v3.2-small-Q5_K_M.gguf')
+$mustContain = @('mozc_server.exe','mozc_tool.exe','mozc_renderer.exe','mozc_tip64.dll','mozc_zenz_scorer.exe','llama-server.exe','zenz-v3.2-small-Q5_K_M.gguf','credits_en.html','DICTIONARY_NOTICES.md','SudachiDict-LEGAL.txt','THIRD_PARTY_NOTICES.md','Apache-2.0.txt','llama.cpp-MIT.txt','zenz-v3.2-small-gguf.txt')
 foreach ($name in $mustContain) {
   $n = @($metadata.Files | Where-Object { $_ -ieq $name }).Count
   Assert-Condition ($n -eq 1) "MSI File table expected one $name; found $n"
@@ -139,6 +139,22 @@ try {
   $llama = Find-UniqueExtracted $extract 'llama-server.exe'
   $model = Find-UniqueExtracted $extract 'zenz-v3.2-small-Q5_K_M.gguf'
   $scorer = Find-UniqueExtracted $extract 'mozc_zenz_scorer.exe'
+  $documentSources = @{
+    'DICTIONARY_NOTICES.md' = 'src\data\installer\DICTIONARY_NOTICES.md'
+    'SudachiDict-LEGAL.txt' = 'src\data\installer\SudachiDict-LEGAL.txt'
+    'THIRD_PARTY_NOTICES.md' = 'src\win32\installer\zenz_runtime\licenses\THIRD_PARTY_NOTICES.md'
+    'Apache-2.0.txt' = 'src\win32\installer\zenz_runtime\licenses\Apache-2.0.txt'
+    'llama.cpp-MIT.txt' = 'src\win32\installer\zenz_runtime\licenses\llama.cpp-MIT.txt'
+    'zenz-v3.2-small-gguf.txt' = 'src\win32\installer\zenz_runtime\licenses\zenz-v3.2-small-gguf.txt'
+  }
+  foreach ($name in $documentSources.Keys) {
+    $installedFile = Find-UniqueExtracted $extract $name
+    $sourceFile = Join-Path $Repo $documentSources[$name]
+    Assert-Condition (Test-Path -LiteralPath $sourceFile -PathType Leaf) "Missing source notice: $sourceFile"
+    $expectedHash = (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash
+    $null = Assert-Sha $installedFile $expectedHash
+  }
+  Write-Host 'MSI_DOCUMENT_LICENSE_IDENTITIES=PASS'
   $llamaHash = Assert-Sha $llama $archContract.locked.sha256
   $modelHash = Assert-Sha $model $lock.model.sha256
   Assert-Condition ((Get-PeMachine $llama) -eq $archContract.machine) "llama-server architecture does not match $Architecture"

@@ -171,6 +171,8 @@
       <ComponentRef Id="SysProcs" />
       <ComponentRef Id="PrelaunchProcesses" />
       <ComponentRef Id="CreditsEn" />
+      <ComponentRef Id="DictionaryNotices" />
+      <ComponentRef Id="SudachiDictLegal" />
 
       <ComponentRef Id="ZenzScorer" />
       <ComponentRef Id="ZenzLlamaServer" />
@@ -389,6 +391,12 @@
         <Directory Id="DocumentsDir" Name="documents">
           <Component Id="CreditsEn">
             <File Id="credits_en.html" Name="credits_en.html" DiskId="1" Checksum="yes" Vital="yes" Source="$(var.DocumentsDir)/credits_en.html" />
+          </Component>
+          <Component Id="DictionaryNotices">
+            <File Id="dictionary_notices_md" Name="DICTIONARY_NOTICES.md" DiskId="1" Checksum="yes" Vital="yes" KeyPath="yes" Source="$(var.DocumentsDir)/DICTIONARY_NOTICES.md" />
+          </Component>
+          <Component Id="SudachiDictLegal">
+            <File Id="sudachidict_legal_txt" Name="SudachiDict-LEGAL.txt" DiskId="1" Checksum="yes" Vital="yes" KeyPath="yes" Source="$(var.DocumentsDir)/SudachiDict-LEGAL.txt" />
           </Component>
         </Directory>
         <Directory Id="QtPlatformsPluginDir" Name="platforms">

@@ -280,6 +280,8 @@ required_payload=(
   "$guard"
   "$model"
   "$contract"
+  "$app/Contents/Resources/DICTIONARY_NOTICES.md"
+  "$app/Contents/Resources/SudachiDict-LEGAL.txt"
   "$license_dir/Apache-2.0.txt"
   "$license_dir/llama.cpp-MIT.txt"
   "$license_dir/THIRD_PARTY_NOTICES.md"
@@ -421,6 +423,14 @@ for license_name in \
   [[ "$(sha256_file "$source_license")" == "$(sha256_file "$payload_license")" ]] ||
     die "License/notice identity mismatch: $license_name"
 done
+
+for dictionary_notice in DICTIONARY_NOTICES.md SudachiDict-LEGAL.txt; do
+  source_notice="$src_root/data/installer/$dictionary_notice"
+  packaged_notice="$app/Contents/Resources/$dictionary_notice"
+  [[ "$(sha256_file "$source_notice")" == "$(sha256_file "$packaged_notice")" ]] ||
+    die "Dictionary license notice mismatch: $dictionary_notice"
+done
+echo "Dictionary notice identities = EXACT"
 
 echo "Model / license identity = EXACT"
 
