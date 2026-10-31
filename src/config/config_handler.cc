@@ -300,7 +300,7 @@ void ApplyMozkeyProductDefaults(Config* config) {
     config->set_use_zenz_live_correction_right_context(true);
   }
   if (!config->has_use_realtime_conversion()) {
-    config->set_use_realtime_conversion(false);
+    config->set_use_realtime_conversion(true);
   }
 
 #ifdef _WIN32

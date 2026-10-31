@@ -501,9 +501,7 @@ message Config {
   // you haven't typed before.
   optional bool use_dictionary_suggest = 101 [default = true];
 
-  // Use realtime conversion feature. Mozkey disables this by default in
-  // ConfigHandler because normal live conversion already provides inline
-  // conversion results.
+  // Include realtime conversion candidates in suggestions.
   optional bool use_realtime_conversion = 102 [default = true];
 
   // Size of suggestions.
@@ -620,7 +618,7 @@ message Config {
   optional string candidate_ruby_font_name = 134 [default = ""];
 
   // Show ruby window during live conversion on Windows.
-  optional bool show_live_conversion_ruby_window = 135 [default = true];
+  optional bool show_live_conversion_ruby_window = 135 [default = false];
 
 
   enum RendererWindowColorTheme {

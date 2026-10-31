@@ -33,14 +33,13 @@ inline ConversionDisplayStatus ResolveConversionDisplayStatus(
   return ConversionDisplayStatus::kReading;
 }
 
-// A passive live-conversion suggestion is a companion to the composition,
-// not an actively selected candidate list. Keep the status visible in that
-// situation, just as the ruby window remains visible. Suppress it while the
-// user is navigating a focused suggestion, conversion, or prediction list.
+// Unfocused suggestions are companions to ongoing composition, whether or
+// not live conversion has started. Hide only when navigating a focused
+// suggestion, conversion, or prediction list.
 inline bool ShouldHideConversionStatusForCandidate(
     const commands::Output& output, bool candidate_window_visible) {
   if (!candidate_window_visible) return false;
-  if (output.live_conversion() && output.has_candidate_window()) {
+  if (output.has_candidate_window()) {
     const auto& candidate = output.candidate_window();
     if (candidate.has_category() &&
         candidate.category() == commands::SUGGESTION &&

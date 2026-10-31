@@ -51,7 +51,13 @@ TEST(ConversionStatusIndicatorTest, NormalSuggestionsAndConversionHideStatus) {
   auto* candidates = out.mutable_candidate_window();
   candidates->set_category(commands::SUGGESTION);
   candidates->add_candidate()->set_value("candidate");
+  out.set_pre_live_conversion_reading(true);
+  EXPECT_EQ(ResolveConversionDisplayStatus(out), ConversionDisplayStatus::kReading);
+  // An unfocused normal suggestion must not erase the reading indicator.
+  EXPECT_FALSE(ShouldHideConversionStatusForCandidate(out, true));
+  candidates->set_focused_index(0);
   EXPECT_TRUE(ShouldHideConversionStatusForCandidate(out, true));
+  candidates->clear_focused_index();
   out.set_live_conversion(true);
   candidates->set_category(commands::CONVERSION);
   EXPECT_TRUE(ShouldHideConversionStatusForCandidate(out, true));
