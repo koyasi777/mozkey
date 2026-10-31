@@ -47,6 +47,8 @@ namespace renderer {
 namespace win32 {
 
 // This class is the controller of the candidate windows.
+class ConversionStatusWindow;
+
 class WindowManager {
  public:
   WindowManager();
@@ -76,6 +78,7 @@ class WindowManager {
   std::unique_ptr<IndicatorWindow> indicator_window_;
   std::unique_ptr<InfolistWindow> infolist_window_;
   std::unique_ptr<RubyWindow> ruby_window_;
+  std::unique_ptr<ConversionStatusWindow> conversion_status_window_;
   std::unique_ptr<LayoutManager> layout_manager_;
   client::SendCommandInterface* send_command_interface_;
   POINT last_position_;

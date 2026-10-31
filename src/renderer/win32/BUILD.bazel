@@ -276,6 +276,26 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "conversion_status_window",
+    srcs = ["conversion_status_window.cc"],
+    hdrs = ["conversion_status_window.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":win32_dpi_util",
+        ":win32_renderer_util",
+        "//base:coordinates",
+        "//bazel/win32:gdi32",
+        "//bazel/win32:user32",
+        "//config:config_handler",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//protocol:renderer_cc_proto",
+        "//renderer:conversion_status_indicator",
+    ],
+)
+
+mozc_cc_library(
     name = "ruby_window",
     srcs = ["ruby_window.cc"],
     hdrs = ["ruby_window.h"],
@@ -336,6 +356,7 @@ mozc_cc_library(
     deps = [
         ":candidate_window",
         ":cascading_window_layout",
+        ":conversion_status_window",
         ":indicator_window",
         ":infolist_window",
         ":ruby_window",

@@ -228,6 +228,35 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "conversion_status_indicator",
+    hdrs = ["conversion_status_indicator.h"],
+    visibility = [
+        "//gui/config_dialog:__pkg__",
+        "//mac:__pkg__",
+        "//renderer:__subpackages__",
+        "//win32:__subpackages__",
+    ],
+    deps = [
+        "//base:coordinates",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+    ],
+)
+
+mozc_cc_test(
+    name = "conversion_status_indicator_test",
+    size = "small",
+    srcs = ["conversion_status_indicator_test.cc"],
+    deps = [
+        ":conversion_status_indicator",
+        "//base:coordinates",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "window_util",
     srcs = ["window_util.cc"],
     hdrs = ["window_util.h"],
@@ -467,6 +496,7 @@ mozc_objc_library(
         "mac/CandidateController.mm",
         "mac/CandidateView.mm",
         "mac/CandidateWindow.mm",
+        "mac/ConversionStatusWindow.mm",
         "mac/InfolistView.mm",
         "mac/InfolistWindow.mm",
         "mac/RendererBaseWindow.mm",
@@ -480,6 +510,7 @@ mozc_objc_library(
         "mac/CandidateController.h",
         "mac/CandidateView.h",
         "mac/CandidateWindow.h",
+        "mac/ConversionStatusWindow.h",
         "mac/InfolistView.h",
         "mac/InfolistWindow.h",
         "mac/RendererBaseWindow.h",
@@ -496,6 +527,7 @@ mozc_objc_library(
         "Foundation",
     ],
     deps = [
+        ":conversion_status_indicator",
         ":mac_candidate_interaction",
         ":mac_vertical_candidate_layout",
         ":mac_vertical_infolist_layout",
@@ -511,6 +543,7 @@ mozc_objc_library(
         "//base:util",
         "//base/mac:mac_util",
         "//client:client_interface",
+        "//config:config_handler",
         "//mac:common",
         "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",

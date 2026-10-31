@@ -83,6 +83,10 @@ RendererBaseWindow::~RendererBaseWindow() {
   }
 }
 
+NSRect RendererBaseWindow::GetWindowFrame() const {
+  return window_ ? [window_ frame] : NSZeroRect;
+}
+
 Size RendererBaseWindow::GetWindowSize() const {
   if (!window_) {
     return Size(0, 0);

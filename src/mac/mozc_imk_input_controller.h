@@ -107,6 +107,8 @@
 
   /** True when the current config enables live conversion. */
   bool useLiveConversion_;
+  /** True when the current config enables the independent status overlay. */
+  bool useConversionStatusIndicator_;
   /** True when a Zenz context-length preflight is useful for this config. */
   bool useZenzContextAcquisition_;
   /** -1 uses Carbon; 0/1 are deterministic test overrides. */

@@ -125,6 +125,7 @@ macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://su
 - Windows / macOS 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、対応するキー設定では候補・文節移動も視覚方向に合わせて操作可能
 - Windows / macOS 版では、縦書き時の連鎖候補ウィンドウを現在候補から本文の外側へ展開するよう配置し、必要に応じて反対側へフォールバック
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
+- Windows / macOS 版に、未確定文字の近くで「入力中 / Mozc / Zenz処理中 / Zenz適用済み」を示す変換状態インジケータを追加。ルビとは独立して表示でき、位置・状態別配色・形状・フォント・サイズ・影を設定可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能。「入力中の文字」「変換中の文節」「Zenz 補正中の文字」を個別に設定でき、「Zenz 補正中の文字」の下線は新規・未設定プロファイルで既定 ON、既定色は `#C4DC6C`
 - Windows 版のローマ字入力で、変換規則の途中にある末尾の未確定ローマ字だけを薄く表示する opt-in 機能を追加。既定は OFF で、薄さは 0～100%（既定 85%）の範囲で調整可能。100% は背景色と同じになり不可視
 - Windows 版の IME 切り替えインジケータは、設定画面から「システムテーマに合わせる / ダーク / ライト / カスタム」を選択可能。カスタムでは入力モード別の配色とサイズ・角丸・枠線・影を調整でき、画面端付近では表示位置を自動調整
@@ -725,6 +726,25 @@ Windows 版のルビ表示では、左右の余白、上下の余白、入力文
 
 ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。
 
+### 変換状態インジケータ（Windows / macOS）
+
+未確定文字の近くに、現在の変換処理の状態を示す小さなインジケータを表示できます。ライブ変換のルビ表示や、IME の有効・無効を示す「IME 切り替えインジケータ」とは**別の機能**です。設定画面の「入力・表示」内にある「変換状態インジケータ」から変更できます。新規・未設定のプロファイルでは既定で表示 ON ですが、明示的に保存済みの OFF 設定は維持します。ルビ表示を OFF にしても、インジケータ自体は利用できます。
+
+| 表示状態 | 意味 |
+| --- | --- |
+| `入力中` | 未確定文字を入力中で、まだ Mozc / Zenz のライブ変換結果が表示されていない |
+| `Mozc` | Mozc のライブ変換結果を表示中 |
+| `Zenz処理中` | Zenz の非同期補正を処理中 |
+| `Zenz適用済み` | Zenz の補正結果を表示に採用済み |
+
+これは**現在の表示・処理状態**であり、未確定文字列の各文字が Mozc / Zenz のどちらに由来するかを示すものではありません。特に「Zenz処理中」は、表示中の文字列すべてが Zenz で生成済みであることを意味しません。
+
+設定画面では、カプセル / 円形 / 角丸四角形の形状、名称 / 記号 / 色のみのラベル、状態別の色、文字色・枠線色、フォント、サイズ、透明度、角丸、枠線、影、表示位置、間隔と水平・垂直方向の補正を調整できます。「標準 / ミニマル / 詳細」プリセットの適用にも対応し、変更内容が既存のプリセットと一致しなければ「カスタム」として表示します。プレビューは4状態を同時に表示し、インジケータの表示設定が OFF でも利用できます。初期の状態色は Mozc `#586B85`、Zenz処理中 `#847438`、Zenz適用済み `#338D85`、入力中 `#747D8C` です。
+
+表示位置は「自動（重なりを回避）」「ルビの横」「ルビの上」「未確定文字の上」「未確定文字の下」から選択できます。横書きの「ルビの横」はルビと上下中央を揃え、縦書きでは同項目が**ルビの下**に相当し、左右中央を揃えます。一方、横書きの「ルビの上」は左端を、縦書きでルビ列の外側に置く配置は上端を基準にします。水平・垂直方向の補正は、こうした基準位置の決定後に適用されます。ルビがない場合も未確定文字の位置を基準に配置します。
+
+候補を明示的に選択・移動している間はインジケータを隠します。ただし、候補をまだ選択していない受動的なライブ変換サジェストの表示だけでは隠しません。未確定文字、ルビ、候補ウィンドウとの重なりを避け、指定した固定位置に安全に配置できない場合は、別方向へ無理に移動せず非表示にします。
+
 Windows 版の IME 切り替えインジケータは、設定画面から「システムテーマに合わせる / ダーク / ライト / カスタム」を選択できます。「システムテーマに合わせる」では Windows のライト / ダークテーマに追従し、「ダーク」「ライト」を明示した場合は Windows のテーマ変更に追従せず、その配色を維持します。「カスタム」では英数字・ひらがな・カタカナの背景色・枠線色・文字色・影色に加え、幅・高さ・角丸・文字サイズ・枠線幅・影のぼかし・濃さ・位置を調整できます。
 
 入力位置がモニターの作業領域端付近にある場合は、インジケータが画面外にはみ出さないよう表示位置を自動調整します。外観設定の「リセット」はテーマとカスタム値を既定値へ戻しますが、インジケータの表示 ON/OFF 設定は変更しません。
@@ -1075,6 +1095,7 @@ Main features added in this fork
 - Adds vertical-writing layouts for candidate, suggestion, infolist, and live-conversion ruby displays on Windows and macOS, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
 - On Windows and macOS, places cascading candidate windows outward from the focused vertical candidate, with fallback to the opposite side when necessary
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
+- Adds an independent conversion-status indicator for Windows/macOS near the composition, with Reading / Mozc / Zenz processing / Zenz applied states and configurable placement, colors, shape, font, size, and shadow
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog for input text, converting segments, and "Text being corrected by Zenz" separately; the underline for Zenz-corrected text defaults to enabled with `#C4DC6C` for new or otherwise unset profiles
 - Adds an opt-in Windows feature for Roman input that dims only the unresolved trailing romaji still forming an incomplete conversion-rule prefix; it defaults to OFF and the dimness can be adjusted from 0% to 100% (default 85%); 100% matches the background and becomes invisible
 - Allows choosing System theme, Dark, Light, or Custom for the Windows IME mode indicator, including per-mode colors and geometry/shadow customization, with automatic screen-edge repositioning
@@ -1933,6 +1954,54 @@ descriptions, footer labels, and infolist text keeps its existing weight.
 
 The ruby display shown during live conversion can be enabled or disabled from
 the config dialog.
+
+### Conversion status indicator (Windows / macOS)
+
+An independent indicator near the composition shows the current conversion
+**display/processing status**. It is separate from both the live-conversion
+ruby overlay and the IME on/off mode indicator. The "Conversion status
+indicator" section of Input/Appearance settings controls it. It defaults to
+ON for new/unset profiles while respecting an explicitly saved OFF setting,
+and remains available when the ruby overlay is disabled.
+
+| Status | Meaning |
+| --- | --- |
+| `Reading` (`入力中`) | Composing text without a displayed Mozc or Zenz live-conversion result |
+| `Mozc` | Showing a Mozc live-conversion result |
+| `Zenz processing` (`Zenz処理中`) | An asynchronous Zenz correction is in progress |
+| `Zenz applied` (`Zenz適用済み`) | A Zenz correction has been adopted for display |
+
+These statuses describe the visible operation, **not per-character provenance**.
+In particular, a pending Zenz request does not mean all currently visible
+characters have already been produced by Zenz.
+
+Appearance settings cover Capsule / Circle / Rounded rectangle, Name / Symbol /
+Color-only labels, separate status colors, text and border colors, font,
+minimum width, height, opacity, corner radius, border, shadow, spacing,
+position, and horizontal/vertical offsets. Standard, Minimal, and Detailed
+presets are available, with Custom detected when edited settings differ.
+The preview shows all four statuses together even while the indicator is
+disabled. The default colors are Mozc `#586B85`, Zenz processing `#847438`,
+Zenz applied `#338D85`, and Reading `#747D8C`.
+
+Position options are Automatic (avoid overlap), Beside ruby, Above ruby,
+Above text, and Below text. Beside ruby is centered vertically on the ruby in
+horizontal writing; in vertical writing it sits **below the ruby column** and
+is centered horizontally. Above ruby retains the leading-edge alignment:
+left-aligned in horizontal writing, top-aligned outside the ruby column in
+vertical writing. User offsets are applied after the reference alignment.
+Without a ruby window, placement uses the composition geometry.
+
+The indicator is suppressed while the user actively selects or navigates a
+candidate list, but an unfocused passive live-conversion suggestion does not
+suppress it. Placement avoids covering the preedit, ruby, or candidate window.
+If an explicitly chosen position cannot be used safely, the indicator is
+hidden rather than moved to an unrelated side.
+
+The Windows implementation, including its high-DPI drawing correction, has
+been exercised with real IME input. **The new indicator has not yet received
+native macOS build or runtime verification**; the shared placement logic and
+source-level integration do not constitute a macOS release validation.
 
 On Windows, the IME mode indicator can use System theme, Dark, Light, or
 Custom. System theme follows the Windows light/dark appearance; explicit Dark

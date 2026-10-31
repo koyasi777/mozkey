@@ -195,10 +195,13 @@ bool HasLiveConversionReading(const Output &output) {
          (output.live_conversion() || output.pre_live_conversion_reading());
 }
 
-bool ShouldDisplayRendererForOutput(const Output &output) {
+bool ShouldDisplayRendererForOutput(const Output &output,
+                                    bool show_conversion_status_indicator) {
+  const bool status_visible = show_conversion_status_indicator &&
+      output.has_preedit() && output.preedit().segment_size() > 0;
   return (output.has_candidate_window() &&
           output.candidate_window().candidate_size() > 0) ||
-         HasLiveConversionReading(output);
+         HasLiveConversionReading(output) || status_visible;
 }
 
 bool ShouldSuppressCandidateWindowForLiveConversion(
@@ -219,9 +222,12 @@ bool ShouldSuppressCandidateWindowForLiveConversion(
   return !candidate_window.has_focused_index();
 }
 
-bool ShouldRecalculateRendererPosition(const RendererCommand &command) {
+bool ShouldRecalculateRendererPosition(const RendererCommand &command,
+                                       bool show_conversion_status_indicator) {
   return !command.visible() || (command.has_output() &&
-                                HasLiveConversionReading(command.output()));
+      (HasLiveConversionReading(command.output()) ||
+       (show_conversion_status_indicator &&
+        command.output().has_preedit())));
 }
 
 int32_t GetRendererAnchorPosition(const Output &output) {
@@ -352,6 +358,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   liveConversionAnchorLeft_ = 0;
   hasLiveConversionAnchorLeft_ = false;
   useLiveConversion_ = false;
+  useConversionStatusIndicator_ = false;
   useZenzContextAcquisition_ = false;
   secureEventInputStateForTest_ = (server == nil) ? 0 : -1;
   // Unit tests inject mock renderer/client objects immediately after
@@ -505,6 +512,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   [keyCodeMap_ setInputMode:input_mode];
   yenSignCharacter_ = config.yen_sign_character();
   useLiveConversion_ = config.use_live_conversion();
+  useConversionStatusIndicator_ = config.show_conversion_status_indicator();
   // Avoid an extra TEST_SEND_KEY round trip for ordinary Mozc input.
   useZenzContextAcquisition_ =
       useLiveConversion_ && config.use_zenz_live_correction();
@@ -986,7 +994,8 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   }
 
   if (!rendererCommand_.has_output() ||
-      !ShouldDisplayRendererForOutput(rendererCommand_.output())) {
+      !ShouldDisplayRendererForOutput(rendererCommand_.output(),
+                                      useConversionStatusIndicator_)) {
     hasLiveConversionAnchorLeft_ = false;
     rendererCommand_.set_visible(false);
     mozcRenderer_->ExecCommand(rendererCommand_);
@@ -1005,7 +1014,8 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   //    cursor position correctly.  The candidate window moves
   //    frequently with those application, which irritates users.
   //  - Kotoeri does this too.
-  if (!ShouldRecalculateRendererPosition(rendererCommand_)) {
+  if (!ShouldRecalculateRendererPosition(rendererCommand_,
+                                         useConversionStatusIndicator_)) {
     // Call ExecCommand anyway to update other information like candidate words.
     mozcRenderer_->ExecCommand(rendererCommand_);
     return;

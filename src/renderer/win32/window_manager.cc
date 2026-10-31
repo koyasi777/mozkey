@@ -43,6 +43,7 @@
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
 #include "renderer/win32/cascading_window_layout.h"
+#include "renderer/win32/conversion_status_window.h"
 #include "renderer/win32/indicator_window.h"
 #include "renderer/win32/infolist_window.h"
 #include "renderer/win32/win32_dpi_util.h"
@@ -134,6 +135,7 @@ WindowManager::WindowManager()
       indicator_window_(std::make_unique<IndicatorWindow>()),
       infolist_window_(std::make_unique<InfolistWindow>()),
       ruby_window_(std::make_unique<RubyWindow>()),
+      conversion_status_window_(std::make_unique<ConversionStatusWindow>()),
       layout_manager_(std::make_unique<LayoutManager>()),
       send_command_interface_(nullptr),
       last_position_(kInvalidMousePosition),
@@ -166,6 +168,7 @@ void WindowManager::Initialize(HWND owner_window,
   infolist_window_->Create(owner_window);
   infolist_window_->ShowWindow(SW_HIDE);
   ruby_window_->Initialize(owner_window);
+  conversion_status_window_->Initialize(owner_window);
 }
 
 void WindowManager::AsyncHideAllWindows() {
@@ -175,6 +178,7 @@ void WindowManager::AsyncHideAllWindows() {
   main_window_->ShowWindowAsync(SW_HIDE);
   infolist_window_->ShowWindowAsync(SW_HIDE);
   ruby_window_->Hide();
+  conversion_status_window_->Hide();
 }
 
 void WindowManager::AsyncQuitAllWindows() {
@@ -184,6 +188,7 @@ void WindowManager::AsyncQuitAllWindows() {
   main_window_->PostMessage(WM_CLOSE, 0, 0);
   infolist_window_->PostMessage(WM_CLOSE, 0, 0);
   ruby_window_->Destroy();
+  conversion_status_window_->Destroy();
 }
 
 void WindowManager::DestroyAllWindows() {
@@ -200,6 +205,7 @@ void WindowManager::DestroyAllWindows() {
     infolist_window_->DestroyWindow();
   }
   ruby_window_->Destroy();
+  conversion_status_window_->Destroy();
 }
 
 void WindowManager::HideAllWindows() {
@@ -210,6 +216,7 @@ void WindowManager::HideAllWindows() {
   indicator_window_->Hide();
   infolist_window_->DelayHide(0);
   ruby_window_->Hide();
+  conversion_status_window_->Hide();
 }
 
 // TODO(yukawa): Refactor this method by making a new method in LayoutManager
@@ -227,6 +234,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     indicator_window_->Hide();
     infolist_window_->DelayHide(0);
     ruby_window_->Hide();
+    conversion_status_window_->Hide();
     return;
   }
 
@@ -258,6 +266,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   if (!should_defer_ruby_update) {
     ruby_window_->OnUpdate(command, *layout_manager_);
   }
+  // Independent from RubyWindow: a user may disable ruby while keeping this.
+  conversion_status_window_->OnUpdate(
+      command, *layout_manager_, ruby_window_->m_hWnd,
+      main_window_->m_hWnd);
 
   if (output.live_conversion() && !is_live_conversion_passive_suggestion) {
     // Session output is authoritative.  If this output does not carry a
@@ -269,6 +281,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     has_last_live_conversion_passive_suggestion_rect_ = false;
     indicator_window_->Hide();
     infolist_window_->DelayHide(0);
+    // The previous candidate may have been visible when the early status
+    // update ran. Re-evaluate after hiding that candidate.
+    conversion_status_window_->OnUpdate(
+        command, *layout_manager_, ruby_window_->m_hWnd, nullptr);
     return;
   }
   if (!output.live_conversion()) {
@@ -325,6 +341,8 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     cascading_window_->HideWithEffects();
     main_window_->HideWithEffects();
     infolist_window_->DelayHide(0);
+    conversion_status_window_->OnUpdate(
+        command, *layout_manager_, ruby_window_->m_hWnd, nullptr);
     return;
   }
 
@@ -336,6 +354,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     if (should_defer_ruby_update) {
       ruby_window_->OnUpdate(command, *layout_manager_);
     }
+    // A stale candidate may have hidden the badge at the start of the
+    // update. Re-evaluate after hiding that candidate in this branch.
+    conversion_status_window_->OnUpdate(
+        command, *layout_manager_, ruby_window_->m_hWnd, nullptr);
     return;
   }
 
@@ -345,6 +367,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     cascading_window_->HideWithEffects();
     main_window_->HideWithEffects();
     infolist_window_->DelayHide(0);
+    // A stale candidate may have hidden the badge at the start of the
+    // update. Re-evaluate after hiding that candidate in this branch.
+    conversion_status_window_->OnUpdate(
+        command, *layout_manager_, ruby_window_->m_hWnd, nullptr);
     return;
   }
 
@@ -353,6 +379,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     cascading_window_->HideWithEffects();
     main_window_->HideWithEffects();
     infolist_window_->DelayHide(0);
+    // A stale candidate may have hidden the badge at the start of the
+    // update. Re-evaluate after hiding that candidate in this branch.
+    conversion_status_window_->OnUpdate(
+        command, *layout_manager_, ruby_window_->m_hWnd, nullptr);
     return;
   }
 
@@ -370,6 +400,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     if (should_defer_ruby_update) {
       ruby_window_->OnUpdate(command, *layout_manager_);
     }
+    // A stale candidate may have hidden the badge at the start of the
+    // update. Re-evaluate after hiding that candidate in this branch.
+    conversion_status_window_->OnUpdate(
+        command, *layout_manager_, ruby_window_->m_hWnd, nullptr);
     return;
   }
 
@@ -499,6 +533,9 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   // main_window_ is the lowest visible renderer body before any secondary
   // shadow is presented.
   ruby_window_->RaiseToTopmostWithoutActivation();
+  conversion_status_window_->OnUpdate(
+      command, *layout_manager_, ruby_window_->m_hWnd, main_window_->m_hWnd);
+  conversion_status_window_->RaiseWithoutActivation();
 
   if (is_live_conversion_passive_suggestion) {
     last_live_conversion_passive_suggestion_visible_ = true;
