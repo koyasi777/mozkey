@@ -1,6 +1,8 @@
 #include "renderer/win32/conversion_status_window.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <string>
 
 #include "config/config_handler.h"
@@ -11,6 +13,41 @@ namespace mozc::renderer::win32 {
 namespace {
 COLORREF RGBColor(uint32_t rgb) {
   return RGB((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+}
+
+// Paint the full-label status dot with analytic pixel coverage. GDI Ellipse
+// has binary edge coverage; the dot is composited into the same opaque DIB
+// before that DIB receives the antialiased window-edge alpha mask.
+void PaintAntialiasedStatusDot(uint32_t* pixels, int width, int height,
+                               int center_x, int center_y, int radius,
+                               COLORREF color) {
+  if (pixels == nullptr || width <= 0 || height <= 0 || radius <= 0) {
+    return;
+  }
+  const int x0 = std::max(0, center_x - radius - 1);
+  const int x1 = std::min(width, center_x + radius + 2);
+  const int y0 = std::max(0, center_y - radius - 1);
+  const int y1 = std::min(height, center_y + radius + 2);
+  for (int y = y0; y < y1; ++y) {
+    for (int x = x0; x < x1; ++x) {
+      const double distance = std::hypot(
+          static_cast<double>(x) + 0.5 - center_x,
+          static_cast<double>(y) + 0.5 - center_y);
+      const double coverage = std::clamp(radius + 0.5 - distance, 0.0, 1.0);
+      if (coverage <= 0.0) {
+        continue;
+      }
+      uint32_t& pixel = pixels[static_cast<size_t>(y) * width + x];
+      const auto blend = [coverage](uint32_t from, uint32_t to) -> uint32_t {
+        return static_cast<uint32_t>(std::lround(
+            from * (1.0 - coverage) + to * coverage));
+      };
+      const uint32_t r = blend((pixel >> 16) & 0xff, GetRValue(color));
+      const uint32_t g = blend((pixel >> 8) & 0xff, GetGValue(color));
+      const uint32_t b = blend(pixel & 0xff, GetBValue(color));
+      pixel = (pixel & 0xff000000u) | (r << 16) | (g << 8) | b;
+    }
+  }
 }
 
 // A badge's clip region, painted outline, and shadow must use the same
@@ -297,25 +334,27 @@ void ConversionStatusWindow::OnUpdate(
   style_.CopyFrom(next_style);
   vertical_ = vertical;
   const int radius = CornerRadiusPx(style_, dpi_, width_, height_);
-  if (repaint || width_ != previous_width || height_ != previous_height ||
-      vertical != previous_vertical || dpi_changed) {
-    const int diameter = std::max(1, radius * 2);
-    HRGN region = CreateRoundRectRgn(0, 0, width_, height_,
-                                     diameter, diameter);
-    if (region) SetWindowRgn(region, FALSE);  // Windows owns the region.
-  }
-  SetLayeredWindowAttributes(m_hWnd, 0, static_cast<BYTE>(
-      std::clamp(style_.opacity_percent(), 20u, 100u) * 255 / 100), LWA_ALPHA);
+  // Do not use a binary HRGN or SetLayeredWindowAttributes on this surface:
+  // per-pixel alpha is provided by UpdateLayeredWindow below.
   const bool dimensions_changed = width_ != previous_width ||
                                   height_ != previous_height;
   const bool position_changed = !last_rect_valid_ ||
       rect.Left() != last_rect_.left || rect.Top() != last_rect_.top;
   if (position_changed || dimensions_changed || !was_visible) {
+    // Render the fully antialiased surface before making the window visible.
     SetWindowPos(HWND_TOPMOST, rect.Left(), rect.Top(), width_, height_,
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                 SWP_NOACTIVATE);
   }
   if (repaint || dimensions_changed || vertical != previous_vertical ||
-      dpi_changed || !was_visible) InvalidateRect(nullptr, TRUE);
+      dpi_changed || !was_visible) {
+    if (!RenderAndPresent()) {
+      Hide();
+      return;
+    }
+  }
+  if (!was_visible) {
+    ShowWindow(SW_SHOWNOACTIVATE);
+  }
   last_rect_ = RECT{rect.Left(), rect.Top(), rect.Right(), rect.Bottom()};
   last_rect_valid_ = true;
   RECT actual{};
@@ -335,27 +374,22 @@ LRESULT ConversionStatusWindow::OnEraseBkgnd(UINT, WPARAM, LPARAM, BOOL&) {
   return 1;
 }
 LRESULT ConversionStatusWindow::OnPaint(UINT, WPARAM, LPARAM, BOOL&) {
+  // The layered bitmap is presented synchronously from OnUpdate. Validate any
+  // redundant WM_PAINT without drawing a second, opaque surface.
   PAINTSTRUCT ps{};
-  HDC dc = BeginPaint(&ps);
+  BeginPaint(&ps);
+  EndPaint(&ps);
+  return 0;
+}
+
+void ConversionStatusWindow::DoPaint(HDC dc) {
   RECT client{};
   GetClientRect(&client);
+  // First draw opaque content. ApplyRoundedRectAlphaAndBorder will add
+  // antialiased silhouette and border in a separate, premultiplied pass.
   HBRUSH brush = CreateSolidBrush(
       RGBColor(ConversionStatusColor(status_, style_)));
-  const int radius = CornerRadiusPx(style_, dpi_, width_, height_);
-  const int stroke = BorderWidthPx(style_, dpi_);
-  HPEN pen = CreatePen(stroke ? PS_SOLID : PS_NULL,
-                      std::max(1, stroke), RGBColor(style_.border_color()));
-  // Fill all pixels permitted by the window region before drawing the
-  // rounded shape. The region and GDI RoundRect otherwise disagree on a
-  // few boundary pixels, exposing the window's default (often white) fill.
   FillRect(dc, &client, brush);
-  HGDIOBJ old_brush = SelectObject(dc, brush);
-  HGDIOBJ old_pen = SelectObject(dc, pen);
-  RoundRect(dc, 0, 0, width_, height_,
-            std::max(1, radius * 2), std::max(1, radius * 2));
-  SelectObject(dc, old_pen);
-  SelectObject(dc, old_brush);
-  DeleteObject(pen);
   DeleteObject(brush);
   // Subtle top-edge highlight; no extra bitmap allocation or alpha surface.
   if (!vertical_ && style_.border_width() == 0 && height_ >= 18 &&
@@ -394,18 +428,7 @@ LRESULT ConversionStatusWindow::OnPaint(UINT, WPARAM, LPARAM, BOOL&) {
       const int dot_gap = show_dot ? ::MulDiv(18, static_cast<int>(dpi_), 96) : 0;
       const int text_height = static_cast<int>(text.size()) * step;
       const int top = std::max(0, (height_ - text_height - dot_gap) / 2);
-      if (show_dot) {
-        const int dot_r = std::max(2, ::MulDiv(3, static_cast<int>(dpi_), 96));
-        const int dot_y = top + dot_gap / 2;
-        HBRUSH dot_brush = CreateSolidBrush(RGBColor(style_.text_color()));
-        HGDIOBJ saved_brush = SelectObject(dc, dot_brush);
-        HGDIOBJ saved_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-        Ellipse(dc, width_ / 2 - dot_r, dot_y - dot_r,
-                width_ / 2 + dot_r, dot_y + dot_r);
-        SelectObject(dc, saved_pen);
-        SelectObject(dc, saved_brush);
-        DeleteObject(dot_brush);
-      }
+      // The status dot is drawn with analytic pixel coverage after GdiFlush.
       for (size_t i = 0; i < text.size(); ++i) {
         const int y = top + dot_gap + static_cast<int>(i) * step;
         RECT glyph_rect{0, y, width_, y + step};
@@ -414,16 +437,6 @@ LRESULT ConversionStatusWindow::OnPaint(UINT, WPARAM, LPARAM, BOOL&) {
       }
     } else {
       if (show_dot) {
-        const int dot_x = ::MulDiv(12, static_cast<int>(dpi_), 96);
-        const int dot_r = std::max(2, ::MulDiv(3, static_cast<int>(dpi_), 96));
-        HBRUSH dot_brush = CreateSolidBrush(RGBColor(style_.text_color()));
-        HGDIOBJ saved_brush = SelectObject(dc, dot_brush);
-        HGDIOBJ saved_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-        Ellipse(dc, dot_x - dot_r, height_ / 2 - dot_r,
-                dot_x + dot_r, height_ / 2 + dot_r);
-        SelectObject(dc, saved_pen);
-        SelectObject(dc, saved_brush);
-        DeleteObject(dot_brush);
         label_rect.left += ::MulDiv(18, static_cast<int>(dpi_), 96);
         label_rect.right -= ::MulDiv(4, static_cast<int>(dpi_), 96);
       }
@@ -433,7 +446,72 @@ LRESULT ConversionStatusWindow::OnPaint(UINT, WPARAM, LPARAM, BOOL&) {
     SelectObject(dc, previous_font);
     DeleteObject(font);
   }
-  EndPaint(&ps);
-  return 0;
+}
+
+bool ConversionStatusWindow::RenderAndPresent() {
+  if (!IsWindow() || width_ <= 0 || height_ <= 0) {
+    return false;
+  }
+  HDC screen_dc = ::GetDC(nullptr);
+  if (screen_dc == nullptr) {
+    return false;
+  }
+  HDC memory_dc = ::CreateCompatibleDC(screen_dc);
+  uint32_t* pixels = nullptr;
+  HBITMAP bitmap = CreateRendererLayeredWindowBitmap(
+      screen_dc, width_, height_, &pixels);
+  ::ReleaseDC(nullptr, screen_dc);
+  if (memory_dc == nullptr || bitmap == nullptr || pixels == nullptr) {
+    if (bitmap != nullptr) ::DeleteObject(bitmap);
+    if (memory_dc != nullptr) ::DeleteDC(memory_dc);
+    return false;
+  }
+  HGDIOBJ previous_bitmap = ::SelectObject(memory_dc, bitmap);
+  if (previous_bitmap == nullptr || previous_bitmap == HGDI_ERROR) {
+    ::DeleteObject(bitmap);
+    ::DeleteDC(memory_dc);
+    return false;
+  }
+
+  std::fill_n(pixels, static_cast<size_t>(width_) * height_, 0u);
+  DoPaint(memory_dc);
+  // Read the DIB only after all queued GDI text and rectangle operations.
+  ::GdiFlush();
+
+  const auto label =
+      style_.shape() == config::Config::CONVERSION_STATUS_CIRCLE &&
+              style_.label() == config::Config::CONVERSION_STATUS_FULL_LABEL
+          ? config::Config::CONVERSION_STATUS_SYMBOL
+          : style_.label();
+  const std::wstring text = StatusText(status_, label);
+  if (!text.empty() && label == config::Config::CONVERSION_STATUS_FULL_LABEL &&
+      style_.shape() != config::Config::CONVERSION_STATUS_CIRCLE) {
+    const int dot_radius = std::max(2, ::MulDiv(3, static_cast<int>(dpi_), 96));
+    int dot_x = ::MulDiv(12, static_cast<int>(dpi_), 96);
+    int dot_y = height_ / 2;
+    if (vertical_) {
+      const int step = VerticalTextStep(dpi_, style_);
+      const int gap = ::MulDiv(18, static_cast<int>(dpi_), 96);
+      const int top = std::max(0, (height_ -
+          static_cast<int>(text.size()) * step - gap) / 2);
+      dot_x = width_ / 2;
+      dot_y = top + gap / 2;
+    }
+    PaintAntialiasedStatusDot(pixels, width_, height_, dot_x, dot_y,
+                              dot_radius, RGBColor(style_.text_color()));
+  }
+
+  const int radius = CornerRadiusPx(style_, dpi_, width_, height_);
+  const int stroke = BorderWidthPx(style_, dpi_);
+  ApplyRoundedRectAlphaAndBorder(pixels, width_, height_, radius, stroke,
+                                  RGBColor(style_.border_color()));
+  // UpdateLayeredWindow selects the bitmap in its own DC: deselect it here.
+  ::SelectObject(memory_dc, previous_bitmap);
+  const bool presented = PresentRendererLayeredWindowBitmap(
+      m_hWnd, bitmap, width_, height_,
+      RendererWindowOpacityToAlpha(style_.opacity_percent()));
+  ::DeleteObject(bitmap);
+  ::DeleteDC(memory_dc);
+  return presented;
 }
 }  // namespace mozc::renderer::win32
