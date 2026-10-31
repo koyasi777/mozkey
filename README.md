@@ -49,17 +49,17 @@ upstream Mozc との追従性および既存インストールとの互換性を
 ダウンロード / インストール
 --------------------------
 
-現在 [GitHub Releases](https://github.com/koyasi777/mozkey/releases) で公開しているビルド済みインストーラーは Windows 向けです。各リリースで実際に利用できるファイルは、その Release の Assets を確認してください。**macOS Universal PKG は開発・検証中で、まだ一般公開していません。**
+インストーラーは [GitHub Releases](https://github.com/koyasi777/mozkey/releases) の各リリースの **Assets** から入手してください。リリースによって対応 OS・アーキテクチャと配布ファイルが異なります。実際に掲載されているファイルを確認してください。
 
 - **Windows x64:** x64 向け MSI を使用してください。
 - **Windows ARM64:** ARM64 向け MSI が公開されているリリースでは、その MSI を使用してください。ARM64 版は Mozkey 本体と Zenz runtime をネイティブ構成で含みます。
-- **macOS:** Apple Silicon / Intel 対応の Universal PKG を開発・検証していますが、現時点では Releases から配布していません。
+- **macOS:** Apple Silicon（arm64）/ Intel（x86_64）対応の Universal PKG が Assets に掲載されている場合は、その PKG を使用してください。導入方法は [macOS のインストールと初期設定](#macos-のインストールと初期設定) を参照してください。
 - **Linux:** upstream Mozc は Linux に対応していますが、Mozkey 固有の機能は未検証で、インストーラーも公開していません。
 
 Windows の `universal` MSI は、製品全体を x64 / ARM64 の両方でネイティブ動作させるパッケージではありません。通常の利用では、対応するアーキテクチャ専用 MSI を優先してください。Zenz 同梱パッケージにはローカル推論 runtime と GGUF モデルが含まれるため、ファイルサイズが大きくなります。Windows 向け MSI にはローカル生成の `daily` 辞書が含まれる場合があります。出典とライセンスは [Third-party notices](THIRD_PARTY_NOTICES.md) を参照してください。
 
 > [!NOTE]
-> Mozkey は Google または google/mozc の公式配布物ではありません。現時点で公開中の Windows MSI は未署名で、OS によっては警告が表示されます。開発用 macOS PKG は Apple Developer ID 署名・公証済みの一般配布物ではありません。macOS の警告については [Apple の案内](https://support.apple.com/ja-jp/102445) を参照してください。
+> Mozkey は Google または google/mozc の公式配布物ではありません。現時点で公開中の Windows MSI は未署名で、OS によっては警告が表示されます。Apple Developer ID 署名・公証のない macOS PKG では、初回起動時に Gatekeeper の警告が表示されることがあります。信頼できる配布元とファイルを確認したうえで、下記の [macOS の個別許可手順](#macos-でセキュリティ警告が表示された場合) に従ってください。
 
 ### コード署名ポリシー（Code signing policy）
 
@@ -67,14 +67,37 @@ Windows の `universal` MSI は、製品全体を x64 / ARM64 の両方でネイ
 
 署名対象の予定、開発・承認の責任体制、プライバシー、およびリリースの検証方法については、[Code signing policy](CODE_SIGNING_POLICY.md)を参照してください。
 
-### macOS の初期設定（検証用PKG）
+### macOS のインストールと初期設定
 
-現在、一般向けの macOS PKG は公開していません。次の手順は、検証済みのインストール可能な開発用 PKG を導入した場合のものです。通常の OSS ビルドで作成される guarded PKG は、誤インストール防止のためインストールを拒否します。詳細は [macOS インストーラーの検証手順](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md) を参照してください。
+#### インストール
 
-1. PKG をインストールしたら、「システム設定」→「キーボード」→「テキスト入力」の「編集」を開きます。
-2. 「Hiragana (Mozkey)」（環境によっては「ひらがな（Mozkey）」）が登録されているか確認します。なければ「+」→「日本語」から追加します。
+1. [GitHub Releases](https://github.com/koyasi777/mozkey/releases) を開き、利用するリリースの **Assets** に macOS 用 Universal PKG があることを確認してダウンロードします。macOS 用 PKG がないリリースでは、macOS 向けインストーラーは配布されていません。
+2. Finder でダウンロードした `.pkg` ファイルを**ダブルクリック**します。インストーラーが開いた場合は、画面の案内に従ってインストールしてください。
+3. セキュリティ警告が表示されて開けない場合は、次の「macOS でセキュリティ警告が表示された場合」を確認してください。
+4. インストール中、パッケージに含まれるプログラムの実行許可を求められる場合があります。配布元を確認済みで、インストールを続ける場合は内容を確認して「許可」を選択します。
+
+既存の Mozkey を更新するときは、必要な設定やユーザー辞書をバックアップしてからインストールしてください。v0.7.7 から v1.0.0 への上書きアップグレードは、Apple Silicon 搭載 Mac（macOS 15.8.2）で動作確認済みです。
+
+#### macOS でセキュリティ警告が表示された場合
+
+Apple Developer ID 署名・公証のない PKG は、macOS の Gatekeeper によって初回起動をブロックされる場合があります。**信頼できる配布元から入手し、ファイルに問題がないことを確認できた場合に限り**、次の手順でその PKG を個別に許可してください。
+
+1. Finder で PKG をダブルクリックし、「Apple で悪質なソフトウェアかどうかを確認できない」などの警告が出た場合は、**「ゴミ箱に入れる」ではなく「完了」**をクリックして閉じます。
+2. Apple メニュー（）→ **「システム設定」→「プライバシーとセキュリティ」**を開き、下へスクロールします。
+3. ブロックされた PKG に関する説明の近くに表示される **「このまま開く」**をクリックします。
+4. 確認画面が表示されたら、内容を確認して **「開く」**などの続行操作を選びます。必要に応じて Mac のログインパスワードや Touch ID で認証してください。
+5. インストーラーが開いたら、通常のインストール手順に進みます。
+
+「このまま開く」は、対象ファイルを開こうとした後の一定時間だけ表示されます。見つからない場合は Finder で同じ PKG をもう一度開こうとしてから確認してください。一度許可した PKG は、次回以降のダブルクリックで同じ警告が出なくなることがあります。
+
+**Gatekeeper 全体を無効化する必要はありません。** 警告が「Mac が破損する」「マルウェアが検出された」などの内容である場合は、安易に回避せずインストールを中止してください。詳しくは [Apple の公式案内](https://support.apple.com/ja-jp/102445) を参照してください。
+
+#### 日本語入力を有効にする
+
+1. インストール後、**「システム設定」→「キーボード」→「テキスト入力」の「編集」**を開きます。
+2. **「Hiragana (Mozkey)」**（環境によっては「ひらがな（Mozkey）」）が登録されているか確認します。なければ「+」→「日本語」から追加します。
 3. メニューバーの入力メニューで Mozkey のひらがな入力ソースを選択します。
-4. 入力ソースが表示されない場合は、macOS からログアウトして再ログインし、もう一度確認してください。
+4. 入力ソースが表示されない場合は、**macOS からログアウトして再ログイン**し、もう一度確認してください。
 
 詳しくは [Apple の入力ソース設定ガイド](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) を参照してください。
 
@@ -895,17 +918,17 @@ For implementation details and settings, see the feature list and detailed expla
 Download / platform availability
 --------------------------------
 
-The [GitHub Releases](https://github.com/koyasi777/mozkey/releases) currently provide prebuilt Windows installers. Check each release's Assets for the packages actually available. **A public macOS Universal PKG is not yet available.**
+Download installers from the **Assets** section of the relevant [GitHub Release](https://github.com/koyasi777/mozkey/releases). Available operating systems, architectures, and packages depend on the release; check the assets actually listed.
 
 - **Windows x64:** Use the x64 MSI.
 - **Windows ARM64:** If an ARM64 MSI is published in a given release, use it for Windows on Arm. That package contains native ARM64 Mozkey and Zenz runtime components.
-- **macOS:** A Universal PKG for Apple Silicon and Intel Macs is under development and validation; it is not currently published as a Release asset.
+- **macOS:** If a Universal PKG is listed for a release, use it on an Apple Silicon (arm64) or Intel (x86_64) Mac. See [macOS installation and initial setup](#macos-installation-and-initial-setup).
 - **Linux:** Upstream Mozc supports Linux, but this fork's features have not been validated there and no Linux installer is distributed.
 
 The Windows `universal` MSI is **not** a fully dual-native x64/ARM64 package. Prefer the architecture-specific MSI. Zenz-enabled packages bundle a local inference runtime and GGUF model, so they are larger. Some Windows MSIs also include a generated `daily` dictionary. See [Third-party notices](THIRD_PARTY_NOTICES.md) for provenance and licenses.
 
 > [!NOTE]
-> Mozkey is not an official Google or google/mozc distribution. The currently published Windows MSIs are unsigned and may trigger operating-system warnings. Development macOS PKGs are not publicly distributed Developer ID-signed and notarized packages; see [Apple's guidance](https://support.apple.com/ja-jp/102445).
+> Mozkey is not an official Google or google/mozc distribution. The currently published Windows MSIs are unsigned and may trigger operating-system warnings. An unsigned, unnotarized macOS PKG may be blocked by Gatekeeper on first launch. Verify the download source and file before using the [per-package approval steps](#if-macos-blocks-the-installer).
 
 ### Code signing policy
 
@@ -913,15 +936,38 @@ Mozkey's currently published Windows MSI installers are **unsigned**. The projec
 
 See the [Code signing policy](CODE_SIGNING_POLICY.md) for the proposed signing scope, project responsibilities, privacy disclosures, and release verification process.
 
-macOS initial setup (development PKGs)
---------------------------------------
+macOS installation and initial setup
+------------------------------------
 
-No public macOS installer is currently available. These instructions apply only after installing an audited, explicitly installable development PKG. Ordinary guarded OSS builds refuse installation; see the [macOS installer test guide](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md).
+### Install the PKG
 
-1. After installing the PKG, open **System Settings → Keyboard → Text Input → Edit**.
+1. Open [GitHub Releases](https://github.com/koyasi777/mozkey/releases). Download the macOS Universal PKG from the **Assets** of a release that provides one. If no macOS PKG is listed, that release does not distribute a macOS installer.
+2. In Finder, **double-click** the downloaded `.pkg` file. If Installer opens, follow its instructions.
+3. If macOS blocks the PKG with a security warning, follow the steps below.
+4. During installation, macOS may ask permission to run programs included in the package. Review the prompt and, if you trust the package and wish to continue, choose **Allow**.
+
+Back up important settings and user-dictionary data before upgrading. An in-place upgrade from v0.7.7 to v1.0.0 was verified on an Apple Silicon Mac running macOS 15.8.2.
+
+### If macOS blocks the installer
+
+An unsigned, unnotarized PKG may be blocked by macOS Gatekeeper. **Only override the block if you have verified that the package comes from a trusted source and has not been tampered with.**
+
+1. In Finder, double-click the PKG. If macOS says it **cannot check the software for malicious content** or displays a similar warning, dismiss the dialog with **Done** (rather than moving the package to the Trash).
+2. Open **Apple menu → System Settings → Privacy & Security** and scroll down.
+3. Find the blocked PKG notice and click **Open Anyway**.
+4. Review the follow-up confirmation, choose **Open** or the equivalent option, and authenticate with your Mac password or Touch ID if requested.
+5. When Installer opens, complete the installation normally.
+
+**Open Anyway** is shown only for a limited time after you try opening the file. If you cannot find it, retry opening the same PKG in Finder and check Privacy & Security again. Once approved, the same PKG may open by double-clicking without displaying that warning again.
+
+**Do not disable Gatekeeper system-wide.** If macOS reports that the software will damage your Mac or that malware was detected, stop instead of bypassing the warning. See [Apple's official guidance](https://support.apple.com/ja-jp/102445).
+
+### Enable Japanese input
+
+1. After installation, open **System Settings → Keyboard → Text Input → Edit**.
 2. If **Hiragana (Mozkey)** is not listed, click **+**, choose **Japanese**, and add the Mozkey Hiragana input source. The name may be localized.
 3. Select Mozkey's Hiragana input source in the menu-bar input menu.
-4. If it does not appear, log out of macOS and log back in, then check again.
+4. If it does not appear, **log out of macOS and log back in**, then check again.
 
 See [Apple's input-source settings guide](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) for details.
 
