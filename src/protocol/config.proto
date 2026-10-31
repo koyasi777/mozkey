@@ -724,6 +724,13 @@ message Config {
   optional uint32 suggest_window_font_weight = 1024 [default = 400];
   optional uint32 ruby_window_font_weight = 1025 [default = 400];
 
+  // Independent font families for candidate/suggestion/live-ruby windows.
+  // Missing fields inherit the legacy candidate_ruby_font_name (tag 134).
+  // Explicitly present empty strings request the platform's default font.
+  optional string candidate_window_font_name = 1047 [default = ""];
+  optional string suggest_window_font_name = 1048 [default = ""];
+  optional string ruby_window_font_name = 1049 [default = ""];
+
   enum WindowsImeIconStyle {
     WINDOWS_IME_ICON_DEFAULT = 0;
     WINDOWS_IME_ICON_MONOCHROME_BLACK = 1;

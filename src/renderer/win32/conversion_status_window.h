@@ -35,6 +35,8 @@ class ConversionStatusWindow : public ATL::CWindowImpl<
  private:
   LRESULT OnPaint(UINT, WPARAM, LPARAM, BOOL&);
   LRESULT OnEraseBkgnd(UINT, WPARAM, LPARAM, BOOL&);
+  void DoPaint(HDC dc);
+  bool RenderAndPresent();
   RendererShadowWindow shadow_;
   ConversionDisplayStatus status_ = ConversionDisplayStatus::kHidden;
   config::Config::ConversionStatusIndicatorStyle style_;
