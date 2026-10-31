@@ -1,25 +1,28 @@
-name: macOS Zenz installable candidate (no installation)
+name: macOS release candidate (Universal PKG, not notarized)
 
+# Installable unsigned PKG for manual review: no CI installation or publication.
 on:
-  push:
-    branches:
-      - ci/llama-v070-arm64-native
-    paths:
-      - '.github/workflows/macos_zenz_installable_candidate.yml'
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Exact public version in src/version.bzl (e.g. 1.0.0)'
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build_installable_candidate_arm64:
-    name: Build separate installable candidate and inspect packaged preinstall
+    name: Build installable Universal PKG on Apple Silicon (no CI install)
     runs-on: macos-15
     timeout-minutes: 150
+    env:
+      EXPECTED_RELEASE_VERSION: ${{ inputs.release_version }}
     steps:
       - name: Checkout source without persisted credentials
         uses: actions/checkout@v6
@@ -31,11 +34,36 @@ jobs:
         shell: /bin/zsh {0}
         run: |
           set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REPOSITORY" = koyasi777/mozkey
           test "$(/usr/bin/uname -m)" = arm64
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          python3 - <<'PYVERSION'
+          import os
+          from pathlib import Path
+          import re
+
+          requested = os.environ['EXPECTED_RELEASE_VERSION']
+          assert re.fullmatch(r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)', requested), requested
+          text = Path('src/version.bzl').read_text(encoding='utf-8')
+          parts = []
+          for part in ('MAJOR', 'MINOR', 'PATCH'):
+              matches = re.findall(
+                  rf'(?m)^MOZKEY_RELEASE_VERSION_{part}[ \t]*=[ \t]*([0-9]+)[ \t]*$',
+                  text,
+              )
+              assert len(matches) == 1 and str(int(matches[0])) == matches[0], part
+              parts.append(int(matches[0]))
+          major, minor, patch = parts
+          assert 0 <= major <= 155 and 0 <= minor <= 99 and 0 <= patch <= 99, parts
+          assert requested == f'{major}.{minor}.{patch}', (requested, parts)
+          print(f'RELEASE_SOURCE_VERSION=PASS ({requested}; PKG {100 + major}.{minor}.{patch})')
+          PYVERSION
           /usr/bin/sw_vers
           bazelisk version
-          echo "INSTALLABLE_CANDIDATE_SOURCE=$GITHUB_SHA"
+          echo "RELEASE_SOURCE_IDENTITY=PASS sha=$GITHUB_SHA version=$EXPECTED_RELEASE_VERSION"
 
       - name: Run 27 isolated macOS installer preflight fixtures
         shell: bash
@@ -103,17 +131,21 @@ jobs:
           set -euo pipefail
           OUT="$GITHUB_WORKSPACE/installable-candidate"
           mkdir -p "$OUT"
+          RELEASE_FILE="Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg"
+          test ! -e "$OUT/$RELEASE_FILE"
           install -m 0644 src/bazel-bin/mac/Mozc.pkg \
-            "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg"
+            "$OUT/$RELEASE_FILE"
           install -m 0644 src/mac/installer/zenz_runtime/BUILD-CONTRACT.txt \
             "$OUT/BUILD-CONTRACT.txt"
-          PKG_SHA="$(/usr/bin/shasum -a 256 "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg" | /usr/bin/awk '{print $1}')"
+          PKG_SHA="$(/usr/bin/shasum -a 256 "$OUT/$RELEASE_FILE" | /usr/bin/awk '{print $1}')"
           CONTRACT_SHA="$(/usr/bin/shasum -a 256 "$OUT/BUILD-CONTRACT.txt" | /usr/bin/awk '{print $1}')"
           {
             echo "source_commit=$GITHUB_SHA"
+            echo "release_version=$EXPECTED_RELEASE_VERSION"
+            echo "release_filename=$RELEASE_FILE"
             echo "package_sha256=$PKG_SHA"
             echo "build_contract_sha256=$CONTRACT_SHA"
-            echo "candidate_type=explicit-installable-unsigned-development"
+            echo "candidate_type=explicit-installable-unsigned-release-candidate"
           } > "$OUT/ARTIFACT-CONTRACT.txt"
           cat "$OUT/ARTIFACT-CONTRACT.txt"
 
@@ -125,7 +157,7 @@ jobs:
           MOZKEY_ZENZ_EXPECTED_CONTRACT="$OUT/BUILD-CONTRACT.txt" \
           MOZKEY_ZENZ_VERIFY_BAZEL_ROOT="$HOME/.cache/bazel_mozkey_zenz_installable_candidate" \
             src/mac/installer/zenz_runtime/verify_release_package.zsh \
-            "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg" \
+            "$OUT/Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg" \
             "$OUT/arm64-verify"
           install -m 0644 "$OUT/arm64-verify/audit.txt" "$OUT/arm64-audit.txt"
 
@@ -188,32 +220,35 @@ jobs:
       - name: Upload isolated installable candidate (not signed or notarized)
         uses: actions/upload-artifact@v6
         with:
-          name: mozkey-zenz-installable-candidate-unsigned-dev
+          name: mozkey-macos-universal-unsigned-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            installable-candidate/Mozc_Zenz_Universal_installable_candidate.pkg
+            installable-candidate/Mozkey_v*_macos_universal.pkg
             installable-candidate/BUILD-CONTRACT.txt
             installable-candidate/ARTIFACT-CONTRACT.txt
             installable-candidate/PREINSTALL-AUDIT.txt
             installable-candidate/arm64-audit.txt
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
   verify_same_candidate_on_native_intel:
     name: Verify identical installable candidate on native Intel (without installing)
     needs: build_installable_candidate_arm64
     runs-on: macos-15-intel
     timeout-minutes: 45
+    env:
+      EXPECTED_RELEASE_VERSION: ${{ inputs.release_version }}
     steps:
       - name: Checkout identical source
         uses: actions/checkout@v6
         with:
           submodules: false
           persist-credentials: false
+          ref: ${{ github.sha }}
 
       - name: Download exact candidate
         uses: actions/download-artifact@v6
         with:
-          name: mozkey-zenz-installable-candidate-unsigned-dev
+          name: mozkey-macos-universal-unsigned-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: installable-candidate
 
       - name: Verify x86_64 and artifact identity
@@ -225,9 +260,12 @@ jobs:
           CONTRACT="$OUT/ARTIFACT-CONTRACT.txt"
           EXPECTED_SHA="$(/usr/bin/awk -F= '$1 == "package_sha256" {print $2}' "$CONTRACT")"
           SOURCE_SHA="$(/usr/bin/awk -F= '$1 == "source_commit" {print $2}' "$CONTRACT")"
+          RELEASE_FILE="Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg"
           test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$(/usr/bin/awk -F= '$1 == "release_version" {print $2}' "$CONTRACT")" = "$EXPECTED_RELEASE_VERSION"
+          test "$(/usr/bin/awk -F= '$1 == "release_filename" {print $2}' "$CONTRACT")" = "$RELEASE_FILE"
           test "${#EXPECTED_SHA}" -eq 64
-          test "$(/usr/bin/shasum -a 256 "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg" | /usr/bin/awk '{print $1}')" = "$EXPECTED_SHA"
+          test "$(/usr/bin/shasum -a 256 "$OUT/$RELEASE_FILE" | /usr/bin/awk '{print $1}')" = "$EXPECTED_SHA"
           echo "SAME_INSTALLABLE_CANDIDATE=PASS"
 
       - name: Restore dependency cache
@@ -251,17 +289,17 @@ jobs:
           MOZKEY_ZENZ_EXPECTED_CONTRACT="$OUT/BUILD-CONTRACT.txt" \
           MOZKEY_ZENZ_VERIFY_BAZEL_ROOT="$HOME/.cache/bazel_mozkey_zenz_installable_intel_verify" \
             src/mac/installer/zenz_runtime/verify_release_package.zsh \
-            "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg" \
+            "$OUT/Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg" \
             "$OUT/intel-verify"
           install -m 0644 "$OUT/intel-verify/audit.txt" "$OUT/intel-audit.txt"
 
       - name: Upload native Intel audit
         uses: actions/upload-artifact@v6
         with:
-          name: mozkey-zenz-installable-candidate-intel-audit
+          name: mozkey-macos-universal-intel-audit-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             installable-candidate/ARTIFACT-CONTRACT.txt
             installable-candidate/PREINSTALL-AUDIT.txt
             installable-candidate/intel-audit.txt
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30

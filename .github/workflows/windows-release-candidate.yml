@@ -1,6 +1,6 @@
-name: Windows x64 and ARM64 release candidates (unsigned rehearsal)
+name: Windows release candidates (x64 / ARM64, unsigned)
 
-# Rehearsal ONLY. Never signs files or publishes GitHub Releases.
+# Audited unsigned release candidates; no signing or automatic publication.
 # Pull requests execute contract tests only; MSI builds require dispatch from main.
 # Universal MSI remains supported by the regular Windows CI, NOT released here.
 on:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: 'Exact src/version.bzl public version (e.g. 0.7.7; 1.0.0 only after version bump)'
+        description: 'Exact public version in src/version.bzl (e.g. 1.0.0)'
         type: string
         required: true
 
