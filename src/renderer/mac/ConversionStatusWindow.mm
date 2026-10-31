@@ -10,6 +10,7 @@
 
 using mozc::renderer::ConversionDisplayStatus;
 using mozc::renderer::ConversionStatusColor;
+using mozc::renderer::ConversionStatusVerticalFullLabelFontReduction;
 namespace config = mozc::config;
 namespace {
 NSColor* Color(uint32_t rgb) {
@@ -18,8 +19,12 @@ NSColor* Color(uint32_t rgb) {
                                    blue:(rgb & 255) / 255.0 alpha:1.0];
 }
 NSFont* StatusFont(
-    const config::Config::ConversionStatusIndicatorStyle& style) {
-  const CGFloat size = std::clamp<CGFloat>(style.font_size(), 8, 24);
+    const config::Config::ConversionStatusIndicatorStyle& style,
+    bool vertical) {
+  // Cocoa sizes are in logical points; do not modify the stored font size.
+  const CGFloat size = std::max<CGFloat>(
+      8, std::clamp<CGFloat>(style.font_size(), 8, 24) -
+             ConversionStatusVerticalFullLabelFontReduction(style, vertical));
   if (!style.font_family().empty()) {
     NSString* family = [NSString stringWithUTF8String:style.font_family().c_str()];
     if (family != nil) {
@@ -187,7 +192,7 @@ bool ConversionStatusWindow::Update(const commands::RendererCommand& command,
       style.label() == config::Config::CONVERSION_STATUS_FULL_LABEL
           ? config::Config::CONVERSION_STATUS_SYMBOL : style.label();
   NSString* displayed_title = Label(state, display_mode);
-  NSFont* display_font = StatusFont(style);
+  NSFont* display_font = StatusFont(style, vertical);
   if (style.shape() != config::Config::CONVERSION_STATUS_CIRCLE &&
       [displayed_title length] > 0) {
     NSDictionary* attrs = @{

@@ -14,6 +14,9 @@ TEST(ConversionStatusIndicatorTest, DefaultSettingsAndExplicitOverrides) {
   EXPECT_FALSE(config.has_show_conversion_status_indicator());
   EXPECT_TRUE(config.show_conversion_status_indicator());
   const auto& style = config.conversion_status_indicator_style();
+  EXPECT_EQ(style.width(), 56u);
+  EXPECT_EQ(style.height(), 22u);
+  EXPECT_EQ(style.font_size(), 11u);
   EXPECT_EQ(style.zenz_pending_color(), 0x847438u);
   EXPECT_EQ(style.zenz_color(), 0x338d85u);
 
@@ -22,17 +25,39 @@ TEST(ConversionStatusIndicatorTest, DefaultSettingsAndExplicitOverrides) {
   EXPECT_TRUE(config.has_show_conversion_status_indicator());
   EXPECT_FALSE(config.show_conversion_status_indicator());
 
-  // Previously customized colors are preserved after serialization.
+  // Previously customized colors and geometry survive new product defaults.
   auto* custom = config.mutable_conversion_status_indicator_style();
   custom->set_zenz_pending_color(0x112233u);
   custom->set_zenz_color(0x445566u);
+  custom->set_width(58);
+  custom->set_height(24);
+  custom->set_font_size(12);
   config::Config restored;
   ASSERT_TRUE(restored.ParseFromString(config.SerializeAsString()));
   EXPECT_FALSE(restored.show_conversion_status_indicator());
+  EXPECT_EQ(restored.conversion_status_indicator_style().width(), 58u);
+  EXPECT_EQ(restored.conversion_status_indicator_style().height(), 24u);
+  EXPECT_EQ(restored.conversion_status_indicator_style().font_size(), 12u);
   EXPECT_EQ(restored.conversion_status_indicator_style().zenz_pending_color(),
             0x112233u);
   EXPECT_EQ(restored.conversion_status_indicator_style().zenz_color(),
             0x445566u);
+}
+TEST(ConversionStatusIndicatorTest, VerticalFullLabelFontReductionScope) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  // Default pill + full label: horizontal is unchanged, vertical is 2 DIPs less.
+  EXPECT_EQ(ConversionStatusVerticalFullLabelFontReduction(style, false), 0);
+  EXPECT_EQ(ConversionStatusVerticalFullLabelFontReduction(style, true), 2);
+  style.set_shape(config::Config::CONVERSION_STATUS_ROUNDED_RECT);
+  EXPECT_EQ(ConversionStatusVerticalFullLabelFontReduction(style, true), 2);
+  style.set_shape(config::Config::CONVERSION_STATUS_CIRCLE);
+  // A circle uses a symbol rather than a full label at rendering time.
+  EXPECT_EQ(ConversionStatusVerticalFullLabelFontReduction(style, true), 0);
+  style.set_shape(config::Config::CONVERSION_STATUS_PILL);
+  style.set_label(config::Config::CONVERSION_STATUS_SYMBOL);
+  EXPECT_EQ(ConversionStatusVerticalFullLabelFontReduction(style, true), 0);
+  style.set_label(config::Config::CONVERSION_STATUS_COLOR_ONLY);
+  EXPECT_EQ(ConversionStatusVerticalFullLabelFontReduction(style, true), 0);
 }
 TEST(ConversionStatusIndicatorTest, PassiveLiveSuggestionKeepsStatus) {
   auto out = PreeditOutput();

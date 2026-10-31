@@ -767,9 +767,9 @@ message Config {
     optional uint32 reading_color = 7 [default = 0x747d8c];
     optional uint32 text_color = 8 [default = 0xffffff];
     optional uint32 border_color = 9 [default = 0x354357];
-    optional uint32 width = 10 [default = 58];
-    optional uint32 height = 11 [default = 24];
-    optional uint32 font_size = 12 [default = 12];
+    optional uint32 width = 10 [default = 56];
+    optional uint32 height = 11 [default = 22];
+    optional uint32 font_size = 12 [default = 11];
     optional uint32 corner_radius = 13 [default = 7];
     optional uint32 border_width = 14 [default = 0];
     optional uint32 opacity_percent = 15 [default = 93];

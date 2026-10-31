@@ -64,6 +64,19 @@ inline uint32_t ConversionStatusColor(
   return style.reading_color();
 }
 
+// Reduce only the displayed full-name label in vertical writing.  Circle
+// badges render a symbol even when FULL_LABEL is configured.  Font size remains
+// a user preference in points; 2 is a logical-pixel (DIP) rendering adjustment.
+inline int ConversionStatusVerticalFullLabelFontReduction(
+    const config::Config::ConversionStatusIndicatorStyle& style,
+    bool vertical) {
+  return vertical &&
+                 style.label() == config::Config::CONVERSION_STATUS_FULL_LABEL &&
+                 style.shape() != config::Config::CONVERSION_STATUS_CIRCLE
+             ? 2
+             : 0;
+}
+
 // All rectangles use the Mozc top-left screen coordinate system. The placement
 // never covers the composition, ruby or candidate obstacle. The caller may
 // omit the ruby/obstacle rectangles. Return false rather than covering text.

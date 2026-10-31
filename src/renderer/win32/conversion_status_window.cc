@@ -54,6 +54,22 @@ std::wstring StatusFontFamily(
   return wide;
 }
 
+// GDI expects a physical-pixel font height.  The vertical full-label offset is
+// 2 DIPs, scaled at the current monitor DPI.  Keep the same result for both
+// font creation and vertical glyph spacing to avoid clipping.
+int StatusFontHeightPx(
+    const config::Config::ConversionStatusIndicatorStyle& style,
+    uint32_t dpi, bool vertical) {
+  const int base = ::MulDiv(
+      std::clamp(static_cast<int>(style.font_size()), 8, 24),
+      static_cast<int>(dpi), 72);
+  const int reduction = ::MulDiv(
+      ConversionStatusVerticalFullLabelFontReduction(style, vertical),
+      static_cast<int>(dpi), 96);
+  const int minimum = ::MulDiv(8, static_cast<int>(dpi), 72);
+  return std::max(1, std::max(minimum, base - reduction));
+}
+
 std::wstring StatusText(ConversionDisplayStatus state,
     config::Config::ConversionStatusIndicatorLabel label) {
   if (label == config::Config::CONVERSION_STATUS_COLOR_ONLY) return L"";
@@ -112,9 +128,8 @@ int RecommendedWidth(HWND hwnd, uint32_t dpi, int height,
 // rather than a horizontal text measurement.
 int VerticalTextStep(uint32_t dpi,
     const config::Config::ConversionStatusIndicatorStyle& style) {
-  return std::max(1, ::MulDiv(
-      std::clamp(static_cast<int>(style.font_size()), 8, 24),
-      static_cast<int>(dpi), 72) + ::MulDiv(3, static_cast<int>(dpi), 96));
+  return std::max(1, StatusFontHeightPx(style, dpi, true) +
+                         ::MulDiv(3, static_cast<int>(dpi), 96));
 }
 
 int RecommendedVerticalHeight(uint32_t dpi, int thickness,
@@ -362,9 +377,9 @@ LRESULT ConversionStatusWindow::OnPaint(UINT, WPARAM, LPARAM, BOOL&) {
       ? config::Config::CONVERSION_STATUS_SYMBOL : style_.label();
   const std::wstring text = StatusText(status_, label);
   if (!text.empty()) {
-    const int point_size = std::clamp(static_cast<int>(style_.font_size()), 8, 24);
+    const int font_height = StatusFontHeightPx(style_, dpi_, vertical_);
     const std::wstring family = StatusFontFamily(style_);
-    HFONT font = CreateFontW(-::MulDiv(point_size, dpi_, 72), 0, 0, 0,
+    HFONT font = CreateFontW(-font_height, 0, 0, 0,
                             FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                             CLEARTYPE_QUALITY, DEFAULT_PITCH, family.c_str());
