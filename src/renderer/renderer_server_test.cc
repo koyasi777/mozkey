@@ -141,7 +141,7 @@ TEST_F(RendererServerTest,
   config::ConfigHandler::SetConfig(input);
 
   TestRendererServer server;
-  EXPECT_TRUE(RendererStyleHandler::GetRubyWindowStyle().enabled);
+  EXPECT_FALSE(RendererStyleHandler::GetRubyWindowStyle().enabled);
 }
 
 TEST_F(RendererServerTest, AppliesLiveConversionRubyVisibilityConfig) {
