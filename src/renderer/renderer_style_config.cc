@@ -254,10 +254,26 @@ void UpdateRendererStyleFromConfig() {
           : ResolveRendererWindowColorTheme(ruby_configured_theme,
                                             system_color_theme);
 
+  // Keep existing users' common font until they save independent choices.
+  // A present but empty per-window font deliberately selects the system font.
+  const std::string& legacy_font = shared_config->candidate_ruby_font_name();
+  const std::string candidate_font =
+      shared_config->has_candidate_window_font_name()
+          ? shared_config->candidate_window_font_name()
+          : legacy_font;
+  const std::string suggest_font =
+      shared_config->has_suggest_window_font_name()
+          ? shared_config->suggest_window_font_name()
+          : legacy_font;
+  const std::string ruby_font =
+      shared_config->has_ruby_window_font_name()
+          ? shared_config->ruby_window_font_name()
+          : legacy_font;
+
   RendererStyle candidate_style;
   BuildCandidateLikeStyle(candidate_color_theme,
                           shared_config->candidate_window_custom_color_palette(),
-                          shared_config->candidate_ruby_font_name(),
+                          candidate_font,
                           shared_config->candidate_window_font_weight(),
                           shared_config->candidate_window_size_percent(),
                           &candidate_style);
@@ -271,7 +287,7 @@ void UpdateRendererStyleFromConfig() {
       suggest_follows_candidate
           ? shared_config->candidate_window_custom_color_palette()
           : shared_config->suggest_window_custom_color_palette(),
-      shared_config->candidate_ruby_font_name(),
+      suggest_font,
       shared_config->suggest_window_font_weight(),
       shared_config->suggest_window_size_percent(), &suggestion_style);
 
@@ -293,6 +309,7 @@ void UpdateRendererStyleFromConfig() {
       ClampWindowSizePercent(shared_config->ruby_window_size_percent());
   ruby_style.font_weight =
       NormalizeFontWeight(shared_config->ruby_window_font_weight());
+  ruby_style.font_name = ruby_font;
   ruby_style.opacity_percent =
       ClampWindowOpacityPercent(shared_config->ruby_window_opacity_percent());
   ruby_style.horizontal_padding = ClampRubyHorizontalPadding(

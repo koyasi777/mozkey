@@ -121,18 +121,13 @@ std::wstring GetRubyWindowFontFaceName(uint32_t dpi) {
   const std::wstring default_font_name =
       GetDefaultRubyWindowFontFaceName(dpi);
 
-  RendererStyle style;
-  if (!RendererStyleHandler::GetRendererStyle(&style)) {
+  const std::string& configured_font =
+      RendererStyleHandler::GetRubyWindowStyle().font_name;
+  if (configured_font.empty()) {
     return default_font_name;
   }
 
-  const RendererStyle::TextStyle& candidate_style = style.candidate_style();
-  if (!candidate_style.has_font_name() || candidate_style.font_name().empty()) {
-    return default_font_name;
-  }
-
-  const std::wstring font_name =
-      mozc::win32::Utf8ToWide(candidate_style.font_name());
+  const std::wstring font_name = mozc::win32::Utf8ToWide(configured_font);
   if (font_name.empty()) {
     return default_font_name;
   }

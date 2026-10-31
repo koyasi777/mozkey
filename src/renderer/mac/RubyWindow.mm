@@ -536,13 +536,6 @@ bool RubyWindow::Update(const commands::RendererCommand &command) {
   const RendererStyleHandler::RubyWindowStyle appearance =
       RendererStyleHandler::GetRubyWindowStyle();
 
-  RendererStyle renderer_style;
-  if (!RendererStyleHandler::GetRendererStyleForWindowType(
-          RendererStyleHandler::RendererStyleType::kCandidate,
-          &renderer_style)) {
-    RendererStyleHandler::GetDefaultRendererStyle(&renderer_style);
-  }
-
   RendererStyle::TextStyle text_style;
   text_style.set_font_size(ScaleFontSize(appearance.size_percent));
   text_style.set_font_weight(
@@ -551,11 +544,8 @@ bool RubyWindow::Update(const commands::RendererCommand &command) {
       appearance.text_color,
       text_style.mutable_foreground_color());
 
-  if (renderer_style.has_candidate_style() &&
-      renderer_style.candidate_style().has_font_name() &&
-      !renderer_style.candidate_style().font_name().empty()) {
-    text_style.set_font_name(
-        renderer_style.candidate_style().font_name());
+  if (!appearance.font_name.empty()) {
+    text_style.set_font_name(appearance.font_name);
   }
 
   RubyView *ruby_view = (RubyView *)view_;

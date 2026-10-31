@@ -65,6 +65,7 @@
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTabWidget>
 #include <QPlainTextEdit>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -2985,7 +2986,9 @@ class ModeIndicatorPreviewWidget final : public QWidget {
  protected:
   void resizeEvent(QResizeEvent* event) override {
     QWidget::resizeEvent(event);
-    const int desired = width() < 450 ? 224 : 122;
+    // Three labels and compact glyphs fit side by side above 310 logical px.
+    // At 150% Windows scaling, a visually wide preview can be <450 logical px.
+    const int desired = width() < 310 ? 224 : 122;
     if (height() != desired) setFixedHeight(desired);
   }
 
@@ -3057,7 +3060,7 @@ class ModeIndicatorPreviewWidget final : public QWidget {
     painter.setPen(QPen(outline, 1));
     painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 9, 9);
 
-    const bool narrow = width() < 450;
+    const bool narrow = width() < 310;
     const double cell_width = narrow ? width() - 20.0 : (width() - 20.0) / 3;
     const double cell_height = narrow ? (height() - 12.0) / 3 : height() - 12.0;
     const QString captions[3] = {
@@ -3121,6 +3124,294 @@ class ModeIndicatorPreviewWidget final : public QWidget {
   QWidget* settings_;
 };
 #endif  // _WIN32
+
+// A settings-only approximation of the renderer output.  This never creates
+// a renderer window or writes to ConfigHandler: it reads the unsaved Qt widgets.
+class RendererWindowAppearancePreview final : public QWidget {
+ public:
+  enum class Kind { kCandidate, kSuggestion, kRuby };
+
+  RendererWindowAppearancePreview(QWidget* settings, Kind kind, QWidget* parent)
+      : QWidget(parent), settings_(settings), kind_(kind) {
+    setFixedHeight(170);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  }
+
+  void Refresh() {
+    if (isVisible()) {
+      repaint();
+    } else {
+      update();
+    }
+  }
+
+ protected:
+  void paintEvent(QPaintEvent*) override {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QColor base = palette().color(QPalette::Base);
+    QColor outline = palette().color(QPalette::Mid);
+    outline.setAlpha(95);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(base);
+    painter.drawRoundedRect(QRectF(rect()), 8, 8);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(outline, 1));
+    painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                            8, 8);
+
+    auto get_value = [this](const QString& name, int fallback) {
+      const QSpinBox* control = settings_->findChild<QSpinBox*>(name);
+      return control ? control->value() : fallback;
+    };
+    auto get_theme = [this](const char* name) {
+      return static_cast<config::Config::RendererWindowColorTheme>(
+          GetComboCurrentData(FindComboBox(settings_, name),
+                              config::Config::RENDERER_WINDOW_COLOR_AUTO));
+    };
+
+    const auto system_theme = renderer::GetSystemColorTheme();
+    const auto candidate_theme = renderer::ResolveRendererWindowColorTheme(
+        get_theme("candidateWindowColorThemeComboBox"), system_theme);
+    const auto target_theme = kind_ == Kind::kCandidate
+        ? candidate_theme
+        : renderer::ResolveDependentRendererWindowColorTheme(
+              get_theme(kind_ == Kind::kSuggestion
+                            ? "suggestWindowColorThemeComboBox"
+                            : "rubyWindowColorThemeComboBox"),
+              candidate_theme, system_theme);
+    const bool dark = target_theme ==
+        config::Config::RENDERER_WINDOW_COLOR_DARK;
+    const QString candidate_prefix = QStringLiteral("candidateWindow");
+    const auto candidate_palette =
+        candidate_theme == config::Config::RENDERER_WINDOW_COLOR_CUSTOM
+            ? GetCandidatePaletteButtons(settings_, candidate_prefix,
+                                         kLightCandidatePalette)
+            : (candidate_theme == config::Config::RENDERER_WINDOW_COLOR_DARK
+                   ? kDarkCandidatePalette : kLightCandidatePalette);
+
+    const bool follows_candidate = kind_ != Kind::kCandidate &&
+        get_theme(kind_ == Kind::kSuggestion
+                      ? "suggestWindowColorThemeComboBox"
+                      : "rubyWindowColorThemeComboBox") ==
+            config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE;
+    CandidateWindowPaletteDefaults candidate_like =
+        dark ? kDarkCandidatePalette : kLightCandidatePalette;
+    if (kind_ == Kind::kCandidate || follows_candidate) {
+      candidate_like = candidate_palette;
+    } else if (target_theme == config::Config::RENDERER_WINDOW_COLOR_CUSTOM &&
+               kind_ == Kind::kSuggestion) {
+      candidate_like = GetCandidatePaletteButtons(
+          settings_, QStringLiteral("suggestWindow"), kLightCandidatePalette);
+    }
+    RubyWindowPaletteDefaults ruby =
+        dark ? kDarkRubyPalette : kLightRubyPalette;
+    if (follows_candidate) {
+      ruby = {candidate_palette.background_color,
+              candidate_palette.text_color, candidate_palette.border_color};
+    } else if (kind_ == Kind::kRuby &&
+               target_theme == config::Config::RENDERER_WINDOW_COLOR_CUSTOM) {
+      ruby = GetRubyPaletteButtons(settings_, QStringLiteral("rubyWindow"),
+                                   kLightRubyPalette);
+    }
+
+    const QString prefix = kind_ == Kind::kCandidate
+        ? QStringLiteral("candidateWindow")
+        : (kind_ == Kind::kSuggestion
+               ? QStringLiteral("suggestWindow")
+               : QStringLiteral("rubyWindow"));
+    const int size_percent = get_value(prefix + "SizePercentSpinBox", 100);
+    const int corner = get_value(prefix + "CornerRadiusSpinBox",
+                                 kind_ == Kind::kRuby ? 9 : 6);
+    const int opacity = get_value(prefix + "OpacityPercentSpinBox",
+                                  kind_ == Kind::kRuby ? 90 : 100);
+    const int spread = get_value(prefix + "ShadowSizeSpinBox", 5);
+    const int shadow_opacity = get_value(
+        prefix + "ShadowOpacityPercentSpinBox", kind_ == Kind::kRuby ? 8 : 10);
+    const int distance = get_value(prefix + "ShadowDistanceSpinBox",
+                                   kind_ == Kind::kRuby ? 3 : 6);
+    const int angle = get_value(prefix + "ShadowAngleDegreesSpinBox", 45);
+    int font_weight = 400;
+    if (const auto* combo = FindComboBox(
+            settings_, (prefix + "FontWeightComboBox").toLatin1().constData())) {
+      font_weight = GetComboCurrentData(combo, 400);
+    }
+
+    QFont text_font = font();
+    const char* font_picker = kind_ == Kind::kCandidate
+        ? "candidateRubyFontComboBox"
+        : (kind_ == Kind::kSuggestion
+               ? "suggestWindowFontNameComboBox"
+               : "rubyWindowFontNameComboBox");
+    if (const QComboBox* font_combo = FindComboBox(settings_, font_picker)) {
+      const QString family = font_combo->currentData().toString();
+      if (!family.isEmpty()) {
+        text_font.setFamily(family);
+      }
+    }
+    text_font.setWeight(static_cast<QFont::Weight>(
+        std::clamp(font_weight, 100, 900)));
+    const double size_factor = size_percent / 100.0;
+    text_font.setPointSizeF(kind_ == Kind::kRuby
+        ? std::clamp(13.0 * size_factor, 10.4, 26.0)
+        : std::clamp(10.0 * size_factor, 8.0, 18.0));
+
+    // The real Windows ruby window sizes itself to the measured reading text
+    // plus horizontal/vertical padding, rather than using a fixed 225x60 box.
+    // A short reading makes the representative live-conversion overlay clear.
+    const QString ruby_reading = QStringLiteral("きょうは");
+    const QString ruby_composition = QStringLiteral("今日は");
+    const QFontMetricsF ruby_metrics(text_font);
+    // Native ruby spacing uses 144 DPI as its design baseline. Qt measures
+    // here in logical pixels, so normalize the spacing for the preview.
+    const double ruby_dpi_factor =
+        std::clamp(logicalDpiX() / 144.0, 0.5, 2.0);
+    const double ruby_pad_x =
+        get_value("rubyWindowHorizontalPaddingSpinBox", 14) *
+        size_factor * ruby_dpi_factor;
+    const double ruby_pad_y =
+        get_value("rubyWindowVerticalPaddingSpinBox", 6) *
+        size_factor * ruby_dpi_factor;
+    const double target_width = kind_ == Kind::kRuby
+        ? ruby_metrics.horizontalAdvance(ruby_reading) + 2 * ruby_pad_x
+        : 275.0 * size_factor;
+    const double target_height = kind_ == Kind::kRuby
+        ? ruby_metrics.height() + 2 * ruby_pad_y
+        : 105.0 * size_factor;
+    const double available_width = std::max(80, width() - 58);
+    const double scale = std::min({1.20, available_width / target_width,
+                                   (kind_ == Kind::kRuby ? 100.0 : 130.0) /
+                                       target_height});
+    painter.save();
+    painter.translate(width() / 2.0, height() / 2.0 + 6);
+    painter.scale(scale, scale);
+    const QRectF window(-target_width / 2, -target_height / 2,
+                        target_width, target_height);
+    const double radius = std::clamp<double>(corner, 0.0, 24.0);
+    const double radians = angle * 3.141592653589793 / 180.0;
+    const double dx = std::cos(radians) * distance;
+    const double dy = std::sin(radians) * distance;
+    // A lightweight approximate shadow, kept separate from production GDI.
+    for (int i = std::min(spread, 16); i >= 1; --i) {
+      QColor shade = Qt::black;
+      shade.setAlpha(std::clamp(shadow_opacity * 255 /
+                                    (100 * std::max(1, std::min(spread, 16))),
+                                0, 255));
+      painter.setPen(Qt::NoPen);
+      painter.setBrush(shade);
+      painter.drawRoundedRect(window.adjusted(-i, -i, i, i).translated(dx, dy),
+                              radius + i, radius + i);
+    }
+    painter.setOpacity(opacity / 100.0);
+    const QColor background = RgbHexToQColor(
+        kind_ == Kind::kRuby ? ruby.background_color
+                             : candidate_like.background_color);
+    const QColor border = RgbHexToQColor(
+        kind_ == Kind::kRuby ? ruby.border_color
+                             : candidate_like.border_color);
+    const QColor foreground = RgbHexToQColor(
+        kind_ == Kind::kRuby ? ruby.text_color
+                             : candidate_like.text_color);
+    painter.setPen(QPen(border, 1));
+    painter.setBrush(background);
+    painter.drawRoundedRect(window, radius, radius);
+
+    QPainterPath clip;
+    clip.addRoundedRect(window.adjusted(1, 1, -1, -1), radius, radius);
+    painter.setClipPath(clip);
+    painter.setFont(text_font);
+    if (kind_ == Kind::kRuby) {
+      const QRectF ruby_text = window.adjusted(
+          ruby_pad_x, ruby_pad_y, -ruby_pad_x, -ruby_pad_y);
+      painter.setPen(foreground);
+      painter.drawText(ruby_text, Qt::AlignCenter | Qt::TextSingleLine,
+                       ruby_reading);
+      painter.setClipping(false);
+      painter.setOpacity(1.0);
+      painter.setPen(palette().color(QPalette::Text));
+      // The reading overlay floats above the composition text. The gap is
+      // the configured distance from the real composition, not inner padding.
+      const double gap = get_value("rubyWindowCompositionGapSpinBox", 4) *
+                         size_factor * ruby_dpi_factor;
+      QFont composition_font = font();
+      composition_font.setPointSizeF(12.0);
+      painter.setFont(composition_font);
+      const QFontMetricsF composition_metrics(composition_font);
+      painter.drawText(QRectF(window.center().x() -
+                                  composition_metrics.horizontalAdvance(
+                                      ruby_composition) / 2.0,
+                              window.bottom() + gap,
+                              composition_metrics.horizontalAdvance(
+                                  ruby_composition),
+                              composition_metrics.height()),
+                       Qt::AlignCenter | Qt::TextSingleLine,
+                       ruby_composition);
+    } else {
+      const QString candidates[] = {
+          QStringLiteral("今日はいい天気です"),
+          QStringLiteral("今日もいい天気です"),
+          QStringLiteral("今日は良い天気")};
+      const double row_height = std::max(19.0, (window.height() - 25) / 3.0);
+      for (int i = 0; i < 3; ++i) {
+        const QRectF row(window.left() + 5,
+                         window.top() + 2 + row_height * i,
+                         window.width() - 10, row_height);
+        if (i == 0) {
+          painter.setPen(QPen(RgbHexToQColor(
+              candidate_like.selected_border_color), 1));
+          painter.setBrush(RgbHexToQColor(
+              candidate_like.selected_background_color));
+          painter.drawRoundedRect(row, 3, 3);
+        }
+        const QRectF shortcut(row.left() + 2, row.top() + 3, 24, row.height() - 6);
+        painter.fillRect(shortcut, RgbHexToQColor(
+            candidate_like.shortcut_background_color));
+        painter.setFont(text_font);
+        painter.setPen(RgbHexToQColor(candidate_like.shortcut_text_color));
+        painter.drawText(shortcut, Qt::AlignCenter,
+                         QString::number(i + 1));
+        painter.setPen(foreground);
+        painter.drawText(row.adjusted(32, 0, -4, 0),
+                         Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+                         candidates[i]);
+      }
+      const QRectF footer(window.left() + 1, window.bottom() - 27,
+                          window.width() - 2, 26);
+      painter.fillRect(footer, RgbHexToQColor(
+          candidate_like.footer_background_color));
+      painter.setPen(QPen(RgbHexToQColor(
+          candidate_like.footer_border_color), 1));
+      painter.drawLine(footer.topLeft(), footer.topRight());
+      painter.setPen(RgbHexToQColor(candidate_like.footer_text_color));
+      QFont footer_font = text_font;
+      footer_font.setPointSizeF(std::max(8.0, text_font.pointSizeF() - 1.0));
+      painter.setFont(footer_font);
+      painter.drawText(footer.adjusted(9, 0, -8, 0),
+                       Qt::AlignVCenter | Qt::AlignRight,
+                       kind_ == Kind::kCandidate
+                           ? QStringLiteral("1 / 3")
+                           : QStringLiteral("予測候補"));
+      const QRectF track(window.right() - 8, window.top() + 4,
+                         4, window.height() - 36);
+      painter.fillRect(track, RgbHexToQColor(
+          candidate_like.scrollbar_background_color));
+      painter.fillRect(QRectF(track.left(), track.top(), 4, track.height() / 2),
+                       RgbHexToQColor(candidate_like.scrollbar_indicator_color));
+    }
+    painter.restore();
+    painter.setPen(palette().color(QPalette::Text));
+    QFont label_font = font();
+    label_font.setPointSizeF(std::max(8.0, label_font.pointSizeF() - 1));
+    painter.setFont(label_font);
+    painter.drawText(QRectF(12, 6, width() - 24, 19),
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     StatusUiText("Preview (illustrative)", "プレビュー（表示例）"));
+  }
+
+ private:
+  QWidget* settings_;
+  Kind kind_;
+};
 }  // namespace
 
 void ConfigDialog::UpdateConversionStatusPreview() {
@@ -3888,21 +4179,10 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   body_layout->setSpacing(6);
   root_layout->addWidget(body);
 
-  QGridLayout* font_layout = new QGridLayout();
-  font_layout->setContentsMargins(0, 0, 0, 0);
-  font_layout->setHorizontalSpacing(8);
-  font_layout->setVerticalSpacing(0);
-  QLabel* font_label =
-      new QLabel(tr("Candidate, suggestion, and ruby font"), group);
-  font_label->setMinimumHeight(24);
-  font_label->setMinimumWidth(220);
+  // The pre-existing font picker is reused in the candidate tab; the other
+  // two editors get independent pickers. Keep the original widget identity.
   candidateRubyFontComboBox->setParent(group);
-  candidateRubyFontComboBox->show();
   candidateRubyFontComboBox->setMinimumHeight(24);
-  font_layout->addWidget(font_label, 0, 0);
-  font_layout->addWidget(candidateRubyFontComboBox, 0, 1);
-  font_layout->setColumnStretch(1, 1);
-  body_layout->addLayout(font_layout);
 
   QGroupBox* font_weight_box = new QGroupBox(tr("Font weight"), group);
   font_weight_box->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -4201,10 +4481,17 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
     QLabel* text = new QLabel(label, group);
     text->setMinimumHeight(26);
     text->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    // Keep two color entries per row without imposing the full label text
+    // width as the minimum width of the entire nested editor. In compact
+    // layouts a long label wraps rather than clipping its color swatch.
+    text->setWordWrap(true);
+    text->setMinimumWidth(0);
+    text->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     QPushButton* button = new QPushButton(group);
     button->setObjectName(prefix + suffix);
-    button->setMinimumSize(84, 26);
-    button->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
+    // A compact, predictable color chip leaves room for both label columns.
+    // Seven-character #RRGGBB labels still remain visible.
+    button->setFixedSize(76, 26);
     layout->addWidget(text, row, col * 2);
     layout->addWidget(button, row, col * 2 + 1);
     QObject::connect(button, SIGNAL(clicked()), this,
@@ -4248,11 +4535,16 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
         tr("Footer border"),
         tr("Scrollbar background"),
         tr("Scrollbar thumb")};
+    // Two color entries per row as in the original appearance editor.
+    // Flexible, wrapping label columns protect the compact editor width.
+    palette_grid->setHorizontalSpacing(6);
     for (size_t i = 0; i < std::size(kCandidatePaletteButtonNames); ++i) {
       add_palette_button(palette_grid, static_cast<int>(i / 2),
                          static_cast<int>(i % 2), prefix,
                          kCandidatePaletteButtonNames[i], labels[i]);
     }
+    palette_grid->setColumnStretch(0, 1);
+    palette_grid->setColumnStretch(2, 1);
     QHBoxLayout* load_layout = new QHBoxLayout();
     load_layout->setSpacing(6);
     add_load_button(load_layout, tr("Load light colors"), prefix,
@@ -4281,9 +4573,14 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
     palette_grid->setVerticalSpacing(8);
     box_layout->addLayout(palette_grid);
     const QString labels[] = {tr("Background"), tr("Text"), tr("Border")};
+    palette_grid->setHorizontalSpacing(5);
+    // Ruby has only three colors; preserve the compact original one-row grid.
     for (size_t i = 0; i < std::size(kRubyPaletteButtonNames); ++i) {
       add_palette_button(palette_grid, 0, static_cast<int>(i), prefix,
                          kRubyPaletteButtonNames[i], labels[i]);
+    }
+    for (int column = 0; column < 6; column += 2) {
+      palette_grid->setColumnStretch(column, 1);
     }
     QHBoxLayout* load_layout = new QHBoxLayout();
     load_layout->setSpacing(6);
@@ -4303,6 +4600,196 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   add_candidate_palette_group(tr("Suggestion window custom colors"),
                               QStringLiteral("suggestWindow"), true);
   add_ruby_palette_group();
+
+  // Reorganize the editor by window rather than by property type.  Keep the
+  // original objectNames so Convert*Proto and reset handlers stay unchanged.
+  auto* window_tabs = new QTabWidget(body);
+  window_tabs->setObjectName(QStringLiteral("rendererWindowAppearanceTabs"));
+  window_tabs->setDocumentMode(true);
+  const char* prefixes[] = {"candidateWindow", "suggestWindow", "rubyWindow"};
+  const QString titles[] = {
+      StatusUiText("Candidate window", "候補ウィンドウ"),
+      StatusUiText("Suggestion window", "サジェストウィンドウ"),
+      StatusUiText("Ruby window", "ルビウィンドウ")};
+  RendererWindowAppearancePreview* window_previews[3] = {};
+  const auto move_from_grid = [](QGridLayout* from, int row, int column,
+                                 QWidget* new_parent, QGridLayout* to,
+                                 int new_row, int new_column) {
+    QLayoutItem* entry = from != nullptr ? from->itemAtPosition(row, column)
+                                         : nullptr;
+    QWidget* widget = entry != nullptr ? entry->widget() : nullptr;
+    CHECK(widget != nullptr) << "Missing renderer editor control";
+    from->removeWidget(widget);
+    widget->setParent(new_parent);
+    to->addWidget(widget, new_row, new_column);
+    widget->show();
+  };
+
+  for (int index = 0; index < 3; ++index) {
+    const int source_row = index + 1;
+    const QString prefix = QString::fromLatin1(prefixes[index]);
+    auto* page = new QWidget(window_tabs);
+    page->setObjectName(prefix + QStringLiteral("AppearanceTab"));
+    auto* page_layout = new QVBoxLayout(page);
+    // Match the tab page width: do not inset the entire preview and editor
+    // another eight pixels inside the already-margined outer appearance tab.
+    page_layout->setContentsMargins(0, 10, 0, 8);
+    page_layout->setSpacing(9);
+
+    auto* preview = new RendererWindowAppearancePreview(
+        this, static_cast<RendererWindowAppearancePreview::Kind>(index), page);
+    preview->setObjectName(prefix + QStringLiteral("AppearancePreview"));
+    window_previews[index] = preview;
+    page_layout->addWidget(preview);
+
+    // Only the controls scroll; the preview stays visible at the top of its
+    // tab while editing the lower color and shadow settings.
+    auto* editor_scroll = new QScrollArea(page);
+    editor_scroll->setObjectName(prefix + QStringLiteral("AppearanceScroll"));
+    editor_scroll->setWidgetResizable(true);
+    // Keep the editor vertical-only; color labels are permitted to wrap,
+    // avoiding a horizontal scrollbar at ordinary dialog widths.
+    editor_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    editor_scroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    editor_scroll->setFrameShape(QFrame::NoFrame);
+    editor_scroll->setFixedHeight(425);
+    auto* editor = new QWidget(editor_scroll);
+    auto* editor_layout = new QVBoxLayout(editor);
+    // Restore visual breathing room inside the scrolling editor while
+    // preserving the full-width preview and tab page from v2.4.
+    editor_layout->setContentsMargins(10, 7, 10, 12);
+    editor_layout->setSpacing(12);
+
+    auto* appearance_box = new QGroupBox(
+        StatusUiText("Appearance", "外観"), editor);
+    auto* appearance = new QGridLayout(appearance_box);
+    appearance->setHorizontalSpacing(10);
+    appearance->setVerticalSpacing(7);
+    auto add_field = [&](int row, const QString& label, QGridLayout* source,
+                         int source_column) {
+      appearance->addWidget(new QLabel(label, appearance_box), row, 0);
+      move_from_grid(source, source_row, source_column, appearance_box,
+                     appearance, row, 1);
+    };
+    add_field(0, StatusUiText("Color theme", "配色テーマ"), grid, 1);
+    add_field(1, StatusUiText("Size", "表示サイズ"), grid, 2);
+    add_field(2, StatusUiText("Corner radius", "角丸"), grid, 3);
+    add_field(3, StatusUiText("Opacity", "透明度"), grid, 4);
+    // Each window has its own font family. The candidate picker originates
+    // in the existing .ui; the other two reuse the same font list builder.
+    QComboBox* font_combo = nullptr;
+    if (index == 0) {
+      font_combo = candidateRubyFontComboBox;
+      font_combo->setParent(appearance_box);
+    } else {
+      font_combo = new QComboBox(appearance_box);
+      font_combo->setObjectName(QString::fromLatin1(
+          index == 1 ? "suggestWindowFontNameComboBox"
+                     : "rubyWindowFontNameComboBox"));
+      InitializeCandidateRubyFontComboBox(font_combo);
+      QObject::connect(font_combo,
+                       QOverload<int>::of(&QComboBox::currentIndexChanged),
+                       this, [this](int) { EnableApplyButton(); });
+    }
+    appearance->addWidget(
+        new QLabel(StatusUiText("Font family", "フォント"), appearance_box),
+        4, 0);
+    appearance->addWidget(font_combo, 4, 1);
+    font_combo->show();
+    appearance->addWidget(
+        new QLabel(StatusUiText("Font weight", "フォントの太さ"),
+                   appearance_box), 5, 0);
+    move_from_grid(font_weight_layout, index, 1, appearance_box,
+                   appearance, 5, 1);
+    appearance->setColumnStretch(1, 1);
+    editor_layout->addWidget(appearance_box);
+
+    auto* shadow_box = new QGroupBox(StatusUiText("Shadow", "影"), editor);
+    auto* shadow_layout = new QGridLayout(shadow_box);
+    shadow_layout->setHorizontalSpacing(10);
+    shadow_layout->setVerticalSpacing(6);
+    // Compact two-pair layout: spread + opacity, then angle + distance.
+    // Direction remains a separate 3x3 pad so it has enough room to operate.
+    const auto add_shadow_field = [&](int row, int column,
+                                      const QString& label,
+                                      int original_column) {
+      shadow_layout->addWidget(new QLabel(label, shadow_box), row, column);
+      move_from_grid(shadow_grid, source_row, original_column,
+                     shadow_box, shadow_layout, row, column + 1);
+    };
+    add_shadow_field(0, 0, StatusUiText("Spread", "広がり"), 1);
+    add_shadow_field(0, 2, StatusUiText("Opacity", "濃さ"), 2);
+    add_shadow_field(1, 0, StatusUiText("Angle", "角度"), 4);
+    add_shadow_field(1, 2, StatusUiText("Distance", "距離"), 5);
+    shadow_layout->addWidget(
+        new QLabel(StatusUiText("Direction", "方向"), shadow_box), 2, 0);
+    // Move the existing 3x3 direction pad intact.  Each button is 24x24
+    // logical pixels with 1 px gaps; constrain its overall width so QGridLayout
+    // cannot spread the button columns across the available editor width.
+    QLayoutItem* pad_item = shadow_grid->itemAtPosition(source_row, 3);
+    QWidget* direction_pad = pad_item != nullptr ? pad_item->widget() : nullptr;
+    CHECK(direction_pad != nullptr) << "Missing direction pad";
+    shadow_grid->removeWidget(direction_pad);
+    direction_pad->setParent(shadow_box);
+    direction_pad->setFixedSize(3 * 24 + 2, 3 * 24 + 2);
+    shadow_layout->addWidget(direction_pad, 2, 1, 1, 3, Qt::AlignCenter);
+    direction_pad->show();
+    shadow_layout->setColumnStretch(1, 1);
+    shadow_layout->setColumnStretch(3, 1);
+    editor_layout->addWidget(shadow_box);
+
+    if (index == 2) {
+      body_layout->removeWidget(ruby_spacing_box);
+      ruby_spacing_box->setParent(editor);
+      editor_layout->addWidget(ruby_spacing_box);
+      ruby_spacing_box->show();
+    }
+
+    auto* palette_group = findChild<QGroupBox*>(
+        prefix + QStringLiteral("PaletteGroupBox"));
+    CHECK(palette_group != nullptr) << "Missing renderer palette group";
+    body_layout->removeWidget(palette_group);
+    palette_group->setParent(editor);
+    editor_layout->addWidget(palette_group);
+    palette_group->show();
+    editor_layout->addStretch();
+    editor_scroll->setWidget(editor);
+    page_layout->addWidget(editor_scroll);
+    window_tabs->addTab(page, titles[index]);
+  }
+  // The old table headers and row labels are deleted here; the moved editors
+  // have new QWidget parents and remain accessible by their original names.
+  body_layout->removeWidget(font_weight_box);
+  delete font_weight_box;
+  body_layout->removeWidget(color_grid_widget);
+  delete color_grid_widget;
+  body_layout->removeWidget(shadow_grid_widget);
+  delete shadow_grid_widget;
+  for (int i = body_layout->count() - 1; i >= 0; --i) {
+    if (body_layout->itemAt(i)->spacerItem() != nullptr) {
+      delete body_layout->takeAt(i);
+    }
+  }
+  body_layout->addWidget(window_tabs);
+
+  // The same refresh path handles direct edits and programmatic preset loads.
+  // Slot connections already installed during control creation execute before
+  // these connections, so preview colors reflect the final button value.
+  const auto refresh_previews = [window_previews]() {
+    for (auto* preview : window_previews) preview->Refresh();
+  };
+  for (auto* combo : group->findChildren<QComboBox*>()) {
+    QObject::connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                     group, [refresh_previews](int) { refresh_previews(); });
+  }
+  for (auto* spin : group->findChildren<QSpinBox*>()) {
+    QObject::connect(spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                     group, [refresh_previews](int) { refresh_previews(); });
+  }
+  for (auto* button : group->findChildren<QPushButton*>()) {
+    QObject::connect(button, &QPushButton::clicked, group,
+                     [refresh_previews]() { refresh_previews(); });
+  }
 
   // Place candidate/suggestion/ruby first on the Appearance tab.
   // On Windows, keep the input-mode indicator next and the TSF preedit color
@@ -4602,9 +5089,26 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
 
   ConvertRendererAppearanceFromProto(config);
 
+  // New window-specific fonts inherit the original shared font if absent.
+  // An explicitly saved empty value selects the system font independently.
+  const std::string& legacy_font_name = config.candidate_ruby_font_name();
   SetComboBoxCurrentFontNameOrAdd(
       candidateRubyFontComboBox,
-      QString::fromUtf8(config.candidate_ruby_font_name().c_str()));
+      QString::fromUtf8((config.has_candidate_window_font_name()
+                             ? config.candidate_window_font_name()
+                             : legacy_font_name).c_str()));
+  if (QComboBox* combo = FindComboBox(this, "suggestWindowFontNameComboBox")) {
+    SetComboBoxCurrentFontNameOrAdd(
+        combo, QString::fromUtf8((config.has_suggest_window_font_name()
+                                     ? config.suggest_window_font_name()
+                                     : legacy_font_name).c_str()));
+  }
+  if (QComboBox* combo = FindComboBox(this, "rubyWindowFontNameComboBox")) {
+    SetComboBoxCurrentFontNameOrAdd(
+        combo, QString::fromUtf8((config.has_ruby_window_font_name()
+                                     ? config.ruby_window_font_name()
+                                     : legacy_font_name).c_str()));
+  }
 
   SET_CHECKBOX(dimPendingRomanInputCheckBox, dim_pending_roman_input);
   const uint32_t pending_roman_dimness_percent =
@@ -4927,13 +5431,27 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
 
   ConvertRendererAppearanceToProto(config);
 
-  const QString font_name =
-      candidateRubyFontComboBox->currentData().toString().trimmed();
-  if (!font_name.isEmpty()) {
-    config->set_candidate_ruby_font_name(font_name.toUtf8().constData());
+  const auto selected_font = [](const QComboBox* combo) -> std::string {
+    return combo == nullptr ? std::string()
+                            : combo->currentData().toString().trimmed()
+                                  .toUtf8().toStdString();
+  };
+  const std::string candidate_font =
+      selected_font(candidateRubyFontComboBox);
+  const std::string suggest_font = selected_font(
+      FindComboBox(this, "suggestWindowFontNameComboBox"));
+  const std::string ruby_font = selected_font(
+      FindComboBox(this, "rubyWindowFontNameComboBox"));
+  // Retain the historical shared field for older Mozkey versions, with the
+  // candidate font as its compatibility value.
+  if (!candidate_font.empty()) {
+    config->set_candidate_ruby_font_name(candidate_font);
   } else {
     config->clear_candidate_ruby_font_name();
   }
+  config->set_candidate_window_font_name(candidate_font);
+  config->set_suggest_window_font_name(suggest_font);
+  config->set_ruby_window_font_name(ruby_font);
 
   GET_CHECKBOX(dimPendingRomanInputCheckBox, dim_pending_roman_input);
   config->set_pending_roman_dimness_percent(
@@ -5576,6 +6094,10 @@ void ConfigDialog::ResetRendererAppearanceControls() {
   }
 
   SetComboBoxCurrentFontNameOrAdd(candidateRubyFontComboBox, QString());
+  SetComboBoxCurrentFontNameOrAdd(
+      FindComboBox(this, "suggestWindowFontNameComboBox"), QString());
+  SetComboBoxCurrentFontNameOrAdd(
+      FindComboBox(this, "rubyWindowFontNameComboBox"), QString());
   if (useDarkModeCandidateWindow != nullptr) {
     useDarkModeCandidateWindow->setChecked(false);
   }
@@ -5730,6 +6252,17 @@ void ConfigDialog::UpdateRendererAppearanceControls() {
                               "suggestWindowShadowAngleDegreesSpinBox");
   update_shadow_angle_enabled("rubyWindowShadowDistanceSpinBox",
                               "rubyWindowShadowAngleDegreesSpinBox");
+  // QWidget has Q_OBJECT; the settings-only preview subclass does not.
+  // Look up previews by their stable object names and schedule a repaint.
+  constexpr const char* kPreviewNames[] = {
+      "candidateWindowAppearancePreview",
+      "suggestWindowAppearancePreview",
+      "rubyWindowAppearancePreview"};
+  for (const char* name : kPreviewNames) {
+    if (QWidget* preview = findChild<QWidget*>(QString::fromLatin1(name))) {
+      preview->update();
+    }
+  }
 }
 
 void ConfigDialog::SelectPreeditColor() {
