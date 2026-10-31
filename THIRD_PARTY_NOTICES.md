@@ -15,6 +15,11 @@ components, and the local inference privacy note.
 
 ## Generated dictionary data
 
+Release-bundled dictionary notices, source revisions and upstream legal
+attributions are maintained in
+[DICTIONARY_NOTICES.md](src/data/installer/DICTIONARY_NOTICES.md).
+The bundled notice also includes `SudachiDict-LEGAL.txt`.
+
 This project can build a `daily` dictionary profile from generated dictionary
 data derived from third-party sources.
 
@@ -35,7 +40,9 @@ notes.
 
 * Source: [https://github.com/utuhiro78/merge-ut-dictionaries](https://github.com/utuhiro78/merge-ut-dictionaries)
 * Used for: merge-ut daily dictionary profile
-* License note: upstream describes the generated `mozcdic-ut.txt` as `Combined`.
+* License note: the pinned upstream README describes the generated
+  `mozcdic-ut.txt` as `Mixed`, while its LICENSE file says `Combined`.
+  These descriptions are not a single license grant for all entries.
 * Data/license note: upstream lists source-specific license notes including
   Japanese Wikipedia-derived data, Mozc dictionary data, id.def, and source code.
 

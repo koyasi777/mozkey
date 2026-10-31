@@ -124,6 +124,8 @@ mozc_macos_application(
         "//data/images/mac:half_ascii.tiff",
         "//data/images/mac:half_katakana.tiff",
         "//data/images/mac:hiragana.tiff",
+        "//data/installer:DICTIONARY_NOTICES.md",
+        "//data/installer:SudachiDict-LEGAL.txt",
         "//data/installer:credits_en.html",
     ],
     strings = [

@@ -13,6 +13,9 @@ This directory contains additional dictionary data and generated dictionary arti
 
 ## External dictionary sources and licenses
 
+Bundled distribution attributions: [`DICTIONARY_NOTICES.md`](../installer/DICTIONARY_NOTICES.md)
+and [`SudachiDict-LEGAL.txt`](../installer/SudachiDict-LEGAL.txt).
+
 This directory uses external dictionary sources during local generation.
 
 Generated dictionary files are not committed by default. Before redistributing a built package that includes generated dictionaries, check the upstream source licenses, attribution requirements, and any distribution notes.
@@ -21,7 +24,7 @@ Current external sources used by the daily workflow:
 
 | Source | Used for | Upstream / license note |
 | --- | --- | --- |
-| `merge-ut-dictionaries` | merge-ut daily profile | Upstream generated dictionary is described as `Combined`. Check the upstream LICENSE and source-specific license notes before redistribution. |
+| `merge-ut-dictionaries` | merge-ut daily profile | Pinned README calls the generated dictionary `Mixed`; upstream LICENSE calls it `Combined`. The outputs combine source-specific licenses. See `src/data/installer/DICTIONARY_NOTICES.md` and `SudachiDict-LEGAL.txt` for the v1.0.0 distribution inventory. |
 | `dic-nico-intersection-pixiv` | nico/pixiv delta dictionary | Upstream states that the code is MIT licensed and that the generated dictionary data is published with no copyright claim by the upstream author. Treat redistribution as review-required because the data is derived from external web sources. |
 | `mozcdic-ut-personal-names` | personal names dictionary | Upstream is Apache License, Version 2.0. Check upstream attribution and NOTICE requirements before redistribution. |
 

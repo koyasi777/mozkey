@@ -96,6 +96,8 @@ genrule(
         "//base:mozc_version_txt",
         "//data/images/win:product_icon.ico",
         "//data/installer:credits_en.html",
+        "//data/installer:DICTIONARY_NOTICES.md",
+        "//data/installer:SudachiDict-LEGAL.txt",
         "@qt_win//:bin/Qt6Core.dll",
         "@wix//:wix.exe",
     ] + select({
