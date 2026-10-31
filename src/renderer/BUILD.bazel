@@ -108,7 +108,10 @@ mozc_cc_library(
     name = "renderer_color_theme",
     srcs = ["renderer_color_theme.cc"],
     hdrs = ["renderer_color_theme.h"],
-    visibility = ["//renderer:__subpackages__"],
+    visibility = [
+        "//gui/config_dialog:__pkg__",
+        "//renderer:__subpackages__",
+    ],
     deps = [
         "//protocol:config_cc_proto",
     ] + mozc_select(

@@ -100,6 +100,7 @@
 #include "gui/config_dialog/roman_table_editor.h"
 #include "protocol/config.pb.h"
 #include "renderer/conversion_status_indicator.h"
+#include "renderer/renderer_color_theme.h"
 #include "session/keymap.h"
 #include "session/zenz_feedback_store.h"
 
@@ -921,6 +922,9 @@ bool ConfigDialog::Update() {
     initial_preedit_method_ = static_cast<int>(config.preedit_method());
     initial_use_keyboard_to_change_preedit_method_ =
         config.use_keyboard_to_change_preedit_method();
+  }
+  if (QWidget* preview = findChild<QWidget*>("modeIndicatorLivePreview")) {
+    preview->repaint();
   }
 #endif  // _WIN32
 
@@ -2944,6 +2948,179 @@ class ConversionStatusPreviewWidget final : public QWidget {
  private:
   config::Config::ConversionStatusIndicatorStyle style_;
 };
+#ifdef _WIN32
+// Keep the standard palette constants in one place: the live preview and
+// "Load light/dark colors" actions must use exactly the same values.
+// These are the palettes used by renderer/win32/indicator_window.cc.
+struct ModeIndicatorPalette {
+  uint32_t background;
+  uint32_t border;
+  uint32_t shadow;
+  uint32_t text;
+};
+
+constexpr ModeIndicatorPalette kModeIndicatorLightPalettes[3] = {
+    {0xf5f8fc, 0x5c7491, 0x788291, 0x1c2634},
+    {0xebfcf8, 0x24968c, 0x69918a, 0x124e48},
+    {0xf4f4ff, 0x626cd7, 0x78789b, 0x303469},
+};
+constexpr ModeIndicatorPalette kModeIndicatorDarkPalettes[3] = {
+    {0x1e2634, 0x6082aa, 0x000000, 0xebf2fa},
+    {0x14403d, 0x46beb4, 0x000000, 0xf5ffff},
+    {0x2a2c46, 0x7e87f5, 0x000000, 0xf5f5ff},
+};
+
+// Read the editor controls directly so that the preview includes unsaved
+// changes. The real overlay uses BalloonImage/GDI; this is a Qt approximation
+// with the same theme colors, nominal geometry and mode labels.
+class ModeIndicatorPreviewWidget final : public QWidget {
+ public:
+  ModeIndicatorPreviewWidget(QWidget* settings, QWidget* parent)
+      : QWidget(parent), settings_(settings) {
+    setFixedHeight(122);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setAutoFillBackground(false);
+  }
+
+ protected:
+  void resizeEvent(QResizeEvent* event) override {
+    QWidget::resizeEvent(event);
+    const int desired = width() < 450 ? 224 : 122;
+    if (height() != desired) setFixedHeight(desired);
+  }
+
+  void paintEvent(QPaintEvent*) override {
+    const auto& defaults = GetDefaultModeIndicatorCustomStyle();
+    auto spin = [this](const char* name, int fallback) {
+      const auto* widget = settings_->findChild<QSpinBox*>(name);
+      return widget != nullptr ? widget->value() : fallback;
+    };
+    auto color = [this](const char* name, uint32_t fallback) {
+      return GetColorButtonRgb(settings_->findChild<QPushButton*>(name),
+                               fallback);
+    };
+    const auto* theme_combo =
+        settings_->findChild<QComboBox*>("modeIndicatorThemeComboBox");
+    const int theme = theme_combo != nullptr
+        ? theme_combo->currentData().toInt()
+        : static_cast<int>(config::Config::WINDOWS_MODE_INDICATOR_THEME_SYSTEM);
+    const bool custom = theme ==
+        static_cast<int>(config::Config::WINDOWS_MODE_INDICATOR_THEME_CUSTOM);
+    const bool dark = renderer::ResolveWindowsModeIndicatorTheme(
+        static_cast<config::Config::WindowsModeIndicatorTheme>(theme),
+        renderer::GetSystemColorTheme()) == renderer::SystemColorTheme::kDark;
+
+    const ModeIndicatorPalette custom_colors[3] = {
+        {color("modeIndicatorAsciiBackgroundColorButton", defaults.ascii_background_color()),
+         color("modeIndicatorAsciiBorderColorButton", defaults.ascii_border_color()),
+         color("modeIndicatorAsciiShadowColorButton", defaults.ascii_shadow_color()),
+         color("modeIndicatorAsciiTextColorButton", defaults.ascii_text_color())},
+        {color("modeIndicatorHiraganaBackgroundColorButton", defaults.hiragana_background_color()),
+         color("modeIndicatorHiraganaBorderColorButton", defaults.hiragana_border_color()),
+         color("modeIndicatorHiraganaShadowColorButton", defaults.hiragana_shadow_color()),
+         color("modeIndicatorHiraganaTextColorButton", defaults.hiragana_text_color())},
+        {color("modeIndicatorKatakanaBackgroundColorButton", defaults.katakana_background_color()),
+         color("modeIndicatorKatakanaBorderColorButton", defaults.katakana_border_color()),
+         color("modeIndicatorKatakanaShadowColorButton", defaults.katakana_shadow_color()),
+         color("modeIndicatorKatakanaTextColorButton", defaults.katakana_text_color())},
+    };
+    const ModeIndicatorPalette* palettes = custom ? custom_colors
+        : (dark ? kModeIndicatorDarkPalettes : kModeIndicatorLightPalettes);
+    const int chip_width = custom
+        ? spin("modeIndicatorWidthSpinBox", defaults.width()) : 36;
+    const int chip_height = custom
+        ? spin("modeIndicatorHeightSpinBox", defaults.height()) : 28;
+    const int corner = custom
+        ? spin("modeIndicatorCornerRadiusSpinBox", defaults.corner_radius()) : 8;
+    const int label_size = custom
+        ? spin("modeIndicatorLabelSizeSpinBox", defaults.label_size()) : 12;
+    const int border = custom
+        ? spin("modeIndicatorBorderThicknessSpinBox", defaults.border_thickness()) : 1;
+    const int blur = custom
+        ? spin("modeIndicatorShadowBlurSpinBox", defaults.shadow_blur()) : 4;
+    const int opacity = custom
+        ? spin("modeIndicatorShadowOpacitySpinBox", defaults.shadow_opacity_percent())
+        : (dark ? 25 : 22);
+    const int shadow_x = custom
+        ? spin("modeIndicatorShadowOffsetXSpinBox", defaults.shadow_offset_x()) : 0;
+    const int shadow_y = custom
+        ? spin("modeIndicatorShadowOffsetYSpinBox", defaults.shadow_offset_y()) : 1;
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(palette().color(QPalette::Base));
+    painter.drawRoundedRect(QRectF(rect()), 9, 9);
+    QColor outline = palette().color(QPalette::Mid);
+    outline.setAlpha(90);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(outline, 1));
+    painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 9, 9);
+
+    const bool narrow = width() < 450;
+    const double cell_width = narrow ? width() - 20.0 : (width() - 20.0) / 3;
+    const double cell_height = narrow ? (height() - 12.0) / 3 : height() - 12.0;
+    const QString captions[3] = {
+        StatusUiText("Alphanumeric", "英数"),
+        StatusUiText("Hiragana", "ひらがな"),
+        StatusUiText("Katakana", "カタカナ")};
+    const QString glyphs[3] = {
+        QStringLiteral("A"), QString::fromUtf8("あ"), QString::fromUtf8("ア")};
+    QFont caption_font = font();
+    caption_font.setPointSizeF(std::max(8.0, caption_font.pointSizeF() - 1.0));
+    QFont glyph_font = font();
+    glyph_font.setPointSize(std::clamp(label_size, 8, 32));
+
+    for (int i = 0; i < 3; ++i) {
+      const QRectF cell(10.0 + (narrow ? 0 : i) * cell_width,
+                        6.0 + (narrow ? i : 0) * cell_height,
+                        cell_width, cell_height);
+      painter.save();
+      painter.setClipRect(cell.adjusted(2, 2, -2, -2));
+      painter.setFont(caption_font);
+      painter.setPen(palette().color(QPalette::Text));
+      painter.drawText(QRectF(cell.left(), cell.top() + 2,
+                              cell.width(), 19),
+                       Qt::AlignCenter, captions[i]);
+      const double shadow_extent = blur * 2.0 +
+          std::max(std::abs(shadow_x), std::abs(shadow_y));
+      const double scale = std::clamp(std::min(
+          (cell.width() - 18.0) / (chip_width + shadow_extent + 6.0),
+          (cell.height() - 30.0) / (chip_height + shadow_extent + 6.0)),
+          0.1, 1.0);
+      painter.translate(cell.center().x(), cell.center().y() + 10);
+      painter.scale(scale, scale);
+      const QRectF chip(-chip_width / 2.0, -chip_height / 2.0,
+                        chip_width, chip_height);
+      const double radius = std::clamp(static_cast<double>(corner), 0.0,
+                                       std::min(chip.width(), chip.height()) / 2.0);
+      for (int spread = blur; spread > 0 && opacity > 0; --spread) {
+        QColor shade = RgbHexToQColor(palettes[i].shadow);
+        shade.setAlpha(std::clamp(opacity * (blur - spread + 1) * 255 /
+                                  (blur * 100 * 2), 0, 255));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(shade);
+        painter.drawRoundedRect(
+            chip.adjusted(-spread, -spread, spread, spread)
+                .translated(shadow_x, shadow_y),
+            radius + spread, radius + spread);
+      }
+      painter.setBrush(RgbHexToQColor(palettes[i].background));
+      painter.setPen(border > 0
+                         ? QPen(RgbHexToQColor(palettes[i].border), border)
+                         : QPen(Qt::NoPen));
+      painter.drawRoundedRect(chip, radius, radius);
+      painter.setPen(RgbHexToQColor(palettes[i].text));
+      painter.setFont(glyph_font);
+      painter.drawText(chip, Qt::AlignCenter | Qt::TextSingleLine, glyphs[i]);
+      painter.restore();
+    }
+  }
+
+ private:
+  QWidget* settings_;
+};
+#endif  // _WIN32
 }  // namespace
 
 void ConfigDialog::UpdateConversionStatusPreview() {
@@ -3354,6 +3531,27 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                                    Qt::AlignRight);
   mode_indicator_layout->setColumnStretch(1, 1);
 
+  // Keep the preview outside the custom-only controls so that Standard,
+  // Dark, Light and disabled indicators can all be inspected without Apply.
+  auto* mode_preview_section = new QWidget(mode_indicator_body);
+  auto* mode_preview_layout = new QVBoxLayout(mode_preview_section);
+  mode_preview_layout->setContentsMargins(8, 4, 8, 6);
+  mode_preview_layout->setSpacing(5);
+  auto* mode_preview_title = new QLabel(
+      StatusUiText("Live preview", "プレビュー"), mode_preview_section);
+  mode_preview_layout->addWidget(mode_preview_title);
+  auto* mode_preview = new ModeIndicatorPreviewWidget(this, mode_preview_section);
+  mode_preview->setObjectName(QStringLiteral("modeIndicatorLivePreview"));
+  mode_preview_layout->addWidget(mode_preview);
+  mode_indicator_layout->addWidget(mode_preview_section, 2, 0, 1, 2);
+
+  // A combo box popup can defer a scheduled update() until the next input
+  // event. Paint synchronously on selection so theme changes are immediate.
+  QObject::connect(modeIndicatorThemeComboBox,
+                   QOverload<int>::of(&QComboBox::currentIndexChanged),
+                   mode_preview,
+                   [mode_preview](int) { mode_preview->repaint(); });
+
   QGroupBox* mode_indicator_custom_box =
       new QGroupBox(tr("Custom design"), mode_indicator_body);
   mode_indicator_custom_box->setObjectName(
@@ -3364,6 +3562,66 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
       new QVBoxLayout(mode_indicator_custom_box);
   mode_indicator_custom_layout->setContentsMargins(8, 8, 8, 8);
   mode_indicator_custom_layout->setSpacing(8);
+
+  // Load only the four colors for each displayed input-mode family. Geometry,
+  // shadow strength and the selected CUSTOM theme are intentionally preserved.
+  auto* palette_actions = new QHBoxLayout();
+  palette_actions->setContentsMargins(0, 0, 0, 0);
+  palette_actions->setSpacing(8);
+  auto* load_light = new QPushButton(
+      StatusUiText("Load light colors", "ライト配色を読み込む"),
+      mode_indicator_custom_box);
+  auto* load_dark = new QPushButton(
+      StatusUiText("Load dark colors", "ダーク配色を読み込む"),
+      mode_indicator_custom_box);
+  load_light->setObjectName(QStringLiteral("modeIndicatorLoadLightColorsButton"));
+  load_dark->setObjectName(QStringLiteral("modeIndicatorLoadDarkColorsButton"));
+  const QString palette_tooltip = StatusUiText(
+      "Replace the colors for all three modes, keeping size and shadow settings.",
+      "英数・ひらがな・カタカナの配色のみ変更します。サイズや影の設定は維持します。");
+  load_light->setToolTip(palette_tooltip);
+  load_dark->setToolTip(palette_tooltip);
+  palette_actions->addWidget(load_light);
+  palette_actions->addWidget(load_dark);
+  palette_actions->addStretch(1);
+  mode_indicator_custom_layout->addLayout(palette_actions);
+
+  auto load_mode_palette = [this, mode_preview](
+      const ModeIndicatorPalette (&colors)[3]) {
+    const char* const controls[3][4] = {
+        {"modeIndicatorAsciiBackgroundColorButton",
+         "modeIndicatorAsciiBorderColorButton",
+         "modeIndicatorAsciiShadowColorButton",
+         "modeIndicatorAsciiTextColorButton"},
+        {"modeIndicatorHiraganaBackgroundColorButton",
+         "modeIndicatorHiraganaBorderColorButton",
+         "modeIndicatorHiraganaShadowColorButton",
+         "modeIndicatorHiraganaTextColorButton"},
+        {"modeIndicatorKatakanaBackgroundColorButton",
+         "modeIndicatorKatakanaBorderColorButton",
+         "modeIndicatorKatakanaShadowColorButton",
+         "modeIndicatorKatakanaTextColorButton"},
+    };
+    for (int i = 0; i < 3; ++i) {
+      const uint32_t values[4] = {
+          colors[i].background, colors[i].border,
+          colors[i].shadow, colors[i].text};
+      for (int j = 0; j < 4; ++j) {
+        SetColorButton(FindButton(this, QString::fromLatin1(controls[i][j])),
+                       values[j]);
+      }
+    }
+    mode_preview->repaint();
+    EnableApplyButton();
+  };
+  QObject::connect(load_light, &QPushButton::clicked, this,
+                   [load_mode_palette]() {
+                     load_mode_palette(kModeIndicatorLightPalettes);
+                   });
+  QObject::connect(load_dark, &QPushButton::clicked, this,
+                   [load_mode_palette]() {
+                     load_mode_palette(kModeIndicatorDarkPalettes);
+                   });
 
   QGridLayout* mode_indicator_color_layout = new QGridLayout();
   mode_indicator_color_layout->setHorizontalSpacing(8);
@@ -3502,7 +3760,13 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   mode_indicator_shape_layout->setColumnStretch(3, 1);
   mode_indicator_custom_layout->addLayout(mode_indicator_shape_layout);
 
-  mode_indicator_layout->addWidget(mode_indicator_custom_box, 2, 0, 1, 2);
+  // Spin changes update the preview immediately; no configuration is saved.
+  for (QSpinBox* spin : mode_indicator_custom_box->findChildren<QSpinBox*>()) {
+    QObject::connect(spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                     mode_preview, [mode_preview](int) { mode_preview->repaint(); });
+  }
+
+  mode_indicator_layout->addWidget(mode_indicator_custom_box, 3, 0, 1, 2);
   mode_indicator_root_layout->addWidget(mode_indicator_body);
 
   QObject::connect(
@@ -5363,6 +5627,9 @@ void ConfigDialog::SelectRendererAppearanceColor() {
   }
   SetColorButton(button, QColorToRgbHex(selected_color));
   UpdateConversionStatusPreview();
+  if (QWidget* preview = findChild<QWidget*>("modeIndicatorLivePreview")) {
+    preview->repaint();
+  }
   EnableApplyButton();
 }
 
