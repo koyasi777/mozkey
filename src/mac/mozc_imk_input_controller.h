@@ -105,6 +105,11 @@
   int liveConversionAnchorLeft_;
   bool hasLiveConversionAnchorLeft_;
 
+  /** Caret geometry reported by the client just before the current composition started. */
+  NSRect compositionStartCaretRect_;
+  NSDictionary *compositionStartCaretAttributes_;
+  bool hasCompositionStartCaret_;
+
   /** True when the current config enables live conversion. */
   bool useLiveConversion_;
   /** True when the current config enables the independent status overlay. */
