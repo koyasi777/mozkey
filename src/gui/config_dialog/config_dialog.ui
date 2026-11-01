@@ -1075,6 +1075,9 @@
                    </property>
                    <item>
                     <widget class="QLabel" name="zenzConditionFieldsSectionLabel">
+                     <property name="toolTip">
+                      <string>自動ライブ補正とコマンドによる未確定文字の手動 Zenz 補正で共通して使う設定です。Zenz ライブ補正がオフでも編集できます。</string>
+                     </property>
                      <property name="text">
                       <string>Zenz 条件フィールド</string>
                      </property>
@@ -1629,7 +1632,7 @@
                    <string>Zenz 補正が実行される場合、補正結果が確定するまで通常の Mozc ライブ変換結果を表示しません。Zenz が採用されなかった場合は Mozc 結果を表示します。</string>
                   </property>
                   <property name="text">
-                   <string>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</string>
+                   <string>Zenz 補正結果が返るまでライブ変換結果（Mozc）を表示しない</string>
                   </property>
                  </widget>
                 </item>
