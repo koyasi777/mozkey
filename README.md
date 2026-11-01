@@ -85,31 +85,27 @@ Windows 向けの未署名 MSI は、Microsoft Defender SmartScreen によって
 
 #### インストール
 
-1. Releases の **Assets** から macOS 用 Universal `.pkg` をダウンロードします。対象リリースに PKG がない場合は、macOS 用インストーラーは配布されていません。
-2. Finder で PKG を**ダブルクリック**し、画面の案内に従います。
-3. macOS によって開けない場合は、下記の [セキュリティ警告への対処](#macos-でセキュリティ警告が表示された場合) を参照してください。パッケージ内のプログラム実行許可を求められた場合も、内容を確認してから判断してください。
-4. インストール後、下記の [日本語入力を有効にする](#日本語入力を有効にする) の手順に進みます。
+1. [GitHub Releases](https://github.com/koyasi777/mozkey/releases) の対象リリースにある **Assets** から、macOS 用 Universal `.pkg` をダウンロードします。PKG が掲載されていないリリースでは、macOS 用インストーラーは配布されていません。
+2. Finder でダウンロードした PKG を**ダブルクリック**します。Gatekeeper の警告で開けない場合は、下記の [macOS でセキュリティ警告が表示された場合](#macos-でセキュリティ警告が表示された場合) に従い、対象の PKG だけを個別に許可してください。インストーラーが開いたら、画面の案内に従ってインストールします。
+3. **インストール完了後は、macOS から一度ログアウトして再ログインしてください。** インストール直後に「キーボード」の設定画面が自動で開くことがありますが、その時点では Mozkey が入力ソースの候補にまだ表示されないことがあります。再ログインを先に行ってください。
+4. 再ログイン後、**システム設定 → キーボード → テキスト入力 → 編集** を開きます。**「ひらがな（Mozkey）」**（環境によっては「Hiragana (Mozkey)」）がすでに登録されていれば、そのまま次へ進みます。未登録の場合は **「+」→「日本語」** から Mozkey のひらがな入力ソースを追加します。
+5. メニューバーの入力メニューから **ひらがな（Mozkey）** を選択し、実際に日本語を入力できることを確認します。表示されない場合は、再ログインが完了していることを確認し、入力ソースの追加画面をもう一度開いてください。
 
-既存の Mozkey を更新するときは、重要な設定やユーザー辞書を事前にバックアップしてください。v0.7.7 から v1.0.0 への上書きアップグレードは、Apple Silicon 搭載 Mac（macOS 15.8.2）で動作確認済みです。
+既存の Mozkey を更新する場合は、重要な設定やユーザー辞書を事前にバックアップしてください。v0.7.7 から v1.0.0 への上書きアップグレードは、Apple Silicon 搭載 Mac（macOS 15.8.2）で動作確認済みです。入力ソースの設定については [Apple の公式ガイド](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) も参照してください。
 
 #### macOS でセキュリティ警告が表示された場合
 
-Apple Developer ID 署名・公証のない PKG は、macOS の Gatekeeper によってブロックされる場合があります。**公式配布元とファイルの完全性を確認できた場合に限り**、対象の PKG を個別に許可してください。
+Apple Developer ID 署名・公証のない PKG は、macOS の Gatekeeper によってブロックされることがあります。**GitHub Releases の正規のファイルであることと、公開されているチェックサムがあればその一致を確認した場合に限り**、対象ファイルを個別に許可してください。
 
-1. Finder で PKG を開こうとして「Apple で悪質なソフトウェアかどうかを確認できない」などと表示されたら、「ゴミ箱に入れる」ではなく **「完了」** を選びます。
-2. **Apple メニュー → システム設定 → プライバシーとセキュリティ** を開きます。
-3. ブロックされた PKG の説明付近にある **「このまま開く」** を選び、内容を確認して認証します。
-4. インストーラーが開いたら、通常の手順でインストールします。
+1. Finder から PKG を開こうとして警告が表示されたら、**「ゴミ箱に入れる」ではなく「完了」** をクリックして閉じます。
+2. **Apple メニュー → システム設定 → プライバシーとセキュリティ** を開き、右側を下へスクロールして **「セキュリティ」** 欄を探します。
+3. **「アプリケーションの実行許可」** の下に、**「お使いの Mac を保護するために “Mozkey_…pkg” がブロックされました。」** というメッセージが表示されます。**このメッセージの右側にある「このまま開く」** をクリックします。
+4. **「“Mozkey_v1.0.0_macos_universal.pkg” を開きますか？」** という確認ダイアログが表示されたら、ファイル名を再確認し、**確認ダイアログ内の「このまま開く」** をクリックします。認証を求められた場合は画面の指示に従います。
+5. PKG インストーラーが起動したら、画面の案内に従ってインストールします。完了後は上記のインストール手順に戻り、**ログアウト・再ログインしてから**日本語入力を有効化してください。
 
-「このまま開く」が見つからない場合は、同じ PKG を Finder でもう一度開こうとしてから確認してください。**Gatekeeper 全体を無効化する必要はありません。** 「Mac が破損する」「マルウェアが検出された」などの警告は回避せず中止してください。詳しくは [Apple の公式案内](https://support.apple.com/ja-jp/102445) を参照してください。
+「このまま開く」が見つからない場合は、Finder で同じ PKG をもう一度開こうとしてから「プライバシーとセキュリティ」を確認してください。macOS のバージョンによって文言や配置が多少異なることがあります。
 
-#### 日本語入力を有効にする
-
-1. **システム設定 → キーボード → テキスト入力 → 編集** を開きます。
-2. **「Hiragana (Mozkey)」**（「ひらがな（Mozkey）」と表示される場合もあります）がなければ、「+」から日本語の Mozkey 入力ソースを追加します。
-3. メニューバーの入力メニューで Mozkey を選択します。表示されなければ、macOS からログアウトして再ログインし、もう一度確認してください。
-
-詳しくは [Apple の入力ソース設定ガイド](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) を参照してください。
+**Gatekeeper 全体を無効化する必要はありません。** 「Mac が破損する」「マルウェアが検出された」などの警告は回避せず、実行を中止してください。詳しくは [Apple の公式案内](https://support.apple.com/ja-jp/102445) を参照してください。
 
 ### コード署名・配布上の注意
 
@@ -971,31 +967,27 @@ macOS installation and initial setup
 
 ### Install the PKG
 
-1. Download the macOS Universal `.pkg` from the release **Assets**. If the release has no PKG, it does not distribute a macOS installer.
-2. **Double-click** the PKG in Finder and follow the Installer prompts.
-3. If macOS blocks the package, see [the per-package security instructions](#if-macos-blocks-the-installer). Review any request to run programs contained in the package before allowing it.
-4. After installation, [enable Japanese input](#enable-japanese-input).
+1. Download the macOS Universal `.pkg` from the **Assets** of the relevant [GitHub Release](https://github.com/koyasi777/mozkey/releases). If the release has no PKG, no macOS installer is provided for that release.
+2. **Double-click** the downloaded PKG in Finder. If Gatekeeper blocks it, follow [If macOS blocks the installer](#if-macos-blocks-the-installer) below to approve that specific package only. Then complete the Installer prompts.
+3. **After installation, log out of macOS and log back in before selecting Mozkey.** The installer may open Keyboard settings automatically, but **ひらがな（Mozkey）** (or **Hiragana (Mozkey)**) may not appear in the input-source choices until you log back in.
+4. After logging in again, open **System Settings → Keyboard → Text Input → Edit**. If **ひらがな（Mozkey）** (or **Hiragana (Mozkey)**) is already configured, continue. Otherwise, use **+ → Japanese** to add the Mozkey Hiragana input source (its displayed name may be localized).
+5. Select **ひらがな（Mozkey）** (or **Hiragana (Mozkey)**) from the menu-bar input menu and confirm that Japanese input works. If it is absent, confirm that you have logged back in and try the input-source settings again.
 
-Back up important settings and user-dictionary data before upgrading. An in-place upgrade from v0.7.7 to v1.0.0 was verified on an Apple Silicon Mac running macOS 15.8.2.
+Back up important settings and user-dictionary data before upgrading. An in-place upgrade from v0.7.7 to v1.0.0 was verified on an Apple Silicon Mac running macOS 15.8.2. See [Apple's input-source settings guide](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) for more details.
 
 ### If macOS blocks the installer
 
-An unsigned, unnotarized PKG may be blocked by macOS Gatekeeper. **Override the block only if you have verified the source and integrity of that specific package.**
+An unsigned, unnotarized PKG may be blocked by macOS Gatekeeper. **Only approve the specific PKG if you have verified that it came from the official GitHub Releases and matches any published checksum.**
 
-1. Try opening the PKG in Finder. If macOS says it cannot check the software for malicious content, dismiss the dialog with **Done** rather than moving the package to the Trash.
-2. Open **Apple menu → System Settings → Privacy & Security**.
-3. Find the blocked PKG notice, select **Open Anyway**, review the prompt, and authenticate.
-4. When Installer opens, complete the installation normally.
+1. When opening the PKG in Finder triggers the warning, click **Done** rather than **Move to Trash**.
+2. Open **Apple menu → System Settings → Privacy & Security**. Scroll down to the **Security** section.
+3. Under **Allow applications**, locate a message similar to **“‘Mozkey_…pkg’ was blocked to protect your Mac.”** Click the **Open Anyway** button to the right of this message.
+4. A second dialog asks whether to open **“Mozkey_v1.0.0_macos_universal.pkg”**. Verify the file name and click **Open Anyway** in the confirmation dialog. Authenticate if prompted.
+5. When Installer opens, follow its instructions. Once installation completes, return to the steps above and **log out and back in before enabling Japanese input**.
 
-If **Open Anyway** does not appear, try opening the same PKG in Finder again and return to Privacy & Security. **Do not disable Gatekeeper system-wide.** If macOS reports damage or detects malware, stop rather than bypassing the warning. See [Apple's official guidance](https://support.apple.com/ja-jp/102445).
+If **Open Anyway** is absent, try opening the same PKG in Finder once more, then return to Privacy & Security. The wording and layout can differ by macOS version.
 
-### Enable Japanese input
-
-1. Open **System Settings → Keyboard → Text Input → Edit**.
-2. If **Hiragana (Mozkey)** is absent, use **+** to add the Mozkey Hiragana input source under Japanese. The name may be localized.
-3. Select Mozkey in the menu-bar input selector. If it is absent, log out of macOS, log back in, and check again.
-
-See [Apple's input-source guide](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) for details.
+**Do not disable Gatekeeper system-wide.** If macOS reports damage or detects malware, do not bypass the warning. See [Apple's official guidance](https://support.apple.com/ja-jp/102445).
 
 ### Code signing and distribution notes
 
