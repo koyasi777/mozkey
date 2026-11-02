@@ -286,6 +286,13 @@ bool ValidateOptions(const LlamaServerProcessOptions& options,
     return false;
   }
   for (const std::string& argument : options.additional_args) {
+    // Additional arguments follow the fixed loopback host / random port.
+    // Never allow an argument to override this network isolation boundary.
+    if (argument == "--host" || argument.starts_with("--host=") ||
+        argument == "--port" || argument.starts_with("--port=")) {
+      *error = "network_endpoint_override_rejected";
+      return false;
+    }
     // API key is controlled by Mozkey; never accept a second key in argv.
     if (argument == "--api-key" ||
         argument.starts_with("--api-key=")) {

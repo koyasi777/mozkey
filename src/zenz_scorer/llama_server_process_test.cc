@@ -319,6 +319,21 @@ TEST(LlamaServerProcessTest, RejectsKeyOverrideArgument) {
   EXPECT_EQ(error, "api_key_override_rejected");
 }
 
+TEST(LlamaServerProcessTest, RejectsNetworkEndpointOverrideArgument) {
+  TemporaryModel model;
+  ASSERT_FALSE(model.path().empty());
+
+  for (const std::string& argument : {
+           "--host", "--host=0.0.0.0", "--port", "--port=18080"}) {
+    LlamaServerProcessOptions options = MakeOptions(model.path());
+    options.additional_args = {argument};
+    LlamaServerProcess process(std::move(options));
+    std::string error;
+    EXPECT_FALSE(process.Start(&error)) << argument;
+    EXPECT_EQ(error, "network_endpoint_override_rejected") << argument;
+  }
+}
+
 TEST(LlamaServerProcessTest, RejectsMissingRuntimeFiles) {
   TemporaryModel model;
   ASSERT_FALSE(model.path().empty());
