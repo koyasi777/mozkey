@@ -6,6 +6,7 @@ The Zenz-enabled macOS package embeds the following runtime under
 ```text
 ZenzRuntime/
 ├── mozc_zenz_scorer
+├── mozc_zenz_guard
 ├── llama-server
 ├── BUILD-CONTRACT.txt
 ├── models/
@@ -270,18 +271,37 @@ It verifies:
 Distribution minimum macOS and architecture policy
 embedded BUILD-CONTRACT provenance
 model and license identities
-Universal Mozc / mozc_zenz_scorer / llama-server executables
+Universal Mozc / mozc_zenz_scorer / mozc_zenz_guard / llama-server executables
 macOS 12.0 deployment target on both slices
-system-only scorer and llama-server dependencies
+system-only scorer, guard and llama-server dependencies
 tokenizer compatibility marker on both llama-server slices
 nested code signatures
 native mozc_zenz_scorer -> llama-server -> model request over the production
 Unix-domain wire protocol
+sampled IPv4 / IPv6 socket audit for the packaged scorer and descendants
 ```
 
 The verifier refuses the native runtime test if another Zenz scorer is already
 accepting connections on the production socket. This prevents a false pass
 against an installed or unrelated scorer process.
+
+The inference test now invokes `tools/macos_offline_socket_audit.py` and saves
+`offline-sockets.json` beside the package audit. The sampled `ps` / `lsof`
+checks reject non-loopback IP endpoints and observation errors. This is a
+**detection gate, not an outbound firewall**: connections between samples may
+be missed, and the test does not audit every component of an installed IME.
+
+Run the independent macOS source gate and its regression tests from the
+repository root:
+
+```bash
+python3 tools/check_macos_offline_source.py
+python3 -m unittest discover -s tools/tests -p 'test_macos_offline_audit.py' -v
+```
+
+CI runs these checks using `.github/workflows/macos_secure_offline.yml`.
+See the [macOS offline audit contract](../../../../docs/security/macos_offline_audit.md)
+for coverage, evidence, and remaining release requirements.
 
 Example:
 
