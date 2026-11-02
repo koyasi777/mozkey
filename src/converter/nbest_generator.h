@@ -120,6 +120,8 @@ class NBestGenerator {
                      Segment& segment);
 
  private:
+  // Narrow test-only access for synthetic lattice regression tests.
+  friend class NBestGeneratorTestPeer;
   enum BoundaryCheckResult {
     VALID = 0,
     VALID_WEAK_CONNECTED,  // Valid but should get penalty.

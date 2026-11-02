@@ -77,6 +77,7 @@ void Candidate::Clear() {
   style = NumberUtil::NumberString::DEFAULT_STYLE;
   command = DEFAULT_COMMAND;
   inner_segment_boundary.clear();
+  proper_noun_spans.clear();
 #ifdef MOZC_CANDIDATE_DEBUG
   log.clear();
 #endif  // MOZC_CANDIDATE_DEBUG

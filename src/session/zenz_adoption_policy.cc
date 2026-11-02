@@ -604,6 +604,157 @@ bool BaselineSegmentsMatchAdoptionInput(
   return concatenated_key == key && concatenated_value == mozc_value;
 }
 
+// v8.4: Repair only a provably aligned, small change to a selected system name.
+// Avoid guessing from similar spellings or the absolute byte offset in Zenz's
+// output: the latter may change when text before the name is corrected.
+struct NameRepairScalars {
+  std::vector<char32_t> chars;
+  std::vector<size_t> byte_offsets;
+};
+
+bool DecodeNameRepairScalars(absl::string_view text, NameRepairScalars* out) {
+  if (out == nullptr) return false;
+  out->chars.clear();
+  out->byte_offsets.clear();
+  for (size_t i = 0; i < text.size();) {
+    const size_t begin = i;
+    char32_t c = 0;
+    if (!DecodeUtf8Char(text, &i, &c)) return false;
+    out->chars.push_back(c);
+    out->byte_offsets.push_back(begin);
+    if (out->chars.size() > 128) return false;
+  }
+  out->byte_offsets.push_back(text.size());
+  return true;
+}
+
+bool UniqueNameRepairBoundary(
+    const std::vector<std::vector<int>>& forward,
+    const std::vector<std::vector<int>>& backward, size_t source_index,
+    int distance, size_t* target_index) {
+  bool found = false;
+  for (size_t j = 0; j < forward[source_index].size(); ++j) {
+    // Every node on an optimal edit path satisfies this equality.  If a source
+    // boundary has two optimal target positions, there is no safe repair.
+    if (forward[source_index][j] + backward[source_index][j] != distance) {
+      continue;
+    }
+    if (found) return false;
+    *target_index = j;
+    found = true;
+  }
+  return found;
+}
+
+bool TryRepairSelectedSystemName(
+    absl::string_view mozc_value, const ProtectedConversionSpan& span,
+    std::string* zenz_value) {
+  if (zenz_value == nullptr || span.value.empty() ||
+      span.source_value_offset == std::string::npos ||
+      span.source_value_offset > mozc_value.size() ||
+      mozc_value.substr(span.source_value_offset, span.value.size()) !=
+          span.value ||
+      CountOccurrences(mozc_value, span.value) != 1 ||
+      CountOccurrences(*zenz_value, span.value) != 0) {
+    return false;
+  }
+
+  NameRepairScalars source, target;
+  if (!DecodeNameRepairScalars(mozc_value, &source) ||
+      !DecodeNameRepairScalars(*zenz_value, &target)) {
+    return false;
+  }
+  const size_t name_end_byte = span.source_value_offset + span.value.size();
+  const auto begin = std::find(source.byte_offsets.begin(),
+                               source.byte_offsets.end(),
+                               span.source_value_offset);
+  const auto end = std::find(source.byte_offsets.begin(),
+                             source.byte_offsets.end(), name_end_byte);
+  if (begin == source.byte_offsets.end() ||
+      end == source.byte_offsets.end()) {
+    return false;
+  }
+  const size_t name_begin = begin - source.byte_offsets.begin();
+  const size_t name_end = end - source.byte_offsets.begin();
+  const size_t name_length = name_end - name_begin;
+  if (name_length < 2 || name_length > 16) return false;
+
+  const size_t n = source.chars.size();
+  const size_t m = target.chars.size();
+  std::vector<std::vector<int>> forward(n + 1,
+                                        std::vector<int>(m + 1, 0));
+  std::vector<std::vector<int>> backward(n + 1,
+                                         std::vector<int>(m + 1, 0));
+  for (size_t i = 0; i <= n; ++i) forward[i][0] = static_cast<int>(i);
+  for (size_t j = 0; j <= m; ++j) forward[0][j] = static_cast<int>(j);
+  for (size_t i = 1; i <= n; ++i) {
+    for (size_t j = 1; j <= m; ++j) {
+      forward[i][j] = std::min(
+          {forward[i - 1][j] + 1, forward[i][j - 1] + 1,
+           forward[i - 1][j - 1] +
+               (source.chars[i - 1] == target.chars[j - 1] ? 0 : 1)});
+    }
+  }
+  for (size_t i = 0; i <= n; ++i) backward[i][m] = static_cast<int>(n - i);
+  for (size_t j = 0; j <= m; ++j) backward[n][j] = static_cast<int>(m - j);
+  for (size_t i = n; i-- > 0;) {
+    for (size_t j = m; j-- > 0;) {
+      backward[i][j] = std::min(
+          {backward[i + 1][j] + 1, backward[i][j + 1] + 1,
+           backward[i + 1][j + 1] +
+               (source.chars[i] == target.chars[j] ? 0 : 1)});
+    }
+  }
+  const int distance = forward[n][m];
+  // Conservative initial scope: refuse large, potentially reordered rewrites.
+  if (distance > 8) return false;
+  size_t target_begin = 0, target_end = 0;
+  if (!UniqueNameRepairBoundary(forward, backward, name_begin, distance,
+                                &target_begin) ||
+      !UniqueNameRepairBoundary(forward, backward, name_end, distance,
+                                &target_end) ||
+      target_end < target_begin ||
+      target_end - target_begin != name_length) {
+    return false;
+  }
+
+  size_t substitutions = 0;
+  size_t equal_chars = 0;
+  for (size_t k = 0; k < name_length; ++k) {
+    if (source.chars[name_begin + k] == target.chars[target_begin + k]) {
+      ++equal_chars;
+    } else {
+      ++substitutions;
+    }
+  }
+  // Only repair a small spelling change, never reconstruct an arbitrary
+  // missing name or insert/delete a different-length name token.
+  const size_t allowed_substitutions = name_length >= 5 ? 2 : 1;
+  if (substitutions == 0 || substitutions > allowed_substitutions ||
+      equal_chars == 0 ||
+      forward[name_begin][target_begin] +
+              static_cast<int>(substitutions) +
+              backward[name_end][target_end] != distance) {
+    // Require the character-for-character name substitution itself to lie on
+    // an optimal edit path. Otherwise a shifted / overlapping match could
+    // accidentally consume the neighboring Japanese text.
+    return false;
+  }
+
+  std::string repaired(*zenz_value);
+  repaired.replace(target.byte_offsets[target_begin],
+                   target.byte_offsets[target_end] -
+                       target.byte_offsets[target_begin],
+                   span.value);
+  // A no-op Zenz correction is a rejection, not accepted learning evidence.
+  if (repaired == mozc_value ||
+      CountOccurrences(repaired, span.value) != 1) {
+    return false;
+  }
+  *zenz_value = std::move(repaired);
+  return true;
+}
+
 }  // namespace
 
 ProtectedConversionSpan::Tier ClassifyProtectedAsciiSurface(
@@ -643,6 +794,57 @@ ProtectedConversionSpan::Tier ClassifyProtectedAsciiSurface(
     return ProtectedConversionSpan::Tier::kNumericLiteral;
   }
   return ProtectedConversionSpan::Tier::kIdentityCritical;
+}
+
+bool ShouldProtectSystemProperNounReadings(
+    const std::vector<std::string>& token_readings) {
+  if (token_readings.empty()) {
+    return false;
+  }
+
+  // Minimal high-risk seed list: these are deliberately not permanent
+  // bans on Zenz conversion, only exemptions from the new system-name guard.
+  // Entries are full lexical readings (not substrings of the full sentence).
+  // Curated whole-reading exceptions: common non-name meanings can otherwise
+  // become impossible to recover when Mozc selected a proper-name node.
+  // The list is intentionally NOT all homophones of proper nouns.  In
+  // particular, けん/県 and しょうじ/商事 are intentionally excluded to retain
+  // protection of compounds such as 奈良県 and 佐藤商事 under the current
+  // all-token exception policy. Review each addition against compound tests.
+  constexpr absl::string_view kAmbiguousReadings[] = {
+      "あい", "あおい", "あかね", "あかり", "あき", "あきた",
+      "あさひ", "あや", "あゆみ", "あゆむ", "あらい", "あんな",
+      "いこう", "いずみ", "えり", "おか", "かい", "かいとう",
+      "かおり", "かおる", "かける", "かこう", "かすみ", "かとう",
+      "かな", "かんじ", "かんせい", "かんだ", "きかん", "きし",
+      "きせい", "きた", "きょう", "ぎふ", "くるみ", "けんじ",
+      "こう", "こうえい", "こうかん", "こうし", "こうしょう", "こうじ",
+      "こうせい", "こうち", "さくら", "さつき", "さとう", "さとる",
+      "しおり", "しげる", "しこう", "しずか", "しのぶ", "しみず",
+      "しょう", "しょうこ", "しんこう", "しんじ", "じゅん", "すすむ",
+      "すずき", "すみれ", "せいか", "せいかく", "せいじ", "せんだい",
+      "そら", "たくみ", "たける", "とうこう", "とおる", "なお",
+      "なつ", "なみ", "なら", "のぞみ", "のぼる", "はじめ",
+      "はな", "はら", "はる", "はるか", "ひかり", "ひかる",
+      "ひとみ", "ひなた", "ふじ", "まい", "まこと", "まさる",
+      "まもる", "みえ", "みき", "みさき", "みどり", "みなと",
+      "みなみ", "みらい", "めい", "めぐみ", "もり", "ゆうき",
+      "ゆかり", "ゆき", "ゆめ", "ゆり", "りく", "りょう",
+      "れい", "れん", "わたる",
+  };
+  for (const std::string& reading : token_readings) {
+    bool is_exception = false;
+    for (absl::string_view exception : kAmbiguousReadings) {
+      if (absl::string_view(reading) == exception) {
+        is_exception = true;
+        break;
+      }
+    }
+    if (!is_exception) {
+      return true;
+    }
+  }
+  return false;
 }
 
 ZenzProtectedPromptResult ZenzAdoptionPolicy::ProtectPromptKey(
@@ -715,6 +917,17 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
     const ZenzAdoptionInput& input) const {
   std::string adopted_value(input.zenz_value);
   bool protected_surface_repaired = false;
+  bool selected_system_name_repaired = false;
+  size_t selected_system_name_count = 0;
+  for (const ProtectedConversionSpan& candidate : input.protected_spans) {
+    if (candidate.tier == ProtectedConversionSpan::Tier::kSystemProperNoun) {
+      ++selected_system_name_count;
+    }
+  }
+  // Selected-name locations are stable lexical anchors in the *baseline*.
+  // The output position may change when Zenz corrects nearby text, but names
+  // must remain in the same relative order.
+  std::vector<std::pair<size_t, size_t>> system_name_positions;
 
   for (const ProtectedConversionSpan& span : input.protected_spans) {
     if (span.value.empty()) {
@@ -748,6 +961,69 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
       continue;
     }
 
+    if (span.tier == ProtectedConversionSpan::Tier::kSystemProperNoun) {
+      // Only for a single, unique selected name: align the original
+      // and Zenz text on Unicode boundaries and repair a small,
+      // unambiguous local name spelling difference. All other rules
+      // (baseline offsets, boundary expansions, orthography) still run.
+      if (selected_system_name_count == 1 && required_occurrences == 1 &&
+          CountOccurrences(adopted_value, span.value) == 0 &&
+          TryRepairSelectedSystemName(input.mozc_value, span,
+                                      &adopted_value)) {
+        selected_system_name_repaired = true;
+        protected_surface_repaired = true;
+      }
+      // The selected dictionary expression is a lexical unit, not necessarily
+      // a character-class-delimited string. Japanese names may be adjacent
+      // to other Japanese text on either side. Require exact spelling and
+      // uniqueness, rather than punctuation/particle boundaries.
+      // Repeated names are excluded by the session-side collector until a
+      // positional adoption guard can identify each individual occurrence.
+      if (required_occurrences != 1 ||
+          CountOccurrences(input.mozc_value, span.value) != 1 ||
+          CountOccurrences(adopted_value, span.value) != 1) {
+        ZenzAdoptionResult result;
+        result.action = ZenzAdoptionResult::Action::kReject;
+        result.value = std::string(input.mozc_value);
+        result.reason = "protected_system_proper_noun_not_preserved";
+        return result;
+      }
+      if (span.source_value_offset != std::string::npos) {
+        const size_t before = span.source_value_offset;
+        if (before > input.mozc_value.size() ||
+            input.mozc_value.substr(before, span.value.size()) != span.value) {
+          ZenzAdoptionResult result;
+          result.action = ZenzAdoptionResult::Action::kReject;
+          result.value = std::string(input.mozc_value);
+          result.reason = "protected_system_proper_noun_stale_offset";
+          return result;
+        }
+        const size_t after = adopted_value.find(span.value);
+        const absl::string_view old_right =
+            input.mozc_value.substr(before + span.value.size());
+        const absl::string_view new_right =
+            absl::string_view(adopted_value).substr(after + span.value.size());
+        // Reject an added place/company ending if it turns the selected name
+        // into a different compound. Unlike a generic character boundary
+        // check this still permits adjacent kana and particle corrections.
+        constexpr absl::string_view kNewNameEndings[] = {
+            "都", "道", "府", "県", "市", "区", "町", "村", "郡", "商事",
+        };
+        for (absl::string_view ending : kNewNameEndings) {
+          if (absl::StartsWith(new_right, ending) &&
+              !absl::StartsWith(old_right, ending)) {
+            ZenzAdoptionResult result;
+            result.action = ZenzAdoptionResult::Action::kReject;
+            result.value = std::string(input.mozc_value);
+            result.reason = "protected_system_proper_noun_boundary_expanded";
+            return result;
+          }
+        }
+        system_name_positions.emplace_back(before, after);
+      }
+      continue;
+    }
+
     while (CountBoundaryPreservedOccurrences(adopted_value, span.value) <
            required_occurrences) {
       if (TryRepairAttachedProtectedSpan(input.mozc_value, span,
@@ -770,6 +1046,20 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
                           ? "protected_user_dictionary_surface_boundary_changed"
                           : "protected_user_dictionary_surface_not_preserved";
       return result;
+    }
+  }
+
+  if (system_name_positions.size() > 1) {
+    std::sort(system_name_positions.begin(), system_name_positions.end());
+    for (size_t i = 1; i < system_name_positions.size(); ++i) {
+      if (system_name_positions[i - 1].second >=
+          system_name_positions[i].second) {
+        ZenzAdoptionResult result;
+        result.action = ZenzAdoptionResult::Action::kReject;
+        result.value = std::string(input.mozc_value);
+        result.reason = "protected_system_proper_noun_order_changed";
+        return result;
+      }
     }
   }
 
@@ -857,6 +1147,8 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
   result.value = std::move(adopted_value);
   if (orthography_repaired) {
     result.reason = "orthographic_transition_repaired";
+  } else if (selected_system_name_repaired) {
+    result.reason = "protected_system_proper_noun_repaired";
   } else if (protected_surface_repaired) {
     result.reason = "protected_user_dictionary_surface_repaired";
   } else {

@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/base/nullability.h"
@@ -58,6 +59,7 @@
 #include "dictionary/pos_matcher.h"
 #include "prediction/suggestion_filter.h"
 #include "request/options.h"
+
 
 namespace mozc {
 namespace {
@@ -222,6 +224,228 @@ void NBestGenerator<TConnector>::MakeCandidate(
   // For realtime conversion.
   if (options_.candidate_mode & CandidateMode::FILL_INNER_SEGMENT_INFO) {
     FillInnerSegmentInfo(nodes, candidate);
+  }
+
+  // Keep selected-path evidence for both single- and multi-segment
+  // conversion modes. Zenz may inspect either, so a realtime-only flag would
+  // silently lose protection on ordinary multi-segment conversion paths.
+  {
+    // These endings explicitly extend a selected proper name into a place or
+    // organization expression. This is not a general-purpose suffix parser.
+    constexpr std::pair<absl::string_view, absl::string_view> kNameEndings[] = {
+        {"けん", "県"}, {"と", "都"}, {"ふ", "府"}, {"どう", "道"},
+        {"し", "市"}, {"く", "区"}, {"ちょう", "町"},
+        {"むら", "村"}, {"ぐん", "郡"}, {"しょうじ", "商事"},
+    };
+    size_t key_offset = 0;
+    size_t value_offset = 0;
+    bool expression_open = false;
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      const Node* node = nodes[i];
+      // SYSTEM_DICTIONARY is currently unused on Node.  Consequently the
+      // evidence here is a normal lexical path with proper-noun POS, *not*
+      // a cryptographic guarantee of system-dictionary origin.
+      const bool eligible_node =
+          node->node_type == Node::NOR_NODE &&
+          !(node->attributes & (Node::USER_DICTIONARY |
+                                 Node::SPELLING_CORRECTION)) &&
+          !node->key.empty() && !node->value.empty();
+      const bool is_proper =
+          eligible_node && pos_matcher_.IsUniqueNoun(node->lid) &&
+          pos_matcher_.IsUniqueNoun(node->rid);
+      bool named_ending = false;
+      if (eligible_node && expression_open && !is_proper) {
+        for (const auto& ending : kNameEndings) {
+          if (absl::string_view(node->key) == ending.first &&
+              absl::string_view(node->value) == ending.second) {
+            named_ending = true;
+            break;
+          }
+        }
+      }
+      const bool surname_given_boundary =
+          is_proper && expression_open && i != 0 &&
+          pos_matcher_.IsLastName(nodes[i - 1]->rid) &&
+          pos_matcher_.IsFirstName(node->lid);
+      const bool continues_proper =
+          is_proper && expression_open && i != 0 &&
+          (surname_given_boundary ||
+           !segmenter_.IsBoundary(*nodes[i - 1], *node, false));
+      // A designated name ending may cross an ordinary segmenter boundary;
+      // adjacency on the selected node path is what establishes the compound.
+      if (named_ending || continues_proper) {
+        converter::ProperNounSpan& span = candidate.proper_noun_spans.back();
+        span.key.append(node->key);
+        span.value.append(node->value);
+        span.token_readings.push_back(node->key);
+        // Only assert a full name when the span began at the surname,
+        // not if a preceding unrelated proper noun was merged into it.
+        if (surname_given_boundary &&
+            span.key_offset == key_offset - nodes[i - 1]->key.size() &&
+            span.value_offset ==
+                value_offset - nodes[i - 1]->value.size()) {
+          span.verified_personal_full_name = true;
+        }
+      } else if (is_proper) {
+        converter::ProperNounSpan span;
+        span.key_offset = key_offset;
+        span.value_offset = value_offset;
+        span.key = node->key;
+        span.value = node->value;
+        span.token_readings.push_back(node->key);
+        // A single surname-to-given-name dictionary token is a
+        // full-name candidate even when its reading is ambiguous.
+        span.verified_personal_full_name =
+            pos_matcher_.IsLastName(node->lid) &&
+            pos_matcher_.IsFirstName(node->rid);
+        candidate.proper_noun_spans.push_back(std::move(span));
+      }
+      expression_open = is_proper || named_ending;
+      key_offset += node->key.size();
+      value_offset += node->value.size();
+    }
+  }
+
+  // Recover a verified surname+given-name from an alternative lexical path,
+  // even when the SELECTED path appends particles or other text to the name.
+  // Only the exact surname+given-name surface is protected, never the suffix.
+  // A general-noun selected node supplies an anchor; it is not itself proof
+  // of a name.  All name evidence is drawn from the same conversion lattice.
+  size_t selected_key_offset = 0;
+  size_t selected_value_offset = 0;
+  for (const Node* selected : nodes) {
+    const bool eligible_selected =
+        selected->node_type == Node::NOR_NODE &&
+        !(selected->attributes &
+          (Node::USER_DICTIONARY | Node::SPELLING_CORRECTION)) &&
+        pos_matcher_.IsGeneralNoun(selected->lid) &&
+        pos_matcher_.IsGeneralNoun(selected->rid) &&
+        !selected->key.empty() && !selected->value.empty() &&
+        selected->key.size() >= 3 && selected->key.size() <= 72 &&
+        selected->value.size() >= 3 && selected->value.size() <= 36 &&
+        selected->begin_pos < selected->end_pos &&
+        selected_key_offset <= candidate.key.size() &&
+        selected_value_offset <= candidate.value.size();
+    if (eligible_selected) {
+      const absl::string_view key_tail(candidate.key.data() +
+                                           selected_key_offset,
+                                       candidate.key.size() -
+                                           selected_key_offset);
+      const absl::string_view value_tail(candidate.value.data() +
+                                             selected_value_offset,
+                                         candidate.value.size() -
+                                             selected_value_offset);
+      bool found = false;
+      bool ambiguous = false;
+      std::string surname_key, surname_value;
+      std::string given_key, given_value;
+      // Bound the number of genuinely matching surname+given paths, not the
+      // unrelated lexical alternatives in the lattice.  A raw node budget
+      // caused name protection to vary with following particles because
+      // extra words changed the number of unrelated given-position nodes.
+      // If there are too many matches, fail closed (no name protection).
+      constexpr size_t kMaxMatchingNamePaths = 64;
+      size_t matching_name_paths = 0;
+      for (const Node* surname : lattice_.begin_nodes(selected->begin_pos)) {
+        if (surname->node_type != Node::NOR_NODE ||
+            (surname->attributes &
+             (Node::USER_DICTIONARY | Node::SPELLING_CORRECTION)) ||
+            !pos_matcher_.IsLastName(surname->lid) ||
+            !pos_matcher_.IsLastName(surname->rid) ||
+            surname->key.empty() || surname->value.empty() ||
+            surname->end_pos <= selected->begin_pos ||
+            surname->end_pos >= lattice_.key().size() ||
+            !key_tail.starts_with(surname->key) ||
+            !value_tail.starts_with(surname->value)) {
+          continue;
+        }
+        for (const Node* given : lattice_.begin_nodes(surname->end_pos)) {
+          if (given->node_type != Node::NOR_NODE ||
+              (given->attributes &
+               (Node::USER_DICTIONARY | Node::SPELLING_CORRECTION)) ||
+              !pos_matcher_.IsFirstName(given->lid) ||
+              !pos_matcher_.IsFirstName(given->rid) ||
+              given->key.empty() || given->value.empty() ||
+              given->end_pos <= surname->end_pos ||
+              !key_tail.substr(surname->key.size()).starts_with(given->key) ||
+              !value_tail.substr(surname->value.size()).starts_with(given->value)) {
+            continue;
+          }
+          const size_t name_key_size =
+              surname->key.size() + given->key.size();
+          const size_t name_value_size =
+              surname->value.size() + given->value.size();
+          if (name_key_size < 9 || name_key_size > 72 ||
+              name_value_size < 9 || name_value_size > 36) {
+            continue;
+          }
+
+          // If the name ends INSIDE a selected general-noun node, require
+          // independent evidence for the immediately following functional
+          // morpheme. Otherwise a random noun prefix could be overprotected.
+          if (given->end_pos < selected->end_pos) {
+            bool validated_suffix_boundary = false;
+            for (const Node* suffix : lattice_.begin_nodes(given->end_pos)) {
+              if (suffix->node_type != Node::NOR_NODE ||
+                  (suffix->attributes &
+                   (Node::USER_DICTIONARY | Node::SPELLING_CORRECTION)) ||
+                  !pos_matcher_.IsFunctional(suffix->lid) ||
+                  suffix->key.empty() || suffix->value.empty() ||
+                  !key_tail.substr(name_key_size).starts_with(suffix->key) ||
+                  !value_tail.substr(name_value_size).starts_with(suffix->value)) {
+                continue;
+              }
+              validated_suffix_boundary = true;
+              break;
+            }
+            if (!validated_suffix_boundary) continue;
+          }
+          if (++matching_name_paths > kMaxMatchingNamePaths) {
+            ambiguous = true;
+            break;
+          }
+          if (found &&
+              (surname_key != surname->key ||
+               surname_value != surname->value ||
+               given_key != given->key ||
+               given_value != given->value)) {
+            ambiguous = true;
+            break;
+          }
+          found = true;
+          surname_key = surname->key;
+          surname_value = surname->value;
+          given_key = given->key;
+          given_value = given->value;
+        }
+        if (ambiguous) break;
+      }
+      if (found && !ambiguous) {
+        const size_t name_key_size =
+            surname_key.size() + given_key.size();
+        bool overlaps_existing = false;
+        for (const converter::ProperNounSpan& existing :
+             candidate.proper_noun_spans) {
+          if (existing.key_offset < selected_key_offset + name_key_size &&
+              selected_key_offset < existing.key_offset + existing.key.size()) {
+            overlaps_existing = true;
+            break;
+          }
+        }
+        if (!overlaps_existing) {
+          converter::ProperNounSpan span;
+          span.key_offset = selected_key_offset;
+          span.value_offset = selected_value_offset;
+          span.key = surname_key + given_key;
+          span.value = surname_value + given_value;
+          span.token_readings = {surname_key, given_key};
+          span.verified_personal_full_name = true;
+          candidate.proper_noun_spans.push_back(std::move(span));
+        }
+      }
+    }
+    selected_key_offset += selected->key.size();
+    selected_value_offset += selected->value.size();
   }
 }
 
