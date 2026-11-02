@@ -1,0 +1,102 @@
+load(
+    "//:build_defs.bzl",
+    "mozc_cc_binary",
+    "mozc_cc_library",
+)
+
+package(default_visibility = ["//:__subpackages__"])
+
+mozc_cc_library(
+    name = "mozc_connection",
+    srcs = ["mozc_connection.cc"],
+    hdrs = ["mozc_connection.h"],
+    deps = [
+        ":fcitx_key_util",
+        ":surrounding_text_util",
+        "//base:port",
+        "//base:util",
+        "//base:vlog",
+        "//client",
+        "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/log:check",
+        "@fcitx",
+    ],
+)
+
+mozc_cc_library(
+    name = "fcitx_mozc",
+    srcs = [
+        "fcitx_mozc.cc",
+        "mozc_response_parser.cc",
+    ],
+    hdrs = [
+        "fcitx_mozc.h",
+        "mozc_response_parser.h",
+    ],
+    deps = [
+        ":fcitx_key_util",
+        ":mozc_connection",
+        ":surrounding_text_util",
+        "//base:port",
+        "//base:process",
+        "//base:run_level",
+        "//base:util",
+        "//base:vlog",
+        "//client:client_interface",
+        "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/log:check",
+    ],
+)
+
+mozc_cc_library(
+    name = "fcitx_key_util",
+    srcs = [
+        "fcitx_key_event_handler.cc",
+        "fcitx_key_translator.cc",
+    ],
+    hdrs = [
+        "fcitx_key_event_handler.h",
+        "fcitx_key_translator.h",
+    ],
+    deps = [
+        "//base:port",
+        "//base:singleton",
+        "//base:vlog",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "@com_google_absl//absl/log:check",
+        "@fcitx",
+    ],
+)
+
+mozc_cc_library(
+    name = "surrounding_text_util",
+    srcs = [
+        "surrounding_text_util.cc",
+    ],
+    hdrs = [
+        "surrounding_text_util.h",
+    ],
+    deps = [
+        "//base:port",
+        "//base:util",
+        "//base:vlog",
+        "@com_google_absl//absl/log:check",
+        "@fcitx",
+    ],
+)
+
+mozc_cc_binary(
+    name = "fcitx-mozc.so",
+    srcs = ["eim.cc"],
+    linkshared = 1,
+    linkstatic = 1,
+    local_defines = [
+        'LOCALEDIR=\\"/usr/share/locale\\"',
+    ],
+    deps = [
+        ":fcitx_mozc",
+        "//base:init_mozc",
+        "@fcitx",
+    ],
+)

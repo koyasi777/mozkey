@@ -205,6 +205,23 @@ pkg_config_repository(
     ],
 )
 
+# Fcitx
+new_local_repository(
+    name = "fcitx",
+    build_file = "BUILD.fcitx.bazel",
+    # This path should be updated per the environment.
+    path = "/usr",  # For Debian
+)
+
+# Fcitx 5
+pkg_config_repository(
+    name = "fcitx5",
+    packages = [
+        "Fcitx5Core",
+        "Fcitx5Module",
+    ],
+)
+
 # Qt for Linux
 pkg_config_repository(
     name = "qt_linux",
