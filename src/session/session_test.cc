@@ -17531,6 +17531,90 @@ TEST_F(SessionTest, ZenzConversionCustomRevertPreservesMozcPreedit) {
   EXPECT_PREEDIT("あいうえお", command);
 }
 
+TEST_F(SessionTest, ZenzCtrlDeleteHardBlocksAndRestoresMozc) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Delete\tDeleteSelectedCandidate\n"
+      "ZenzConversion\tCtrl Delete\tBlockVisibleZenzCorrection\n",
+      &session);
+  config::Config config = session.context().GetConfig();
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_feedback_recording(false);
+  config.set_use_zenz_feedback_reuse(false);
+  session.SetConfig(config);
+  InitSessionToConversionWithAiueo(&session, converter.get());
+
+  SessionTestPeer peer(session);
+  peer.live_conversion_active_() = true;
+  peer.live_conversion_key_() = "あいうえお";
+  peer.live_conversion_preedit_() = "あいうえお";
+  peer.live_conversion_value_() = "あいうえお";
+  peer.zenz_live_visible_generation_() = 1;
+  peer.zenz_live_key_() = "あいうえお";
+  peer.zenz_live_value_() = "愛上尾";
+  peer.zenz_live_mozc_value_() = "あいうえお";
+  peer.zenz_live_context_class_() = "empty";
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Ctrl Delete", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(peer.live_conversion_active_());
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_PREEDIT("あいうえお", command);
+  EXPECT_TRUE(peer.zenz_live_key_().empty());
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_TRUE(peer.zenz_feedback_store_().IsManuallyBlocked(
+      "あいうえお", "empty", "愛上尾"));
+  const auto entries = peer.zenz_feedback_store_().ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
+TEST_F(SessionTest, ZenzCtrlDeleteIncognitoRevertsWithoutPersisting) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "ZenzConversion\tCtrl Delete\tBlockVisibleZenzCorrection\n",
+      &session);
+  config::Config config = session.context().GetConfig();
+  config.set_use_live_conversion(false);
+  config.set_incognito_mode(true);
+  session.SetConfig(config);
+  InitSessionToConversionWithAiueo(&session, converter.get());
+  SessionTestPeer peer(session);
+  peer.live_conversion_active_() = true;
+  peer.live_conversion_key_() = "あいうえお";
+  peer.live_conversion_preedit_() = "あいうえお";
+  peer.live_conversion_value_() = "あいうえお";
+  peer.zenz_live_visible_generation_() = 1;
+  peer.zenz_live_key_() = "あいうえお";
+  peer.zenz_live_value_() = "愛上尾";
+  peer.zenz_live_mozc_value_() = "あいうえお";
+  peer.zenz_live_context_class_() = "empty";
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Ctrl Delete", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_PREEDIT("あいうえお", command);
+  EXPECT_TRUE(peer.zenz_feedback_store_().ListEntries().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
+}
+
 TEST_F(SessionTest, ZenzRevertPreservesLiveStateWhenEnabled) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

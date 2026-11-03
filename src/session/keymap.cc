@@ -388,7 +388,9 @@ bool KeyMapManager::AddCommand(const std::string& state_name,
     // Switching the visible presentation to ordinary conversion is a
     // stand-alone action. Do not silently discard later macro steps from
     // SendKeyConversionState's special-case dispatch.
-    if (command == "RevertZenzToMozc" && command_sequence.size() != 1) {
+    if ((command == "RevertZenzToMozc" ||
+         command == "BlockVisibleZenzCorrection") &&
+        command_sequence.size() != 1) {
       return false;
     }
   }
@@ -794,6 +796,8 @@ void KeyMapManager::InitCommandData() {
       ConversionState::FORCE_ZENZ_LIVE_CORRECTION_WITHOUT_FEEDBACK);
   RegisterConversionCommand("RevertZenzToMozc",
                             ConversionState::REVERT_ZENZ_TO_MOZC);
+  RegisterConversionCommand("BlockVisibleZenzCorrection",
+                            ConversionState::BLOCK_VISIBLE_ZENZ_CORRECTION);
   RegisterConversionCommand("Backspace", ConversionState::BACKSPACE);
   RegisterConversionCommand("IMEOff", ConversionState::IME_OFF);
   RegisterConversionCommand("IMEOn", ConversionState::IME_ON);

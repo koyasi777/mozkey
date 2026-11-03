@@ -2148,11 +2148,16 @@ void ShowZenzFeedbackManagementDialog(QWidget* parent,
                        return;
                      }
 
-                     store.RecordRejected(
-                         key.toUtf8().constData(),
-                         context_class.toUtf8().constData(),
-                         value.toUtf8().constData(),
-                         "hard_reject");
+                     if (!store.RecordManualBlock(
+                             key.toUtf8().constData(),
+                             context_class.toUtf8().constData(),
+                             value.toUtf8().constData())) {
+                       ShowJapaneseCritical(
+                           &dialog, dialog.windowTitle(),
+                           QString::fromUtf8(
+                               "Zenz 補正のブロックを保存できませんでした。"));
+                       return;
+                     }
 
                      reload_table();
 

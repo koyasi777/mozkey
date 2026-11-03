@@ -418,6 +418,21 @@ TEST(ZenzFeedbackStoreTest, DecideAllowsFutureHardRejectReason) {
   EXPECT_TRUE(decision.hard_rejected);
 }
 
+TEST(ZenzFeedbackStoreTest, ManualBlockIsPersistentAndIdempotent) {
+  ScopedUserProfileForZenzFeedbackStoreTest profile;
+  ASSERT_TRUE(profile.ok());
+  ZenzFeedbackStore store;
+  EXPECT_TRUE(store.RecordManualBlock("あいうえお", "empty", "愛上尾"));
+  EXPECT_TRUE(store.RecordManualBlock("あいうえお", "empty", "愛上尾"));
+  EXPECT_TRUE(store.IsManuallyBlocked("あいうえお", "empty", "愛上尾"));
+  EXPECT_FALSE(store.IsManuallyBlocked("あいうえお", "empty", "愛上緒"));
+  const auto entries = store.ListEntries();
+  ASSERT_EQ(entries.size(), 1);
+  EXPECT_TRUE(entries[0].hard_rejected);
+  EXPECT_EQ(entries[0].rejected_count, 1);
+  EXPECT_FALSE(store.RecordManualBlock("bad\nkey", "empty", "v"));
+}
+
 TEST(ZenzFeedbackStoreTest, DecideHardRejectOverridesAcceptedFeedback) {
   ScopedUserProfileForZenzFeedbackStoreTest profile;
   ASSERT_TRUE(profile.ok());

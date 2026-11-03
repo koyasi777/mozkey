@@ -507,6 +507,82 @@ TEST_F(ConfigHandlerTest, CustomKeymapZenzMigrationPreservesExistingRevert) {
   EXPECT_EQ(table.find(kRevert, first + 1), std::string::npos);
 }
 
+TEST_F(ConfigHandlerTest, CustomZenzBlockMigrationIsSafeAndIdempotent) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "zenz_block_migration.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config config;
+  config.set_session_keymap(Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Delete\tDeleteSelectedCandidate\n");
+  ConfigHandler::SetConfig(config);
+  const std::string migrated =
+      ConfigHandler::GetCopiedConfig().custom_keymap_table();
+  constexpr absl::string_view row =
+      "ZenzConversion\tCtrl Delete\tBlockVisibleZenzCorrection";
+  const size_t first = migrated.find(row);
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(migrated.find(row, first + 1), std::string::npos);
+  ConfigHandler::SetConfig(ConfigHandler::GetCopiedConfig());
+  EXPECT_EQ(ConfigHandler::GetCopiedConfig().custom_keymap_table(), migrated);
+  ConfigHandler::Reload();
+  EXPECT_EQ(ConfigHandler::GetCopiedConfig().custom_keymap_table(), migrated);
+
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Delete\tCancel\n");
+  ConfigHandler::SetConfig(config);
+  EXPECT_EQ(ConfigHandler::GetCopiedConfig().custom_keymap_table().find(row),
+            std::string::npos);
+
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tCtrl Delete\tDeleteSelectedCandidate\n"
+      "ZenzConversion\tCtrl Delete\tCommit\n");
+  ConfigHandler::SetConfig(config);
+  const std::string custom =
+      ConfigHandler::GetCopiedConfig().custom_keymap_table();
+  EXPECT_EQ(custom.find(row), std::string::npos);
+  EXPECT_NE(custom.find("ZenzConversion\tCtrl Delete\tCommit"),
+            std::string::npos);
+}
+
+TEST_F(ConfigHandlerTest,
+       CustomZenzBlockMigrationPreservesSpecializedDeleteBindings) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file = FileUtil::JoinPath(
+      temp_dir.path(), "zenz_block_specialized_delete.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  // Ctrl Delete overlaps side-specific rules; ZenzConversion also has
+  // precedence over any LiveConversion Ctrl Delete fallback.
+  const std::vector<std::string> specialized_bindings = {
+      "ZenzConversion\tRightCtrl Delete\tCommit",
+      "ZenzConversion\tLeftCtrl Delete\tCommit",
+      "ZenzConversion\tCaps Ctrl Delete\tCommit",
+      "ZenzConversion\tCtrl Shift Delete\tCommit",
+      "LiveConversion\tCtrl Delete\tCancel",
+      "LiveConversion\tRightCtrl Delete\tCommit",
+  };
+  for (const std::string& specialized : specialized_bindings) {
+    Config config;
+    config.set_session_keymap(Config::CUSTOM);
+    const std::string table =
+        absl::StrCat("status\tkey\tcommand\n",
+                     "Conversion\tCtrl Delete\tDeleteSelectedCandidate\n",
+                     specialized, "\n");
+    config.set_custom_keymap_table(table);
+    ConfigHandler::SetConfig(config);
+    EXPECT_EQ(ConfigHandler::GetCopiedConfig().custom_keymap_table(), table)
+        << specialized;
+  }
+}
+
 TEST_F(ConfigHandlerTest, LiveBackspaceMigrationAddsOnlyLiveRuleOnce) {
   TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
   const std::string config_file =
@@ -574,6 +650,7 @@ TEST_F(ConfigHandlerTest, LiveBackspaceMigrationWithExistingLiveBindingIsNoop) {
   const std::string original_table =
       "status\tkey\tcommand\n"
       "Conversion\tCtrl Delete\tDeleteSelectedCandidate\n"
+      "ZenzConversion\tCtrl Delete\tBlockVisibleZenzCorrection\n"
       "Conversion\tBackspace\tCancel\n"
       "LiveConversion\tBackspace\tCommit";
   Config config;

@@ -2897,6 +2897,8 @@ bool Session::ExecuteConversionCommand(
       return HasVisibleZenzLiveCorrection()
                  ? RevertZenzLiveCorrectionToNormalConversion(command)
                  : DoNothing(command);
+    case keymap::ConversionState::BLOCK_VISIBLE_ZENZ_CORRECTION:
+      return BlockVisibleZenzCorrection(command);
     case keymap::ConversionState::BACKSPACE:
       // Backspace() edits the composer, not the visible kanji surface. An
       // ordinary (non-live) conversion must first return to composition.
@@ -3222,6 +3224,13 @@ bool Session::SendKeyConversionState(commands::Command* command) {
       " has_mode=", ZenzBool(input_key.has_mode()),
       " mode=", input_key.has_mode() ? static_cast<int>(input_key.mode()) : -1,
       " input_style=", static_cast<int>(input_key.input_style())));
+
+  // Manual block must run while the visible Zenz snapshot still exists.
+  // It is not an ordinary Mozc candidate deletion.
+  if (key_command ==
+      keymap::ConversionState::BLOCK_VISIBLE_ZENZ_CORRECTION) {
+    return BlockVisibleZenzCorrection(command);
+  }
 
   // Explicit user-selected return to the baseline. Handle before the
   // generic live-conversion promotion clears the visible Zenz snapshot.
@@ -8076,8 +8085,40 @@ bool Session::OutputZenzLiveCorrection(
   return true;
 }
 
+bool Session::BlockVisibleZenzCorrection(commands::Command* command) {
+  if (!HasVisibleZenzLiveCorrection()) {
+    return DoNothing(command);
+  }
+
+  const std::string key = zenz_live_key_;
+  const std::string context_class =
+      zenz_live_context_class_.empty() ? "empty" : zenz_live_context_class_;
+  const std::string value = zenz_live_value_;
+
+  // A deliberate user hard-block is independent of automatic recording
+  // and automatic reuse, but never bypasses the privacy gate.
+  const bool can_persist =
+      CanPersistZenzLearningFromInput(*context_) &&
+      EvaluateZenzLiveKeyPrivacy(key).allow &&
+      EvaluateZenzLiveValuePrivacy(value).allow;
+  const bool saved =
+      can_persist &&
+      zenz_feedback_store_.RecordManualBlock(key, context_class, value);
+  ZenzDebugOutput(absl::StrCat(
+      "[zenz-feedback] manual block saved=", ZenzBool(saved),
+      " allowed=", ZenzBool(can_persist),
+      " ", ZenzRedactedTextStats("key", key),
+      " ", ZenzRedactedTextStats("value", value),
+      " context_class=", context_class));
+
+  // Unlike Space, a hard block is already the final user decision.
+  // Do not queue another statistical rejection for the same correction.
+  return RevertZenzLiveCorrectionToNormalConversion(
+      command, /*record_rejection=*/false);
+}
+
 bool Session::RevertZenzLiveCorrectionToNormalConversion(
-    commands::Command* command) {
+    commands::Command* command, bool record_rejection) {
   if (!HasVisibleZenzLiveCorrection()) {
     return false;
   }
@@ -8089,7 +8130,9 @@ bool Session::RevertZenzLiveCorrectionToNormalConversion(
       " ", ZenzRedactedTextStats("mozc_value", zenz_live_mozc_value_),
       " visible_generation=", zenz_live_visible_generation_));
 
-  SetPendingZenzFeedbackRejected("space_revert_zenz_to_mozc");
+  if (record_rejection) {
+    SetPendingZenzFeedbackRejected("space_revert_zenz_to_mozc");
+  }
 
   const commands::Preedit live_preedit = live_conversion_preedit_output_;
   const std::string live_value = live_conversion_value_;

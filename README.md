@@ -34,7 +34,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **Mozc と Zenz の二層構成：** Mozc の通常変換を維持しながら、ローカルの Zenz で文脈に応じた補正を追加。補正が適さない場合は Mozc の結果へ戻せます。
 - **文脈と表記を尊重する補正：** 前後の文脈を利用し、助詞・機能語や文節のつながりを改善。ユーザー辞書に加え、システム辞書由来の人名・地名・組織名などの固有名詞、英字・技術用語、数字、記号の表記を不用意に置き換えないための保護も備えています。
 - **選べる Zenz の表示タイミング：** 通常のライブ変換結果を先に表示する動作に加え、Zenz の応答を一定時間待ってから表示する方式も選択できます。
-- **学習と候補のコントロール：** Zenz の採用・却下フィードバック、保存済み結果の再利用、Mozc 変換履歴への学習を個別に設定。学習データの管理、候補の履歴削除・非表示、確定直後の取り消しにも対応します。
+- **学習と候補のコントロール：** Zenz の採用・却下フィードバック、保存済み結果の再利用、Mozc 変換履歴への学習を個別に設定。表示中の Zenz 補正は `Ctrl+Delete` で明示的にブロックでき、学習データの管理、通常候補の履歴削除・非表示、確定直後の取り消しにも対応します。
 - **縦書きに対応した入力 UI（Windows / macOS）：** 候補・サジェスト・用例・ルビを縦書きに合わせて配置し、対応するキー設定では候補や文節の移動方向も調整します。
 - **変換状態インジケータ（Windows / macOS）：** 未確定文字の近くで「入力中・Mozc・Zenz処理中・Zenz適用済み」を表示し、配色・形状・位置を調整できます。macOS での新しいインジケータの実機検証は未完了です。
 - **幅広い外観カスタマイズ：** 候補・サジェスト・ルビの配色（ライト／ダーク／自動／カスタム）、サイズ、角丸、透明度、影を個別に設定。Windows ではフォント・文字の太さ・未確定文字の色や下線、IME インジケータも調整できます。
@@ -142,6 +142,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
 - `ForceZenzLiveCorrection` により、未確定文字列へ手動で Zenz 補正を要求可能。Zenz の自動ライブ補正が OFF でもキー設定から明示実行できる
 - `ForceZenzLiveCorrectionWithoutFeedback` により、保存済み Zenz feedback の自動利用をこの実行に限り無視して手動補正可能。通常の Mozc 履歴・ユーザー辞書および明示的な手動ブロックは維持し、新しい確定結果の学習も設定に従う
+- `BlockVisibleZenzCorrection` を追加。Zenz 補正結果が表示されている間に標準キー設定の `Ctrl+Delete` を押すと、その補正を手動ブロック（`hard_reject`）として保存し、通常の Mozc 変換結果へ戻す。通常の候補に対する `DeleteSelectedCandidate` とは別の操作
 - キー設定のコマンド列に `Delay(700)` などの待機ステップ（0～5000 ms）を追加。選択文字列の再変換後に待機して手動 Zenz 補正する操作にも対応
 - 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには、選択中の候補の状態と現在のキー設定に応じて履歴削除または候補非表示の操作案内を表示
 - 通常変換では、Mozc が顔文字として意味的に識別できる候補（標準の顔文字候補、およびユーザー辞書で品詞「顔文字」として登録された候補）が、学習によって第1候補へ上がらないように制御。候補自体は一覧に残し、同じ表記でも「顔文字」以外の品詞として登録した候補は通常の順位付け・学習を許可。Zenz が独立して生成した表記は、文字列の見た目だけを理由に顔文字扱いしない
@@ -205,6 +206,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Zenz 補正表示中に Space で Mozc 通常変換結果へ戻した場合は、次の文字入力や句読点・記号の単打確定で、戻した通常 Mozc の結果を先に最終確定値として取得する。句読点・記号の単打確定後も短い rollback window を維持し、直後の Backspace / Escape / Ctrl+Z / Revert / Undo などでは pending な Zenz reject を破棄する。次の通常入力や確定後の context transition、Windows Search などでの pass-through Enter を含む通常の pass-through 操作へ進んだ時点で rollback window を閉じ、最終確定結果に基づいて feedback を確定する
 - Zenz の**フィードバック学習データ**を設定画面から管理できる UI を追加。TSV を直接編集せず検索、インポート、エクスポート、選択項目削除、全削除が可能。ここで管理・削除するのは A/B の記録であり、C で Mozc の通常変換履歴に学習済みの内容は削除しない
 - フィードバック学習データ管理画面から、選択した Zenz 補正を明示的に手動ブロック可能。手動ブロックは B の自動利用設定が OFF でも Zenz 補正の採用判定に有効。解除するには該当エントリを削除し、必要なら再学習する
+- Zenz 補正表示中の `Ctrl+Delete` からも手動ブロックを実行可能。同じ読み全体・文脈クラス・補正文字列の組に対する永続的な `hard_reject` として保存し、同時に通常 Mozc 変換へ戻る。通常却下の統計記録は二重に行わず、通常候補の学習履歴や「非表示候補」の辞書項目も削除しない
 - B が ON の場合は Zenz feedback を通常変換候補の ranking に利用。1 文節の通常変換では保存済み feedback を score 化し、既存候補の cost を調整するか synthetic candidate を自然な位置へ追加。accepted は順位を上げ、通常操作由来の rejected は候補を除外せず順位を下げる
 - 文節境界を壊さないため、複数文節に分かれた通常変換では Zenz feedback による通常候補 ranking を行わない
 - 複数文節に分かれるライブ変換では、全文補正の学習を保つため、accepted Zenz feedback を session-level live correction fast path として再利用
@@ -648,9 +650,25 @@ ZenzConversion + Space -> RevertZenzToMozc
 
 「通常のMozc変換に戻す」（`RevertZenzToMozc`）は、キー設定エディタで別のキーにも割り当てられます。このコマンドは単独で指定してください。カスタムキー設定で明示的に割り当てた操作がある場合は、その設定が優先されます。
 
+### 表示中の Zenz 補正を Ctrl+Delete で手動ブロック
+
+標準キー設定では、**Zenz の補正結果が実際に表示されている間**に `Ctrl+Delete` を押すと、現在の補正を明示的な手動ブロック（`hard_reject`）としてローカルの Zenz feedback に記録し、入力中の読みを失わずに通常の Mozc 変換結果へ戻します。未確定文字列の確定操作ではありません。
+
+```text
+ZenzConversion + Ctrl Delete -> BlockVisibleZenzCorrection
+```
+
+`Space` の `RevertZenzToMozc` は補正の表示を通常変換へ戻す操作であり、それだけで永続的な手動ブロックは行いません。一方、`BlockVisibleZenzCorrection` はその場で `hard_reject` の保存を試み、通常操作由来の統計的な rejected feedback を重複して記録しません。Zenz 補正が表示されていない状態では、このコマンド自体は何もしません。
+
+ブロックの対象は **読み全体・粗い文脈クラス・補正文字列**の組です。すべての文脈でその単語を禁止する機能ではなく、通常 Mozc の辞書候補やユーザー学習履歴を削除する機能でもありません。保存済みの手動ブロックは、Zenz feedback の自動記録（A）と自動利用（B）が OFF でも有効です。解除するには、設定画面の Zenz フィードバック学習データ管理から対応するエントリを削除してください。
+
+**保存条件と制約：** シークレットモード、Windows TSF の `IS_PRIVATE`、パスワード欄、その他のプライバシー保護条件では、新しい永続ブロックを保存しません。また、フィードバックファイルへの書き込みが失敗しても画面上の補正は通常 Mozc 変換へ戻ります。この場合は永続ブロックされず、現在の画面には保存成功・失敗の通知を表示しません。
+
+**CUSTOM キー設定：** `Conversion + Ctrl Delete -> DeleteSelectedCandidate` が既定どおり1行あり、`ZenzConversion` / `LiveConversion` に `Delete` を含む独自のキー割り当てがない場合だけ、専用の `ZenzConversion + Ctrl Delete` 行を自動追加します。既存の左右 Ctrl 指定などを上書きしないため、これらの条件に当てはまらない CUSTOM 設定では、必要に応じてキー設定エディタから `BlockVisibleZenzCorrection` を手動割り当てしてください。`RevertZenzToMozc` と同様に、このコマンドは**単独で**指定する必要があります。
+
 ### 候補の履歴削除・非表示
 
-変換中または予測候補の表示中に `DeleteSelectedCandidate` を実行すると、選択中の候補を履歴から削除するか、候補一覧から非表示にできます。標準キー設定では Prediction / Conversion の `Ctrl+Delete` にこの操作を割り当てています。
+Zenz 補正結果が表示されていない通常変換中、または予測候補の表示中に `DeleteSelectedCandidate` を実行すると、選択中の候補を履歴から削除するか、候補一覧から非表示にできます。標準キー設定では Prediction / Conversion の `Ctrl+Delete` にこの操作を割り当てています。**Zenz 補正表示中の `Ctrl+Delete` は上記の手動ブロック操作になり、通常候補の履歴削除・非表示とは区別されます。**
 
 操作時は、まず選択候補に対応するユーザー履歴の削除を試みます。履歴削除に成功した場合はそこで処理を終え、候補を抑制単語として登録しません。履歴削除の対象ではなく、それでも非表示可能な候補である場合だけ、読みと候補文字列の組をユーザー辞書「非表示候補」へ `SUPPRESSION_WORD` として登録します。
 
@@ -935,7 +953,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **Layered Mozc + Zenz conversion:** Keeps normal Mozc conversion as the baseline and adds optional local Zenz correction, falling back to Mozc when a correction is not adopted.
 - **Context-aware correction with spelling safeguards:** Uses available preceding and following context while protecting user-dictionary entries, verified proper nouns from the system dictionary (including personal and place names and organization names), Latin/technical spellings, numeric literals, and punctuation choices.
 - **Optional deferred presentation:** Choose whether to display Mozc live conversion immediately or briefly wait for Zenz before showing a result.
-- **Controllable learning and candidates:** Configure Zenz accept/reject recording, feedback reuse, and Mozc-history learning independently; manage feedback, hide unwanted candidates, and undo recent commits.
+- **Controllable learning and candidates:** Configure Zenz accept/reject recording, feedback reuse, and Mozc-history learning independently; use `Ctrl+Delete` to explicitly block a visible Zenz correction, manage feedback, hide ordinary candidates, and undo recent commits.
 - **Vertical-writing UI on Windows and macOS:** Candidate, suggestion, infolist, and ruby layouts adapt to vertical text; supported keymaps can follow the visual navigation direction.
 - **Conversion-status indicator (Windows / macOS):** Displays Reading, Mozc, Zenz processing, or Zenz applied near the composition, with adjustable position, shape, and colors. The new macOS indicator has not yet been verified on native macOS hardware.
 - **Extensive appearance customization:** Configure colors (light/dark/system/custom), dimensions, rounded corners, opacity, and shadows per window. Windows additionally supports font/weight, preedit colors and underlines, and IME-indicator styling.
@@ -1136,6 +1154,7 @@ Main features added in this fork
 - Allows assigning multiple commands to a single key binding as an ordered command sequence
 - Adds `ForceZenzLiveCorrection` to explicitly request Zenz correction for uncommitted text, including when automatic Zenz live correction is disabled
 - Adds `ForceZenzLiveCorrectionWithoutFeedback` to request a one-shot correction without automatically reusing stored Zenz feedback, while retaining normal Mozc history, user-dictionary entries, explicit manual blocks, and settings-controlled learning of newly committed results
+- Adds `BlockVisibleZenzCorrection`: while a Zenz correction is visibly applied, the built-in `Ctrl+Delete` shortcut records a persistent manual hard rejection and restores ordinary Mozc conversion. This differs from deleting or hiding an ordinary candidate with `DeleteSelectedCandidate`.
 - Adds `Delay(700)`-style waiting steps (0–5000 ms) in keymap command sequences, including after selected-text reconversion
 - Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows history-delete or hide guidance for the currently selected candidate using the active key binding
 - Prevents candidates that Mozc can semantically identify as emoticons—built-in emoticon candidates and user-dictionary entries registered with the `顔文字` POS—from being promoted to the first candidate in ordinary conversion through learning. The candidates remain visible, while the same surface registered under a non-emoticon POS remains eligible for normal ranking and learning. Independently generated Zenz surfaces are not classified as emoticons from string shape alone
@@ -1199,6 +1218,7 @@ Main features added in this fork
 - When Space restores the underlying Mozc normal conversion from a visible Zenz correction, the next text input commits that restored conversion before starting a new composition
 - Adds a feedback-learning data management UI to the config dialog. Users can search, import, export, delete entries, and clear the feedback TSV. Deleting this feedback does **not** delete separately learned Mozc conversion history from C
 - Allows explicitly blocking selected Zenz corrections from the feedback management UI. Manual hard rejects continue to apply even when automatic feedback reuse (B) is OFF; unblocking requires deleting the corresponding entry
+- Allows manually blocking a currently visible Zenz correction with `Ctrl+Delete`, persisting a `hard_reject` for the full reading, context class, and corrected value, then restoring the underlying Mozc result without double-counting an ordinary rejection or deleting regular Mozc candidate history.
 - When automatic reuse (B) is ON, ranks normal single-segment candidates using stored feedback and may insert synthetic candidates at feedback-adjusted positions. Accepted observations raise ranking; ordinary rejections lower it without deleting the candidate
 - Does not apply Zenz feedback ranking to multi-segment normal conversions, to avoid collapsing phrase boundaries
 - Reuses accepted Zenz feedback via the session-level live-correction fast path for multi-segment live conversion to preserve learned full-phrase corrections
@@ -1850,9 +1870,25 @@ ZenzConversion + Space -> RevertZenzToMozc
 
 **Return to ordinary Mozc conversion** (`RevertZenzToMozc`) can also be assigned to another key. Configure it as a single command, not as part of a command sequence. Explicit bindings in CUSTOM keymaps take precedence.
 
+### Manually block a visible Zenz correction with Ctrl+Delete
+
+In built-in keymaps, pressing `Ctrl+Delete` **while a Zenz correction is visibly applied** records a manual `hard_reject` in the local Zenz feedback store and restores the underlying ordinary Mozc conversion without losing the current uncommitted reading. It does not commit the correction.
+
+```text
+ZenzConversion + Ctrl Delete -> BlockVisibleZenzCorrection
+```
+
+`Space` / `RevertZenzToMozc` only returns to ordinary conversion; it does not itself create a permanent manual block. In contrast, `BlockVisibleZenzCorrection` attempts to save the hard rejection immediately and does not also queue a statistical rejection. If no Zenz correction is visible, this command does nothing.
+
+The block applies to a **full reading, coarse context class, and correction value**. It is not a global word ban and does not delete normal Mozc dictionary candidates or learning history. Persisted manual blocks remain effective even when automatic feedback recording (A) or automatic reuse (B) is disabled. To unblock a correction, delete the corresponding entry from the Zenz feedback management dialog.
+
+**Privacy and write failures:** No new persistent hard rejection is written in Secret/Incognito mode, TSF `IS_PRIVATE` input, password fields, or other protected contexts. If the feedback store cannot be written, the visible correction still reverts to ordinary Mozc conversion, but no durable block is created; the current UI does not report whether saving succeeded.
+
+**CUSTOM keymaps:** Mozkey adds the dedicated Zenz `Ctrl Delete` rule automatically only if there is exactly one `Conversion + Ctrl Delete -> DeleteSelectedCandidate` row and no existing `Delete`-containing assignment in `ZenzConversion` or `LiveConversion`. Otherwise, existing custom bindings are preserved; assign `BlockVisibleZenzCorrection` explicitly in the keymap editor if desired. Like `RevertZenzToMozc`, it must be configured as a **standalone command**, not inside a multi-command sequence.
+
 ### Delete candidate history / hide candidate
 
-While conversion or prediction candidates are visible, `DeleteSelectedCandidate` removes the selected candidate from learned history when possible, or hides it from the candidate list. The standard keymaps bind this action to `Ctrl+Delete` in Prediction and Conversion states.
+Outside visible Zenz correction, `DeleteSelectedCandidate` removes a selected conversion or prediction candidate from learned history when possible, or hides it from the candidate list. The standard keymaps bind this action to `Ctrl+Delete` in Prediction and Conversion states. **When Zenz correction is visible, `Ctrl+Delete` instead performs the manual block described above.**
 
 The action first attempts to delete the selected candidate from user history. When that succeeds, the operation stops there and no suppression entry is created. Only when history deletion does not apply and the candidate is otherwise suppressible does Mozkey store the exact reading/value pair as a `SUPPRESSION_WORD` in the `非表示候補` user dictionary.
 

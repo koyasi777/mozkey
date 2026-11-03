@@ -826,7 +826,8 @@ class Session {
       absl::string_view value,
       mozc::commands::Command* command);
   bool RevertZenzLiveCorrectionToNormalConversion(
-      mozc::commands::Command* command);
+      mozc::commands::Command* command, bool record_rejection = true);
+  bool BlockVisibleZenzCorrection(mozc::commands::Command* command);
   bool CommitZenzLiveCorrectionResult(mozc::commands::Command* command);
 
   std::string BuildZenzFeedbackContextClass(

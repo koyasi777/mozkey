@@ -192,6 +192,51 @@ bool MaybeMigrateZenzRevertCustomKeymap(Config* config) {
   return true;
 }
 
+constexpr absl::string_view kZenzBlockCtrlDeleteRow =
+    "ZenzConversion\tCtrl Delete\tBlockVisibleZenzCorrection";
+
+bool MaybeMigrateZenzBlockCustomKeymap(Config* config) {
+  if (config->session_keymap() != Config::CUSTOM ||
+      config->custom_keymap_table().empty()) {
+    return false;
+  }
+
+  int conversion_ctrl_delete_rows = 0;
+  bool base_is_default_delete = false;
+  for (absl::string_view line :
+       absl::StrSplit(config->custom_keymap_table(), '\n')) {
+    line = absl::StripAsciiWhitespace(line);
+    if (line.empty() || line.front() == '#') continue;
+    const std::vector<absl::string_view> columns = absl::StrSplit(line, '\t');
+    if (columns.size() != 3) continue;
+    const absl::string_view state = absl::StripAsciiWhitespace(columns[0]);
+    const absl::string_view key = absl::StripAsciiWhitespace(columns[1]);
+    const absl::string_view action = absl::StripAsciiWhitespace(columns[2]);
+    // The generic Ctrl Delete key overlaps side-specific and Caps-qualified
+    // bindings. A ZenzConversion rule also shadows LiveConversion fallback.
+    // Never inject a generic binding if the user has any specialized Delete
+    // assignment. The user can explicitly bind the new command in the editor.
+    if ((state == "ZenzConversion" || state == "LiveConversion") &&
+        key.find("Delete") != absl::string_view::npos) {
+      return false;
+    }
+    if (state == "Conversion" && key == "Ctrl Delete") {
+      ++conversion_ctrl_delete_rows;
+      base_is_default_delete = action == "DeleteSelectedCandidate";
+    }
+  }
+  if (conversion_ctrl_delete_rows != 1 || !base_is_default_delete) {
+    return false;
+  }
+
+  std::string table = config->custom_keymap_table();
+  if (!table.empty() && table.back() != '\n') table.push_back('\n');
+  table.append(kZenzBlockCtrlDeleteRow.data(), kZenzBlockCtrlDeleteRow.size());
+  table.push_back('\n');
+  config->set_custom_keymap_table(std::move(table));
+  return true;
+}
+
 // Preserve physical-Backspace editing when a legacy CUSTOM map inherits
 // Conversion+Backspace=Cancel in live mode. Manual Zenz must instead inherit
 // ordinary Conversion+Backspace; never create a ZenzConversion override.
@@ -238,6 +283,9 @@ bool MaybeMigrateLiveBackspaceCustomKeymap(Config* config) {
 bool MaybeMigrateMozkeyCustomKeymap(Config* config) {
   bool changed = MaybeMigrateCandidateHideCustomKeymap(config);
   if (MaybeMigrateZenzRevertCustomKeymap(config)) {
+    changed = true;
+  }
+  if (MaybeMigrateZenzBlockCustomKeymap(config)) {
     changed = true;
   }
   if (MaybeMigrateLiveBackspaceCustomKeymap(config)) {
