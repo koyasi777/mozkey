@@ -1952,6 +1952,47 @@ bool EngineConverter::GetConversionSegmentKeys(
   return !segment_keys->empty();
 }
 
+bool EngineConverter::GetSelectedProperNounSpans(
+    std::vector<converter::ProperNounSpan>* spans) const {
+  if (spans == nullptr) {
+    return false;
+  }
+  spans->clear();
+  if (!CheckState(CONVERSION) || segments_.conversion_segments_size() == 0) {
+    return false;
+  }
+
+  size_t key_offset = 0;
+  size_t value_offset = 0;
+  for (size_t i = 0; i < segments_.conversion_segments_size();
+       i += GetSegmentSpan(i)) {
+    const converter::Candidate& candidate = GetSelectedCandidate(i);
+    if (candidate.key.empty() || candidate.value.empty()) {
+      spans->clear();
+      return false;
+    }
+    for (const converter::ProperNounSpan& span : candidate.proper_noun_spans) {
+      // Rewriters can change a candidate after N-best generation.  Stale
+      // lexical metadata must never become a protection instruction.
+      if (span.key.empty() || span.value.empty() ||
+          span.key_offset > candidate.key.size() ||
+          span.value_offset > candidate.value.size() ||
+          candidate.key.compare(span.key_offset, span.key.size(), span.key) != 0 ||
+          candidate.value.compare(span.value_offset, span.value.size(),
+                                  span.value) != 0) {
+        continue;
+      }
+      converter::ProperNounSpan selected = span;
+      selected.key_offset += key_offset;
+      selected.value_offset += value_offset;
+      spans->push_back(std::move(selected));
+    }
+    key_offset += candidate.key.size();
+    value_offset += candidate.value.size();
+  }
+  return !spans->empty();
+}
+
 void EngineConverter::FillOutput(const composer::Composer& composer,
                                  commands::Output* output) const {
   if (!output) {

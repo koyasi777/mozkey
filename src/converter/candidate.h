@@ -59,6 +59,22 @@
 namespace mozc {
 namespace converter {
 
+// Named lexical material from the N-best node path selected by Mozc.
+// Offsets are UTF-8 byte offsets within the original Candidate::key/value.
+// This is evidence about the chosen path, not a claim that the word is
+// unambiguous or that the candidate's surface was explicitly user-selected.
+struct ProperNounSpan {
+  size_t key_offset = 0;
+  size_t value_offset = 0;
+  std::string key;
+  std::string value;
+  // Keep original lexical readings for all-token exception-list matching.
+  std::vector<std::string> token_readings;
+  // A verified surname+given-name structure, not merely a proper-noun POS.
+  // Allows strong full-name evidence despite ambiguous component readings.
+  bool verified_personal_full_name = false;
+};
+
 class Candidate {
  public:
   Candidate() = default;
@@ -162,6 +178,10 @@ class Candidate {
   // real time conversion result candidates.  Each element is the encoded
   // lengths of key, value, content key and content value.
   InnerSegmentBoundary inner_segment_boundary;
+
+  // Derived from the real dictionary node path, when available.  Derived
+  // candidates must clear these if their key/value are rewritten.
+  std::vector<ProperNounSpan> proper_noun_spans;
   // LINT.ThenChange(//converter/segments_matchers.h)
 
   // The original cost before rescoring. Used for debugging purpose.

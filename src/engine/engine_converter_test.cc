@@ -549,6 +549,48 @@ TEST_F(EngineConverterTest,
   EXPECT_FALSE(converter.DeleteOrSuppressCandidate(0));
 }
 
+TEST_F(EngineConverterTest, SelectedProperNounSpansUseAbsoluteOffsets) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  Segments segments;
+  AddSegmentWithSingleCandidate(&segments, "きのう", "昨日");
+  AddSegmentWithSingleCandidate(&segments, "とうきょうに", "東京に");
+  converter::Candidate* candidate =
+      segments.mutable_conversion_segment(1)->mutable_candidate(0);
+  candidate->proper_noun_spans.push_back(
+      {0, 0, "とうきょう", "東京", {"とうきょう"}});
+
+  SetSegments(segments, &converter);
+  SetState(EngineConverterInterface::CONVERSION, &converter);
+  std::vector<converter::ProperNounSpan> spans;
+  ASSERT_TRUE(converter.GetSelectedProperNounSpans(&spans));
+  ASSERT_EQ(spans.size(), 1);
+  EXPECT_EQ(spans[0].key, "とうきょう");
+  EXPECT_EQ(spans[0].value, "東京");
+  EXPECT_EQ(spans[0].key_offset, std::string("きのう").size());
+  EXPECT_EQ(spans[0].value_offset, std::string("昨日").size());
+}
+
+TEST_F(EngineConverterTest, SelectedProperNounSpansRejectStaleCandidateText) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  Segments segments;
+  AddSegmentWithSingleCandidate(&segments, "とうきょうに", "東京に");
+  converter::Candidate* candidate =
+      segments.mutable_conversion_segment(0)->mutable_candidate(0);
+  candidate->proper_noun_spans.push_back(
+      {0, 0, "とうきょう", "東京", {"とうきょう"}});
+  // A rewriter may change the candidate without updating lexical metadata.
+  candidate->value = "大阪に";
+  candidate->content_value = candidate->value;
+
+  SetSegments(segments, &converter);
+  SetState(EngineConverterInterface::CONVERSION, &converter);
+  std::vector<converter::ProperNounSpan> spans;
+  EXPECT_FALSE(converter.GetSelectedProperNounSpans(&spans));
+  EXPECT_TRUE(spans.empty());
+}
+
 TEST_F(EngineConverterTest, Convert) {
   auto mock_converter = std::make_shared<MockConverter>();
   EngineConverter converter(mock_converter, request_, config_);

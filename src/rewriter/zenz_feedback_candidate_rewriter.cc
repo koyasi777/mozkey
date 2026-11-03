@@ -164,6 +164,8 @@ void FillSyntheticCandidate(const converter::Candidate& base_candidate,
   candidate->content_value = std::string(value);
 
   candidate->inner_segment_boundary = converter::InnerSegmentBoundary();
+  // A synthetic Zenz-feedback surface is not a system-dictionary node path.
+  candidate->proper_noun_spans.clear();
 
   candidate->attributes &= ~converter::Attribute::BEST_CANDIDATE;
   candidate->attributes |=

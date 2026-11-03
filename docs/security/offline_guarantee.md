@@ -35,7 +35,7 @@ This fork uses local resources for normal IME operation:
 
 Input text is processed locally.
 
-For Zenz-bundled builds, local Zenz correction is performed through
+For Windows Zenz-bundled builds, local Zenz correction is performed through
 `mozc_zenz_scorer.exe`, the bundled `llama-server.exe`, and the bundled local
 GGUF model. The scorer-to-runtime transport is localhost-only and must be bound
 to `127.0.0.1`.
@@ -51,6 +51,32 @@ because that is the interface exposed by llama.cpp server. Therefore it should
 not be treated as a strong secret against same-user local malware. The primary
 boundary is that the server is bound to `127.0.0.1`, uses a random high port, and
 is launched and managed by `mozc_zenz_scorer.exe`.
+
+## macOS offline verification
+
+For macOS Zenz-bundled builds, Mozc communicates with its scorer through a
+private, per-user Unix-domain socket. The scorer-to-`llama-server` connection
+is authenticated and bound to randomized localhost (`127.0.0.1`) transport.
+
+The macOS-specific checks include:
+
+- `python3 tools/check_macos_offline_source.py` for selected macOS/shared
+  runtime source contracts;
+- `python3 -m unittest discover -s tools/tests -p 'test_macos_offline_audit.py' -v`
+  for the guard's regression cases;
+- `src/mac/installer/zenz_runtime/verify_release_package.zsh` for the final
+  unpacked PKG, including a native scorer inference probe and sampled `ps` /
+  `lsof` socket audit of the scorer and descendants.
+
+The sampled socket audit records no prompts or model outputs and rejects
+observed non-loopback IP endpoints. It is **not an OS-enforced egress block**,
+may miss short-lived connections, and does not cover every installed Mozkey
+process. Native Intel verification and installed full-IME audits are separate
+release requirements. Build-time dependency/model downloads are not treated
+as installed-IME runtime communications.
+
+See [macOS offline audit contract](macos_offline_audit.md) for the detailed
+scope and limitations.
 
 ## Usage statistics and crash reports
 

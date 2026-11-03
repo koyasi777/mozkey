@@ -60,6 +60,11 @@ struct ProtectedConversionSpan {
     // reading-derived kana replacement, but boundary/attachment repair may be
     // applied when it is locally safe.
     kUserPreferred,
+
+    // A unique proper noun selected from a dictionary node path. Unlike
+    // user-preferred entries, it may be adjacent to Japanese characters
+    // without a detectable character-class boundary (e.g. 髙橋さん).
+    kSystemProperNoun,
   };
 
   std::string key;
@@ -75,6 +80,14 @@ struct ProtectedConversionSpan {
   // repair the missing occurrence when it is safe.
   size_t required_occurrences = 1;
 
+  // Verified UTF-8 byte offset of the selected system proper name in the
+  // original Mozc value. Unset for preexisting user dictionary spans.
+  size_t source_value_offset = std::string::npos;
+
+  // Selected full-name reading offset, verified against the same conversion.
+  size_t source_key_offset = std::string::npos;
+  bool verified_personal_full_name = false;
+
   // Placeholder used only in the Zenz prompt.  When non-empty, the prompt key
   // contains this token instead of key, and the Zenz output is restored to
   // value before validation and adoption.
@@ -86,6 +99,13 @@ struct ProtectedConversionSpan {
 // technical spellings remain identity-critical.
 ProtectedConversionSpan::Tier ClassifyProtectedAsciiSurface(
     absl::string_view surface);
+
+// Whole-expression exception: skip protection only when every lexical
+// reading in the selected proper-noun expression is listed.  A single
+// ambiguous proper-noun token does not disable protection of an expression
+// that also contains a non-exception proper-noun token.
+bool ShouldProtectSystemProperNounReadings(
+    const std::vector<std::string>& token_readings);
 
 struct ZenzProtectedPromptInput {
   absl::string_view key;
