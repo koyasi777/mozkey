@@ -239,6 +239,8 @@ class EngineConverter : public EngineConverterInterface {
                      const std::vector<std::string>& segment_keys) override;
   bool GetConversionSegmentKeys(
       std::vector<std::string>* segment_keys) const override;
+  bool GetSelectedProperNounSpans(
+      std::vector<converter::ProperNounSpan>* spans) const override;
 
   // Commits the specified number of characters at the head of the preedit
   // string represented by Composer.

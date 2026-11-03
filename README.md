@@ -32,7 +32,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 
 - **遅延付きライブ変換とルビ表示：** スペースキーを押す前から未確定文字列を変換。開始までの待機時間や文字数、読みを示すルビ風の表示を調整できます。
 - **Mozc と Zenz の二層構成：** Mozc の通常変換を維持しながら、ローカルの Zenz で文脈に応じた補正を追加。補正が適さない場合は Mozc の結果へ戻せます。
-- **文脈と表記を尊重する補正：** 前後の文脈を利用し、助詞・機能語や文節のつながりを改善。ユーザー辞書、英字・技術用語、数字、記号の表記を不用意に置き換えないための保護も備えています。
+- **文脈と表記を尊重する補正：** 前後の文脈を利用し、助詞・機能語や文節のつながりを改善。ユーザー辞書に加え、システム辞書由来の人名・地名・組織名などの固有名詞、英字・技術用語、数字、記号の表記を不用意に置き換えないための保護も備えています。
 - **選べる Zenz の表示タイミング：** 通常のライブ変換結果を先に表示する動作に加え、Zenz の応答を一定時間待ってから表示する方式も選択できます。
 - **学習と候補のコントロール：** Zenz の採用・却下フィードバック、保存済み結果の再利用、Mozc 変換履歴への学習を個別に設定。学習データの管理、候補の履歴削除・非表示、確定直後の取り消しにも対応します。
 - **縦書きに対応した入力 UI（Windows / macOS）：** 候補・サジェスト・用例・ルビを縦書きに合わせて配置し、対応するキー設定では候補や文節の移動方向も調整します。
@@ -218,6 +218,8 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Zenz が `（ ）` / `( )`、`？` / `?`、`！` / `!`、`：` / `:` などの記号幅・記号スタイルを正規化して返した場合でも、元の未確定文字列または通常 Mozc ライブ変換結果でユーザーが使っていた表記へ復元
 - Zenz が左文脈などから `！` / `!`、`？` / `?`、`。`、`…`、`〜` などの文末・表現記号を、現在の未確定文字列または通常 Mozc ライブ変換結果の末尾にある数を超えて追加した場合は、余分な末尾記号だけを抑制し、漢字・語彙などの補正結果は保持
 - 日本語のみのユーザー辞書語は、自然な読みを Zenz prompt に残したまま、Zenz 応答後に表記の境界を検証し、余分なかな付着を安全に修復できる場合だけ採用するようにした
+- システム辞書由来の固有名詞について、Mozc が実際に選択した候補の品詞・読み・表記・位置情報を検証し、人名・地名・組織名などの不用意な書き換えを抑制。すべての固有名詞を無条件に固定するものではない
+- 検証済みの姓名に限り、Zenz への入力中で読みと表記を自然な代理語へ一時的に置き換え、応答後に元の姓名へ復元。出現回数・復元条件などを確認し、安全に復元できない場合は通常 Mozc の変換結果を維持。地名や組織名は代理語化しない
 - Zenz prompt に使う左文脈は sanitizer を通し、URL、email、file path、token、長い数字列など sensitive-like な文脈は prompt に含めない
 - Zenz feedback は full-sequence 単位だけを保存し、raw left context や segment-local feedback は保存せず、非可逆な context class のみを保存
 - Zenz model / llama.cpp runtime の third-party license notice を MSI に同梱
@@ -403,6 +405,18 @@ Zenz が保護対象の表記を落としたり変更したりし、placeholder 
 Zenz ライブ補正は password field では実行されません。また、入力途中の raw romaji のように日本語文字シグナルを含まない読みは補正対象外です。日本語文字を含む英字混じりの入力は、privacy gate を通る場合に限り補正対象になり得ます。
 
 Windows TSF の password input scope と macOS の Secure Event Input では、application の surrounding text を Zenz 用に取得せず、Zenz extended context acquisition も実行しません。
+
+#### システム辞書由来の固有名詞と検証済み姓名の保護
+
+Zenz が、Mozc の通常変換で正しく選択された人名・地名・組織名などを別の表記へ変更してしまう場合があります。Mozkey は、実際に選択された候補の辞書ノードから品詞・読み・表記・位置情報を調べ、固有名詞として十分な根拠を確認できた部分を保護します。ユーザー辞書の登録語は、従来からの別の保護経路でも扱います。
+
+人名は姓・名の品詞と構造を検証します。選択経路が一般名詞などになっていても、ラティス上の代替辞書経路と読み・表記が整合すれば、姓名を検出できる場合があります。
+
+珍しい姓名は、表記をそのままZenzへ渡しても書き換えられることがあるため、**検証済みの姓名に限り**、読みと表記を一時的な代理語へ置き換えます。例えば「見上愛」（みかみあい）の条件が成立した場合、Zenz に渡す部分を「木村」（きむら）へ置き換え、応答後に元の「見上愛」へ復元します。出現回数や不適切な敬称付加などを検査し、復元条件を満たさなければ通常のMozc変換結果を維持します。
+
+この代理語方式を地名・組織名や単独の姓・名へ拡張するものではありません。また、辞書に登録された全固有名詞を一律に保護するわけではなく、現在の変換結果について十分な根拠が得られた範囲に限定します。周囲の文脈補正は可能な限り維持します。
+
+固有名詞情報は通常のMozc候補生成時に収集するため、Zenz補正をOFFにしていても追加探索が行われる場合があります。現時点では、後から手動でZenz補正を実行する際の候補情報の整合性を優先しています。
 
 #### Zenz 学習の独立設定
 
@@ -915,7 +929,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 
 - **Delayed live conversion and reading overlay:** Converts compositions before Space is pressed, with adjustable debounce delay, minimum length, and ruby-like display of the reading.
 - **Layered Mozc + Zenz conversion:** Keeps normal Mozc conversion as the baseline and adds optional local Zenz correction, falling back to Mozc when a correction is not adopted.
-- **Context-aware correction with spelling safeguards:** Uses available preceding and following context while protecting user-dictionary entries, Latin/technical spellings, numeric literals, and punctuation choices.
+- **Context-aware correction with spelling safeguards:** Uses available preceding and following context while protecting user-dictionary entries, verified proper nouns from the system dictionary (including personal and place names and organization names), Latin/technical spellings, numeric literals, and punctuation choices.
 - **Optional deferred presentation:** Choose whether to display Mozc live conversion immediately or briefly wait for Zenz before showing a result.
 - **Controllable learning and candidates:** Configure Zenz accept/reject recording, feedback reuse, and Mozc-history learning independently; manage feedback, hide unwanted candidates, and undo recent commits.
 - **Vertical-writing UI on Windows and macOS:** Candidate, suggestion, infolist, and ruby layouts adapt to vertical text; supported keymaps can follow the visual navigation direction.
@@ -1183,6 +1197,8 @@ Main features added in this fork
 - Preserves user-visible punctuation style when adopting Zenz live-correction output, so brackets and symbols such as `（ ）` / `( )`, `？` / `?`, and `！` / `!` stay in the style chosen by the current composition or Mozc live-conversion result
 - Suppresses only excess trailing sentence-final or expressive punctuation introduced by contextual Zenz output beyond what is already present at the end of the current composition or normal Mozc live-conversion result, while preserving the rest of the correction
 - For Japanese-only user-dictionary surfaces, keeps the natural reading in the Zenz prompt and validates the selected surface boundaries after the response, accepting the result only when any extra kana attachment can be repaired safely
+- Protects proper nouns from the system dictionary when the POS, reading, surface, and position of the actual Mozc-selected candidate provide sufficient evidence, including personal names, place names, and organization names; it does not indiscriminately lock every dictionary entry
+- Temporarily substitutes a natural proxy reading and surface for verified full personal names in the Zenz input, then restores the original name after the response; validates occurrence counts and restoration conditions, and falls back to the normal Mozc result if restoration is unsafe. Place and organization names are not proxied
 - Sanitizes left context before using it in Zenz prompts, and excludes sensitive-like context such as URLs, email addresses, file paths, tokens, and long digit sequences
 - Stores only full-sequence Zenz feedback with non-reversible context classes, never raw left context or segment-local feedback
 - Bundles third-party license notices for the Zenz model and llama.cpp runtime in the MSI
@@ -1443,6 +1459,18 @@ gate.
 For Windows TSF password input scopes and macOS Secure Event Input, application
 surrounding text is not acquired for Zenz and extended Zenz context acquisition
 is skipped.
+
+#### Protecting system-dictionary proper nouns and verified full personal names
+
+Zenz may rewrite a personal name, place name, or organization name that normal Mozc conversion selected correctly. Mozkey uses the dictionary nodes underlying the actually selected candidate to inspect part-of-speech information, reading, surface, and position, and protects only spans for which it has sufficient evidence. User-dictionary entries continue to use their existing protection path as well.
+
+For personal names, Mozkey checks surname/given-name POS information and structure. Even if the selected path is classified as a general noun, an alternative lattice path may establish a verified full name when its reading and surface agree with the selected result.
+
+Uncommon full names can still be rewritten by Zenz even when passed unchanged. For **verified full personal names only**, Mozkey can temporarily substitute a natural proxy reading and surface. For example, when the conditions are met, `見上愛` (`みかみあい`) is passed to Zenz as `木村` (`きむら`), and the original `見上愛` is restored after the response. Occurrence counts and unsafe additions such as honorifics are checked; when restoration is not safe, the normal Mozc result is retained.
+
+This proxy mechanism does not apply to place or organization names or to standalone surnames/given names. Not every proper noun in a dictionary is protected: the selected conversion must provide adequate evidence. Mozkey retains surrounding contextual corrections when it can do so safely.
+
+Proper-noun evidence is collected during normal Mozc candidate generation, so additional exploration may also occur when automatic Zenz correction is OFF. For now, this preserves candidate consistency when Zenz is invoked manually after conversion.
 
 #### Independent Zenz learning controls
 

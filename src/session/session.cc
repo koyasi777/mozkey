@@ -935,7 +935,103 @@ std::vector<ProtectedConversionSpan> BuildZenzProtectedConversionSpans(
   AddDirectUserDictionaryEntryProtectedSpans(converter, live_key, mozc_value,
                                              &protected_spans);
 
+  // Extend the existing output-side, non-placeholder guard to normal-Mozc
+  // system proper nouns, including embedded names in longer conversion paths.
+  // Retain lexical boundaries: never match an arbitrary dictionary word against
+  // the complete reading and never let the exception list weaken user entries.
+  std::vector<converter::ProperNounSpan> selected_names;
+  const bool has_selected_names =
+      converter.GetSelectedProperNounSpans(&selected_names);
+  if (has_selected_names) {
+    for (const converter::ProperNounSpan& name : selected_names) {
+      // Verified surname-and-given-name evidence is stronger than an
+      // ambiguous individual token reading.
+      const bool protect_reading =
+          name.verified_personal_full_name ||
+          ShouldProtectSystemProperNounReadings(name.token_readings);
+      if (!protect_reading) {
+        continue;
+      }
+      // Current ProtectedConversionSpan uses occurrence/boundary checks.
+      // Skip repeated surfaces until a positional adoption guard is available.
+      // This conservative rule prevents protecting the wrong occurrence.
+      if (name.value.empty() ||
+          CountSurfaceOccurrences(mozc_value, name.value) != 1 ||
+          name.value_offset > mozc_value.size() ||
+          mozc_value.compare(name.value_offset, name.value.size(),
+                             name.value) != 0 ||
+          name.key_offset > live_key.size() ||
+          live_key.compare(name.key_offset, name.key.size(), name.key) != 0) {
+        continue;
+      }
+      AddOrUpdateProtectedSpan(
+          name.key, name.value,
+          ProtectedConversionSpan::Tier::kSystemProperNoun, false,
+          mozc_value, &protected_spans);
+      // The selection is already checked against both the full key and value.
+      // Do not attach an offset to a preexisting user-dictionary protection.
+      if (ProtectedConversionSpan* added =
+              FindProtectedSurface(&protected_spans, name.value);
+          added != nullptr &&
+          added->tier == ProtectedConversionSpan::Tier::kSystemProperNoun) {
+        added->source_value_offset = name.value_offset;
+        added->source_key_offset = name.key_offset;
+        added->verified_personal_full_name = name.verified_personal_full_name;
+      }
+    }
+  }
+
   return protected_spans;
+}
+
+// Protect a single verified personal name with a natural proxy when the
+// selected source reading and surface are uniquely and positionally verified.
+// This never changes the original reading used for adoption and stale replies.
+bool TryApplySingleVerifiedNameProxy(
+    absl::string_view original_key, absl::string_view mozc_value,
+    absl::string_view left_context, absl::string_view right_context,
+    ZenzProtectedPromptResult* protected_prompt) {
+  constexpr absl::string_view kProxyReading = "きむら";
+  constexpr absl::string_view kProxySurface = "木村";
+  if (protected_prompt == nullptr || protected_prompt->placeholder_count != 0 ||
+      protected_prompt->protected_spans.size() != 1 ||
+      protected_prompt->key != original_key) {
+    return false;
+  }
+  ProtectedConversionSpan& name = protected_prompt->protected_spans.front();
+  if (name.tier != ProtectedConversionSpan::Tier::kSystemProperNoun ||
+      !name.verified_personal_full_name || name.key.empty() ||
+      name.value.empty() || !name.placeholder.empty() ||
+      name.source_key_offset == std::string::npos ||
+      name.source_value_offset == std::string::npos ||
+      name.source_key_offset > original_key.size() ||
+      name.source_value_offset > mozc_value.size() ||
+      original_key.substr(name.source_key_offset, name.key.size()) != name.key ||
+      mozc_value.substr(name.source_value_offset, name.value.size()) !=
+          name.value ||
+      CountSurfaceOccurrences(original_key, name.key) != 1 ||
+      CountSurfaceOccurrences(mozc_value, name.value) != 1 ||
+      absl::StrContains(original_key, kProxyReading) ||
+      absl::StrContains(mozc_value, kProxySurface) ||
+      absl::StrContains(left_context, kProxySurface) ||
+      absl::StrContains(right_context, kProxySurface) ||
+      absl::StrContains(left_context, kProxyReading) ||
+      absl::StrContains(right_context, kProxyReading)) {
+    return false;
+  }
+  // Do not proxy a name followed by an honorific in the original reading.
+  const absl::string_view suffix =
+      original_key.substr(name.source_key_offset + name.key.size());
+  for (absl::string_view honorific : {"さん", "さま", "ちゃん", "くん"}) {
+    if (absl::StartsWith(suffix, honorific)) {
+      return false;
+    }
+  }
+  protected_prompt->key.replace(name.source_key_offset, name.key.size(),
+                                std::string(kProxyReading));
+  name.placeholder = std::string(kProxySurface);
+  protected_prompt->placeholder_count = 1;
+  return true;
 }
 
 uint32_t GetLiveConversionDelayMillisec(const config::Config& config) {
@@ -7121,8 +7217,11 @@ bool Session::MaybeScheduleZenzLiveCorrection(
   ZenzProtectedPromptInput protected_prompt_input;
   protected_prompt_input.key = live_conversion_key_;
   protected_prompt_input.protected_spans = live_conversion_protected_spans_;
-  const ZenzProtectedPromptResult protected_prompt =
+  ZenzProtectedPromptResult protected_prompt =
       zenz_adoption_policy_.ProtectPromptKey(protected_prompt_input);
+  const bool proper_name_proxy_active = TryApplySingleVerifiedNameProxy(
+      live_conversion_key_, live_conversion_value_, left_context_for_prompt,
+      right_context_for_prompt, &protected_prompt);
 
   ZenzPromptBuilder prompt_builder;
   const std::string prompt =
@@ -7140,6 +7239,8 @@ bool Session::MaybeScheduleZenzLiveCorrection(
       live_conversion_preedit_.empty() ? live_conversion_key_
                                        : live_conversion_preedit_;
   pending_zenz_live_.prompt = prompt;
+  pending_zenz_live_.prompt_reading = protected_prompt.key;
+  pending_zenz_live_.proper_name_proxy_active = proper_name_proxy_active;
   pending_zenz_live_.protected_spans = protected_prompt.protected_spans;
   pending_zenz_live_.baseline_segments = BuildZenzAdoptionBaselineSegments(
       live_conversion_preedit_output_, live_conversion_key_,
@@ -7463,8 +7564,10 @@ bool Session::AdvancePendingZenzLiveCorrection(
     request.issued_at = pending_zenz_live_.issued_at;
 
     ZenzPromptBuilder prompt_builder;
-    request.reading_katakana =
-        prompt_builder.HiraganaToKatakana(pending_zenz_live_.key);
+    request.reading_katakana = prompt_builder.HiraganaToKatakana(
+        pending_zenz_live_.prompt_reading.empty()
+            ? pending_zenz_live_.key
+            : pending_zenz_live_.prompt_reading);
 
     ZenzDebugOutput(absl::StrCat(
         "[zenz] async submit pipe_configured=",
@@ -7612,6 +7715,28 @@ bool Session::ApplyZenzLiveCorrectionResult(
         "[zenz] stripped verified left_context prefix ",
         ZenzRedactedTextStats("value", zenz_value),
         " context_class=", pending_zenz_live_.context_class));
+  }
+
+  if (pending_zenz_live_.proper_name_proxy_active) {
+    // A single validated proxy must survive exactly once. The model may
+    // otherwise delete or duplicate the surrogate, so fail closed.
+    constexpr absl::string_view kProxySurface = "木村";
+    if (CountSurfaceOccurrences(zenz_value, kProxySurface) != 1) {
+      CancelPendingZenzLiveCorrection();
+      return OutputCurrentLiveConversionAfterZenzStop(
+          command, "natural_name_proxy_missing_or_ambiguous");
+    }
+    const size_t proxy_offset = zenz_value.find(kProxySurface);
+    const absl::string_view after_proxy =
+        absl::string_view(zenz_value).substr(proxy_offset + kProxySurface.size());
+    for (absl::string_view honorific : {"さん", "さま", "様", "ちゃん",
+                                       "くん", "君", "氏"}) {
+      if (absl::StartsWith(after_proxy, honorific)) {
+        CancelPendingZenzLiveCorrection();
+        return OutputCurrentLiveConversionAfterZenzStop(
+            command, "natural_name_proxy_unrequested_honorific");
+      }
+    }
   }
 
   const std::string zenz_value_before_placeholder_restore = zenz_value;

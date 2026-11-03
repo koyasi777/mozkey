@@ -376,6 +376,17 @@ class EngineConverterInterface {
     return false;
   }
 
+  // Retrieves proper-noun lexical spans of the currently selected normal
+  // Mozc conversion, with absolute UTF-8 byte offsets in the full reading
+  // and selected surface.  False means no trustworthy snapshot is available.
+  virtual bool GetSelectedProperNounSpans(
+      std::vector<converter::ProperNounSpan>* spans) const {
+    if (spans != nullptr) {
+      spans->clear();
+    }
+    return false;
+  }
+
   // Commit prefix of the preedit string represented by Composer.
   // The caller should delete characters from composer based on returned
   // |committed_size|.

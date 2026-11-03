@@ -30,11 +30,16 @@
 #include "session/session.h"
 #include "session/zenz_prompt_builder.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -96,6 +101,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_METHOD(MaybeUpdateCandidateActionFooter);
   PEER_METHOD(PushUndoContext);
   PEER_METHOD(MaybeApplyZenzFeedbackLiveCorrection);
+  PEER_METHOD(MaybeScheduleZenzLiveCorrection);
   PEER_METHOD(ApplyZenzLiveCorrectionResult);
   PEER_METHOD(SetPendingZenzFeedbackAccepted);
   PEER_METHOD(ApplyPendingZenzAcceptedMozcHistoryLearning);
@@ -146,6 +152,8 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_VARIABLE(zenz_live_mozc_value_);
   PEER_VARIABLE(zenz_live_context_class_);
   PEER_VARIABLE(zenz_live_stable_spans_);
+  PEER_VARIABLE(live_conversion_protected_spans_);
+  PEER_VARIABLE(zenz_live_corrector_);
   PEER_VARIABLE(pending_zenz_live_);
   PEER_VARIABLE(zenz_feedback_store_);
   PEER_VARIABLE(pending_zenz_feedback_);
@@ -25267,6 +25275,283 @@ TEST_F(SessionTest, MultiSegmentSubmitCandidate) {
   session.Commit(&command);
   ASSERT_TRUE(command.output().has_result());
   EXPECT_EQ(command.output().result().value(), "脱ぐ");
+}
+
+// Mozkey verified-personal-name proxy regression tests.
+// This fixture exercises production Session scheduling, a single asynchronous
+// fake scorer response, restoration, strict-reading validation and rejection.
+// It must not be used to claim that the fake scorer represents a live model.
+
+namespace {
+struct ZenzNameProxyTransportState {
+  std::atomic<int> calls{0};
+  std::mutex mutex;
+  std::string last_prompt;
+  std::string last_key;
+  std::string last_reading_katakana;
+  uint32_t last_generation = 0;
+};
+
+class ZenzNameProxySingleReplyClient final : public ZenzClient {
+ public:
+  ZenzNameProxySingleReplyClient(std::shared_ptr<ZenzNameProxyTransportState> state,
+                           std::string raw_value)
+      : state_(std::move(state)), raw_value_(std::move(raw_value)) {}
+
+  bool IsAvailable() const override { return true; }
+
+  ZenzLiveResponse Convert(const ZenzLiveRequest& request) override {
+    {
+      std::lock_guard<std::mutex> lock(state_->mutex);
+      state_->last_prompt = request.prompt;
+      state_->last_key = request.key;
+      state_->last_generation = request.generation;
+      state_->last_reading_katakana = request.reading_katakana;
+    }
+    ZenzLiveResponse response;
+    response.generation = request.generation;
+    response.key = request.key;
+    response.value = raw_value_;
+    response.ok = true;
+    state_->calls.fetch_add(1);
+    return response;
+  }
+
+ private:
+  std::shared_ptr<ZenzNameProxyTransportState> state_;
+  std::string raw_value_;
+};
+
+void ZenzNameProxySetupSession(
+    Session* session, SessionTestPeer* peer,
+    const std::shared_ptr<MockConverter>& converter,
+    commands::Command* command) {
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_zenz_live_correction_min_key_length(2);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_use_zenz_strict_reading_preservation(false);
+  config.set_use_zenz_feedback_reuse(false);
+  session->SetConfig(config);
+
+  // SendKey setup is done in each SessionTest, using its inherited helper.
+  Segments segments;
+  for (const auto& item :
+       {std::pair<const char*, const char*>{"きのう", "機能"},
+        {"みかみあい", "見上愛"}, {"に", "に"}, {"あった", "あった"}}) {
+    Segment* segment = segments.add_segment();
+    segment->set_key(item.first);
+    AddCandidate(item.first, item.second, segment);
+  }
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  config.set_use_live_conversion(true);
+  session->SetConfig(config);
+  command->mutable_output()->Clear();
+  ASSERT_TRUE(peer->MaybeStartLiveConversion(command));
+  ASSERT_TRUE(command->output().zenz_live_correction_pending());
+  ASSERT_TRUE(command->output().has_callback());
+}
+
+bool ZenzNameProxySendSessionCallback(Session* session,
+                                const commands::SessionCommand& callback,
+                                commands::Command* command) {
+  command->Clear();
+  command->mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *command->mutable_input()->mutable_command() = callback;
+  return session->SendCommand(command);
+}
+
+void ZenzNameProxyWaitForWorker(ZenzNameProxyTransportState* state) {
+  for (int i = 0; i < 100 && state->calls.load() == 0; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  // The worker records calls just before returning. Give it a bounded chance
+  // to publish the response through ZenzLiveCorrector.
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+}
+void ZenzV12PrepareVerifiedName(SessionTestPeer* peer,
+                                bool full_name = true,
+                                bool repeated = false) {
+  ProtectedConversionSpan name;
+  name.tier = ProtectedConversionSpan::Tier::kSystemProperNoun;
+  name.key = "みかみあい";
+  name.value = "見上愛";
+  name.source_key_offset = std::string("きのう").size();
+  name.source_value_offset = std::string("機能").size();
+  name.verified_personal_full_name = full_name;
+  name.required_occurrences = repeated ? 2 : 1;
+  peer->live_conversion_protected_spans_() = {name};
+}
+
+// Re-schedule from the actual Session function, not by changing pending.prompt
+// or pending.protected_spans (unlike the earlier v11 transport experiment).
+void ZenzV12Reschedule(SessionTestPeer* peer,
+                       commands::Command* command) {
+  command->Clear();
+  ASSERT_TRUE(peer->MaybeScheduleZenzLiveCorrection(
+      command, /*forced=*/false, /*bypass_automatic_feedback=*/false));
+  ASSERT_TRUE(peer->pending_zenz_live_().pending);
+  ASSERT_FALSE(peer->pending_zenz_live_().submitted);
+  ASSERT_TRUE(command->output().has_callback());
+}
+
+void ZenzV12RunWorkerResponse(Session* session, SessionTestPeer* peer,
+                              std::shared_ptr<ZenzNameProxyTransportState> state,
+                              absl::string_view raw_value,
+                              commands::Command* command) {
+  peer->zenz_live_corrector_() = std::make_unique<ZenzLiveCorrector>(
+      std::make_unique<ZenzNameProxySingleReplyClient>(state,
+                                                std::string(raw_value)));
+  const commands::SessionCommand initial =
+      command->output().callback().session_command();
+  ASSERT_TRUE(ZenzNameProxySendSessionCallback(session, initial, command));
+  ZenzNameProxyWaitForWorker(state.get());
+  ASSERT_EQ(state->calls.load(), 1);
+  ASSERT_TRUE(command->output().has_callback());
+  const commands::SessionCommand poll =
+      command->output().callback().session_command();
+  ASSERT_TRUE(ZenzNameProxySendSessionCallback(session, poll, command));
+}
+}  // namespace
+
+TEST_F(SessionTest, ZenzV12ActualSchedulerOneRequestAndStrictReadingOn) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+  commands::Command command;
+  InsertCharacterString("きのうみかみあいにあった", "abcdefghijkl", &session,
+                        &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  // Establish four selected Mozc baseline segments. The production scheduler
+  // creates the proxy from independently supplied name-span evidence.
+  ZenzNameProxySetupSession(&session, &peer, converter, &command);
+  config::Config config = session.context().GetConfig();
+  config.set_use_zenz_strict_reading_preservation(true);
+  session.SetConfig(config);
+  ZenzV12PrepareVerifiedName(&peer);
+  ZenzV12Reschedule(&peer, &command);
+  auto& pending = peer.pending_zenz_live_();
+  ASSERT_TRUE(pending.proper_name_proxy_active);
+  ASSERT_EQ(pending.key, "きのうみかみあいにあった");
+  ASSERT_EQ(pending.prompt_reading, "きのうきむらにあった");
+  ASSERT_EQ(pending.baseline_segments.size(), 4u);
+  ASSERT_NE(pending.prompt.find("キノウキムラニアッタ"), std::string::npos);
+  ASSERT_EQ(pending.protected_spans.size(), 1u);
+  ASSERT_EQ(pending.protected_spans.front().placeholder, "木村");
+  EXPECT_EQ(pending.protected_spans.front().source_key_offset, 9u);
+  EXPECT_EQ(pending.protected_spans.front().source_value_offset, 6u);
+
+  // Exercise the Session strict-reading gate using a mocked reverse-conversion
+  // result. The real dictionary is independently covered by prior testing.
+  ExpectZenzReverseReading(converter.get(), "昨日見上愛に会った",
+                           "きのうみかみあいにあった");
+  auto state = std::make_shared<ZenzNameProxyTransportState>();
+  ZenzV12RunWorkerResponse(&session, &peer, state, "昨日木村に会った", &command);
+  EXPECT_TRUE(command.output().zenz_live_correction_applied());
+  EXPECT_PREEDIT("昨日見上愛に会った", command);
+  EXPECT_EQ(peer.zenz_live_value_(), "昨日見上愛に会った");
+  EXPECT_FALSE(peer.pending_zenz_live_().pending);
+  EXPECT_EQ(state->calls.load(), 1);
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    EXPECT_EQ(state->last_reading_katakana, "キノウキムラニアッタ");
+    EXPECT_EQ(state->last_key, "きのうみかみあいにあった");
+  }
+  std::cout << "SESSION_V12_PRODUCT_SCHEDULER_PROXY=YES\n"
+            << "SESSION_V12_STRICT_READING_ON_APPLIED="
+            << (command.output().zenz_live_correction_applied() ? "YES" : "NO")
+            << "\nSESSION_V12_MODEL_REQUESTS=" << state->calls.load() << "\n";
+}
+
+TEST_F(SessionTest, ZenzV12DuplicateProxyReplyFailsClosed) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+  commands::Command command;
+  InsertCharacterString("きのうみかみあいにあった", "abcdefghijkl", &session,
+                        &command);
+  ZenzNameProxySetupSession(&session, &peer, converter, &command);
+  ZenzV12PrepareVerifiedName(&peer);
+  ZenzV12Reschedule(&peer, &command);
+  ASSERT_TRUE(peer.pending_zenz_live_().proper_name_proxy_active);
+  auto state = std::make_shared<ZenzNameProxyTransportState>();
+  ZenzV12RunWorkerResponse(&session, &peer, state, "昨日木村と木村に会った", &command);
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(peer.pending_zenz_live_().pending);
+  EXPECT_NE(command.output().zenz_live_correction_debug().find(
+      "natural_name_proxy_missing_or_ambiguous"), std::string::npos);
+  std::cout << "SESSION_V12_DUPLICATE_PROXY_REJECTED=YES\n";
+}
+
+TEST_F(SessionTest, ZenzV12UnrequestedHonorificFailsClosed) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+  commands::Command command;
+  InsertCharacterString("きのうみかみあいにあった", "abcdefghijkl", &session,
+                        &command);
+  ZenzNameProxySetupSession(&session, &peer, converter, &command);
+  ZenzV12PrepareVerifiedName(&peer);
+  ZenzV12Reschedule(&peer, &command);
+  ASSERT_TRUE(peer.pending_zenz_live_().proper_name_proxy_active);
+  auto state = std::make_shared<ZenzNameProxyTransportState>();
+  ZenzV12RunWorkerResponse(&session, &peer, state, "昨日木村さんに会った", &command);
+  EXPECT_FALSE(command.output().zenz_live_correction_applied());
+  EXPECT_FALSE(peer.pending_zenz_live_().pending);
+  EXPECT_NE(command.output().zenz_live_correction_debug().find(
+      "natural_name_proxy_unrequested_honorific"), std::string::npos);
+  std::cout << "SESSION_V12_HONORIFIC_REJECTED=YES\n";
+}
+
+TEST_F(SessionTest, ZenzV12UnverifiedNameFallsBackToOrdinaryPrompt) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+  commands::Command command;
+  InsertCharacterString("きのうみかみあいにあった", "abcdefghijkl", &session,
+                        &command);
+  ZenzNameProxySetupSession(&session, &peer, converter, &command);
+  ZenzV12PrepareVerifiedName(&peer, /*full_name=*/false);
+  ZenzV12Reschedule(&peer, &command);
+  EXPECT_FALSE(peer.pending_zenz_live_().proper_name_proxy_active);
+  EXPECT_EQ(peer.pending_zenz_live_().prompt_reading,
+            "きのうみかみあいにあった");
+  EXPECT_EQ(peer.pending_zenz_live_().prompt.find("キムラ"), std::string::npos);
+  std::cout << "SESSION_V12_UNVERIFIED_NAME_BYPASS=YES\n";
+}
+
+TEST_F(SessionTest, ZenzV12UnpositionedNameFallsBackToOrdinaryPrompt) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+  commands::Command command;
+  InsertCharacterString("きのうみかみあいにあった", "abcdefghijkl", &session,
+                        &command);
+  ZenzNameProxySetupSession(&session, &peer, converter, &command);
+  ZenzV12PrepareVerifiedName(&peer);
+  peer.live_conversion_protected_spans_().front().source_key_offset = 0;
+  ZenzV12Reschedule(&peer, &command);
+  EXPECT_FALSE(peer.pending_zenz_live_().proper_name_proxy_active);
+  EXPECT_EQ(peer.pending_zenz_live_().prompt_reading,
+            "きのうみかみあいにあった");
+  std::cout << "SESSION_V12_INVALID_OFFSETS_BYPASS=YES\n";
 }
 
 }  // namespace session
