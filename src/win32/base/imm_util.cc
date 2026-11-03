@@ -71,12 +71,12 @@ bool ImeUtil::SetDefault() {
   wchar_t clsid[64] = {};
   if (!::StringFromGUID2(TsfProfile::GetTextServiceGuid(), clsid,
                          std::size(clsid))) {
-    return E_OUTOFMEMORY;
+    return false;
   }
   wchar_t profile_id[64] = {};
   if (!::StringFromGUID2(TsfProfile::GetProfileGuid(), profile_id,
                          std::size(profile_id))) {
-    return E_OUTOFMEMORY;
+    return false;
   }
 
   const std::wstring profile = StrCatW(L"0x0411:", clsid, profile_id);
@@ -89,6 +89,10 @@ bool ImeUtil::SetDefault() {
     return false;
   }
 
+  return Activate();
+}
+
+bool ImeUtil::Activate() {
   wil::com_ptr_nothrow<ITfInputProcessorProfileMgr> profile_mgr;
   {
     wil::com_ptr_nothrow<ITfInputProcessorProfiles> profiles;
@@ -105,14 +109,16 @@ bool ImeUtil::SetDefault() {
     }
   }
   const LANGID kLANGJaJP = MAKELANGID(LANG_JAPANESE, SUBLANG_JAPANESE_JAPAN);
-  if (FAILED(profile_mgr->ActivateProfile(
-          TF_PROFILETYPE_INPUTPROCESSOR, kLANGJaJP,
-          TsfProfile::GetTextServiceGuid(), TsfProfile::GetProfileGuid(),
-          nullptr, TF_IPPMF_FORPROCESS | TF_IPPMF_FORSESSION))) {
-    DLOG(ERROR) << "ActivateProfile failed";
+  const HRESULT result = profile_mgr->ActivateProfile(
+      TF_PROFILETYPE_INPUTPROCESSOR, kLANGJaJP,
+      TsfProfile::GetTextServiceGuid(), TsfProfile::GetProfileGuid(),
+      nullptr, TF_IPPMF_FORPROCESS | TF_IPPMF_FORSESSION |
+                   TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE);
+  // S_FALSE means the profile was not enabled; SUCCEEDED is insufficient.
+  if (result != S_OK) {
+    DLOG(ERROR) << "ActivateProfile failed: " << result;
     return false;
   }
-
   return true;
 }
 

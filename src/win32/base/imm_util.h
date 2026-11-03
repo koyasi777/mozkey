@@ -45,15 +45,13 @@ class ImeUtil {
   //   0411:{TEXT_SERVICE_GUID}{PROFILE_GUID}
   static std::wstring GetInputTip();
 
-  // Sets Google Japanese Input as the default IME and update the runtime
-  // keyboard setting of the current session.
-  // Returns true if the operation completed successfully.
-  // NOTE: This function internally calls LoadKeyboardLayout on Windows XP.
-  // Loading the specified keyboard layout might result in loading
-  // corresponding IME module (*.ime) into the current process, although I
-  // have not tested. If this is true, you cannot freely call SetDefault() in
-  // some special situations like CustomAction.
+  // Set Mozkey as the current user's default input method and activate it
+  // in the current desktop session. Returns false if a Windows API fails.
   static bool SetDefault();
+
+  // Re-activate Mozkey in the current desktop session after language-list
+  // updates. This does not replace persistent default-input settings.
+  static bool Activate();
 };
 
 }  // namespace win32
