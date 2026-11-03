@@ -557,8 +557,8 @@
     </message>
     <message>
         <location filename="config_dialog.ui" line="0"/>
-        <source>Zenz 補正結果が返るまで通常のライブ変換結果を表示しない</source>
-        <translation>Hide the normal live-conversion result until Zenz correction finishes</translation>
+        <source>Zenz 補正結果が返るまでライブ変換結果（Mozc）を表示しない</source>
+        <translation>Hide the Mozc live-conversion result until Zenz correction finishes</translation>
     </message>
     <message>
         <location filename="config_dialog.ui" line="0"/>

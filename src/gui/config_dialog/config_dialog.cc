@@ -3516,8 +3516,8 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   enabled_layout->addWidget(enabled);
   status_root->addWidget(enabled_row);
 
-  // The preview is deliberately above the controls and never hidden when the
-  // production overlay is disabled: users can design the indicator offline.
+  // The preview remains visible when the production overlay is disabled,
+  // while the related appearance controls become unavailable for editing.
   auto* preview_section = new QFrame(status_group);
   auto* preview_layout = new QVBoxLayout(preview_section);
   preview_layout->setContentsMargins(16, 0, 16, 0);
@@ -3536,6 +3536,11 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   QPushButton* preset_button = nullptr;
   auto make_section = [&](const QString& title, bool is_basic = false) -> QGridLayout* {
     auto* section = new QFrame(status_group);
+    // The preview and visibility toggle stay usable; style edits do not.
+    // The checked state is restored from config after this UI is constructed.
+    section->setEnabled(enabled->isChecked());
+    QObject::connect(enabled, &QCheckBox::toggled,
+                     section, &QWidget::setEnabled);
     auto* layout = new QVBoxLayout(section);
     // Match the small gaps above the preedit color subsections.
     // Basic follows the preview directly; subsequent subsections get 8 px
@@ -6476,19 +6481,10 @@ void ConfigDialog::SelectZenzLiveCorrectionSetting(int state) {
               : 0);
   zenzLiveCorrectionMinKeyLengthLabel->setEnabled(enabled);
   zenzLiveCorrectionMinKeyLengthSpinBox->setEnabled(enabled);
-  zenzLiveCorrectionProfileLabel->setEnabled(enabled);
-  zenzLiveCorrectionProfileLineEdit->setEnabled(enabled);
-  zenzLiveCorrectionTopicLabel->setEnabled(enabled);
-  zenzLiveCorrectionTopicLineEdit->setEnabled(enabled);
-  zenzLiveCorrectionStyleLabel->setEnabled(enabled);
-  zenzLiveCorrectionStyleLineEdit->setEnabled(enabled);
-  zenzLiveCorrectionSettingsLabel->setEnabled(enabled);
-  zenzLiveCorrectionSettingsLineEdit->setEnabled(enabled);
-  zenzLiveCorrectionRightContextCheckBox->setEnabled(enabled);
+  // Condition fields and right context are shared by automatic and explicit
+  // manual Zenz correction.  Keep them editable with live conversion off.
   SelectZenzRightContextSetting(
-      enabled ? static_cast<int>(
-                    zenzLiveCorrectionRightContextCheckBox->isChecked())
-              : 0);
+      static_cast<int>(zenzLiveCorrectionRightContextCheckBox->isChecked()));
   // Recording, automatic reuse, and external Mozc history learning are
   // independent preferences. Keep their controls available even when live
   // correction is disabled: the feedback candidate rewriter also operates
@@ -6533,9 +6529,7 @@ void ConfigDialog::SelectZenzFeedbackAutoBlockSetting(int state) {
 }
 
 void ConfigDialog::SelectZenzRightContextSetting(int state) {
-  const bool enabled = liveConversionCheckBox->isChecked() &&
-                       zenzLiveCorrectionCheckBox->isChecked() &&
-                       static_cast<bool>(state);
+  const bool enabled = static_cast<bool>(state);
 
   zenzLiveCorrectionRightContextLengthLabel->setEnabled(enabled);
   zenzLiveCorrectionRightContextLengthSpinBox->setEnabled(enabled);
