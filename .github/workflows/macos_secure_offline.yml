@@ -1,0 +1,38 @@
+name: macOS secure offline source gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos_source_gate:
+    name: macOS offline source contract and Python tests
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Mozkey
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Verify platform
+        run: |
+          test "$(uname -s)" = Darwin
+          python3 --version
+
+      - name: Unit test offline guards
+        run: |
+          python3 -m unittest discover -s tools/tests -p 'test_macos_offline_audit.py' -v
+
+      - name: Enforce macOS runtime source contract
+        run: |
+          python3 tools/check_macos_offline_source.py

@@ -258,10 +258,13 @@ Windows TSF の `IS_PRIVATE` は、Mozkey のシークレットモードとは�
 
 Windows 版では、追加のオフライン防御層として、インストーラーが Mozc の実行ファイルに outbound 通信をブロックする Windows Firewall rule を追加します。Zenz 同梱構成では `mozc_zenz_scorer.exe` と `llama-server.exe` も対象です。これらの rule はアンインストール時に削除されます。
 
+macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの Unix ドメインソケットで接続し、scorer から同梱の `llama-server` へは `127.0.0.1` のランダムポートとランダム API キーを使って接続します。ソース監査と、PKG から展開した Zenz の実推論中に `ps` / `lsof` で通信先をサンプリングする検証を追加しています。**サンプリングで外部通信が観測されないことは、全プロセスの通信禁止や OS レベルの外向き通信遮断を証明するものではありません。** 公開リリース本体の監査とも区別します。詳細は [macOS オフライン監査仕様](docs/security/macos_offline_audit.md) を参照してください。
+
 関連ドキュメント:
 
 - [Secure Offline Guarantee](docs/security/offline_guarantee.md)
 - [Secure Offline Release Checklist](docs/security/release_checklist.md)
+- [macOS オフライン監査仕様](docs/security/macos_offline_audit.md)
 
 <br>
 
@@ -917,6 +920,7 @@ daily local 辞書は主に以下を元に生成できます。
 - [Windows ビルド手順](docs/build_mozc_in_windows.md)
 - [macOS Universal Zenz runtime / PKG ビルド手順](src/mac/installer/zenz_runtime/README.md)
 - [macOS インストーラーの検証手順](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md)
+- [macOS オフライン監査仕様](docs/security/macos_offline_audit.md)
 - [Linux ビルド手順](docs/build_mozc_for_linux.md)
 
 # English
@@ -1082,10 +1086,21 @@ Mozc runtime executables as an additional offline hardening layer. For
 Zenz-bundled builds, the rules also cover `mozc_zenz_scorer.exe` and
 `llama-server.exe`. These rules are removed during uninstall.
 
+On macOS Zenz-bundled builds, Mozc communicates with its scorer over a private
+per-user Unix-domain socket. The scorer contacts the packaged `llama-server`
+only on a randomized `127.0.0.1` port with a randomized API key. The macOS
+source gate and package verifier audit selected code paths and sample network
+sockets during real inference using `ps` / `lsof`. **A passing sampled audit
+is not proof that all IME processes are unable to access the Internet, nor an
+OS-enforced outbound network restriction.** Audited development packages must
+also be distinguished from published release artifacts. See the
+[macOS offline audit contract](docs/security/macos_offline_audit.md).
+
 See also:
 
 - [Secure Offline Guarantee](docs/security/offline_guarantee.md)
 - [Secure Offline Release Checklist](docs/security/release_checklist.md)
+- [macOS offline audit contract](docs/security/macos_offline_audit.md)
 
 
 Main branches
@@ -2213,6 +2228,7 @@ For source builds, Zenz runtime packaging, and installer validation, consult:
 - [Windows build instructions](docs/build_mozc_in_windows.md)
 - [macOS Universal Zenz runtime / PKG build guide](src/mac/installer/zenz_runtime/README.md)
 - [macOS installer regression test guide](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md)
+- [macOS offline audit contract](docs/security/macos_offline_audit.md)
 - [Linux build instructions](docs/build_mozc_for_linux.md)
 
 ### Upstream and licensing

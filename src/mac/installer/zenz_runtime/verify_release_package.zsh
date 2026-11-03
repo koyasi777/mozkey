@@ -587,7 +587,12 @@ scorer_pid="$!"
 
 echo "Packaged scorer PID = $scorer_pid"
 
-if ! "$probe" --request; then
+# This is a sampled egress audit, not a firewall. Run it while the exact
+# packaged scorer performs a native inference request (on arm64 and x86_64).
+if ! /usr/bin/python3 "$src_root/../tools/macos_offline_socket_audit.py" \
+  --scorer-pid "$scorer_pid" \
+  --report "$output_root/offline-sockets.json" \
+  -- "$probe" --request; then
   echo
   echo "===== PACKAGED SCORER LOG ====="
   /usr/bin/tail -n 300 "$scorer_log" 2>/dev/null || true
@@ -599,6 +604,7 @@ scorer_pid=""
 trap - EXIT INT TERM
 
 echo "Native packaged scorer end-to-end = PASS"
+echo "macOS sampled socket audit = PASS"
 
 echo
 echo "===== WRITE VERIFIER AUDIT ====="
