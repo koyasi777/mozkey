@@ -207,6 +207,13 @@ class ZenzFeedbackStore {
                       absl::string_view context_class,
                       absl::string_view value,
                       absl::string_view reason);
+
+  // User-managed hard block. Unlike statistical rejection, the caller
+  // must be able to observe persistence failure. Idempotent.
+  // The caller is responsible for enforcing privacy restrictions.
+  [[nodiscard]] bool RecordManualBlock(absl::string_view key,
+                                       absl::string_view context_class,
+                                       absl::string_view value);
 };
 
 }  // namespace session

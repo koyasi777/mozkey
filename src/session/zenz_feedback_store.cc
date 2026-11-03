@@ -1749,5 +1749,15 @@ void ZenzFeedbackStore::RecordRejected(
   AppendRecord("rejected", key, context_class, value, reason);
 }
 
+bool ZenzFeedbackStore::RecordManualBlock(
+    absl::string_view key, absl::string_view context_class,
+    absl::string_view value) {
+  if (IsManuallyBlocked(key, context_class, value)) {
+    return true;
+  }
+  return AppendRecord("rejected", key, context_class, value,
+                      "hard_reject");
+}
+
 }  // namespace session
 }  // namespace mozc

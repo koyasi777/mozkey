@@ -141,4 +141,5 @@ Suggestion	Ctrl n	PredictAndConvert
 Suggestion	Down	PredictAndConvert
 Suggestion	Shift Enter	CommitFirstSuggestion
 ZenzConversion	Space	RevertZenzToMozc
+ZenzConversion	Ctrl Delete	BlockVisibleZenzCorrection
 LiveConversion	Backspace	Backspace

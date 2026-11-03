@@ -393,6 +393,43 @@ TEST_F(KeyMapTest, BuiltinKeymapsExplicitlyBindZenzSpaceRevert) {
   }
 }
 
+TEST_F(KeyMapTest, BuiltinKeymapsBindZenzCtrlDeleteSeparately) {
+  commands::KeyEvent key;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Delete", &key));
+  for (const config::Config::SessionKeymap kind :
+       {config::Config::ATOK, config::Config::MSIME, config::Config::KOTOERI,
+        config::Config::MOBILE, config::Config::CHROMEOS}) {
+    KeyMapManager manager(GetDefaultConfig(kind));
+    CommandSequence ordinary;
+    ASSERT_TRUE(manager.GetCommandSequenceConversion(key, &ordinary));
+    ASSERT_EQ(ordinary.size(), 1);
+    EXPECT_EQ(ordinary.front(), "DeleteSelectedCandidate");
+
+    CommandSequence zenz;
+    bool specialized = false;
+    ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(
+        key, &zenz, &specialized));
+    EXPECT_TRUE(specialized);
+    ASSERT_EQ(zenz.size(), 1);
+    EXPECT_EQ(zenz.front(), "BlockVisibleZenzCorrection");
+    ASSERT_TRUE(manager.GetCommandSequenceZenzLiveConversion(
+        key, &zenz, &specialized));
+    EXPECT_TRUE(specialized);
+    EXPECT_EQ(zenz.front(), "BlockVisibleZenzCorrection");
+  }
+}
+
+TEST_F(KeyMapTest, ZenzBlockMustBeStandalone) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer peer(manager);
+  EXPECT_TRUE(peer.AddCommand("ZenzConversion", "Ctrl Delete",
+                              "BlockVisibleZenzCorrection"));
+  EXPECT_FALSE(peer.AddCommand("ZenzConversion", "Ctrl Shift Delete",
+                               "BlockVisibleZenzCorrection|Commit"));
+  EXPECT_FALSE(peer.AddCommand("Conversion", "Ctrl Alt Delete",
+                               "Commit|BlockVisibleZenzCorrection"));
+}
+
 TEST_F(KeyMapTest, BuiltinKeymapsInheritZenzBackspaceFromOrigin) {
   commands::KeyEvent backspace;
   ASSERT_TRUE(KeyParser::ParseKey("Backspace", &backspace));

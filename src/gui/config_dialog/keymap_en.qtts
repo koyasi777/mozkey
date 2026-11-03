@@ -272,8 +272,16 @@
         <translation>Return to ordinary Mozc conversion</translation>
     </message>
     <message>
+        <source>BlockVisibleZenzCorrection</source>
+        <translation>Block visible Zenz correction</translation>
+    </message>
+    <message>
         <source>Return to Mozc conversion must be used alone.</source>
         <translation>Return to Mozc conversion must be used alone.</translation>
+    </message>
+    <message>
+        <source>Return to Mozc conversion or blocking Zenz must be used alone.</source>
+        <translation>Returning to Mozc conversion or blocking Zenz must be used alone.</translation>
     </message>
     <message>
         <source>ForceZenzLiveCorrection</source>
