@@ -735,6 +735,10 @@ void AddOrUpdateProtectedSpan(
 
   if (ProtectedConversionSpan* existing =
           FindProtectedSurface(protected_spans, value)) {
+    // Direct user-dictionary evidence is never a preedit-only numeric anchor.
+    if (tier == ProtectedConversionSpan::Tier::kUserPreferred) {
+      existing->numeric_preedit_only = false;
+    }
     if (existing->required_occurrences < required_occurrences) {
       existing->required_occurrences = required_occurrences;
     }
@@ -762,7 +766,8 @@ void AddOrUpdateProtectedSpan(
 }
 
 void AddPreeditIdentityProtectedSpans(
-    const commands::Preedit& preedit, absl::string_view mozc_value,
+    const commands::Preedit& preedit, absl::string_view live_key,
+    absl::string_view mozc_value,
     std::vector<ProtectedConversionSpan>* protected_spans) {
   for (int i = 0; i < preedit.segment_size(); ++i) {
     const commands::Preedit::Segment& segment = preedit.segment(i);
@@ -774,16 +779,42 @@ void AddPreeditIdentityProtectedSpans(
         segment.has_key() ? segment.key() : std::string();
     const std::vector<std::string> identity_surfaces =
         ExtractAsciiIdentitySurfaces(segment.value());
+    // The preedit's selected surface is only a Mozc hypothesis.  A number
+    // generated from a kana reading (e.g. いつか -> 5日) must not become a
+    // mandatory numeric literal for Zenz adoption.  Treat only a numeric
+    // token present in the original conversion reading as a hard constraint.
+    // With no segment key, fall back conservatively to the full live key.
+    const absl::string_view numeric_reading =
+        segment_key.empty() ? live_key : absl::string_view(segment_key);
+    const std::vector<std::string> reading_surfaces =
+        ExtractAsciiIdentitySurfaces(numeric_reading);
     for (const std::string& surface : identity_surfaces) {
-      const std::string surface_key = InferProtectedKeyForEmbeddedSurface(
-          segment_key, segment.value(), surface);
       const ProtectedConversionSpan::Tier tier =
           ClassifyProtectedAsciiSurface(surface);
+      if (tier == ProtectedConversionSpan::Tier::kNumericLiteral &&
+          std::find(reading_surfaces.begin(), reading_surfaces.end(), surface) ==
+              reading_surfaces.end()) {
+        continue;
+      }
+      const std::string surface_key = InferProtectedKeyForEmbeddedSurface(
+          segment_key, segment.value(), surface);
+      // Numeric protection from a user-dictionary candidate has stronger
+      // provenance.  Do not relax it merely because the same number appears
+      // in the ordinary preedit.
+      const bool already_protected =
+          FindProtectedSurface(protected_spans, surface) != nullptr;
       AddOrUpdateProtectedSpan(
           surface_key, surface, tier,
           tier == ProtectedConversionSpan::Tier::kIdentityCritical &&
               !surface_key.empty(),
           mozc_value, protected_spans);
+      if (tier == ProtectedConversionSpan::Tier::kNumericLiteral &&
+          !already_protected) {
+        if (ProtectedConversionSpan* added =
+                FindProtectedSurface(protected_spans, surface)) {
+          added->numeric_preedit_only = true;
+        }
+      }
     }
   }
 }
@@ -928,7 +959,7 @@ std::vector<ProtectedConversionSpan> BuildZenzProtectedConversionSpans(
   }
 
   if (output.has_preedit()) {
-    AddPreeditIdentityProtectedSpans(output.preedit(), mozc_value,
+    AddPreeditIdentityProtectedSpans(output.preedit(), live_key, mozc_value,
                                      &protected_spans);
   }
 

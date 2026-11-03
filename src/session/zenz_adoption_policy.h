@@ -80,6 +80,12 @@ struct ProtectedConversionSpan {
   // repair the missing occurrence when it is safe.
   size_t required_occurrences = 1;
 
+  // True only for a numeric span first observed in the selected preedit,
+  // rather than from a user-dictionary candidate.  An individually verified
+  // edge segment may relax the baseline-wide occurrence count when other
+  // numerals with the same spelling were generated from kana readings.
+  bool numeric_preedit_only = false;
+
   // Verified UTF-8 byte offset of the selected system proper name in the
   // original Mozc value. Unset for preexisting user dictionary spans.
   size_t source_value_offset = std::string::npos;

@@ -913,6 +913,136 @@ std::string ZenzAdoptionPolicy::RestorePlaceholders(
   return restored;
 }
 
+// Numeric-only tokens in the original conversion reading.  Checking exact
+// ASCII token boundaries avoids mistaking 5 inside GPT-5 or 15 for a literal 5.
+size_t CountReadingNumericTokens(absl::string_view reading,
+                                 absl::string_view surface) {
+  if (surface.empty()) {
+    return 0;
+  }
+
+  const auto identity_char = [](unsigned char c) {
+    return ('0' <= c && c <= '9') || ('a' <= c && c <= 'z') ||
+           ('A' <= c && c <= 'Z') || c == '_' || c == '-' ||
+           c == '.' || c == '+' || c == '#';
+  };
+  size_t matches = 0;
+  size_t start = absl::string_view::npos;
+  for (size_t i = 0; i <= reading.size(); ++i) {
+    if (i < reading.size() &&
+        identity_char(static_cast<unsigned char>(reading[i]))) {
+      if (start == absl::string_view::npos) {
+        start = i;
+      }
+      continue;
+    }
+    if (start != absl::string_view::npos) {
+      if (reading.substr(start, i - start) == surface) {
+        ++matches;
+      }
+      start = absl::string_view::npos;
+    }
+  }
+  return matches;
+}
+
+enum class MixedNumericAnchor {
+  kNotApplicable,
+  kPreserved,
+  kLost,
+};
+
+// A baseline-wide digit count conflates explicit and kana-derived numbers.
+// Relax it only when *every* user-entered occurrence is tied to an independent
+// baseline segment at the start/end of the composition.  Requiring the entire
+// edge segment unchanged establishes its position and preserves punctuation,
+// without guessing an interior boundary or interpreting similar spellings.
+MixedNumericAnchor CheckMixedNumericEdgeAnchors(
+    const ZenzAdoptionInput& input, absl::string_view surface,
+    absl::string_view candidate) {
+  if (!BaselineSegmentsMatchAdoptionInput(
+          input.baseline_segments, input.key, input.mozc_value) ||
+      input.baseline_segments.size() < 2) {
+    return MixedNumericAnchor::kNotApplicable;
+  }
+
+  size_t explicit_count = 0;
+  std::string prefix;
+  std::string suffix;
+  const size_t segment_count = input.baseline_segments.size();
+  for (size_t i = 0; i < segment_count; ++i) {
+    const ZenzBaselineSegment& segment = input.baseline_segments[i];
+    const size_t reading_count =
+        CountReadingNumericTokens(segment.key, surface);
+    if (reading_count == 0) {
+      continue;
+    }
+
+    // A segment with more output numerals than typed numerals has uncertain
+    // internal provenance.  It cannot serve as an occurrence-specific anchor.
+    if (reading_count != CountReadingNumericTokens(segment.value, surface)) {
+      return MixedNumericAnchor::kNotApplicable;
+    }
+    if (i == 0) {
+      prefix = segment.value;
+    } else if (i + 1 == segment_count) {
+      suffix = segment.value;
+    } else {
+      return MixedNumericAnchor::kNotApplicable;
+    }
+    explicit_count += reading_count;
+  }
+
+  const size_t baseline_count =
+      CountReadingNumericTokens(input.mozc_value, surface);
+  if (explicit_count == 0 || explicit_count >= baseline_count ||
+      explicit_count != CountReadingNumericTokens(input.key, surface)) {
+    return MixedNumericAnchor::kNotApplicable;
+  }
+
+  const size_t candidate_count = CountReadingNumericTokens(candidate, surface);
+  if (candidate_count < explicit_count || candidate_count > baseline_count ||
+      prefix.size() + suffix.size() > candidate.size() ||
+      (!prefix.empty() && !absl::StartsWith(candidate, prefix)) ||
+      (!suffix.empty() && !absl::EndsWith(candidate, suffix))) {
+    return MixedNumericAnchor::kLost;
+  }
+  // The unchanged edge segment alone does not verify the immediate neighbor
+  // when the typed numeral is exactly at its boundary.  Japanese neighbors
+  // may be rewritten as Japanese; punctuation and symbols must remain exact.
+  if (!prefix.empty() && absl::EndsWith(prefix, surface)) {
+    bool baseline_present = false;
+    bool candidate_present = false;
+    char32_t baseline_neighbor = 0;
+    char32_t candidate_neighbor = 0;
+    if (!GetRightNeighbor(input.mozc_value, prefix.size(),
+                          &baseline_present, &baseline_neighbor) ||
+        !GetRightNeighbor(candidate, prefix.size(),
+                          &candidate_present, &candidate_neighbor) ||
+        !NumericNeighborMatches(baseline_present, baseline_neighbor,
+                                candidate_present, candidate_neighbor)) {
+      return MixedNumericAnchor::kLost;
+    }
+  }
+  if (!suffix.empty() && absl::StartsWith(suffix, surface)) {
+    const size_t baseline_pos = input.mozc_value.size() - suffix.size();
+    const size_t candidate_pos = candidate.size() - suffix.size();
+    bool baseline_present = false;
+    bool candidate_present = false;
+    char32_t baseline_neighbor = 0;
+    char32_t candidate_neighbor = 0;
+    if (!GetLeftNeighbor(input.mozc_value, baseline_pos,
+                         &baseline_present, &baseline_neighbor) ||
+        !GetLeftNeighbor(candidate, candidate_pos,
+                         &candidate_present, &candidate_neighbor) ||
+        !NumericNeighborMatches(baseline_present, baseline_neighbor,
+                                candidate_present, candidate_neighbor)) {
+      return MixedNumericAnchor::kLost;
+    }
+  }
+  return MixedNumericAnchor::kPreserved;
+}
+
 ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
     const ZenzAdoptionInput& input) const {
   std::string adopted_value(input.zenz_value);
@@ -942,6 +1072,20 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
           CountOccurrences(input.mozc_value, span.value);
       const size_t adopted_occurrences =
           CountOccurrences(adopted_value, span.value);
+      if (span.numeric_preedit_only) {
+        const MixedNumericAnchor mixed = CheckMixedNumericEdgeAnchors(
+            input, span.value, adopted_value);
+        if (mixed == MixedNumericAnchor::kPreserved) {
+          continue;
+        }
+        if (mixed == MixedNumericAnchor::kLost) {
+          ZenzAdoptionResult result;
+          result.action = ZenzAdoptionResult::Action::kReject;
+          result.value = std::string(input.mozc_value);
+          result.reason = "protected_numeric_literal_edge_anchor_lost";
+          return result;
+        }
+      }
       if (baseline_occurrences < required_occurrences ||
           adopted_occurrences != baseline_occurrences) {
         ZenzAdoptionResult result;
