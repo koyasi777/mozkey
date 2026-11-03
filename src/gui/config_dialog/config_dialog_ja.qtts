@@ -1594,6 +1594,38 @@ The current Windows default IME override will be saved so it can be restored lat
         <source>Zenz correction maximum wait must be at least 50 ms.</source>
         <translation>Zenz 補正開始後の最大待機時間は 50 ms 以上にしてください。</translation>
     </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Failed to activate %1 in the current session. No Windows default-input settings were changed.</source>
+        <translation>現在のセッションで%1を有効化できませんでした。Windowsの既定の入力方式の設定は変更されていません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Failed to set %1 as the Windows default IME. Persistent changes were rolled back where possible. A restore point may remain; inspect your input settings before trying again.</source>
+        <translation>%1をWindowsの既定IMEに設定できませんでした。可能な範囲で設定を元に戻しましたが、復元用の設定情報が残っている場合があります。再試行する前に、Windowsの入力設定を確認してください。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>%1 was saved as the Windows default IME, but the current session could not be activated. Sign out or restart Windows for the change to take effect.</source>
+        <translation>%1をWindowsの既定IMEに設定しましたが、現在のセッションでは有効化できませんでした。変更を反映するには、Windowsからサインアウトするか、再起動してください。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>The previous Windows default IME setting has been restored.
+The active input method may require a sign-out or restart to update.</source>
+        <translation>以前のWindowsの既定IME設定を復元しました。
+現在使用中の入力方式に反映されるまで、サインアウトまたは再起動が必要な場合があります。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>The previous Windows default IME settings were restored and verified, but the saved restore point could not be cleared.</source>
+        <translation>以前のWindowsの既定IME設定を復元し、結果を確認しました。ただし、保存されていた復元用の設定情報を削除できませんでした。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.cc" line="0"/>
+        <source>Failed to restore the previous Windows default IME setting. The saved restore point has not been intentionally consumed. Some settings may have changed.</source>
+        <translation>以前のWindowsの既定IME設定を復元できませんでした。復元用の設定情報は意図的に削除していませんが、一部の設定が変更された可能性があります。</translation>
+    </message>
 </context>
 <context>
     <name>mozc::gui::GenericTableEditorDialog</name>
