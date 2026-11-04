@@ -91,6 +91,7 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_use_zenz_feedback_reuse(true);
   config->set_use_zenz_mozc_history_learning(true);
   config->set_use_zenz_strict_reading_preservation(false);
+  config->set_allow_zenz_emoji_changes(false);
   config->set_use_zenz_feedback_min_key_length(true);
   config->set_zenz_feedback_min_key_length(7);
   config->set_use_zenz_auto_block_rejected_correction(true);
@@ -118,6 +119,7 @@ void ExpectMozkeyProductDefaults(const Config& config) {
 
   EXPECT_TRUE(config.use_zenz_live_correction());
   EXPECT_FALSE(config.use_zenz_strict_reading_preservation());
+  EXPECT_FALSE(config.allow_zenz_emoji_changes());
   EXPECT_FALSE(config.defer_live_conversion_display_until_zenz_result());
   EXPECT_EQ(config.zenz_live_correction_delay_msec(), 700);
   EXPECT_EQ(config.zenz_deferred_presentation_timeout_msec(), 250);
@@ -797,6 +799,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   input.set_direct_commit_key(0);
   input.set_use_zenz_live_correction(false);
   input.set_use_zenz_strict_reading_preservation(true);
+  input.set_allow_zenz_emoji_changes(true);
   input.set_use_zenz_feedback_learning(false);
   input.set_use_zenz_feedback_recording(false);
   input.set_use_zenz_feedback_reuse(true);
@@ -827,6 +830,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_EQ(output.direct_commit_key(), 0);
   EXPECT_FALSE(output.use_zenz_live_correction());
   EXPECT_TRUE(output.use_zenz_strict_reading_preservation());
+  EXPECT_TRUE(output.allow_zenz_emoji_changes());
   EXPECT_FALSE(output.use_zenz_feedback_learning());
   EXPECT_FALSE(output.use_zenz_feedback_recording());
   EXPECT_TRUE(output.use_zenz_feedback_reuse());

@@ -115,11 +115,13 @@ void AddSegment(absl::string_view key,
 
 ConversionRequest CreateZenzFeedbackConversionRequest(
     bool enable_minimum_key_length = true,
-    absl::string_view reading = "かれはてんてきです") {
+    absl::string_view reading = "かれはてんてきです",
+    bool allow_zenz_emoji_changes = false) {
   config::Config config;
   config.set_use_zenz_feedback_learning(true);
   config.set_use_zenz_feedback_reuse(true);
   config.set_use_zenz_feedback_min_key_length(enable_minimum_key_length);
+  config.set_allow_zenz_emoji_changes(allow_zenz_emoji_changes);
   config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
 
   ConversionRequest::Options options;
@@ -875,6 +877,45 @@ TEST(ZenzFeedbackCandidateRewriterTest,
   ASSERT_EQ(segments.conversion_segments_size(), 1);
   ASSERT_EQ(segments.conversion_segment(0).candidates_size(), 1);
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "一緒に行って");
+}
+
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotReinsertUnrequestedEmojiFromSavedFeedback) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("くらっかー", "japanese_only", "🎉");
+
+  Segments segments;
+  AddSegment("くらっかー", "クラッカー", &segments);
+  const ConversionRequest request =
+      CreateZenzFeedbackConversionRequest(false, "くらっかー");
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  ASSERT_EQ(segments.conversion_segment(0).candidates_size(), 1);
+  EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "クラッカー");
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     ExplicitOptInRestoresSavedEmojiFeedback) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("くらっかー", "japanese_only", "🎉");
+
+  Segments segments;
+  AddSegment("くらっかー", "クラッカー", &segments);
+  const ConversionRequest request =
+      CreateZenzFeedbackConversionRequest(false, "くらっかー", true);
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+  bool found_emoji = false;
+  const Segment& segment = segments.conversion_segment(0);
+  for (size_t i = 0; i < segment.candidates_size(); ++i) {
+    found_emoji |= segment.candidate(i).value == "🎉";
+  }
+  EXPECT_TRUE(found_emoji);
 }
 
 #else  // defined(_WIN32)

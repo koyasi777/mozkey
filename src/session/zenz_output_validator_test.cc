@@ -29,6 +29,8 @@
 
 #include "session/zenz_output_validator.h"
 
+#include <string>
+
 #include "testing/gunit.h"
 
 namespace mozc::session {
@@ -345,6 +347,94 @@ TEST(ZenzOutputValidatorTest, RejectsAmbiguousCorrectedPayloadAfterContext) {
   EXPECT_FALSE(decision.safe);
   EXPECT_FALSE(decision.stripped);
   EXPECT_EQ(decision.value, "病院に一緒に行って");
+}
+
+
+TEST(ZenzOutputValidatorTest, RejectsUnrequestedZenzEmojiByDefault) {
+  ZenzValidationInput input;
+  input.key = "えもじ";
+  input.mozc_value = "絵文字";
+  input.zenz_value = "🎉";
+  input.min_key_length = 0;
+  ZenzOutputValidator validator;
+  const auto rejected = validator.Validate(input);
+  EXPECT_FALSE(rejected.accept);
+  EXPECT_EQ(rejected.reason, "emoji_sequence_changed");
+
+  input.allow_zenz_emoji_changes = true;
+  EXPECT_TRUE(validator.Validate(input).accept);
+}
+
+TEST(ZenzOutputValidatorTest, DetectsEmojiInsertionsAndReplacements) {
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences("クラッカー", "🎉"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "おめでとう", "おめでとう🎉"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "おめでとう🎉", "おめでとう😊"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "おめでとう🎉", "おめでとう"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "おめでとう🎉", "おめでとう🎉🎉"));
+}
+
+TEST(ZenzOutputValidatorTest, PreservesExplicitEmojiDuringJapaneseCorrection) {
+  EXPECT_TRUE(ZenzOutputValidator::PreservesEmojiSequences(
+      "今日は楽しい🎉", "今日は楽しかった🎉"));
+  EXPECT_TRUE(ZenzOutputValidator::PreservesEmojiSequences(
+      "😊ありがとう🎉", "😊ありがとうございます🎉"));
+  EXPECT_TRUE(ZenzOutputValidator::PreservesEmojiSequences(
+      "きょうはいいてんき", "今日はいい天気"));
+}
+
+TEST(ZenzOutputValidatorTest, TreatsEmojiClustersAsCompleteUnits) {
+  EXPECT_TRUE(ZenzOutputValidator::PreservesEmojiSequences(
+      "👩🏽‍💻で作業", "👩🏽‍💻として作業"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "👩🏽‍💻で作業", "👩🏻‍💻で作業"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "🇯🇵です", "🇰🇷です"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "数字1️⃣です", "数字2️⃣です"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "数字1⃣です", "数字2⃣です"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "ありがとう", "ありがとう❤️"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "ありがとう", "ありがとう❤"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences(
+      "お知らせ", "お知らせ⚠"));
+  // Plain trademark/copyright signs are ordinary text unless VS16 is used.
+  EXPECT_TRUE(ZenzOutputValidator::PreservesEmojiSequences("商品", "商品©"));
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences("商品", "商品©️"));
+}
+
+// A non-emoji prefix followed by ZWJ can be merged with a real emoji by
+// Mozc's simplified grapheme splitter. Do not lose the trailing emoji.
+TEST(ZenzOutputValidatorTest, DetectsEmojiAfterNonEmojiJoiner) {
+  const std::string joined = std::string("A\xE2\x80\x8D") +
+                             "\xF0\x9F\x8E\x89";
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences("A", joined));
+  EXPECT_TRUE(ZenzOutputValidator::PreservesEmojiSequences(joined, joined));
+  // The standalone keycap mark can be split from a base attached to ZWJ.
+  const std::string keycap = std::string("A\xE2\x80\x8D") + "1" +
+                             "\xE2\x83\xA3";
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences("A", keycap));
+}
+
+// VS15 requests text presentation for only the preceding character. It must
+// not hide a later emoji in the same imperfectly split ZWJ cluster.
+TEST(ZenzOutputValidatorTest, TextSelectorDoesNotHideFollowingEmoji) {
+  const std::string joined =
+      std::string("\xE2\x9A\xA0\xEF\xB8\x8E\xE2\x80\x8D") +
+      "\xF0\x9F\x8E\x89";
+  EXPECT_FALSE(ZenzOutputValidator::PreservesEmojiSequences("plain", joined));
+  EXPECT_TRUE(ZenzOutputValidator::PreservesEmojiSequences(joined, joined));
+}
+
+// VS16 alone does not turn an unrelated ASCII character into emoji.
+TEST(ZenzOutputValidatorTest, IgnoresUnrelatedPresentationSelector) {
+  const std::string stylized = "A\xEF\xB8\x8F";
+  EXPECT_TRUE(ZenzOutputValidator::PreservesEmojiSequences("A", stylized));
 }
 
 TEST(ZenzOutputValidatorTest, BlocksDeletionOfExplicitlyRepeatedInput) {

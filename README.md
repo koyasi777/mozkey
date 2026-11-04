@@ -33,6 +33,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **遅延付きライブ変換とルビ表示：** スペースキーを押す前から未確定文字列を変換。開始までの待機時間や文字数、読みを示すルビ風の表示を調整できます。
 - **Mozc と Zenz の二層構成：** Mozc の通常変換を維持しながら、ローカルの Zenz で文脈に応じた補正を追加。補正が適さない場合は Mozc の結果へ戻せます。
 - **文脈と表記を尊重する補正：** 前後の文脈を利用し、助詞・機能語や文節のつながりを改善。ユーザー辞書に加え、システム辞書由来の人名・地名・組織名などの固有名詞、英字・技術用語、数字、記号の表記を不用意に置き換えないための保護も備えています。
+- **Zenz 補正結果の採用条件：** 厳密な読み保持と、Zenz が絵文字を意図せず追加・変更・削除することを抑制する設定を用意。自動ライブ補正と手動補正の両方に適用できます。
 - **選べる Zenz の表示タイミング：** 通常のライブ変換結果を先に表示する動作に加え、Zenz の応答を一定時間待ってから表示する方式も選択できます。
 - **学習と候補のコントロール：** Zenz の採用・却下フィードバック、保存済み結果の再利用、Mozc 変換履歴への学習を個別に設定。表示中の Zenz 補正は `Ctrl+Delete` で明示的にブロックでき、学習データの管理、通常候補の履歴削除・非表示、確定直後の取り消しにも対応します。
 - **縦書きに対応した入力 UI（Windows / macOS）：** 候補・サジェスト・用例・ルビを縦書きに合わせて配置し、対応するキー設定では候補や文節の移動方向も調整します。
@@ -194,6 +195,8 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Zenz 出力が確定済み左文脈の長い suffix を現在入力の先頭へ反復する context echo を検出して拒否し、通常の Mozc ライブ変換結果へフォールバック
 - Zenz の最終候補が通常 Mozc 変換結果の明白な先頭・末尾の欠落になっている場合は、逆変換を使わない軽量な検証で拒否。保存済みフィードバック由来の候補にも適用し、確定済み左文脈の表記と現在の入力が重なる境界が曖昧な場合は、無理に左文脈を削らず通常 Mozc 結果へ戻す
 - 「厳密な読み保持（実験的）」を追加。初期値は OFF で、ON の場合のみ Zenz 最終候補を逆変換して入力した読み全体と照合。読みが一致しない場合や取得できない場合は通常 Mozc 結果へ戻すが、正しい候補や保存済みフィードバックの補正が採用されない場合があり、処理時間も増える可能性がある
+- 「Zenz による絵文字変換を抑制する」を追加。初期値は ON。Zenz の最終候補に含まれる絵文字の並びを通常 Mozc の変換結果と比較し、絵文字の追加・削除・別の絵文字への置換を検出した場合は Zenz の結果を採用せず、通常 Mozc の結果を維持する。保存済みフィードバック由来の補正にも適用し、通常 Mozc の絵文字候補や手動選択は妨げない
+- 設定画面で「Zenz ライブ補正」と「Zenz 補正結果の採用条件」を分離。後者の厳密な読み保持と絵文字抑制は、ライブ補正の ON/OFF にかかわらず操作でき、手動 Zenz 補正にも適用される
 - Zenz の学習機能を「Zenz 学習（Mozc変換履歴）」と「Zenz 学習（補正フィードバック）」に整理し、次の3設定を**独立して** ON/OFF 可能にした。A：Zenz 補正の採用・却下を TSV に記録する、B：保存済み feedback を候補順位・高速再利用・自動ブロックへ利用する、C：明示的に確定した Zenz 補正を Mozc の通常変換履歴へ追加学習する。A=OFF でも B=ON なら既存 feedback を利用でき、A=OFF でも C=ON なら Mozc 履歴へ追加学習できる。旧統合設定からは未設定の新項目だけ値を引き継ぐ
 - 同音異義語が多く文脈によって適切な表記が変わりやすい短い読みで、Zenz feedback の過剰な学習反映を避けるため、保存済み feedback の自動適用を既定では読み全体が 7 文字以上の場合に限定。設定画面から ON/OFF と最小読み文字数（1～20 文字）を変更可能。短い読みの採用・却下履歴は記録・保持し、手動ブロックは引き続き有効
 - シークレットモードでは Zenz のローカル推論を継続したまま Zenz feedback personalization（学習・保存済み feedback の再利用）を無効化。新しい feedback は保存せず、既存 feedback 自体は削除しない
@@ -383,7 +386,11 @@ deferred 表示で Zenz の応答を待っている間に Space を押した場�
 
 Zenz 出力は表示前に検証されます。空出力、短すぎる入力、Mozc 結果と同一の出力、長すぎる出力、不正な文字列、安全でない可能性のある文字列は拒否されます。さらに、確定済み左文脈の長い末尾部分を Zenz 出力の先頭へ繰り返す context echo についても、現在の読み・Mozc 結果から見て不自然に長い反復だけを検出して拒否します。短い一致や、現在の読みそのものが同じ語句の反復を要求している場合は一律には拒否しません。拒否された場合は、その時点の通常 Mozc ライブ変換結果へフォールバックします。
 
-#### Zenz の明白な欠落防止と厳密な読み保持（実験的）
+#### Zenz 補正結果の採用条件（ライブ・手動共通）
+
+設定画面では「Zenz ライブ補正」の設定とは別に「Zenz 補正結果の採用条件」を設けています。ここにある「厳密な読み保持（実験的）」と「Zenz による絵文字変換を抑制する」は、自動ライブ補正だけでなく、キー操作による手動 Zenz 補正にも適用されます。ライブ補正を OFF にしても設定を変更できます。
+
+**明白な欠落の防止と厳密な読み保持**
 
 通常設定では、Zenz の最終候補が通常 Mozc 変換結果の明白な先頭・末尾の欠落になっている場合、候補を拒否して通常 Mozc 結果へ戻します。この軽量な検証は、Zenz の新しい応答だけでなく保存済みフィードバック由来の候補にも適用します。確定済み左文脈の末尾と今回の入力が表記上重なる場合も、左文脈の反復なのか入力自体の一部なのか安全に区別できなければ、先頭を機械的に削らず通常 Mozc 結果へ戻します。
 
@@ -392,6 +399,14 @@ Zenz 出力は表示前に検証されます。空出力、短すぎる入力、
 設定画面の **「厳密な読み保持（実験的）」** を ON にすると、採用直前の Zenz 候補を Mozc で逆変換し、その読みが入力した読み全体または正規化した入力の読みと一致するか確認します。読みが一致しない場合や読みを取得できない場合は、通常 Mozc 変換結果を使用します。**初期値は OFF** で、明示的に保存した ON 設定は維持します。
 
 厳密モードは保守的な検証です。漢字の複数の読みや逆変換の限界により、正しい候補でも拒否される場合があります。また、読みを検証できない保存済みフィードバックによる通常候補の順位調整・候補追加などは制限され、追加の逆変換処理によって応答が遅くなる可能性があります。通常の Zenz 補正やフィードバック活用を優先する場合は、既定の OFF のまま利用してください。
+
+**Zenz による絵文字変換の抑制**
+
+設定画面の **「Zenz による絵文字変換を抑制する」** は、**初期値が ON** です。ON の場合は、Zenz の補正結果に含まれる絵文字の並びを通常 Mozc の変換結果（基準表記）と比較し、絵文字の追加・削除・別の絵文字への置換が検出された補正結果を採用しません。採用できない場合は通常 Mozc の結果を維持します。新たな Zenz 推論だけでなく、保存済みフィードバック由来の補正にも適用します。
+
+この設定は **Zenz が生成・変更する絵文字の抑制** であり、通常 Mozc の `EmojiRewriter` が生成する絵文字候補を削除する機能ではありません。ユーザーが候補一覧から絵文字を明示的に選ぶ操作も妨げません。また、上記の比較は絵文字の並びを対象としており、文章内の絵文字の位置を含めた完全な同一性を保証するものではありません。設定を OFF にすると、この追加の絵文字検証を行わず、ほかの採用条件を満たした Zenz 補正を採用できるようにします。
+
+通常変換の絵文字候補を第1候補へ学習で昇格させない [`EmojiRewriter` の順位制御](#絵文字候補の第1候補抑制) は、これとは別の機能です。
 
 通常 Mozc ライブ変換で現在の結果として現れているユーザー辞書由来候補や ASCII / mixed-script 表記は、Zenz 採用時に保護されます。ASCII / mixed-script 表記は、読みを安全に特定できる場合に Zenz prompt 内で一時 placeholder 化し、Zenz 応答後に元の表記へ復元します。これにより、`もずきー -> Mozkey` のような表記が `モズキー` のように上書きされることを避けつつ、対象語の前後にある文の補正は採用できるようにしています。
 
@@ -952,6 +967,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **Delayed live conversion and reading overlay:** Converts compositions before Space is pressed, with adjustable debounce delay, minimum length, and ruby-like display of the reading.
 - **Layered Mozc + Zenz conversion:** Keeps normal Mozc conversion as the baseline and adds optional local Zenz correction, falling back to Mozc when a correction is not adopted.
 - **Context-aware correction with spelling safeguards:** Uses available preceding and following context while protecting user-dictionary entries, verified proper nouns from the system dictionary (including personal and place names and organization names), Latin/technical spellings, numeric literals, and punctuation choices.
+- **Zenz correction acceptance criteria:** Optional strict reading preservation and default-on protection against Zenz adding, replacing, or removing emoji. These checks apply to both automatic live correction and explicit manual correction.
 - **Optional deferred presentation:** Choose whether to display Mozc live conversion immediately or briefly wait for Zenz before showing a result.
 - **Controllable learning and candidates:** Configure Zenz accept/reject recording, feedback reuse, and Mozc-history learning independently; use `Ctrl+Delete` to explicitly block a visible Zenz correction, manage feedback, hide ordinary candidates, and undo recent commits.
 - **Vertical-writing UI on Windows and macOS:** Candidate, suggestion, infolist, and ruby layouts adapt to vertical text; supported keymaps can follow the visual navigation direction.
@@ -1206,6 +1222,8 @@ Main features added in this fork
 - Detects and rejects likely context echo where Zenz repeats a long suffix of already committed left context at the beginning of the current output, then falls back to the normal Mozc live-conversion result
 - Applies lightweight omission guards to fresh Zenz responses and stored-feedback candidates, rejecting obvious leading/trailing truncation relative to the normal Mozc result. Ambiguous overlaps with committed left context fall back to Mozc rather than blindly stripping a matching prefix
 - Adds **Strict Reading Preservation (Experimental)** as an opt-in setting, **OFF by default**. When enabled, the final Zenz candidate undergoes reverse-reading verification against the complete typed reading; mismatch or unavailable reading falls back to Mozc. Valid candidates and saved-feedback corrections can be rejected, and additional processing may increase latency
+- Adds **Suppress emoji conversion by Zenz**, **ON by default**. Mozkey compares emoji sequences in Zenz output against the normal Mozc baseline, rejecting corrections that add, remove, or replace emoji; this also constrains saved-feedback corrections without removing ordinary Mozc emoji candidates or manual selection
+- Splits the settings UI into **Zenz live correction** and **Zenz correction acceptance criteria**. Strict reading preservation and emoji suppression remain editable with automatic live correction disabled and also apply to manual Zenz invocations
 - Separates Zenz personalization into three independent settings: **A** records Zenz accept/reject observations to a local TSV; **B** automatically reuses existing feedback for candidate ranking, fast-path correction, and statistical auto-blocking; **C** learns explicitly committed Zenz corrections into regular Mozc conversion history. Recording can be disabled without disabling reuse or Mozc-history learning, and pre-existing legacy preferences are inherited only for new settings that have not yet been explicitly saved
 - Limits automatic reuse of stored Zenz feedback to full readings of at least 7 Unicode code points by default, to avoid over-applying learned preferences to short readings with many homophones and context-dependent interpretations. The threshold (1–20) and the gate can be configured; shorter readings are still recorded, and explicit manual hard blocks still apply
 - In Secret / Incognito mode, keeps local Zenz inference enabled while disabling Zenz feedback personalization; stored feedback is not reused or consulted for decisions, no new feedback is persisted, and existing feedback is left intact
@@ -1400,7 +1418,11 @@ unconditionally, and legitimate repetition supported by the current reading is
 still allowed. If validation fails, Mozkey falls back to the current normal
 Mozc live-conversion result.
 
-#### Obvious Zenz omission guards and strict reading preservation (experimental)
+#### Zenz correction acceptance criteria (live and manual)
+
+The config dialog separates **Zenz live correction** controls from **Zenz correction acceptance criteria**. The latter contains **Strict Reading Preservation (Experimental)** and **Suppress emoji conversion by Zenz**. Both apply to automatic and explicit manual Zenz corrections, and remain editable when automatic live correction is disabled.
+
+**Obvious omission guards and strict reading preservation**
 
 In the default configuration, lightweight checks reject a final Zenz candidate
 when it is an obvious leading or trailing truncation of the normal Mozc
@@ -1426,6 +1448,12 @@ conversion limitations can reject otherwise valid candidates. Normal-candidate
 reranking or insertion based on saved feedback that cannot be verified is also
 restricted, and the additional reverse conversion may increase latency.
 Leave strict mode OFF to retain the usual Zenz correction and feedback behavior.
+
+**Suppress emoji conversion by Zenz**
+
+The **Suppress emoji conversion by Zenz** checkbox is **ON by default**. When enabled, Mozkey compares the ordered emoji sequences extracted from Zenz output with the normal Mozc conversion baseline. If Zenz has added, removed, or replaced emoji, that correction is rejected and the ordinary Mozc result is kept. The safeguard covers both newly inferred Zenz responses and corrections reused from saved feedback.
+
+This is not a ban on emoji in ordinary Mozc conversion. Emoji candidates generated by the built-in `EmojiRewriter` remain available for explicit selection, and emoji already present in the Mozc baseline are not automatically removed. The comparison checks emoji sequences rather than guaranteeing that every emoji stays at precisely the same text position. Turning the setting OFF disables this additional Zenz-specific check but does not bypass other adoption safeguards. The separate `EmojiRewriter` first-candidate ranking constraint remains in effect.
 
 User-dictionary candidates and ASCII / mixed-script surfaces that appear in the
 current normal Mozc live-conversion result are protected before Zenz output is

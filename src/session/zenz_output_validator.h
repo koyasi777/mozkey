@@ -17,6 +17,7 @@ struct ZenzValidationInput {
 
   uint32_t min_key_length = 5;
   bool allow_synthetic_candidate = true;
+  bool allow_zenz_emoji_changes = false;
 };
 
 struct ZenzValidationResult {
@@ -36,6 +37,12 @@ struct ZenzContextPrefixDecision {
 class ZenzOutputValidator {
  public:
   ZenzValidationResult Validate(const ZenzValidationInput& input) const;
+
+  // An unchanged ordered sequence of emoji graphemes is allowed, including
+  // emoji already selected by the user in the Mozc baseline. This policy
+  // rejects unsolicited emoji insertion, deletion, or substitution.
+  static bool PreservesEmojiSequences(absl::string_view mozc_value,
+                                      absl::string_view zenz_value);
 
   // Strict opt-in verifier: compare only with the complete typed key and its
   // normalized reading. A Mozc display candidate is NOT an admissible anchor,

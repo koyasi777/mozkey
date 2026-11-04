@@ -410,6 +410,11 @@ message Config {
   // Additional reverse-conversion work is performed only when enabled.
   optional bool use_zenz_strict_reading_preservation = 1044 [default = false];
 
+  // Opt in to allowing Zenz to create, replace, or remove emoji. When off,
+  // only the user's existing emoji sequences may appear in adopted Zenz output.
+  // Independent of ordinary Mozc emoji conversion candidates (field 89).
+  optional bool allow_zenz_emoji_changes = 1050 [default = false];
+
   // Exclude short full-sequence readings from automatic Zenz feedback
   // promotion, fast reuse, and rejection. Explicit manual hard blocks
   // remain effective. Recording and Mozc history are not affected.

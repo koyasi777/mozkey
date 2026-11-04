@@ -6947,6 +6947,8 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     validation_input.min_key_length = min_key_len;
     validation_input.allow_synthetic_candidate =
         config.use_zenz_synthetic_candidate();
+    validation_input.allow_zenz_emoji_changes =
+        config.allow_zenz_emoji_changes();
 
     const ZenzValidationResult validation =
         zenz_output_validator_.Validate(validation_input);
@@ -6983,6 +6985,16 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
           " context_class=", context_class,
           " accepted_count=", feedback_candidate.accepted_count,
           " rejected_count=", feedback_candidate.rejected_count));
+      continue;
+    }
+
+    // Apply the same policy to the final (potentially repaired) surface.
+    if (!config.allow_zenz_emoji_changes() &&
+        !ZenzOutputValidator::PreservesEmojiSequences(
+            live_conversion_value_, adoption.value)) {
+      ZenzDebugOutput(
+          "[zenz-feedback] rejected "
+          "reason=emoji_sequence_changed_after_adoption");
       continue;
     }
 
@@ -7800,6 +7812,8 @@ bool Session::ApplyZenzLiveCorrectionResult(
       pending_zenz_live_.forced ? 0 : GetZenzLiveCorrectionMinKeyLength(config);
   validation_input.allow_synthetic_candidate =
       config.use_zenz_synthetic_candidate();
+  validation_input.allow_zenz_emoji_changes =
+      config.allow_zenz_emoji_changes();
 
   const ZenzValidationResult validation =
       zenz_output_validator_.Validate(validation_input);
@@ -7876,6 +7890,15 @@ bool Session::ApplyZenzLiveCorrectionResult(
   }
 
   zenz_value = adoption.value;
+
+  // Repairs and restored protected spans must not bypass the emoji policy.
+  if (!config.allow_zenz_emoji_changes() &&
+      !ZenzOutputValidator::PreservesEmojiSequences(
+          pending_zenz_live_.mozc_value, zenz_value)) {
+    CancelPendingZenzLiveCorrection();
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, "emoji_sequence_changed_after_adoption");
+  }
 
   // Validation already rejects a raw Zenz value that is identical to Mozc, but
   // adoption can repair an initially different candidate back to the exact
