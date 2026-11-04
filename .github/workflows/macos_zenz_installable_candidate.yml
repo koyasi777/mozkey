@@ -65,6 +65,20 @@ jobs:
           bazelisk version
           echo "RELEASE_SOURCE_IDENTITY=PASS sha=$GITHUB_SHA version=$EXPECTED_RELEASE_VERSION"
 
+      - name: Resolve canonical release filename
+        id: resolve_artifact
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+          release_file="$(python3 tools/release/artifact_name.py \
+            --version "$EXPECTED_RELEASE_VERSION" --os macos --arch universal --format pkg)"
+          echo "RELEASE_FILE=$release_file" >> "$GITHUB_ENV"
+          echo "filename=$release_file" >> "$GITHUB_OUTPUT"
+
+      - name: Run common release contract regression tests
+        shell: bash
+        run: python3 -B -m unittest discover -s tools/release/tests -v
+
       - name: Run 27 isolated macOS installer preflight fixtures
         shell: bash
         run: |
@@ -131,7 +145,7 @@ jobs:
           set -euo pipefail
           OUT="$GITHUB_WORKSPACE/installable-candidate"
           mkdir -p "$OUT"
-          RELEASE_FILE="Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg"
+          test -n "$RELEASE_FILE"
           test ! -e "$OUT/$RELEASE_FILE"
           install -m 0644 src/bazel-bin/mac/Mozc.pkg \
             "$OUT/$RELEASE_FILE"
@@ -142,6 +156,8 @@ jobs:
           {
             echo "source_commit=$GITHUB_SHA"
             echo "release_version=$EXPECTED_RELEASE_VERSION"
+            echo "operating_system=macos"
+            echo "package_format=pkg"
             echo "release_filename=$RELEASE_FILE"
             echo "package_sha256=$PKG_SHA"
             echo "build_contract_sha256=$CONTRACT_SHA"
@@ -157,7 +173,7 @@ jobs:
           MOZKEY_ZENZ_EXPECTED_CONTRACT="$OUT/BUILD-CONTRACT.txt" \
           MOZKEY_ZENZ_VERIFY_BAZEL_ROOT="$HOME/.cache/bazel_mozkey_zenz_installable_candidate" \
             src/mac/installer/zenz_runtime/verify_release_package.zsh \
-            "$OUT/Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg" \
+            "$OUT/$RELEASE_FILE" \
             "$OUT/arm64-verify"
           install -m 0644 "$OUT/arm64-verify/audit.txt" "$OUT/arm64-audit.txt"
 
@@ -222,7 +238,7 @@ jobs:
         with:
           name: mozkey-macos-universal-unsigned-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            installable-candidate/Mozkey_v*_macos_universal.pkg
+            installable-candidate/${{ steps.resolve_artifact.outputs.filename }}
             installable-candidate/BUILD-CONTRACT.txt
             installable-candidate/ARTIFACT-CONTRACT.txt
             installable-candidate/PREINSTALL-AUDIT.txt
@@ -245,6 +261,16 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
 
+      - name: Resolve canonical release filename
+        id: resolve_artifact
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+          release_file="$(python3 tools/release/artifact_name.py \
+            --version "$EXPECTED_RELEASE_VERSION" --os macos --arch universal --format pkg)"
+          echo "RELEASE_FILE=$release_file" >> "$GITHUB_ENV"
+          echo "filename=$release_file" >> "$GITHUB_OUTPUT"
+
       - name: Download exact candidate
         uses: actions/download-artifact@v6
         with:
@@ -260,9 +286,11 @@ jobs:
           CONTRACT="$OUT/ARTIFACT-CONTRACT.txt"
           EXPECTED_SHA="$(/usr/bin/awk -F= '$1 == "package_sha256" {print $2}' "$CONTRACT")"
           SOURCE_SHA="$(/usr/bin/awk -F= '$1 == "source_commit" {print $2}' "$CONTRACT")"
-          RELEASE_FILE="Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg"
+          test -n "$RELEASE_FILE"
           test "$SOURCE_SHA" = "$GITHUB_SHA"
           test "$(/usr/bin/awk -F= '$1 == "release_version" {print $2}' "$CONTRACT")" = "$EXPECTED_RELEASE_VERSION"
+          test "$(/usr/bin/awk -F= '$1 == "operating_system" {print $2}' "$CONTRACT")" = macos
+          test "$(/usr/bin/awk -F= '$1 == "package_format" {print $2}' "$CONTRACT")" = pkg
           test "$(/usr/bin/awk -F= '$1 == "release_filename" {print $2}' "$CONTRACT")" = "$RELEASE_FILE"
           test "${#EXPECTED_SHA}" -eq 64
           test "$(/usr/bin/shasum -a 256 "$OUT/$RELEASE_FILE" | /usr/bin/awk '{print $1}')" = "$EXPECTED_SHA"
@@ -289,7 +317,7 @@ jobs:
           MOZKEY_ZENZ_EXPECTED_CONTRACT="$OUT/BUILD-CONTRACT.txt" \
           MOZKEY_ZENZ_VERIFY_BAZEL_ROOT="$HOME/.cache/bazel_mozkey_zenz_installable_intel_verify" \
             src/mac/installer/zenz_runtime/verify_release_package.zsh \
-            "$OUT/Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg" \
+            "$OUT/$RELEASE_FILE" \
             "$OUT/intel-verify"
           install -m 0644 "$OUT/intel-verify/audit.txt" "$OUT/intel-audit.txt"
 

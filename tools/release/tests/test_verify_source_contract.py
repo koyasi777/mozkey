@@ -71,12 +71,30 @@ class ReleaseContractTests(unittest.TestCase):
                 path.write_text(contents, encoding='utf-8')
             info = c.check_contract(repo, '1.0.0')
             self.assertEqual('101.0.0', info['expected_msi_product_version'])
+            self.assertEqual('Mozkey_v1.0.0_windows_x64.msi',
+                             info['expected_release_filenames']['windows_x64'])
+            self.assertEqual('Mozkey_v1.0.0_windows_arm64.msi',
+                             info['expected_release_filenames']['windows_arm64'])
+            self.assertEqual('Mozkey_v1.0.0_macos_universal.pkg',
+                             info['expected_release_filenames']['macos_universal'])
             self.assertEqual('C' * 64, info['llama_arm64_sha256'])
             with self.assertRaises(ValueError):
                 c.check_contract(repo, '0.7.7')
             (repo / 'src/config.bzl').write_text('BRANDING = "GoogleJapaneseInput"', encoding='utf-8')
             with self.assertRaises(ValueError):
                 c.check_contract(repo, '1.0.0')
+
+    def test_release_workflows_use_canonical_namer(self):
+        repo = pathlib.Path(__file__).resolve().parents[3]
+        windows = (repo / 'tools/release/Verify-WindowsMsiCandidate.ps1').read_text(encoding='utf-8')
+        macos = (repo / '.github/workflows/macos_zenz_installable_candidate.yml').read_text(encoding='utf-8')
+        windows_ci = (repo / '.github/workflows/windows-release-candidate.yml').read_text(encoding='utf-8')
+        self.assertIn('artifact_name.py', windows)
+        self.assertIn('tools/release/artifact_name.py', macos)
+        self.assertIn('steps.resolve_artifact.outputs.filename', macos)
+        self.assertIn('steps.verify_msi.outputs.filename', windows_ci)
+        self.assertNotIn('Mozkey_v${ReleaseVersion}_${Architecture}.msi', windows)
+        self.assertNotIn('Mozkey_v${EXPECTED_RELEASE_VERSION}_macos_universal.pkg', macos)
 
     def test_workflow_does_not_publish_or_sign(self):
         workflow = (pathlib.Path(__file__).resolve().parents[3] /
