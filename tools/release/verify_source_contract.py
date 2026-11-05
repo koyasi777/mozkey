@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 
+from artifact_name import ReleaseTarget, artifact_name
+
 EXPECTED_ORIGIN = re.compile(
     r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
     r"koyasi777/mozkey(?:\.git)?/?$", re.I
@@ -93,6 +95,11 @@ def check_contract(repo: pathlib.Path, requested_version: str) -> dict:
                 f"Pinned {arch} PE architecture changed")
     return {
         "release_version": requested_version,
+        "expected_release_filenames": {
+            "windows_x64": artifact_name(requested_version, ReleaseTarget("windows", "x64", "msi")),
+            "windows_arm64": artifact_name(requested_version, ReleaseTarget("windows", "arm64", "msi")),
+            "macos_universal": artifact_name(requested_version, ReleaseTarget("macos", "universal", "pkg")),
+        },
         "expected_msi_product_version": msi_version,
         "product_name": "Mozkey",
         "manufacturer": "koyasi777",

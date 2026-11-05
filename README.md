@@ -52,6 +52,8 @@ upstream Mozc との追従性および既存インストールとの互換性を
 
 Mozkey のインストーラーは [GitHub Releases](https://github.com/koyasi777/mozkey/releases) の各リリースの **Assets** に掲載されています。リリースごとに配布対象が異なるため、利用する OS と CPU に合うファイルを選んでください。
 
+今後のリリース用ファイル名は `Mozkey_v{バージョン}_{OS}_{アーキテクチャ}` を基本とし、Windows x64 は `Mozkey_vX.Y.Z_windows_x64.msi`、Windows ARM64 は `Mozkey_vX.Y.Z_windows_arm64.msi`、macOS Universal は `Mozkey_vX.Y.Z_macos_universal.pkg` です。過去のリリースは異なる命名の場合があるため、各リリースの Assets に表示される実際の名前を確認してください。
+
 | 環境 | 選ぶファイル | インストール方法 |
 | --- | --- | --- |
 | Windows x64（Intel / AMD） | x64 向け `.msi` | [Windows のインストール](#windows-のインストール) |
@@ -987,6 +989,8 @@ Download / platform availability
 --------------------------------
 
 Get installers from the **Assets** section of the appropriate [GitHub Release](https://github.com/koyasi777/mozkey/releases). Available platforms and packages vary by release; select the package for your OS and CPU architecture.
+
+For future releases, public asset names use `Mozkey_v{version}_{os}_{architecture}`: `Mozkey_vX.Y.Z_windows_x64.msi`, `Mozkey_vX.Y.Z_windows_arm64.msi`, and `Mozkey_vX.Y.Z_macos_universal.pkg`. Earlier releases may use different filenames; always check the actual Assets for the selected release.
 
 | Platform | Package | Instructions |
 | --- | --- | --- |
