@@ -236,6 +236,188 @@ TEST(ZenzAdoptionPolicyTest, RejectsRepeatedNumericTechnicalDelimiterChange) {
   EXPECT_EQ(result.reason, "protected_numeric_literal_context_changed");
 }
 
+TEST(ZenzAdoptionPolicyTest, AllowsMixedNumericKanaBeforeLiteralEdge) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "いつか5にち";
+  input.mozc_value = "5日5日";
+  input.zenz_value = "いつか5日";
+  input.baseline_segments = {{"いつか", "5日"}, {"5にち", "5日"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "いつか5日");
+}
+
+TEST(ZenzAdoptionPolicyTest, AllowsMixedNumericKanaAfterLiteralEdge) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "5にちいつか";
+  input.mozc_value = "5日5日";
+  input.zenz_value = "5日いつか";
+  input.baseline_segments = {{"5にち", "5日"}, {"いつか", "5日"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "5日いつか");
+}
+
+TEST(ZenzAdoptionPolicyTest, RejectsMixedNumericSwappedLiteralEdge) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "いつか5にち";
+  input.mozc_value = "5日5日";
+  input.zenz_value = "5日いつか";
+  input.baseline_segments = {{"いつか", "5日"}, {"5にち", "5日"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.reason, "protected_numeric_literal_edge_anchor_lost");
+}
+
+TEST(ZenzAdoptionPolicyTest, RejectsMixedNumericDeletedLiteralEdge) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "いつか5にち";
+  input.mozc_value = "5日5日";
+  input.zenz_value = "いつか";
+  input.baseline_segments = {{"いつか", "5日"}, {"5にち", "5日"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.reason, "protected_numeric_literal_edge_anchor_lost");
+}
+
+TEST(ZenzAdoptionPolicyTest, RejectsMixedNumericAmbiguousSingleSegment) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "いつか5にち";
+  input.mozc_value = "5日5日";
+  input.zenz_value = "いつか5日";
+  input.baseline_segments = {{"いつか5にち", "5日5日"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.reason, "protected_numeric_literal_not_preserved");
+}
+
+// Verify that relaxing counts for distinct kana-derived digits does not
+// change numeric punctuation at the boundary of a protected edge segment.
+TEST(ZenzAdoptionPolicyTest, RejectsMixedNumericPrefixTechnicalNeighbor) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "5にちいつか";
+  input.mozc_value = "5日5日";
+  input.zenz_value = "5%いつか";
+  input.baseline_segments = {{"5", "5"}, {"にちいつか", "日5日"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.reason, "protected_numeric_literal_edge_anchor_lost");
+}
+
+TEST(ZenzAdoptionPolicyTest, RejectsMixedNumericSuffixTechnicalNeighbor) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "いつか5";
+  input.mozc_value = "5日5";
+  input.zenz_value = "いつか%5";
+  input.baseline_segments = {{"いつか", "5日"}, {"5", "5"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.reason, "protected_numeric_literal_edge_anchor_lost");
+}
+
+TEST(ZenzAdoptionPolicyTest, AllowsMixedNumericPrefixJapaneseNeighbor) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "5にちいつか";
+  input.mozc_value = "5日5日";
+  input.zenz_value = "5台いつか";
+  input.baseline_segments = {{"5", "5"}, {"にちいつか", "日5日"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "5台いつか");
+}
+
+TEST(ZenzAdoptionPolicyTest, AllowsMixedNumericSuffixJapaneseNeighbor) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "いつか5";
+  input.mozc_value = "5日5";
+  input.zenz_value = "いつか5";
+  input.baseline_segments = {{"いつか", "5日"}, {"5", "5"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  span.numeric_preedit_only = true;
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "いつか5");
+}
+
+TEST(ZenzAdoptionPolicyTest, UserDictionaryNumericProtectionIsNotRelaxed) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "いつか5にち";
+  input.mozc_value = "5日5日";
+  input.zenz_value = "いつか5日";
+  input.baseline_segments = {{"いつか", "5日"}, {"5にち", "5日"}};
+  ProtectedConversionSpan span = BuildSpan(
+      "", "5", ProtectedConversionSpan::Tier::kNumericLiteral, false);
+  span.required_occurrences = 2;
+  // This is a selected user-dictionary numeric surface, not preedit-only.
+  input.protected_spans = {span};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.reason, "protected_numeric_literal_not_preserved");
+}
+
 TEST(ZenzAdoptionPolicyTest, RejectsChangedNumericLiteral) {
   ZenzAdoptionPolicy policy;
   ZenzAdoptionInput input;

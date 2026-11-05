@@ -25361,6 +25361,170 @@ TEST_F(SessionTest, MultiSegmentSubmitCandidate) {
   EXPECT_EQ(command.output().result().value(), "脱ぐ");
 }
 
+// Verify that numbers created from kana readings do not become mandatory
+// literals.  The tests use real Session live-conversion setup with a mocked
+// Mozc converter, then run the actual Zenz adoption policy.  No model is used.
+TEST_F(SessionTest, ZenzNumericLiteralProtectionFollowsReading) {
+  struct Case {
+    const char* reading;
+    const char* mozc_value;
+    const char* zenz_value;
+    const char* numeric_literal;  // Empty when the number was generated.
+    bool expect_accept;
+  };
+  constexpr Case cases[] = {
+      {"いつかきっと", "5日キット", "いつかきっと", "", true},
+      {"ふつか", "2日", "二日", "", true},
+      {"はつか", "20日", "二十日", "", true},
+      {"ひゃくえん", "100円", "百円", "", true},
+      {"5にち", "5日", "いつか", "5", false},
+      {"100えん", "100円", "百円", "100", false},
+      {"すまーとふぉん1だい", "スマートフォン1代", "スマートフォン1台",
+       "1", true},
+  };
+
+  for (const Case& test_case : cases) {
+    SCOPED_TRACE(test_case.reading);
+    MockEngine engine;
+    std::shared_ptr<MockConverter> converter =
+        CreateEngineConverterMock(&engine);
+    Session session(engine);
+    SessionTestPeer peer(session);
+    InitSessionToPrecomposition(&session);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(false);
+    config.set_live_conversion_min_key_length(1);
+    config.set_use_zenz_live_correction(true);
+    config.set_use_zenz_feedback_reuse(false);
+    // Collect protected spans, but do not start the asynchronous model worker.
+    config.set_zenz_live_correction_min_key_length(100);
+    session.SetConfig(config);
+
+    // One SEND_KEY per reading codepoint; preserve literal ASCII digits in
+    // the raw keystrokes while treating kana as generic keyboard input.
+    std::string raw;
+    for (absl::string_view ch : Utf8AsChars(test_case.reading)) {
+      raw.push_back(ch.size() == 1 && '0' <= ch[0] && ch[0] <= '9'
+                        ? ch[0]
+                        : 'a');
+    }
+    commands::Command command;
+    InsertCharacterString(test_case.reading, raw, &session, &command);
+    ASSERT_EQ(session.context().composer().GetQueryForConversion(),
+              test_case.reading);
+    ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(test_case.reading);
+    AddCandidate(test_case.reading, test_case.mozc_value, segment);
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+    config.set_use_live_conversion(true);
+    session.SetConfig(config);
+    ASSERT_TRUE(peer.MaybeStartLiveConversion(&command));
+
+    std::vector<std::string> numeric_spans;
+    for (const ProtectedConversionSpan& span :
+         peer.live_conversion_protected_spans_()) {
+      if (span.tier == ProtectedConversionSpan::Tier::kNumericLiteral) {
+        numeric_spans.push_back(span.value);
+      }
+    }
+    if (*test_case.numeric_literal == '\0') {
+      EXPECT_TRUE(numeric_spans.empty());
+    } else {
+      ASSERT_EQ(numeric_spans.size(), 1u);
+      EXPECT_EQ(numeric_spans.front(), test_case.numeric_literal);
+    }
+
+    ZenzAdoptionInput adoption_input;
+    adoption_input.key = test_case.reading;
+    adoption_input.mozc_value = test_case.mozc_value;
+    adoption_input.zenz_value = test_case.zenz_value;
+    adoption_input.protected_spans = peer.live_conversion_protected_spans_();
+    adoption_input.baseline_segments = {
+        {test_case.reading, test_case.mozc_value}};
+    const ZenzAdoptionResult decision =
+        ZenzAdoptionPolicy().Decide(adoption_input);
+    EXPECT_EQ(decision.action != ZenzAdoptionResult::Action::kReject,
+              test_case.expect_accept);
+    if (!test_case.expect_accept) {
+      EXPECT_EQ(decision.reason, "protected_numeric_literal_not_preserved");
+    }
+  }
+}
+
+// Mixed explicit/kana-derived numerals with identical Mozc spellings must
+// preserve the typed numeric segment while allowing a neighboring kana-derived
+// numeral to be reinterpreted.  Use two distinct conversion segments to make
+// the source-to-output boundary independently verifiable.
+TEST_F(SessionTest, ZenzMixedNumericIdenticalSurfacePreservesLiteralEdge) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(true);
+  config.set_use_zenz_feedback_reuse(false);
+  config.set_zenz_live_correction_min_key_length(100);
+  session.SetConfig(config);
+
+  const std::string reading = "いつか5にち";
+  std::string raw;
+  for (absl::string_view ch : Utf8AsChars(reading)) {
+    raw.push_back(ch == "5" ? '5' : 'a');
+  }
+  commands::Command command;
+  InsertCharacterString(reading, raw, &session, &command);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(), reading);
+
+  // InsertCharacterString leaves its last composition preedit in command.
+  // Clear it before PopOutput appends the mocked conversion segments.
+  command.Clear();
+
+  Segments segments;
+  Segment* first = segments.add_segment();
+  first->set_key("いつか");
+  AddCandidate("いつか", "5日", first);
+  Segment* second = segments.add_segment();
+  second->set_key("5にち");
+  AddCandidate("5にち", "5日", second);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  config.set_use_live_conversion(true);
+  session.SetConfig(config);
+  ASSERT_TRUE(peer.MaybeStartLiveConversion(&command));
+  ASSERT_EQ(peer.live_conversion_value_(), "5日5日");
+
+  const auto& protected_spans = peer.live_conversion_protected_spans_();
+  ASSERT_EQ(protected_spans.size(), 1u);
+  EXPECT_EQ(protected_spans.front().value, "5");
+  EXPECT_EQ(protected_spans.front().tier,
+            ProtectedConversionSpan::Tier::kNumericLiteral);
+  EXPECT_TRUE(protected_spans.front().numeric_preedit_only);
+  EXPECT_EQ(protected_spans.front().required_occurrences, 2u);
+
+  ZenzAdoptionInput input;
+  input.key = reading;
+  input.mozc_value = "5日5日";
+  input.zenz_value = "いつか5日";
+  input.protected_spans = protected_spans;
+  input.baseline_segments = {{"いつか", "5日"}, {"5にち", "5日"}};
+  const ZenzAdoptionResult result = ZenzAdoptionPolicy().Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "いつか5日");
+}
+
 // Mozkey verified-personal-name proxy regression tests.
 // This fixture exercises production Session scheduling, a single asynchronous
 // fake scorer response, restoration, strict-reading validation and rejection.
