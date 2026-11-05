@@ -158,6 +158,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_VARIABLE(zenz_feedback_store_);
   PEER_VARIABLE(pending_zenz_feedback_);
   PEER_VARIABLE(pending_direct_commit_learning_);
+  PEER_VARIABLE(pending_reranked_preedit_commit_after_convert_cancel_);
   PEER_VARIABLE(pending_command_sequence_);
   PEER_VARIABLE(command_sequence_generation_);
   PEER_VARIABLE(pending_command_sequence_key_);
@@ -13946,6 +13947,143 @@ TEST_F(SessionTest,
   EXPECT_NE(committed_segment.candidate(0).attributes &
                 converter::Attribute::RERANKED,
             0);
+}
+
+// A new explicit conversion must supersede the temporary preference for
+// committing hiragana set by ConvertCancel().  Check both the ordinary
+// command sequence and a Cancel -> ForceZenzLiveCorrection macro, with both
+// Japanese punctuation direct-commit triggers and the Mozc fallback.
+TEST_F(SessionTest,
+       ManualZenzAfterConvertCancelDirectCommitUsesVisibleCorrection) {
+  for (int variant = 0; variant < 8; ++variant) {
+    SCOPED_TRACE(variant);
+    const bool macro = (variant & 1) != 0;
+    const bool comma = (variant & 2) != 0;
+    const bool zenz_failed = (variant & 4) != 0;
+
+    MockEngine engine;
+    std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+    Session session(engine);
+    InitSessionToPrecomposition(&session);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(false);
+    config.set_use_zenz_live_correction(false);
+    config.set_use_zenz_feedback_reuse(false);
+    config.set_use_zenz_feedback_recording(false);
+    config.set_use_zenz_mozc_history_learning(false);
+    config.set_use_zenz_synthetic_candidate(true);
+    config.set_zenz_live_correction_min_key_length(2);
+    config.set_zenz_live_correction_delay_msec(1000);
+    config.set_use_auto_conversion(false);
+    config.set_use_direct_commit(true);
+    config.set_direct_commit_key(
+        comma ? config::Config::DIRECT_COMMIT_TOUTEN
+              : config::Config::DIRECT_COMMIT_KUTEN);
+    config.set_session_keymap(config::Config::CUSTOM);
+    config.set_custom_keymap_table(
+        "status\tkey\tcommand\n"
+        "Conversion\tEscape\tCancel\n"
+        "Composition\tShift Space\tForceZenzLiveCorrection\n"
+        "Conversion\tCtrl Enter\tCancel|ForceZenzLiveCorrection\n");
+    session.SetConfig(config);
+    session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+    SessionTestPeer peer(session);
+
+    commands::Command command;
+    InsertCharacterString("あい", "ai", &session, &command);
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key("あい");
+    AddCandidate("あい", "愛", segment);
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .Times(2)
+        .WillRepeatedly(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+    command.Clear();
+    ASSERT_TRUE(session.Convert(&command));
+    EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+
+    if (!macro) {
+      command.Clear();
+      ASSERT_TRUE(SendKey("Escape", &session, &command));
+      EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+      EXPECT_TRUE(peer.pending_reranked_preedit_commit_after_convert_cancel_());
+    }
+
+    command.Clear();
+    ASSERT_TRUE(SendKey(macro ? "Ctrl Enter" : "Shift Space", &session,
+                        &command));
+    EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+    EXPECT_FALSE(peer.pending_reranked_preedit_commit_after_convert_cancel_());
+    ASSERT_TRUE(command.output().zenz_live_correction_pending());
+
+    ZenzLiveResponse response;
+    response.ok = !zenz_failed;
+    if (!zenz_failed) {
+      response.value = "亜衣";
+    }
+    command.Clear();
+    ASSERT_TRUE(peer.ApplyZenzLiveCorrectionResult(response, &command));
+    EXPECT_EQ(command.output().zenz_live_correction_applied(), !zenz_failed);
+    EXPECT_PREEDIT(zenz_failed ? "愛" : "亜衣", command);
+
+    // Direct commit must not learn the cancelled hiragana as a selected result.
+    EXPECT_CALL(*converter, FinishConversion(_, _)).Times(0);
+    command.Clear();
+    InsertCharacterString(comma ? "、" : "。", comma ? "," : ".", &session,
+                          &command);
+    const char* expected = zenz_failed
+                               ? (comma ? "愛、" : "愛。")
+                               : (comma ? "亜衣、" : "亜衣。");
+    EXPECT_RESULT(expected, command);
+    EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  }
+}
+
+// Cancelling a conversion is an instruction to commit hiragana only until the
+// next successful conversion.  Both ordinary conversion entry points must
+// invalidate that instruction, independent of Zenz.
+TEST_F(SessionTest, SuccessfulReconversionInvalidatesCanceledHiraganaChoice) {
+  for (int without_history = 0; without_history < 2; ++without_history) {
+    SCOPED_TRACE(without_history);
+    MockEngine engine;
+    std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+    Session session(engine);
+    InitSessionToPrecomposition(&session);
+    SessionTestPeer peer(session);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(false);
+    session.SetConfig(config);
+
+    commands::Command command;
+    InsertCharacterString("あい", "ai", &session, &command);
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key("あい");
+    AddCandidate("あい", "愛", segment);
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .Times(2)
+        .WillRepeatedly(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+    command.Clear();
+    ASSERT_TRUE(session.Convert(&command));
+    command.Clear();
+    ASSERT_TRUE(session.ConvertCancel(&command));
+    ASSERT_TRUE(peer.pending_reranked_preedit_commit_after_convert_cancel_());
+
+    command.Clear();
+    if (without_history) {
+      ASSERT_TRUE(session.ConvertWithoutHistory(&command));
+    } else {
+      ASSERT_TRUE(session.Convert(&command));
+    }
+    EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+    EXPECT_FALSE(peer.pending_reranked_preedit_commit_after_convert_cancel_());
+  }
 }
 
 TEST_F(SessionTest,

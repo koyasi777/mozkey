@@ -7149,6 +7149,11 @@ bool Session::ForceZenzLiveCorrection(
     return DoNothing(command);
   }
 
+  // A successful explicit conversion supersedes any earlier decision to
+  // commit the hiragana restored by ConvertCancel().  In particular, direct
+  // punctuation must commit the newly visible Zenz result, not the old preedit.
+  ClearPendingRerankedPreeditCommitAfterConvertCancel();
+
   command->mutable_output()->set_consumed(true);
   Output(command);
   const std::string key = context_->composer().GetQueryForConversion();
@@ -10295,6 +10300,8 @@ bool Session::Convert(commands::Command* command) {
     return true;
   }
 
+  // Re-conversion supersedes the hiragana choice implied by an earlier Cancel.
+  ClearPendingRerankedPreeditCommitAfterConvertCancel();
   SetSessionState(ImeContext::CONVERSION, context_.get());
   if (should_show_candidate_window_on_initial_conversion) {
     context_->mutable_converter()->SetCandidateListVisible(true);
@@ -10319,6 +10326,8 @@ bool Session::ConvertWithoutHistory(commands::Command* command) {
     return true;
   }
 
+  // The new conversion replaces a previous cancel-to-hiragana decision.
+  ClearPendingRerankedPreeditCommitAfterConvertCancel();
   SetSessionState(ImeContext::CONVERSION, context_.get());
   Output(command);
   return true;
