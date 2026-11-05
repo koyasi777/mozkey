@@ -2565,22 +2565,35 @@ bool Session::ExecuteCommandSequenceWithInitialOutput(
                             &accumulated_result,
                             &final_output);
 
-    if (command_name == "ReconvertSelectionOrInsertSpace" &&
-        i + 1 < command_sequence.size() &&
-        step_output.has_callback() &&
-        step_output.callback().has_session_command() &&
-        step_output.callback().session_command().type() ==
-            commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE) {
-      pending_command_sequence_.assign(command_sequence.begin() + i + 1,
-                                       command_sequence.end());
-      command_sequence_waits_for_reconversion_ = true;
-      pending_command_sequence_key_.clear();
-      ++command_sequence_generation_;
-      // The client still decides whether a selection is present. If not,
-      // it applies the already-generated fallback Space result.
-      final_output.set_consumed(consumed);
-      *command->mutable_output() = final_output;
-      return true;
+    // Reconvert and selected-text reconversion both need the TSF client to
+    // create and apply a new preedit. Running subsequent commands before that
+    // acknowledgement would resolve them in PRECOMPOSITION (or DIRECT) rather
+    // than CONVERSION. Neither callback's fallback resumes the sequence.
+    if (i + 1 < command_sequence.size() && step_output.has_callback() &&
+        step_output.callback().has_session_command()) {
+      const commands::SessionCommand::CommandType callback_type =
+          step_output.callback().session_command().type();
+#if defined(_WIN32)
+      // Only Windows TSF currently acknowledges application reconversion.
+      const bool is_regular_reconversion =
+          command_name == "Reconvert" &&
+          callback_type == commands::SessionCommand::CONVERT_REVERSE;
+#else
+      const bool is_regular_reconversion = false;
+#endif
+      if (is_regular_reconversion ||
+          (command_name == "ReconvertSelectionOrInsertSpace" &&
+           callback_type ==
+               commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE)) {
+        pending_command_sequence_.assign(command_sequence.begin() + i + 1,
+                                         command_sequence.end());
+        command_sequence_waits_for_reconversion_ = true;
+        pending_command_sequence_key_.clear();
+        ++command_sequence_generation_;
+        final_output.set_consumed(consumed);
+        *command->mutable_output() = final_output;
+        return true;
+      }
     }
   }
 

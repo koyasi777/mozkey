@@ -17326,6 +17326,151 @@ TEST_F(SessionTest,
   EXPECT_FALSE(command.output().has_command_sequence_resume_generation());
 }
 
+#if defined(_WIN32)
+TEST_F(SessionTest, ReconvertCommandSequenceResumesZenzAfterTsfPreedit) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Space\t"
+      "Revert|Reconvert|ForceZenzLiveCorrection\n",
+      &session);
+  InitSessionToPrecomposition(&session);
+  SessionTestPeer peer(session);
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Ctrl Space", &session, &command));
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  EXPECT_EQ(command.output().callback().session_command().type(),
+            commands::SessionCommand::CONVERT_REVERSE);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  ASSERT_EQ(peer.pending_command_sequence_().size(), 1);
+  EXPECT_EQ(peer.pending_command_sequence_().front(),
+            "ForceZenzLiveCorrection");
+  const uint32_t generation = peer.command_sequence_generation_();
+
+  // Simulate the TSF callback obtaining a selected application string.
+  SetupMockForReverseConversion("阿伊宇江於", "あいうえお", converter.get());
+  SetupCommandForReverseConversion("阿伊宇江於", command.mutable_input());
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().has_command_sequence_resume_generation());
+  EXPECT_EQ(command.output().command_sequence_resume_generation(), generation);
+  ASSERT_EQ(peer.pending_command_sequence_().size(), 1);
+
+  // TSF posts this acknowledgement only after applying the new preedit.
+  command.Clear();
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  commands::SessionCommand* resume = command.mutable_input()->mutable_command();
+  resume->set_type(commands::SessionCommand::RESUME_COMMAND_SEQUENCE);
+  resume->set_command_sequence_generation(generation);
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_TRUE(command.output().has_preedit());
+  EXPECT_TRUE(peer.pending_command_sequence_().empty());
+}
+
+TEST_F(SessionTest, ReconvertCommandSequenceResumesCancelAfterTsfAck) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Space\tReconvert|Cancel\n",
+      &session);
+  InitSessionToPrecomposition(&session);
+  SessionTestPeer peer(session);
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Ctrl Space", &session, &command));
+  ASSERT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  ASSERT_EQ(peer.pending_command_sequence_().size(), 1);
+  EXPECT_EQ(peer.pending_command_sequence_().front(), "Cancel");
+
+  // Reverse conversion is server-side; TSF has not applied the preedit yet.
+  SetupMockForReverseConversion("阿伊宇江於", "あいうえお", converter.get());
+  SetupCommandForReverseConversion("阿伊宇江於", command.mutable_input());
+  ASSERT_TRUE(session.SendCommand(&command));
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().has_command_sequence_resume_generation());
+  const uint32_t generation =
+      command.output().command_sequence_resume_generation();
+  EXPECT_EQ(peer.pending_command_sequence_().size(), 1);
+
+  // The acknowledgement must actually execute Cancel in CONVERSION.
+  command.Clear();
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  auto* resume = command.mutable_input()->mutable_command();
+  resume->set_type(commands::SessionCommand::RESUME_COMMAND_SEQUENCE);
+  resume->set_command_sequence_generation(generation);
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_EQ(GetComposition(command), "あいうえお");
+  EXPECT_TRUE(peer.pending_command_sequence_().empty());
+}
+
+TEST_F(SessionTest, ReconvertCommandSequenceInvalidatedByPhysicalKey) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Space\tReconvert|ForceZenzLiveCorrection\n",
+      &session);
+  InitSessionToPrecomposition(&session);
+  SessionTestPeer peer(session);
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Ctrl Space", &session, &command));
+  ASSERT_EQ(peer.pending_command_sequence_().size(), 1);
+  const uint32_t old_generation = peer.command_sequence_generation_();
+
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  EXPECT_TRUE(peer.pending_command_sequence_().empty());
+  ASSERT_TRUE(command.output().has_preedit());
+  const commands::Preedit current = command.output().preedit();
+
+  command.Clear();
+  command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  commands::SessionCommand* resume = command.mutable_input()->mutable_command();
+  resume->set_type(commands::SessionCommand::RESUME_COMMAND_SEQUENCE);
+  resume->set_command_sequence_generation(old_generation);
+  ASSERT_TRUE(session.SendCommand(&command));
+  ASSERT_TRUE(command.output().has_preedit());
+  EXPECT_EQ(command.output().preedit().SerializeAsString(),
+            current.SerializeAsString());
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+}
+
+TEST_F(SessionTest, ReconvertCommandSequenceDoesNotResumeOnReverseFailure) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SetCustomKeymapForSession(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Space\tReconvert|ForceZenzLiveCorrection\n",
+      &session);
+  InitSessionToPrecomposition(&session);
+  SessionTestPeer peer(session);
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Ctrl Space", &session, &command));
+  ASSERT_EQ(peer.pending_command_sequence_().size(), 1);
+
+  // A reverse-conversion failure must not issue a TSF continuation token.
+  SetupCommandForReverseConversion("改行\n禁止", command.mutable_input());
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  EXPECT_FALSE(command.output().has_command_sequence_resume_generation());
+
+  // The next real key invalidates the suspended sequence.
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  EXPECT_TRUE(peer.pending_command_sequence_().empty());
+}
+#endif  // defined(_WIN32)
+
 TEST_F(SessionTest, ReconvertSelectionOrInsertSpaceCommitsFullWidthFallback) {
   config::Config config;
   constexpr absl::string_view kCustomKeymapTable =
