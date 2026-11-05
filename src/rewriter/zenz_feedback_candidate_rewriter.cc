@@ -280,6 +280,15 @@ bool ZenzFeedbackCandidateRewriter::Rewrite(
       continue;
     }
 
+    // Persisted Zenz feedback cannot bypass the user's current emoji policy.
+    // The ordinary EmojiRewriter and explicit dictionary selections are not
+    // affected by this check.
+    if (!request.config().allow_zenz_emoji_changes() &&
+        !session::ZenzOutputValidator::PreservesEmojiSequences(
+            original_top_value, zenz_value)) {
+      continue;
+    }
+
     if (zenz_value == original_top_value) {
       continue;
     }

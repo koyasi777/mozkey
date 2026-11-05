@@ -5160,6 +5160,9 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   SET_CHECKBOX(zenzLiveCorrectionCheckBox, use_zenz_live_correction);
   SET_CHECKBOX(zenzStrictReadingPreservationCheckBox,
                use_zenz_strict_reading_preservation);
+  // Invert only the UI: the persisted field remains an opt-in for emoji changes.
+  zenzSuppressEmojiChangesCheckBox->setChecked(
+      !config.allow_zenz_emoji_changes());
   SET_CHECKBOX(zenzDeferLiveConversionDisplayCheckBox,
                defer_live_conversion_display_until_zenz_result);
 
@@ -5545,6 +5548,8 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   GET_CHECKBOX(zenzLiveCorrectionCheckBox, use_zenz_live_correction);
   GET_CHECKBOX(zenzStrictReadingPreservationCheckBox,
                use_zenz_strict_reading_preservation);
+  config->set_allow_zenz_emoji_changes(
+      !zenzSuppressEmojiChangesCheckBox->isChecked());
   GET_CHECKBOX(zenzDeferLiveConversionDisplayCheckBox,
                defer_live_conversion_display_until_zenz_result);
   config->set_zenz_live_correction_delay_msec(

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -642,6 +643,256 @@ ZenzContextPrefixDecision ZenzOutputValidator::ResolveLeftContextPrefix(
   return decision;
 }
 
+namespace {
+
+// Ranges with the Unicode Emoji property. Unlike a blanket
+// supplementary-plane test, these do not classify CJK extensions as emoji.
+// Text-default symbols are handled below only when emoji presentation is
+// explicitly requested (VS16), apart from common expressive hearts/faces.
+constexpr std::pair<char32_t, char32_t> kEmojiPropertyRanges[] = {
+    {0x23, 0x23},
+    {0x2a, 0x2a},
+    {0x30, 0x39},
+    {0xa9, 0xa9},
+    {0xae, 0xae},
+    {0x203c, 0x203c},
+    {0x2049, 0x2049},
+    {0x2122, 0x2122},
+    {0x2139, 0x2139},
+    {0x2194, 0x2199},
+    {0x21a9, 0x21aa},
+    {0x231a, 0x231b},
+    {0x2328, 0x2328},
+    {0x23cf, 0x23cf},
+    {0x23e9, 0x23f3},
+    {0x23f8, 0x23fa},
+    {0x24c2, 0x24c2},
+    {0x25aa, 0x25ab},
+    {0x25b6, 0x25b6},
+    {0x25c0, 0x25c0},
+    {0x25fb, 0x25fe},
+    {0x2600, 0x2604},
+    {0x260e, 0x260e},
+    {0x2611, 0x2611},
+    {0x2614, 0x2615},
+    {0x2618, 0x2618},
+    {0x261d, 0x261d},
+    {0x2620, 0x2620},
+    {0x2622, 0x2623},
+    {0x2626, 0x2626},
+    {0x262a, 0x262a},
+    {0x262e, 0x262f},
+    {0x2638, 0x263a},
+    {0x2640, 0x2640},
+    {0x2642, 0x2642},
+    {0x2648, 0x2653},
+    {0x265f, 0x2660},
+    {0x2663, 0x2663},
+    {0x2665, 0x2666},
+    {0x2668, 0x2668},
+    {0x267b, 0x267b},
+    {0x267e, 0x267f},
+    {0x2692, 0x2697},
+    {0x2699, 0x2699},
+    {0x269b, 0x269c},
+    {0x26a0, 0x26a1},
+    {0x26a7, 0x26a7},
+    {0x26aa, 0x26ab},
+    {0x26b0, 0x26b1},
+    {0x26bd, 0x26be},
+    {0x26c4, 0x26c5},
+    {0x26c8, 0x26c8},
+    {0x26ce, 0x26cf},
+    {0x26d1, 0x26d1},
+    {0x26d3, 0x26d4},
+    {0x26e9, 0x26ea},
+    {0x26f0, 0x26f5},
+    {0x26f7, 0x26fa},
+    {0x26fd, 0x26fd},
+    {0x2702, 0x2702},
+    {0x2705, 0x2705},
+    {0x2708, 0x270d},
+    {0x270f, 0x270f},
+    {0x2712, 0x2712},
+    {0x2714, 0x2714},
+    {0x2716, 0x2716},
+    {0x271d, 0x271d},
+    {0x2721, 0x2721},
+    {0x2728, 0x2728},
+    {0x2733, 0x2734},
+    {0x2744, 0x2744},
+    {0x2747, 0x2747},
+    {0x274c, 0x274c},
+    {0x274e, 0x274e},
+    {0x2753, 0x2755},
+    {0x2757, 0x2757},
+    {0x2763, 0x2764},
+    {0x2795, 0x2797},
+    {0x27a1, 0x27a1},
+    {0x27b0, 0x27b0},
+    {0x27bf, 0x27bf},
+    {0x2934, 0x2935},
+    {0x2b05, 0x2b07},
+    {0x2b1b, 0x2b1c},
+    {0x2b50, 0x2b50},
+    {0x2b55, 0x2b55},
+    {0x3030, 0x3030},
+    {0x303d, 0x303d},
+    {0x3297, 0x3297},
+    {0x3299, 0x3299},
+    {0x1f004, 0x1f004},
+    {0x1f0cf, 0x1f0cf},
+    {0x1f170, 0x1f171},
+    {0x1f17e, 0x1f17f},
+    {0x1f18e, 0x1f18e},
+    {0x1f191, 0x1f19a},
+    {0x1f1e6, 0x1f1ff},
+    {0x1f201, 0x1f202},
+    {0x1f21a, 0x1f21a},
+    {0x1f22f, 0x1f22f},
+    {0x1f232, 0x1f23a},
+    {0x1f250, 0x1f251},
+    {0x1f300, 0x1f321},
+    {0x1f324, 0x1f393},
+    {0x1f396, 0x1f397},
+    {0x1f399, 0x1f39b},
+    {0x1f39e, 0x1f3f0},
+    {0x1f3f3, 0x1f3f5},
+    {0x1f3f7, 0x1f4fd},
+    {0x1f4ff, 0x1f53d},
+    {0x1f549, 0x1f54e},
+    {0x1f550, 0x1f567},
+    {0x1f56f, 0x1f570},
+    {0x1f573, 0x1f57a},
+    {0x1f587, 0x1f587},
+    {0x1f58a, 0x1f58d},
+    {0x1f590, 0x1f590},
+    {0x1f595, 0x1f596},
+    {0x1f5a4, 0x1f5a5},
+    {0x1f5a8, 0x1f5a8},
+    {0x1f5b1, 0x1f5b2},
+    {0x1f5bc, 0x1f5bc},
+    {0x1f5c2, 0x1f5c4},
+    {0x1f5d1, 0x1f5d3},
+    {0x1f5dc, 0x1f5de},
+    {0x1f5e1, 0x1f5e1},
+    {0x1f5e3, 0x1f5e3},
+    {0x1f5e8, 0x1f5e8},
+    {0x1f5ef, 0x1f5ef},
+    {0x1f5f3, 0x1f5f3},
+    {0x1f5fa, 0x1f64f},
+    {0x1f680, 0x1f6c5},
+    {0x1f6cb, 0x1f6d2},
+    {0x1f6d5, 0x1f6d8},
+    {0x1f6dc, 0x1f6e5},
+    {0x1f6e9, 0x1f6e9},
+    {0x1f6eb, 0x1f6ec},
+    {0x1f6f0, 0x1f6f0},
+    {0x1f6f3, 0x1f6fc},
+    {0x1f7e0, 0x1f7eb},
+    {0x1f7f0, 0x1f7f0},
+    {0x1f90c, 0x1f93a},
+    {0x1f93c, 0x1f945},
+    {0x1f947, 0x1f9ff},
+    {0x1fa70, 0x1fa7c},
+    {0x1fa80, 0x1fa8a},
+    {0x1fa8e, 0x1fac6},
+    {0x1fac8, 0x1fac8},
+    {0x1facd, 0x1fadc},
+    {0x1fadf, 0x1faea},
+    {0x1faef, 0x1faf8},
+};
+
+bool HasEmojiProperty(char32_t cp) {
+  const auto* found = std::lower_bound(
+      std::begin(kEmojiPropertyRanges),
+      std::end(kEmojiPropertyRanges), cp,
+      [](const auto& range, char32_t value) {
+        return range.second < value;
+      });
+  return found != std::end(kEmojiPropertyRanges) &&
+         found->first <= cp;
+}
+
+bool IsKeycapBase(char32_t cp) {
+  return (cp >= U'0' && cp <= U'9') || cp == U'#' || cp == U'*';
+}
+
+bool IsEmojiCluster(absl::string_view cluster) {
+  const std::u32string scalars = Util::Utf8ToUtf32(cluster);
+  // Mozc's grapheme splitter is not a complete implementation of UAX #29.
+  // It can merge a non-emoji prefix, ZWJ, and an emoji into one cluster.
+  // Examine all scalars, not just the first one. Presentation selectors
+  // belong to the immediately preceding scalar, not to the whole cluster.
+  for (size_t i = 0; i < scalars.size(); ++i) {
+    const char32_t cp = scalars[i];
+    if (!HasEmojiProperty(cp)) {
+      continue;
+    }
+    if (IsKeycapBase(cp)) {
+      size_t next = i + 1;
+      if (next < scalars.size() && scalars[next] == 0xFE0F) {
+        ++next;
+      }
+      if (next < scalars.size() && scalars[next] == 0x20E3) {
+        return true;
+      }
+      continue;
+    }
+    // These symbols commonly appear as technical text. Only count their
+    // explicitly emoji-styled form, for compatibility with the old policy.
+    if (cp == 0x00A9 || cp == 0x00AE || cp == 0x2122) {
+      if (i + 1 < scalars.size() && scalars[i + 1] == 0xFE0F) {
+        return true;
+      }
+      continue;
+    }
+    // Text presentation affects this scalar only; a following emoji in the
+    // same imperfectly split cluster must still be detected.
+    if (i + 1 < scalars.size() && scalars[i + 1] == 0xFE0E) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+std::vector<std::string> ExtractEmojiClusters(absl::string_view text) {
+  std::vector<std::string> graphemes;
+  Util::SplitStringToUtf8Graphemes(text, &graphemes);
+  std::vector<std::string> emoji;
+  for (size_t i = 0; i < graphemes.size(); ++i) {
+    const std::u32string scalars = Util::Utf8ToUtf32(graphemes[i]);
+    // Mozc's grapheme splitter recognizes a keycap with VS16, but a keycap
+    // without VS16 (e.g. 1 + U+20E3) can be split into two graphemes.
+    if (!scalars.empty() && IsKeycapBase(scalars.back()) &&
+        i + 1 < graphemes.size() &&
+        graphemes[i + 1] == "\xE2\x83\xA3") {
+      emoji.push_back(graphemes[i] + graphemes[i + 1]);
+      ++i;
+      continue;
+    }
+    if (IsEmojiCluster(graphemes[i])) {
+      emoji.push_back(graphemes[i]);
+    }
+  }
+  return emoji;
+}
+
+}  // namespace
+
+bool ZenzOutputValidator::PreservesEmojiSequences(
+    absl::string_view mozc_value, absl::string_view zenz_value) {
+  if (!Util::IsValidUtf8(mozc_value) || !Util::IsValidUtf8(zenz_value)) {
+    return false;
+  }
+  // Preserve the exact ordered list of user-visible emoji graphemes, not
+  // merely their count. This blocks unsolicited insertions, substitutions,
+  // deletions, duplicated emoji, and changes to skin-tone/ZWJ sequences.
+  // Ordinary Japanese corrections around unchanged emoji remain possible.
+  return ExtractEmojiClusters(mozc_value) == ExtractEmojiClusters(zenz_value);
+}
+
 ZenzValidationResult ZenzOutputValidator::ValidateReadingPreservation(
     absl::string_view key, absl::string_view normalized_key_reading,
     absl::string_view zenz_reading) {
@@ -683,6 +934,11 @@ ZenzValidationResult ZenzOutputValidator::Validate(
 
   if (!Util::IsValidUtf8(input.zenz_value)) {
     return Reject("invalid_utf8");
+  }
+
+  if (!input.allow_zenz_emoji_changes &&
+      !PreservesEmojiSequences(input.mozc_value, input.zenz_value)) {
+    return Reject("emoji_sequence_changed");
   }
 
   const size_t key_len = Util::CharsLen(input.key);
