@@ -1,0 +1,155 @@
+# Diagnostic only: reuse the unsigned x64 MSI from GitHub Actions run 42186076890.
+# Do NOT use this workflow or its test-signed output for production releases.
+# The artifact uploaded here is a COPY of an earlier build. This does not
+# independently establish build provenance for SignPath origin verification.
+name: SignPath legacy connector probe (existing x64 MSI, TEST ONLY)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: signpath-legacy-connector-probe-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.repository == 'koyasi777/mozkey' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    environment: signpath-test
+    timeout-minutes: 60
+    env:
+      SOURCE_RUN_ID: '42186076890'
+      SOURCE_RUN_ATTEMPT: '1'
+      SOURCE_ARTIFACT_ID: '13491623777'
+      SOURCE_COMMIT: 'c3a7312539665cb603a421b429f83e1d6a218d30'
+      SOURCE_VERSION: '1.0.0'
+      SOURCE_FILENAME: 'Mozkey_v1.0.0_windows_x64.msi'
+      SOURCE_SHA256: 'B2082DE71CE0D6310A0480BB794691C6FCB07EBC3F8399337A969B87AD86B817'
+      TEST_CERT_SHA256: ${{ vars.SIGNPATH_TEST_CERTIFICATE_SHA256 }}
+    steps:
+      - name: Checkout tools from the exact original source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+          ref: c3a7312539665cb603a421b429f83e1d6a218d30
+
+      - name: Check locked diagnostic parameters
+        shell: pwsh
+        env:
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:SOURCE_COMMIT -cne (git rev-parse HEAD).Trim()) { throw 'Checkout source commit mismatch.' }
+          if ($env:SOURCE_VERSION -cne '1.0.0') { throw 'Unexpected diagnostic version.' }
+          if ($env:SIGNPATH_ORGANIZATION_ID -notmatch '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$') { throw 'Missing SignPath organization ID.' }
+          if ($env:TEST_CERT_SHA256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Missing pinned test certificate SHA256.' }
+          Write-Host 'MOZKEY_SIGNPATH_CONNECTOR_PROBE_PREFLIGHT=PASS'
+
+      - name: Download exactly the previous run's unsigned x64 candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mozkey-unsigned-x64-candidate-42186076890-1
+          path: ${{ runner.temp }}/connector-probe-input
+          run-id: 42186076890
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+
+      - name: Download the previous run's original verification evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mozkey-unsigned-x64-evidence-42186076890-1
+          path: ${{ runner.temp }}/connector-probe-evidence
+          run-id: 42186076890
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+
+      - name: Verify original GitHub artifact identity, manifest and MSI bytes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $original = Join-Path $env:RUNNER_TEMP "connector-probe-input/$env:SOURCE_FILENAME"
+          $evidence = Join-Path $env:RUNNER_TEMP 'connector-probe-evidence/release-evidence/candidate-manifest.json'
+          if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw 'Missing original candidate manifest.' }
+          $files = @(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'connector-probe-input') -File)
+          if ($files.Count -ne 1 -or $files[0].Name -cne $env:SOURCE_FILENAME) { throw 'Expected exactly one canonical MSI.' }
+          $manifest = Get-Content -LiteralPath $evidence -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ([string]$manifest.status -cne 'UNSIGNED_CANDIDATE_NOT_FOR_RELEASE' -or $manifest.distribution_approved -ne $false) { throw 'Invalid unsigned candidate status.' }
+          if ([string]$manifest.github_run_id -cne $env:SOURCE_RUN_ID -or [string]$manifest.github_run_attempt -cne $env:SOURCE_RUN_ATTEMPT) { throw 'Original run/attempt mismatch.' }
+          if ([string]$manifest.source_sha -cne $env:SOURCE_COMMIT) { throw 'Original source SHA mismatch.' }
+          if ([string]$manifest.release_version -cne $env:SOURCE_VERSION -or [string]$manifest.target_architecture -cne 'x64') { throw 'Version/architecture mismatch.' }
+          if ([string]$manifest.release_filename -cne $env:SOURCE_FILENAME -or [string]$manifest.unsigned_msi_name -cne $env:SOURCE_FILENAME) { throw 'MSI filename mismatch.' }
+          if ([string]$manifest.msi_product_name -cne 'Mozkey' -or [string]$manifest.msi_manufacturer -cne 'koyasi777') { throw 'Unexpected MSI identity.' }
+          $hash = (Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash
+          if ($hash -ine $env:SOURCE_SHA256 -or $hash -ine [string]$manifest.unsigned_msi_sha256) { throw 'MSI SHA256 mismatch.' }
+          if ((Get-Item -LiteralPath $original).Length -ne [long]$manifest.unsigned_msi_size) { throw 'MSI byte-length mismatch.' }
+          if ((Get-AuthenticodeSignature -LiteralPath $original).Status -ne 'NotSigned') { throw 'Original MSI is not unsigned.' }
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:SOURCE_ARTIFACT_ID"
+          $artifact = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+          if ([string]$artifact.id -cne $env:SOURCE_ARTIFACT_ID -or [string]$artifact.name -cne 'mozkey-unsigned-x64-candidate-42186076890-1') { throw 'Original GitHub artifact identity mismatch.' }
+          if ($artifact.expired -ne $false -or [string]$artifact.workflow_run.id -cne $env:SOURCE_RUN_ID) { throw 'Original GitHub artifact expired or belongs to another run.' }
+          Write-Host "MOZKEY_SIGNPATH_CONNECTOR_PROBE_ORIGINAL=PASS originalArtifactId=$env:SOURCE_ARTIFACT_ID sha256=$hash"
+
+      - name: Re-upload original bytes for this diagnostic run only
+        id: upload-probe
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-CONNECTOR-PROBE-UNSIGNED-NOT-FOR-RELEASE-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/connector-probe-input/Mozkey_v1.0.0_windows_x64.msi
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Submit SignPath TEST request using the legacy connector and Action v3
+        id: signpath-probe
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          connector-url: https://githubactions.connectors.signpath.io
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: mozkey
+          signing-policy-slug: test-signing
+          artifact-configuration-slug: windows-msi
+          github-artifact-id: ${{ steps.upload-probe.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: ${{ runner.temp }}/connector-probe-signed
+          parameters: |
+            version: "1.0.0"
+            architecture: "x64"
+
+      - name: Verify SignPath TEST certificate and MSI payload (never install)
+        shell: pwsh
+        run: |
+          ./tools/release/Verify-SignPathTestMsi.ps1 `
+            -UnsignedMsi (Join-Path $env:RUNNER_TEMP "connector-probe-input/$env:SOURCE_FILENAME") `
+            -SignedDirectory (Join-Path $env:RUNNER_TEMP 'connector-probe-signed') `
+            -ManifestPath (Join-Path $env:RUNNER_TEMP 'connector-probe-evidence/release-evidence/candidate-manifest.json') `
+            -ExpectedFilename $env:SOURCE_FILENAME `
+            -ExpectedCertificateSha256 $env:TEST_CERT_SHA256 `
+            -ReportPath (Join-Path $env:RUNNER_TEMP 'connector-probe-report/report.json')
+
+      - name: Retain verified test-signed MSI (NOT FOR RELEASE)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-CONNECTOR-PROBE-TEST-SIGNED-NOT-FOR-RELEASE-${{ github.run_id }}
+          path: ${{ runner.temp }}/connector-probe-signed/Mozkey_v1.0.0_windows_x64.msi
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Retain verification report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-CONNECTOR-PROBE-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/connector-probe-report/report.json
+          if-no-files-found: ignore
+          retention-days: 14
