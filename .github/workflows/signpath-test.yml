@@ -106,7 +106,7 @@ jobs:
           EXPECTED_FILENAME: ${{ steps.resolve_name.outputs.filename }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $manifestFile = Join-Path $env:RUNNER_TEMP 'signpath-evidence/candidate-manifest.json'
+          $manifestFile = Join-Path $env:RUNNER_TEMP 'signpath-evidence/release-evidence/candidate-manifest.json'
           if (-not (Test-Path -LiteralPath $manifestFile -PathType Leaf)) { throw 'Missing candidate manifest.' }
           $manifest = Get-Content -LiteralPath $manifestFile -Raw -Encoding utf8 | ConvertFrom-Json
           if ([string]$manifest.status -cne 'UNSIGNED_CANDIDATE_NOT_FOR_RELEASE' -or $manifest.distribution_approved -ne $false) { throw 'Incorrect candidate release status.' }
@@ -162,7 +162,7 @@ jobs:
           ./tools/release/Verify-SignPathTestMsi.ps1 `
             -UnsignedMsi (Join-Path $env:RUNNER_TEMP "signpath-input/$env:EXPECTED_FILENAME") `
             -SignedDirectory (Join-Path $env:RUNNER_TEMP 'signpath-signed') `
-            -ManifestPath (Join-Path $env:RUNNER_TEMP 'signpath-evidence/candidate-manifest.json') `
+            -ManifestPath (Join-Path $env:RUNNER_TEMP 'signpath-evidence/release-evidence/candidate-manifest.json') `
             -ExpectedFilename $env:EXPECTED_FILENAME `
             -ExpectedCertificateSha256 $env:SIGNPATH_TEST_CERTIFICATE_SHA256 `
             -ReportPath (Join-Path $env:RUNNER_TEMP 'signpath-test-verified/report.json')
