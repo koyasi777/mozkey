@@ -9,10 +9,27 @@ param(
   [Parameter(Mandatory=$true)][string]$ManifestPath,
   [Parameter(Mandatory=$true)][string]$ExpectedFilename,
   [Parameter(Mandatory=$true)][string]$ExpectedCertificateSha256,
-  [Parameter(Mandatory=$true)][string]$ReportPath
+  [Parameter(Mandatory=$true)][string]$ReportPath,
+  [Parameter(Mandatory=$false)][string]$DiagnosticsDirectory = (Join-Path $env:RUNNER_TEMP 'signpath-msi-diagnostics'),
+  [Parameter(Mandatory=$false)][ValidateRange(60,3600)][int]$MsiExtractTimeoutSeconds = 900
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Diagnostics are intentionally written to the ephemeral runner only.
+$script:VerifyStarted = [Diagnostics.Stopwatch]::StartNew()
+$script:DiagnosticsDirectory = [IO.Path]::GetFullPath($DiagnosticsDirectory)
+New-Item -ItemType Directory -Path $script:DiagnosticsDirectory -Force | Out-Null
+$script:TracePath = Join-Path $script:DiagnosticsDirectory 'verify-stages.log'
+[IO.File]::WriteAllText($script:TracePath, '', [Text.UTF8Encoding]::new($false))
+
+function Write-VerifyCheckpoint([string]$Stage) {
+  $elapsed = [Math]::Round($script:VerifyStarted.Elapsed.TotalSeconds, 1)
+  $message = "MOZKEY_SIGNPATH_VERIFY_STAGE=$Stage elapsed_seconds=$elapsed"
+  Write-Host $message
+  [IO.File]::AppendAllText($script:TracePath, $message + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+}
+Write-VerifyCheckpoint 'START'
 
 function Assert-Ok([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw $Message }
@@ -40,25 +57,46 @@ function Get-MsiProperties([string]$Path) {
   }
 }
 
-function Get-ExtractedFileHashMap([string]$Msi, [string]$Destination) {
+function Get-ExtractedFileHashMap([string]$Msi, [string]$Destination, [string]$Label) {
+  Assert-Ok ($Label -cin @('unsigned', 'signed')) 'Unexpected extraction label.'
   New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-  $arguments = @('/a', ('"' + $Msi + '"'), '/qn', ('TARGETDIR="' + $Destination + '"'))
-  $process = Start-Process -FilePath "$env:WINDIR\System32\msiexec.exe" -ArgumentList $arguments -Wait -PassThru
-  Assert-Ok ($process.ExitCode -eq 0) "MSI administrative extraction failed: $($process.ExitCode)"
+  $logPath = Join-Path $script:DiagnosticsDirectory ("msiexec-$Label.log")
+  $arguments = @('/a', ('"' + $Msi + '"'), '/qn', ('TARGETDIR="' + $Destination + '"'), '/L*v', ('"' + $logPath + '"'))
+  Write-VerifyCheckpoint "MSI_EXTRACT_${Label}_BEGIN"
+  $process = $null
+  try {
+    # Do NOT use Start-Process -Wait: an unresponsive MSI must be bounded.
+    $process = Start-Process -FilePath "$env:WINDIR\System32\msiexec.exe" -ArgumentList $arguments -PassThru -NoNewWindow -ErrorAction Stop
+    if (-not $process.WaitForExit($script:MsiExtractTimeoutSeconds * 1000)) {
+      Write-VerifyCheckpoint "MSI_EXTRACT_${Label}_TIMEOUT"
+      try { $process.Kill($true) } catch { Write-Warning "Could not stop timed-out MSI client: $_" }
+      try { $null = $process.WaitForExit(20000) } catch {}
+      throw "MSI administrative extraction timed out after $($script:MsiExtractTimeoutSeconds)s: $Label. Log=$logPath"
+    }
+    $exitCode = $process.ExitCode
+    Assert-Ok ($exitCode -eq 0) "MSI administrative extraction failed: label=$Label exit=$exitCode log=$logPath"
+  } finally {
+    if ($null -ne $process) { $process.Dispose() }
+  }
+  Write-VerifyCheckpoint "MSI_EXTRACT_${Label}_PASS"
   $root = [IO.Path]::GetFullPath($Destination).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
   $map = @{}
-  foreach ($item in @(Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction Stop)) {
-    # msiexec /a may create a new administrative MSI database; that DB differs
-    # when the original MSI acquires a signature. Compare installed payload only.
+  $files = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction Stop)
+  Write-VerifyCheckpoint "PAYLOAD_HASH_${Label}_BEGIN_files_$($files.Count)"
+  foreach ($item in $files) {
+    # Administrative MSI databases can differ solely due to the outer MSI signature.
     if ($item.Extension -ieq '.msi') { continue }
     $relative = $item.FullName.Substring($root.Length)
     Assert-Ok (-not $map.ContainsKey($relative)) "Duplicate administrative image path: $relative"
     $map[$relative] = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
+    if (($map.Count % 50) -eq 0) { Write-VerifyCheckpoint "PAYLOAD_HASH_${Label}_count_$($map.Count)" }
   }
   Assert-Ok ($map.Count -ge 10) "Unexpectedly small MSI payload: $($map.Count) files"
+  Write-VerifyCheckpoint "PAYLOAD_HASH_${Label}_PASS_files_$($map.Count)"
   return ,$map
 }
 
+Write-VerifyCheckpoint 'INPUT_VALIDATION_BEGIN'
 Assert-Ok ([bool]($ExpectedCertificateSha256 -match '^[a-fA-F0-9]{64}$')) 'Expected test certificate SHA256 must be exactly 64 hex characters.'
 Assert-Ok ($ExpectedFilename -ceq [IO.Path]::GetFileName($ExpectedFilename)) 'Expected filename must not contain a directory.'
 $UnsignedMsi = (Resolve-Path -LiteralPath $UnsignedMsi).ProviderPath
@@ -69,13 +107,16 @@ Assert-Ok ($manifest.status -ceq 'UNSIGNED_CANDIDATE_NOT_FOR_RELEASE') 'Input wa
 Assert-Ok ($manifest.release_filename -ceq $ExpectedFilename) 'Manifest filename mismatch.'
 Assert-Ok ([IO.Path]::GetFileName($UnsignedMsi) -ceq $ExpectedFilename) 'Unsigned input has the wrong filename.'
 Assert-Ok ((Get-FileHash -LiteralPath $UnsignedMsi -Algorithm SHA256).Hash -ieq [string]$manifest.unsigned_msi_sha256) 'Original unsigned SHA-256 mismatch.'
+Write-VerifyCheckpoint 'UNSIGNED_SIGNATURE_READ_BEGIN'
 Assert-Ok ((Get-AuthenticodeSignature -LiteralPath $UnsignedMsi).Status -eq 'NotSigned') 'Original input was signed.'
 
+Write-VerifyCheckpoint 'INPUT_VALIDATION_PASS'
 $signedCandidates = @(Get-ChildItem -LiteralPath $SignedDirectory -Recurse -File -ErrorAction Stop)
 Assert-Ok ($signedCandidates.Count -eq 1) "Expected exactly one returned signed file; found $($signedCandidates.Count)."
 $signed = $signedCandidates[0]
 Assert-Ok ($signed.Name -ceq $ExpectedFilename) "SignPath returned a different filename: $($signed.Name)"
 Assert-Ok ($signed.FullName -cne $UnsignedMsi) 'Signed and unsigned paths must be distinct.'
+Write-VerifyCheckpoint 'SIGNED_SIGNATURE_READ_BEGIN'
 $signature = Get-AuthenticodeSignature -LiteralPath $signed.FullName
 Assert-Ok ($null -ne $signature.SignerCertificate) 'SignPath result has no embedded Authenticode signer certificate.'
 $certificate = $signature.SignerCertificate
@@ -83,30 +124,38 @@ $actualPin = $certificate.GetCertHashString([Security.Cryptography.HashAlgorithm
 Assert-Ok ($actualPin -ieq $ExpectedCertificateSha256) "Test signer SHA-256 does not match the PINNED public certificate. Actual=$actualPin"
 Assert-Ok ($signature.Status -ne 'NotSigned') 'Signed MSI is not Authenticode signed.'
 
+Write-VerifyCheckpoint 'SIGNER_CERTIFICATE_PIN_PASS'
 $publicCertPath = Join-Path $env:RUNNER_TEMP ('signpath-test-public-' + [guid]::NewGuid().ToString('N') + '.cer')
 $thumbprint = $certificate.Thumbprint
 $certStorePath = "Cert:\CurrentUser\Root\$thumbprint"
 Assert-Ok (-not (Test-Path -LiteralPath $certStorePath)) 'The test certificate is unexpectedly already in CurrentUser Root.'
 $addedCert = $false
 try {
+  Write-VerifyCheckpoint 'CERT_TRUST_IMPORT_BEGIN'
   [IO.File]::WriteAllBytes($publicCertPath, $certificate.RawData)
   $null = Import-Certificate -FilePath $publicCertPath -CertStoreLocation 'Cert:\CurrentUser\Root' -ErrorAction Stop
   $addedCert = $true
   Assert-Ok (Test-Path -LiteralPath $certStorePath) 'Cannot find the temporarily trusted test certificate.'
+  Write-VerifyCheckpoint 'TRUSTED_AUTHENTICODE_BEGIN'
   # Fail closed even if signature is well-formed but altered, has a bad EKU,
   # or is not trusted by Windows after the known certificate is pinned.
   $trustedSignature = Get-AuthenticodeSignature -LiteralPath $signed.FullName
   Assert-Ok ($trustedSignature.Status -eq 'Valid') "Windows Authenticode verification failed: $($trustedSignature.Status); $($trustedSignature.StatusMessage)"
+  Write-VerifyCheckpoint 'TRUSTED_AUTHENTICODE_PASS'
   Assert-Ok ($trustedSignature.SignerCertificate.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ieq $actualPin) 'Signing certificate changed after trust.'
 } finally {
   if ($addedCert) {
+    Write-VerifyCheckpoint 'CERT_TRUST_REMOVE_BEGIN'
     Remove-Item -LiteralPath $certStorePath -Force -ErrorAction Stop
     Assert-Ok (-not (Test-Path -LiteralPath $certStorePath)) 'Temporary test root certificate cleanup failed.'
   }
   if (Test-Path -LiteralPath $publicCertPath) { Remove-Item -LiteralPath $publicCertPath -Force -ErrorAction Stop }
 }
 
+Write-VerifyCheckpoint 'MSI_UNSIGNED_PROPERTIES_BEGIN'
 $unsignedProperties = Get-MsiProperties $UnsignedMsi
+Write-VerifyCheckpoint 'MSI_UNSIGNED_PROPERTIES_PASS'
+Write-VerifyCheckpoint 'MSI_SIGNED_PROPERTIES_BEGIN'
 $signedProperties = Get-MsiProperties $signed.FullName
 foreach ($key in @('ProductName','Manufacturer','ProductVersion','ProductCode','UpgradeCode')) {
   Assert-Ok ($unsignedProperties.ContainsKey($key) -and $signedProperties.ContainsKey($key)) "Missing MSI property: $key"
@@ -118,19 +167,24 @@ Assert-Ok ($signedProperties['ProductVersion'] -ceq [string]$manifest.msi_produc
 Assert-Ok ($signedProperties['ProductCode'] -ceq [string]$manifest.msi_product_code) 'Wrong MSI ProductCode.'
 Assert-Ok ($signedProperties['UpgradeCode'] -ceq [string]$manifest.msi_upgrade_code) 'Wrong MSI UpgradeCode.'
 
+Write-VerifyCheckpoint 'MSI_PROPERTIES_PASS'
 $scratch = Join-Path $env:RUNNER_TEMP ('mozkey-signpath-payload-' + [guid]::NewGuid().ToString('N'))
 try {
-  $unsignedFiles = Get-ExtractedFileHashMap $UnsignedMsi (Join-Path $scratch 'unsigned')
-  $signedFiles = Get-ExtractedFileHashMap $signed.FullName (Join-Path $scratch 'signed')
+  $unsignedFiles = Get-ExtractedFileHashMap $UnsignedMsi (Join-Path $scratch 'unsigned') 'unsigned'
+  $signedFiles = Get-ExtractedFileHashMap $signed.FullName (Join-Path $scratch 'signed') 'signed'
+  Write-VerifyCheckpoint 'PAYLOAD_COMPARE_BEGIN'
   Assert-Ok ($unsignedFiles.Count -eq $signedFiles.Count) 'MSI payload file counts changed after signing.'
   foreach ($name in $unsignedFiles.Keys) {
     Assert-Ok ($signedFiles.ContainsKey($name)) "A payload file is missing after signing: $name"
     Assert-Ok ($unsignedFiles[$name] -ieq $signedFiles[$name]) "MSI packaged file changed after signing: $name"
   }
+  Write-VerifyCheckpoint 'PAYLOAD_COMPARE_PASS'
 } finally {
+  Write-VerifyCheckpoint 'PAYLOAD_SCRATCH_CLEANUP_BEGIN'
   if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction Stop }
 }
 
+Write-VerifyCheckpoint 'REPORT_BEGIN'
 $report = [ordered]@{
   verdict = 'MOZKEY_SIGNPATH_TEST_MSI_VALIDATED'
   production_approved = $false
@@ -153,5 +207,6 @@ $report = [ordered]@{
 }
 New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($ReportPath)) -Force | Out-Null
 $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ReportPath -Encoding UTF8
+Write-VerifyCheckpoint 'VERIFY_SUCCESS'
 Write-Host "MOZKEY_SIGNPATH_TEST_MSI_VALIDATION=PASS file=$ExpectedFilename signedSHA256=$($report.signed_sha256)"
 Write-Host "Report=$ReportPath"

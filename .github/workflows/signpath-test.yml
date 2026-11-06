@@ -141,7 +141,7 @@ jobs:
         id: signpath
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
         with:
-          connector-url: https://pipelineconnector.connectors.signpath.io/GitHub/GitHubCom
+          connector-url: https://githubactions.connectors.signpath.io
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           project-slug: mozkey
@@ -185,3 +185,12 @@ jobs:
           path: ${{ runner.temp }}/signpath-test-verified/report.json
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Retain SignPath MSI verification diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-TEST-msi-diagnostics-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/signpath-msi-diagnostics/**
+          if-no-files-found: ignore
+          retention-days: 7

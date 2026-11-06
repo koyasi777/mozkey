@@ -36,7 +36,7 @@ jobs:
         with:
           persist-credentials: false
           submodules: false
-          ref: c3a7312539665cb603a421b429f83e1d6a218d30
+          ref: ${{ github.sha }}
 
       - name: Check locked diagnostic parameters
         shell: pwsh
@@ -44,7 +44,7 @@ jobs:
           SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:SOURCE_COMMIT -cne (git rev-parse HEAD).Trim()) { throw 'Checkout source commit mismatch.' }
+          if ((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA) { throw 'Probe verifier source revision mismatch.' }
           if ($env:SOURCE_VERSION -cne '1.0.0') { throw 'Unexpected diagnostic version.' }
           if ($env:SIGNPATH_ORGANIZATION_ID -notmatch '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$') { throw 'Missing SignPath organization ID.' }
           if ($env:TEST_CERT_SHA256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Missing pinned test certificate SHA256.' }
@@ -125,6 +125,15 @@ jobs:
             version: "1.0.0"
             architecture: "x64"
 
+      - name: Retain TEST-signed diagnostic MSI BEFORE verification (UNVERIFIED; NOT FOR RELEASE)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-CONNECTOR-PROBE-TEST-SIGNED-UNVERIFIED-NOT-FOR-RELEASE-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/connector-probe-signed/Mozkey_v1.0.0_windows_x64.msi
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
       - name: Verify SignPath TEST certificate and MSI payload (never install)
         shell: pwsh
         run: |
@@ -153,3 +162,12 @@ jobs:
           path: ${{ runner.temp }}/connector-probe-report/report.json
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Retain SignPath MSI verification diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-PROBE-msi-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/signpath-msi-diagnostics/**
+          if-no-files-found: ignore
+          retention-days: 7
