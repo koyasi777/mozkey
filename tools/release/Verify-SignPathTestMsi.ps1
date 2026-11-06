@@ -35,6 +35,32 @@ function Assert-Ok([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw $Message }
 }
 
+# Only use this verifier on isolated GitHub-hosted Windows runners.
+# CurrentUser Root installation can trigger an invisible confirmation dialog.
+# The hosted Windows runner is elevated; use LocalMachine Root only briefly.
+# Bound all certificate-store command invocations and verify removal.
+function Invoke-BoundedCertUtil([string[]]$CommandArgs, [string]$Operation, [int]$TimeoutSeconds = 60) {
+  Assert-Ok ($Operation -cin @('install', 'remove')) 'Invalid certutil operation.'
+  $exe = Join-Path $env:WINDIR 'System32\certutil.exe'
+  Assert-Ok (Test-Path -LiteralPath $exe -PathType Leaf) 'certutil.exe is unavailable.'
+  $process = $null
+  try {
+    Write-VerifyCheckpoint "CERTUTIL_${Operation}_PROCESS_BEGIN"
+    $process = Start-Process -FilePath $exe -ArgumentList $CommandArgs -PassThru -NoNewWindow -ErrorAction Stop
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+      Write-VerifyCheckpoint "CERTUTIL_${Operation}_TIMEOUT"
+      try { $process.Kill($true) } catch { Write-Warning "Cannot kill timed-out certutil $Operation`: $_" }
+      try { $null = $process.WaitForExit(5000) } catch {}
+      throw "certutil $Operation timed out after ${TimeoutSeconds}s."
+    }
+    $code = $process.ExitCode
+    Assert-Ok ($code -eq 0) "certutil $Operation failed with exit code $code."
+    Write-VerifyCheckpoint "CERTUTIL_${Operation}_PROCESS_PASS"
+  } finally {
+    if ($null -ne $process) { $process.Dispose() }
+  }
+}
+
 function Get-MsiProperties([string]$Path) {
   $installer = $null; $db = $null; $view = $null
   try {
@@ -125,31 +151,37 @@ Assert-Ok ($actualPin -ieq $ExpectedCertificateSha256) "Test signer SHA-256 does
 Assert-Ok ($signature.Status -ne 'NotSigned') 'Signed MSI is not Authenticode signed.'
 
 Write-VerifyCheckpoint 'SIGNER_CERTIFICATE_PIN_PASS'
+Assert-Ok ($env:GITHUB_ACTIONS -ceq 'true' -and $env:RUNNER_OS -ceq 'Windows' -and $env:RUNNER_ENVIRONMENT -ceq 'github-hosted') 'Temporary machine-root trust is restricted to a GitHub-hosted Windows runner.'
 $publicCertPath = Join-Path $env:RUNNER_TEMP ('signpath-test-public-' + [guid]::NewGuid().ToString('N') + '.cer')
 $thumbprint = $certificate.Thumbprint
-$certStorePath = "Cert:\CurrentUser\Root\$thumbprint"
-Assert-Ok (-not (Test-Path -LiteralPath $certStorePath)) 'The test certificate is unexpectedly already in CurrentUser Root.'
-$addedCert = $false
+Assert-Ok ($thumbprint -match '^[a-fA-F0-9]{40}$') 'Unexpected Windows certificate SHA-1 thumbprint.'
+$certStorePath = "Cert:\LocalMachine\Root\$thumbprint"
+Assert-Ok (-not (Test-Path -LiteralPath $certStorePath)) 'The pinned test certificate is unexpectedly already in LocalMachine Root.'
 try {
-  Write-VerifyCheckpoint 'CERT_TRUST_IMPORT_BEGIN'
   [IO.File]::WriteAllBytes($publicCertPath, $certificate.RawData)
-  $null = Import-Certificate -FilePath $publicCertPath -CertStoreLocation 'Cert:\CurrentUser\Root' -ErrorAction Stop
-  $addedCert = $true
-  Assert-Ok (Test-Path -LiteralPath $certStorePath) 'Cannot find the temporarily trusted test certificate.'
+  Write-VerifyCheckpoint 'CERT_TRUST_IMPORT_BEGIN'
+  Invoke-BoundedCertUtil -Operation 'install' -TimeoutSeconds 60 -CommandArgs @('-f', '-addstore', 'Root', ('"' + $publicCertPath + '"'))
+  Assert-Ok (Test-Path -LiteralPath $certStorePath) 'Cannot find the temporarily trusted test certificate in LocalMachine Root.'
+  Write-VerifyCheckpoint 'CERT_TRUST_IMPORT_PASS'
   Write-VerifyCheckpoint 'TRUSTED_AUTHENTICODE_BEGIN'
-  # Fail closed even if signature is well-formed but altered, has a bad EKU,
-  # or is not trusted by Windows after the known certificate is pinned.
+  # Fail closed if signature content, signing policy, or trust fails.
   $trustedSignature = Get-AuthenticodeSignature -LiteralPath $signed.FullName
   Assert-Ok ($trustedSignature.Status -eq 'Valid') "Windows Authenticode verification failed: $($trustedSignature.Status); $($trustedSignature.StatusMessage)"
   Write-VerifyCheckpoint 'TRUSTED_AUTHENTICODE_PASS'
   Assert-Ok ($trustedSignature.SignerCertificate.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ieq $actualPin) 'Signing certificate changed after trust.'
 } finally {
-  if ($addedCert) {
-    Write-VerifyCheckpoint 'CERT_TRUST_REMOVE_BEGIN'
-    Remove-Item -LiteralPath $certStorePath -Force -ErrorAction Stop
-    Assert-Ok (-not (Test-Path -LiteralPath $certStorePath)) 'Temporary test root certificate cleanup failed.'
+  # Inspect the actual store even if certutil failed or timed out after installing.
+  # Never remove a pre-existing root: it was rejected before entering this block.
+  try {
+    if (Test-Path -LiteralPath $certStorePath) {
+      Write-VerifyCheckpoint 'CERT_TRUST_REMOVE_BEGIN'
+      Invoke-BoundedCertUtil -Operation 'remove' -TimeoutSeconds 60 -CommandArgs @('-delstore', 'Root', $thumbprint)
+      Assert-Ok (-not (Test-Path -LiteralPath $certStorePath)) 'Temporary LocalMachine Root cleanup failed.'
+      Write-VerifyCheckpoint 'CERT_TRUST_REMOVE_PASS'
+    }
+  } finally {
+    if (Test-Path -LiteralPath $publicCertPath) { Remove-Item -LiteralPath $publicCertPath -Force -ErrorAction Stop }
   }
-  if (Test-Path -LiteralPath $publicCertPath) { Remove-Item -LiteralPath $publicCertPath -Force -ErrorAction Stop }
 }
 
 Write-VerifyCheckpoint 'MSI_UNSIGNED_PROPERTIES_BEGIN'
@@ -202,6 +234,7 @@ $report = [ordered]@{
   certificate_subject = $certificate.Subject
   windows_authenticode_status_with_temporary_test_root = 'Valid'
   temporary_test_root_removed = $true
+  temporary_test_root_scope = 'LocalMachine'
   packaged_files_unchanged = $true
   packaged_file_count = $unsignedFiles.Count
 }
