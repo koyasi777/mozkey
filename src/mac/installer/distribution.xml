@@ -47,5 +47,5 @@
     <choice id="org.mozc.pkg.JapaneseInput" visible="false">
         <pkg-ref id="org.mozc.pkg.JapaneseInput"/>
     </choice>
-    <pkg-ref id="org.mozc.pkg.JapaneseInput" onConclusion="none">Mozc.pkg</pkg-ref>
+    <pkg-ref id="org.mozc.pkg.JapaneseInput" onConclusion="RequireLogout">Mozc.pkg</pkg-ref>
 </installer-gui-script>
