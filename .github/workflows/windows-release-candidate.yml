@@ -14,6 +14,14 @@ on:
         description: 'Exact public version in src/version.bzl (e.g. 1.0.0)'
         type: string
         required: true
+  # Reusable from the isolated SignPath TEST workflow. Existing dispatch and PR
+  # behavior stays unchanged; this workflow never signs its output.
+  workflow_call:
+    inputs:
+      release_version:
+        description: 'Exact release version for audited MSI candidates'
+        type: string
+        required: true
 
 permissions:
   contents: read
