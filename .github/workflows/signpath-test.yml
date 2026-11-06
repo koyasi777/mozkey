@@ -1,0 +1,186 @@
+# SignPath Foundation TEST-CERTIFICATE signing only. No GitHub Release is created.
+# The build is the existing, unchanged unsigned candidate pipeline, invoked as a
+# reusable workflow so the MSI artifact remains linked to the SAME Actions run.
+name: SignPath test MSI signing (x64 / ARM64, no release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Exact public version in src/version.bzl (e.g. 1.0.0)'
+        type: string
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: signpath-test-msi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.repository == 'koyasi777/mozkey' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: signpath-test
+    timeout-minutes: 5
+    env:
+      SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_TEST_CERTIFICATE_SHA256: ${{ vars.SIGNPATH_TEST_CERTIFICATE_SHA256 }}
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      RELEASE_VERSION: ${{ inputs.release_version }}
+    steps:
+      - name: Check test-only signing configuration before any Windows builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo 'Invalid release version' >&2; exit 1; }
+          [[ "$SIGNPATH_ORGANIZATION_ID" =~ ^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$ ]] || { echo 'Missing/invalid SignPath Organization ID' >&2; exit 1; }
+          [[ "$SIGNPATH_TEST_CERTIFICATE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || { echo 'Missing/invalid pinned TEST certificate SHA-256' >&2; exit 1; }
+          [[ -n "$SIGNPATH_API_TOKEN" ]] || { echo 'Missing test-only CI user API token' >&2; exit 1; }
+          echo 'MOZKEY_SIGNPATH_TEST_PREFLIGHT=PASS'
+
+  build-unsigned:
+    needs: preflight
+    # The called workflow still performs all of its original source, MSI,
+    # dictionary and provenance checks, and remains unsigned by design.
+    uses: ./.github/workflows/windows-release-candidate.yml
+    with:
+      release_version: ${{ inputs.release_version }}
+    permissions:
+      contents: read
+      actions: read
+
+  sign-test:
+    needs: build-unsigned
+    if: github.repository == 'koyasi777/mozkey' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    runs-on: windows-2025
+    timeout-minutes: 90
+    environment: signpath-test
+    env:
+      EXPECTED_VERSION: ${{ inputs.release_version }}
+      TARGET_ARCH: ${{ matrix.arch }}
+      EXPECTED_SOURCE_SHA: ${{ github.sha }}
+      SIGNPATH_TEST_CERTIFICATE_SHA256: ${{ vars.SIGNPATH_TEST_CERTIFICATE_SHA256 }}
+    steps:
+      - name: Checkout exact release source, without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.sha }}
+
+      - name: Resolve canonical name from Mozkey's single naming implementation
+        id: resolve_name
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $got = @(& python tools/release/artifact_name.py --version $env:EXPECTED_VERSION --os windows --arch $env:TARGET_ARCH --format msi)
+          if ($LASTEXITCODE -ne 0 -or $got.Count -ne 1 -or [string]::IsNullOrWhiteSpace($got[0])) { throw 'Canonical name resolution failed.' }
+          $expected = [string]$got[0]
+          if ($expected -cne [IO.Path]::GetFileName($expected)) { throw 'Unexpected directory component in release name.' }
+          "filename=$expected" >> $env:GITHUB_OUTPUT
+
+      - name: Download exact same-run unsigned candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mozkey-unsigned-${{ matrix.arch }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/signpath-input
+
+      - name: Download exact same-run release candidate evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mozkey-unsigned-${{ matrix.arch }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/signpath-evidence
+
+      - name: Verify original unsigned MSI, provenance, and exact Artifact ID
+        id: original
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_FILENAME: ${{ steps.resolve_name.outputs.filename }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestFile = Join-Path $env:RUNNER_TEMP 'signpath-evidence/candidate-manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestFile -PathType Leaf)) { throw 'Missing candidate manifest.' }
+          $manifest = Get-Content -LiteralPath $manifestFile -Raw -Encoding utf8 | ConvertFrom-Json
+          if ([string]$manifest.status -cne 'UNSIGNED_CANDIDATE_NOT_FOR_RELEASE' -or $manifest.distribution_approved -ne $false) { throw 'Incorrect candidate release status.' }
+          if ([string]$manifest.source_sha -cne $env:EXPECTED_SOURCE_SHA) { throw 'Source SHA mismatch.' }
+          if ([string]$manifest.github_run_id -cne $env:GITHUB_RUN_ID -or [string]$manifest.github_run_attempt -cne $env:GITHUB_RUN_ATTEMPT) { throw 'Wrong run or attempt.' }
+          if ([string]$manifest.release_version -cne $env:EXPECTED_VERSION -or [string]$manifest.target_architecture -cne $env:TARGET_ARCH) { throw 'Wrong version or architecture.' }
+          if ([string]$manifest.operating_system -cne 'windows' -or [string]$manifest.package_format -cne 'msi') { throw 'Unexpected release target.' }
+          if ([string]$manifest.release_filename -cne $env:EXPECTED_FILENAME -or [string]$manifest.unsigned_msi_name -cne $env:EXPECTED_FILENAME) { throw 'Canonical MSI name mismatch.' }
+          if ([string]$manifest.msi_product_name -cne 'Mozkey' -or [string]$manifest.msi_manufacturer -cne 'koyasi777') { throw 'Unexpected MSI identity.' }
+          $msiFiles = @(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'signpath-input') -File -ErrorAction Stop)
+          if ($msiFiles.Count -ne 1 -or $msiFiles[0].Name -cne $env:EXPECTED_FILENAME) { throw 'Exactly one canonical MSI is required.' }
+          $unsignedFile = $msiFiles[0].FullName
+          $actualHash = (Get-FileHash -LiteralPath $unsignedFile -Algorithm SHA256).Hash
+          if ($actualHash -ine [string]$manifest.unsigned_msi_sha256) { throw 'Unsigned candidate SHA-256 does not match the verified build.' }
+          if ($msiFiles[0].Length -ne [long]$manifest.unsigned_msi_size) { throw 'Unsigned candidate length mismatch.' }
+          if ((Get-AuthenticodeSignature -LiteralPath $unsignedFile).Status -ne 'NotSigned') { throw 'Candidate is unexpectedly signed.' }
+
+          # Read the ID of the ORIGINAL upload, not a re-packaged or re-uploaded MSI.
+          $artifactName = "mozkey-unsigned-$env:TARGET_ARCH-candidate-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $requestUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts?per_page=100"
+          $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $page = Invoke-RestMethod -Uri $requestUri -Headers $headers -Method Get
+          if ([int]$page.total_count -gt 100) { throw 'Artifact list requires pagination: fail closed.' }
+          $matches = @($page.artifacts | Where-Object { $_.name -ceq $artifactName -and $_.expired -eq $false -and $_.workflow_run.id -eq [long]$env:GITHUB_RUN_ID })
+          if ($matches.Count -ne 1) { throw "Expected exactly one original GitHub artifact: $artifactName; found $($matches.Count)" }
+          $artifactId = [string]$matches[0].id
+          if ($artifactId -notmatch '^[1-9][0-9]*$') { throw 'Invalid artifact ID.' }
+          "artifact_id=$artifactId" >> $env:GITHUB_OUTPUT
+          Write-Host "MOZKEY_SIGNPATH_UNSIGNED_INPUT=PASS arch=$env:TARGET_ARCH artifactId=$artifactId sha256=$actualHash"
+
+      - name: Submit to SignPath TEST policy (never production)
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: mozkey
+          signing-policy-slug: test-signing
+          artifact-configuration-slug: windows-msi
+          github-artifact-id: ${{ steps.original.outputs.artifact_id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: ${{ runner.temp }}/signpath-signed
+          parameters: |
+            version: ${{ toJSON(inputs.release_version) }}
+            architecture: ${{ toJSON(matrix.arch) }}
+
+      - name: Validate certificate, Authenticode and unchanged MSI payload
+        shell: pwsh
+        env:
+          EXPECTED_FILENAME: ${{ steps.resolve_name.outputs.filename }}
+        run: |
+          ./tools/release/Verify-SignPathTestMsi.ps1 `
+            -UnsignedMsi (Join-Path $env:RUNNER_TEMP "signpath-input/$env:EXPECTED_FILENAME") `
+            -SignedDirectory (Join-Path $env:RUNNER_TEMP 'signpath-signed') `
+            -ManifestPath (Join-Path $env:RUNNER_TEMP 'signpath-evidence/candidate-manifest.json') `
+            -ExpectedFilename $env:EXPECTED_FILENAME `
+            -ExpectedCertificateSha256 $env:SIGNPATH_TEST_CERTIFICATE_SHA256 `
+            -ReportPath (Join-Path $env:RUNNER_TEMP 'signpath-test-verified/report.json')
+
+      - name: Store verified self-signed TEST MSI (NEVER a GitHub Release)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-TEST-signed-NOT-FOR-RELEASE-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/signpath-signed/${{ steps.resolve_name.outputs.filename }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Store test-signing verification report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-TEST-verification-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/signpath-test-verified/report.json
+          if-no-files-found: ignore
+          retention-days: 14
