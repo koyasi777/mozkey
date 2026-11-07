@@ -237,6 +237,8 @@ void NBestGenerator<TConnector>::MakeCandidate(
         {"し", "市"}, {"く", "区"}, {"ちょう", "町"},
         {"むら", "村"}, {"ぐん", "郡"}, {"しょうじ", "商事"},
     };
+    // Recognize a place-name node whose RID is a typed regional suffix.
+    // Do not change the existing kNameEndings concatenation policy.
     size_t key_offset = 0;
     size_t value_offset = 0;
     bool expression_open = false;
@@ -250,9 +252,41 @@ void NBestGenerator<TConnector>::MakeCandidate(
           !(node->attributes & (Node::USER_DICTIONARY |
                                  Node::SPELLING_CORRECTION)) &&
           !node->key.empty() && !node->value.empty();
+      // LID and RID encode connection characteristics, not two independent
+      // semantic labels. A geographic RID must agree with the actual ending.
+      // The generic regional suffix (without a specific type) is deliberately
+      // excluded: a matching character string is not sufficient evidence.
+      bool geographic_compound = false;
+      if (eligible_node &&
+          pos_matcher_.IsGeographicProperNoun(node->lid) &&
+          pos_matcher_.IsGeographicSuffix(node->rid)) {
+        const absl::string_view key(node->key);
+        const absl::string_view value(node->value);
+        geographic_compound =
+            (pos_matcher_.IsGeographicWardSuffix(node->rid) &&
+             key.ends_with("く") && value.ends_with("区")) ||
+            (pos_matcher_.IsGeographicCitySuffix(node->rid) &&
+             key.ends_with("し") && value.ends_with("市")) ||
+            (pos_matcher_.IsGeographicPrefectureFuSuffix(node->rid) &&
+             key.ends_with("ふ") && value.ends_with("府")) ||
+            (pos_matcher_.IsGeographicVillageSuffix(node->rid) &&
+             (key.ends_with("むら") || key.ends_with("そん")) &&
+             value.ends_with("村")) ||
+            (pos_matcher_.IsGeographicTownSuffix(node->rid) &&
+             (key.ends_with("ちょう") || key.ends_with("まち")) &&
+             value.ends_with("町")) ||
+            (pos_matcher_.IsGeographicPrefectureKenSuffix(node->rid) &&
+             key.ends_with("けん") && value.ends_with("県")) ||
+            (pos_matcher_.IsGeographicCountySuffix(node->rid) &&
+             key.ends_with("ぐん") && value.ends_with("郡")) ||
+            (pos_matcher_.IsGeographicStationSuffix(node->rid) &&
+             key.ends_with("えき") && value.ends_with("駅"));
+      }
       const bool is_proper =
-          eligible_node && pos_matcher_.IsUniqueNoun(node->lid) &&
-          pos_matcher_.IsUniqueNoun(node->rid);
+          eligible_node &&
+          ((pos_matcher_.IsUniqueNoun(node->lid) &&
+            pos_matcher_.IsUniqueNoun(node->rid)) ||
+           geographic_compound);
       bool named_ending = false;
       if (eligible_node && expression_open && !is_proper) {
         for (const auto& ending : kNameEndings) {

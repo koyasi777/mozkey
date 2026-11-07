@@ -99,6 +99,20 @@ CounterSuffixWord 名詞,接尾,助数詞
 # 固有名詞
 UniqueNoun ^名詞,固有名詞
 
+# Geographic compound nodes can have proper-place LID and regional-suffix RID.
+# Keep these separate from generic proper nouns and generic suffixes.
+GeographicProperNoun ^名詞,固有名詞,地域,
+GeographicSuffix ^名詞,接尾,地域,
+# The final POS field encodes the suffix type. Check the type, not only family.
+GeographicWardSuffix ^名詞,接尾,地域,*,*,*,区$
+GeographicCitySuffix ^名詞,接尾,地域,*,*,*,市$
+GeographicPrefectureFuSuffix ^名詞,接尾,地域,*,*,*,府$
+GeographicVillageSuffix ^名詞,接尾,地域,*,*,*,村$
+GeographicTownSuffix ^名詞,接尾,地域,*,*,*,町$
+GeographicPrefectureKenSuffix ^名詞,接尾,地域,*,*,*,県$
+GeographicCountySuffix ^名詞,接尾,地域,*,*,*,郡$
+GeographicStationSuffix ^名詞,接尾,地域,*,*,*,駅$
+
 # 一般名詞
 GeneralNoun ^名詞,一般,*,*,*,*,*$
 

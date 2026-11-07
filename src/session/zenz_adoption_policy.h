@@ -113,6 +113,15 @@ ProtectedConversionSpan::Tier ClassifyProtectedAsciiSurface(
 bool ShouldProtectSystemProperNounReadings(
     const std::vector<std::string>& token_readings);
 
+// Context-dependent geographical homophones must not be hard-locked only
+// because a selected Mozc dictionary path is tagged as a place name.
+// Match the complete reading + surface, independently of token boundaries.
+// This affects only system-proper-name guards, not user-dictionary protection.
+bool ShouldProtectSelectedSystemProperNoun(
+    absl::string_view reading, absl::string_view surface,
+    const std::vector<std::string>& token_readings,
+    bool verified_personal_full_name);
+
 struct ZenzProtectedPromptInput {
   absl::string_view key;
   std::vector<ProtectedConversionSpan> protected_spans;
