@@ -76,6 +76,9 @@ struct Entry {
   // For UNIT_AND_BIG_DIGIT and UNIT_AND_STOP_DECODING.
   // The key length for the first part.
   int consume_byte_len_of_first = 0;
+  // For STOP_DECODING. Preserve the partial bare number only for explicitly
+  // marked suffix boundaries (e.g., "にせんち" -> "2").
+  bool emits_bare_number_prefix = false;
 };
 
 // We decode the Japanese number reading using big_digit and small_digit.
@@ -122,32 +125,42 @@ struct State {
   // The digit number
   // 12万(=120000) → 6
   int digit_num = 0;
+  // Boundary confirmed by a stop suffix or consecutive-unit transition.
+  // Suppresses noisy single-token numeric prefixes within ordinary words.
+  bool stopped_at_explicit_boundary = false;
 };
 
 }  // namespace number_decoder_internal
 
 struct NumberDecoderResult {
   NumberDecoderResult() = default;
-  NumberDecoderResult(size_t len, std::string c, int digit_num)
+  NumberDecoderResult(size_t len, std::string c, int digit_num,
+                      bool is_counter_suffix = false)
       : consumed_key_byte_len(len),
         candidate(std::move(c)),
-        digit_num(digit_num) {}
+        digit_num(digit_num),
+        is_counter_suffix(is_counter_suffix) {}
 
   template <typename Sink>
   friend void AbslStringify(Sink& sink, const NumberDecoderResult& result) {
-    absl::Format(&sink, "(%d,\" %s\", %d)", result.consumed_key_byte_len,
-                 result.candidate, result.digit_num);
+    absl::Format(&sink, "(%d,\" %s\", %d, %v)",
+                 result.consumed_key_byte_len, result.candidate,
+                 result.digit_num, result.is_counter_suffix);
   }
 
   size_t consumed_key_byte_len;
   std::string candidate;
   int digit_num;  // 12万(=120000) → 6
+  // Fully consumed number+counter or Wago number expression.
+  bool is_counter_suffix = false;
 };
 
 constexpr bool operator==(const NumberDecoderResult& lhs,
                           const NumberDecoderResult& rhs) {
-  return std::tie(lhs.consumed_key_byte_len, lhs.candidate, lhs.digit_num) ==
-         std::tie(rhs.consumed_key_byte_len, rhs.candidate, rhs.digit_num);
+  return std::tie(lhs.consumed_key_byte_len, lhs.candidate, lhs.digit_num,
+                  lhs.is_counter_suffix) ==
+         std::tie(rhs.consumed_key_byte_len, rhs.candidate, rhs.digit_num,
+                  rhs.is_counter_suffix);
 }
 
 std::ostream& operator<<(std::ostream& os, const NumberDecoderResult& r);
@@ -181,6 +194,7 @@ class NumberDecoder {
 
   const uint16_t kanji_number_id_;
   const uint16_t number_id_;
+  const uint16_t counter_suffix_word_id_;
 };
 
 }  // namespace mozc::prediction

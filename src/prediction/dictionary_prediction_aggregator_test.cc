@@ -2419,6 +2419,18 @@ TEST_F(DictionaryPredictionAggregatorTest, NumberDecoderCandidates) {
   ASSERT_NE(result, results.end());
   EXPECT_TRUE(result->attributes & Attribute::PARTIALLY_KEY_CONSUMED);
   EXPECT_TRUE(result->attributes & Attribute::NO_SUGGEST_LEARNING);
+
+  // The fully-consumed "45回" counter candidate survives aggregation, keeps
+  // the counter-suffix POS, and does not become a partial-key result.
+  const auto& counter_result =
+      std::find_if(results.begin(), results.end(),
+                   [](Result r) { return r.value == "45回" && !r.removed; });
+  ASSERT_NE(counter_result, results.end());
+  EXPECT_EQ(counter_result->key, "よんじゅうごかい");
+  EXPECT_FALSE(counter_result->attributes & Attribute::PARTIALLY_KEY_CONSUMED);
+  EXPECT_TRUE(counter_result->attributes & Attribute::NO_SUGGEST_LEARNING);
+  EXPECT_EQ(counter_result->rid,
+            data_and_aggregator->pos_matcher().GetCounterSuffixWordId());
 }
 
 TEST_F(DictionaryPredictionAggregatorTest, DoNotPredictNoisyNumberEntries) {
