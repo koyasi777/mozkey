@@ -32,7 +32,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 
 - **遅延付きライブ変換とルビ表示：** スペースキーを押す前から未確定文字列を変換。開始までの待機時間や文字数、読みを示すルビ風の表示を調整できます。
 - **Mozc と Zenz の二層構成：** Mozc の通常変換を維持しながら、ローカルの Zenz で文脈に応じた補正を追加。補正が適さない場合は Mozc の結果へ戻せます。
-- **文脈と表記を尊重する補正：** 前後の文脈を利用し、助詞・機能語や文節のつながりを改善。ユーザー辞書に加え、システム辞書由来の人名・地名・組織名などの固有名詞、英字・技術用語、数字、記号の表記を不用意に置き換えないための保護も備えています。
+- **文脈と表記を尊重する補正：** 前後の文脈を利用し、助詞・機能語や文節のつながりを改善。ユーザー辞書に加え、システム辞書由来の人名・地名・組織名などの固有名詞、英字・技術用語、数字、記号の表記を不用意に置き換えないための保護も備えています。ただし、一般表現と競合する一部の地名は、Zenz の文脈補正を妨げないよう強制保護の対象から除外しています。
 - **Zenz 補正結果の採用条件：** 厳密な読み保持と、Zenz が絵文字を意図せず追加・変更・削除することを抑制する設定を用意。自動ライブ補正と手動補正の両方に適用できます。
 - **選べる Zenz の表示タイミング：** 通常のライブ変換結果を先に表示する動作に加え、Zenz の応答を一定時間待ってから表示する方式も選択できます。
 - **学習と候補のコントロール：** Zenz の採用・却下フィードバック、保存済み結果の再利用、Mozc 変換履歴への学習を個別に設定。表示中の Zenz 補正は `Ctrl+Delete` で明示的にブロックでき、学習データの管理、通常候補の履歴削除・非表示、確定直後の取り消しにも対応します。
@@ -226,6 +226,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Zenz が左文脈などから `！` / `!`、`？` / `?`、`。`、`…`、`〜` などの文末・表現記号を、現在の未確定文字列または通常 Mozc ライブ変換結果の末尾にある数を超えて追加した場合は、余分な末尾記号だけを抑制し、漢字・語彙などの補正結果は保持
 - 日本語のみのユーザー辞書語は、自然な読みを Zenz prompt に残したまま、Zenz 応答後に表記の境界を検証し、余分なかな付着を安全に修復できる場合だけ採用するようにした
 - システム辞書由来の固有名詞について、Mozc が実際に選択した候補の品詞・読み・表記・位置情報を検証し、人名・地名・組織名などの不用意な書き換えを抑制。すべての固有名詞を無条件に固定するものではない
+- 地名を表す単一辞書ノードで、地域固有名詞の品詞と、市・区・県・町・駅などの接尾辞種別・読み・表記が整合する場合も固有名詞候補として認識。一方、`あきたし / 秋田市` や `さくし / 佐久市` など、一般表現と競合する監査済みの60組は読みと表記の組で強制保護を除外し、Zenz による文脈補正の余地を残す
 - 検証済みの姓名に限り、Zenz への入力中で読みと表記を自然な代理語へ一時的に置き換え、応答後に元の姓名へ復元。出現回数・復元条件などを確認し、安全に復元できない場合は通常 Mozc の変換結果を維持。地名や組織名は代理語化しない
 - Zenz prompt に使う左文脈は sanitizer を通し、URL、email、file path、token、長い数字列など sensitive-like な文脈は prompt に含めない
 - Zenz feedback は full-sequence 単位だけを保存し、raw left context や segment-local feedback は保存せず、非可逆な context class のみを保存
@@ -435,6 +436,10 @@ Windows TSF の password input scope と macOS の Secure Event Input では、a
 #### システム辞書由来の固有名詞と検証済み姓名の保護
 
 Zenz が、Mozc の通常変換で正しく選択された人名・地名・組織名などを別の表記へ変更してしまう場合があります。Mozkey は、実際に選択された候補の辞書ノードから品詞・読み・表記・位置情報を調べ、固有名詞として十分な根拠を確認できた部分を保護します。ユーザー辞書の登録語は、従来からの別の保護経路でも扱います。
+
+地名については、複数ノードの「秋田 + 市」のような構成に加え、単一の辞書ノードが「秋田市」を表す場合にも対応しています。単一ノードでは地域固有名詞の左品詞と、`区`・`市`・`府`・`村`・`町`・`県`・`郡`・`駅`の種別を持つ地域接尾辞の右品詞を照合し、読み・表記の末尾がその種別と整合する場合だけ固有名詞候補として認識します。単に表記が「市」などで終わるだけでは保護根拠にしません。
+
+ただし、辞書上の地名であることは、入力文中でも地名が正解であることを意味しません。例えば `あきたし` は「秋田市」と「飽きたし」の両方に解釈できます。Mozkey は辞書監査で一般語・活用形との競合を確認した60組の地名を、**読み全体と表記の完全一致**によってシステム固有名詞の強制保護から除外します。1ノード・複数ノードのどちらで選択されても同じ方針です。これにより Zenz が文脈に応じた一般表現を選べる余地を残しますが、Zenz の出力検証や既存のユーザー辞書保護を省略するものではなく、正しい変換を保証するものでもありません。60組以外の同音異義・活用形の衝突は網羅されていません。
 
 人名は姓・名の品詞と構造を検証します。選択経路が一般名詞などになっていても、ラティス上の代替辞書経路と読み・表記が整合すれば、姓名を検出できる場合があります。
 
@@ -972,7 +977,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 
 - **Delayed live conversion and reading overlay:** Converts compositions before Space is pressed, with adjustable debounce delay, minimum length, and ruby-like display of the reading.
 - **Layered Mozc + Zenz conversion:** Keeps normal Mozc conversion as the baseline and adds optional local Zenz correction, falling back to Mozc when a correction is not adopted.
-- **Context-aware correction with spelling safeguards:** Uses available preceding and following context while protecting user-dictionary entries, verified proper nouns from the system dictionary (including personal and place names and organization names), Latin/technical spellings, numeric literals, and punctuation choices.
+- **Context-aware correction with spelling safeguards:** Uses available preceding and following context while protecting user-dictionary entries, verified proper nouns from the system dictionary (including personal and place names and organization names), Latin/technical spellings, numeric literals, and punctuation choices. Some ambiguous place names are exempted from hard protection so that Zenz can still correct ordinary expressions in context.
 - **Zenz correction acceptance criteria:** Optional strict reading preservation and default-on protection against Zenz adding, replacing, or removing emoji. These checks apply to both automatic live correction and explicit manual correction.
 - **Optional deferred presentation:** Choose whether to display Mozc live conversion immediately or briefly wait for Zenz before showing a result.
 - **Controllable learning and candidates:** Configure Zenz accept/reject recording, feedback reuse, and Mozc-history learning independently; use `Ctrl+Delete` to explicitly block a visible Zenz correction, manage feedback, hide ordinary candidates, and undo recent commits.
@@ -1259,6 +1264,7 @@ Main features added in this fork
 - Suppresses only excess trailing sentence-final or expressive punctuation introduced by contextual Zenz output beyond what is already present at the end of the current composition or normal Mozc live-conversion result, while preserving the rest of the correction
 - For Japanese-only user-dictionary surfaces, keeps the natural reading in the Zenz prompt and validates the selected surface boundaries after the response, accepting the result only when any extra kana attachment can be repaired safely
 - Protects proper nouns from the system dictionary when the POS, reading, surface, and position of the actual Mozc-selected candidate provide sufficient evidence, including personal names, place names, and organization names; it does not indiscriminately lock every dictionary entry
+- Recognizes single-node geographic compounds when the geographic proper-noun POS, typed regional-suffix POS, reading, and surface ending agree. Exempts 60 reviewed ambiguous reading/surface pairs (for example, `あきたし / 秋田市` and `さくし / 佐久市`) from hard system-name protection so Zenz can resolve ordinary expressions in context
 - Temporarily substitutes a natural proxy reading and surface for verified full personal names in the Zenz input, then restores the original name after the response; validates occurrence counts and restoration conditions, and falls back to the normal Mozc result if restoration is unsafe. Place and organization names are not proxied
 - Sanitizes left context before using it in Zenz prompts, and excludes sensitive-like context such as URLs, email addresses, file paths, tokens, and long digit sequences
 - Stores only full-sequence Zenz feedback with non-reversible context classes, never raw left context or segment-local feedback
@@ -1543,6 +1549,10 @@ is skipped.
 #### Protecting system-dictionary proper nouns and verified full personal names
 
 Zenz may rewrite a personal name, place name, or organization name that normal Mozc conversion selected correctly. Mozkey uses the dictionary nodes underlying the actually selected candidate to inspect part-of-speech information, reading, surface, and position, and protects only spans for which it has sufficient evidence. User-dictionary entries continue to use their existing protection path as well.
+
+For place names, Mozkey handles both multi-node constructions such as `秋田 + 市` and single dictionary nodes such as `秋田市`. For a single node, the left POS must indicate a geographic proper noun and the right POS must identify a typed regional suffix (`区`, `市`, `府`, `村`, `町`, `県`, `郡`, or `駅`), with matching reading and surface endings. A matching surface suffix alone is not sufficient evidence.
+
+A place-name candidate is not proof that the writer intended a place. For example, `あきたし` could mean either `秋田市` (Akita City) or `飽きたし` ("I'm tired of it, and ..."). Based on a dictionary ambiguity audit, 60 reviewed place-name **full-reading/surface pairs** are exempted from hard system-proper-noun protection. The same policy applies whether a name is represented by one node or several nodes. Zenz can therefore propose an ordinary expression in context, but all independent output validation and user-dictionary protections still apply. Correct conversion is not guaranteed, and this curated set does not cover every possible geographic homophone or inflected expression.
 
 For personal names, Mozkey checks surname/given-name POS information and structure. Even if the selected path is classified as a general noun, an alternative lattice path may establish a verified full name when its reading and surface agree with the selected result.
 
