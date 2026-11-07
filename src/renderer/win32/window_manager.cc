@@ -421,6 +421,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   // the stale DPI.
   const uint32_t target_dpi = GetDpiForPoint(target_point.x, target_point.y);
   main_window_->UpdateDpi(target_dpi);
+  cascading_window_->UpdateDpi(target_dpi);
   infolist_window_->UpdateDpi(target_dpi);
 
   const bool vertical = (LayoutManager::GetWritingDirection(app_info) ==
