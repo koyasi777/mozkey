@@ -975,11 +975,11 @@ std::vector<ProtectedConversionSpan> BuildZenzProtectedConversionSpans(
       converter.GetSelectedProperNounSpans(&selected_names);
   if (has_selected_names) {
     for (const converter::ProperNounSpan& name : selected_names) {
-      // Verified surname-and-given-name evidence is stronger than an
-      // ambiguous individual token reading.
-      const bool protect_reading =
-          name.verified_personal_full_name ||
-          ShouldProtectSystemProperNounReadings(name.token_readings);
+      // Token boundaries differ between one-node and multi-node place names.
+      // Use the full selected reading + surface for reviewed ambiguities.
+      const bool protect_reading = ShouldProtectSelectedSystemProperNoun(
+          name.key, name.value, name.token_readings,
+          name.verified_personal_full_name);
       if (!protect_reading) {
         continue;
       }

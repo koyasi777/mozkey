@@ -1005,6 +1005,150 @@ TEST(ZenzAdoptionPolicyTest, SystemProperNounExceptionUsesWholeExpression) {
   EXPECT_TRUE(ShouldProtectSystemProperNounReadings({"ならけん"}));
 }
 
+TEST(ZenzAdoptionPolicyTest, ReviewedGeographicHomophonesAreSoftByFullPair) {
+  // Even if the dictionary chooses a place, a common word or inflected verb
+  // can be the intended reading. A single node and a merged path must agree.
+  constexpr std::pair<absl::string_view, absl::string_view> kCases[] = {
+      {"あきたし", "秋田市"},
+      {"いいだし", "飯田市"},
+      {"おたかく", "小高区"},
+      {"おまち", "雄町"},
+      {"かいたし", "海田市"},
+      {"かいし", "甲斐市"},
+      {"かさまし", "笠間市"},
+      {"きんちょう", "金武町"},
+      {"こうせいちょう", "甲西町"},
+      {"こうちょう", "国府町"},
+      {"さがし", "佐賀市"},
+      {"しんてんちょう", "新天町"},
+      {"じゅけん", "寿県"},
+      {"しばく", "芝区"},
+      {"すいたし", "吹田市"},
+      {"せいちょう", "瀬居町"},
+      {"たくし", "多久市"},
+      {"ちずちょう", "智頭町"},
+      {"つるし", "都留市"},
+      {"ならし", "奈良市"},
+      {"のうじょうちょう", "農場町"},
+      {"みたし", "三田市"},
+      {"みはらし", "三原市"},
+      {"やいたし", "矢板市"},
+      // Additional P1 collisions reviewed against the PR410 dictionary audit.
+      {"あし", "ア市"},
+      {"えなし", "恵那市"},
+      {"おおいまち", "大井町"},
+      {"おく", "小区"},
+      {"かいけん", "開県"},
+      {"かいほうし", "開封市"},
+      {"かけたけん", "カケタ県"},
+      {"かこうえき", "河口駅"},
+      {"きせいちょう", "紀勢町"},
+      {"こうしゅうえき", "杭州駅"},
+      {"こがし", "古河市"},
+      {"こがし", "古賀市"},
+      {"こんごうえき", "金剛駅"},
+      {"ごけん", "呉県"},
+      {"ごせんし", "五泉市"},
+      {"さいかいし", "西海市"},
+      {"さくし", "佐久市"},
+      {"しきし", "志木市"},
+      {"しそうし", "宍粟市"},
+      {"しんせいちょう", "真正町"},
+      {"しんでんちょう", "新田町"},
+      {"じょうとうく", "城東区"},
+      {"せいかいけん", "静海県"},
+      {"たけん", "タ県"},
+      {"たのまち", "田野町"},
+      {"だんちょう", "段町"},
+      {"ちくさく", "千種区"},
+      {"ちゅうけん", "忠県"},
+      {"とうけん", "藤県"},
+      {"とばし", "鳥羽市"},
+      {"なかし", "那珂市"},
+      {"にんぎょうし", "人形市"},
+      {"はんのうえき", "飯能駅"},
+      {"ひたし", "日田市"},
+      {"ふうふ", "風府"},
+      {"べいし", "米市"},
+  };
+  for (const auto& [reading, surface] : kCases) {
+    EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+        reading, surface, {std::string(reading)}, false))
+        << std::string(reading) << " / " << std::string(surface);
+  }
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "あきたし", "秋田市", {"あきた", "し"}, false));
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "ならし", "奈良市", {"なら", "し"}, false));
+}
+
+TEST(ZenzAdoptionPolicyTest, P1GeographicHomophonesShareOneAndMultiNodePolicy) {
+  // The exact full pair, rather than the particular node split, is the key.
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "さくし", "佐久市", {"さくし"}, false));
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "さくし", "佐久市", {"さく", "し"}, false));
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "こがし", "古河市", {"こが", "し"}, false));
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "こがし", "古賀市", {"こがし"}, false));
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "かけたけん", "カケタ県", {"かけた", "けん"}, false));
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "はんのうえき", "飯能駅", {"はんのう", "えき"}, false));
+
+  // Same reading with another surface, another reading with same surface,
+  // and independently verified personal names must not be softened.
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "さくし", "佐久町", {"さくし"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "こがし", "小菓子", {"こがし"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "こがち", "古河市", {"こがち"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "こがし", "古賀市", {"こがし"}, true));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "やまぐちけん", "山口県", {"やまぐち", "けん"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "さとうしょうじ", "佐藤商事", {"さとう", "しょうじ"}, false));
+}
+
+TEST(ZenzAdoptionPolicyTest, GeographicExceptionPreservesUnrelatedGuards) {
+  // A different surface or reading must not be exempt by substring.
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "あきたし", "別の市", {"あきたし"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "あきたけん", "秋田県", {"あきた", "けん"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "ならけん", "奈良県", {"なら", "けん"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "さとうしょうじ", "佐藤商事", {"さとう", "しょうじ"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "あきたし", "秋田市", {"あきたし"}, true));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "あきたし", "秋田市", {"あきた", "し"}, true));
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "あきた", "秋田", {"あきた"}, false));
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "", "", {}, false));
+}
+
+TEST(ZenzAdoptionPolicyTest, UserDictionaryProtectionIsIndependentOfPlaces) {
+  // The geographic soft policy must not weaken a user-preferred exact surface.
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "あきたし";
+  input.mozc_value = "秋田市";
+  input.zenz_value = "飽きたし";
+  input.protected_spans = {
+      BuildSpan("あきたし", "秋田市",
+                ProtectedConversionSpan::Tier::kUserPreferred, false),
+  };
+  const auto result = policy.Decide(input);
+  EXPECT_NE(result.action, ZenzAdoptionResult::Action::kAcceptAsIs);
+  EXPECT_EQ(result.value, "秋田市");
+}
+
 TEST(ZenzAdoptionPolicyTest, ProtectsSelectedSystemNameInLongSentence) {
   ZenzAdoptionPolicy policy;
   ZenzAdoptionInput input;

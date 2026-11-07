@@ -847,6 +847,95 @@ bool ShouldProtectSystemProperNounReadings(
   return false;
 }
 
+bool ShouldProtectSelectedSystemProperNoun(
+    absl::string_view reading, absl::string_view surface,
+    const std::vector<std::string>& token_readings,
+    bool verified_personal_full_name) {
+  // A verified surname + given name is not weakened by a place-name collision.
+  if (verified_personal_full_name) {
+    return true;
+  }
+
+  // Reviewed reading/surface pairs from the PR410 OSS dictionary ambiguity
+  // audit. Each has non-geographic lexical or inflectional evidence. The
+  // dictionary's POS identifies a candidate; it does NOT prove the speaker's
+  // intent. Let Zenz interpret these readings in context, while retaining all
+  // independent Zenz output validation, user-dictionary, and reading guards.
+  // Do not convert this to a broad reading-only exception list: e.g. an
+  // ambiguous 'あきたし/秋田市' must not also exempt 'あきたけん/秋田県'.
+  constexpr std::pair<absl::string_view, absl::string_view>
+      kAmbiguousGeographicNames[] = {
+      {"あきたし", "秋田市"},
+      {"いいだし", "飯田市"},
+      {"おたかく", "小高区"},
+      {"おまち", "雄町"},
+      {"かいたし", "海田市"},
+      {"かいし", "甲斐市"},
+      {"かさまし", "笠間市"},
+      {"きんちょう", "金武町"},
+      {"こうせいちょう", "甲西町"},
+      {"こうちょう", "国府町"},
+      {"さがし", "佐賀市"},
+      {"しんてんちょう", "新天町"},
+      {"じゅけん", "寿県"},
+      {"しばく", "芝区"},
+      {"すいたし", "吹田市"},
+      {"せいちょう", "瀬居町"},
+      {"たくし", "多久市"},
+      {"ちずちょう", "智頭町"},
+      {"つるし", "都留市"},
+      {"ならし", "奈良市"},
+      {"のうじょうちょう", "農場町"},
+      {"みたし", "三田市"},
+      {"みはらし", "三原市"},
+      {"やいたし", "矢板市"},
+      // Additional P1 collisions reviewed against the PR410 dictionary audit.
+      {"あし", "ア市"},
+      {"えなし", "恵那市"},
+      {"おおいまち", "大井町"},
+      {"おく", "小区"},
+      {"かいけん", "開県"},
+      {"かいほうし", "開封市"},
+      {"かけたけん", "カケタ県"},
+      {"かこうえき", "河口駅"},
+      {"きせいちょう", "紀勢町"},
+      {"こうしゅうえき", "杭州駅"},
+      {"こがし", "古河市"},
+      {"こがし", "古賀市"},
+      {"こんごうえき", "金剛駅"},
+      {"ごけん", "呉県"},
+      {"ごせんし", "五泉市"},
+      {"さいかいし", "西海市"},
+      {"さくし", "佐久市"},
+      {"しきし", "志木市"},
+      {"しそうし", "宍粟市"},
+      {"しんせいちょう", "真正町"},
+      {"しんでんちょう", "新田町"},
+      {"じょうとうく", "城東区"},
+      {"せいかいけん", "静海県"},
+      {"たけん", "タ県"},
+      {"たのまち", "田野町"},
+      {"だんちょう", "段町"},
+      {"ちくさく", "千種区"},
+      {"ちゅうけん", "忠県"},
+      {"とうけん", "藤県"},
+      {"とばし", "鳥羽市"},
+      {"なかし", "那珂市"},
+      {"にんぎょうし", "人形市"},
+      {"はんのうえき", "飯能駅"},
+      {"ひたし", "日田市"},
+      {"ふうふ", "風府"},
+      {"べいし", "米市"},
+  };
+  for (const auto& [ambiguous_reading, ambiguous_surface] :
+       kAmbiguousGeographicNames) {
+    if (reading == ambiguous_reading && surface == ambiguous_surface) {
+      return false;
+    }
+  }
+  return ShouldProtectSystemProperNounReadings(token_readings);
+}
+
 ZenzProtectedPromptResult ZenzAdoptionPolicy::ProtectPromptKey(
     const ZenzProtectedPromptInput& input) const {
   ZenzProtectedPromptResult result;

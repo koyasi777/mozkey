@@ -1141,4 +1141,188 @@ TEST_F(NBestGeneratorTest, UnrelatedGivenPositionNodesCannotDiscardNameEvidence)
   EXPECT_EQ(candidate.value, "見上愛から");
 }
 
+// A geographic proper noun can contain its regional suffix in one node.
+// Never promote an ordinary noun or a mismatched suffix to proper-name proof.
+TEST_F(NBestGeneratorTest, GeographicCompoundRequiresMatchingPOSAndEnding) {
+  auto fixture = std::make_unique<MockDataAndImmutableConverter>();
+  const auto& pos = fixture->GetPosMatcher();
+  const uint16_t geographic_lid = pos.GetGeographicProperNounId();
+  const uint16_t city_rid = pos.GetGeographicCitySuffixId();
+  const uint16_t town_rid = pos.GetGeographicTownSuffixId();
+  ASSERT_TRUE(pos.IsGeographicProperNoun(geographic_lid));
+  ASSERT_TRUE(pos.IsGeographicSuffix(city_rid));
+  ASSERT_TRUE(pos.IsGeographicCitySuffix(city_rid));
+  ASSERT_TRUE(pos.IsGeographicTownSuffix(town_rid));
+  ASSERT_FALSE(pos.IsGeographicTownSuffix(city_rid));
+
+  const auto verify = [&](absl::string_view key, absl::string_view value,
+                          uint16_t lid, uint16_t rid, bool expected,
+                          bool user_dictionary = false) {
+    Lattice lattice;
+    lattice.SetKey(std::string(key));
+    auto* node = lattice.NewNode();
+    node->key = std::string(key);
+    node->value = std::string(value);
+    node->lid = lid;
+    node->rid = rid;
+    if (user_dictionary) {
+      node->attributes |= Node::USER_DICTIONARY;
+    }
+    lattice.Insert(0, node);
+
+    auto generator = fixture->CreateNBestGenerator(
+        lattice, ConvReq(ConversionRequest::CONVERSION));
+    NBestGeneratorTestPeer peer(*generator);
+    const std::vector<const Node*> selected = {node};
+    Candidate candidate;
+    peer.MakeCandidate(candidate, 0, 0, 0,
+                       absl::Span<const Node* const>(selected.data(),
+                                                     selected.size()));
+    ASSERT_EQ(candidate.proper_noun_spans.size(), expected ? 1u : 0u)
+        << std::string(key) << " / " << std::string(value);
+    if (expected) {
+      ASSERT_EQ(candidate.proper_noun_spans.size(), 1u);
+      EXPECT_EQ(candidate.proper_noun_spans[0].key, std::string(key));
+      EXPECT_EQ(candidate.proper_noun_spans[0].value, std::string(value));
+      EXPECT_EQ(candidate.proper_noun_spans[0].key_offset, 0u);
+      EXPECT_EQ(candidate.proper_noun_spans[0].value_offset, 0u);
+      EXPECT_FALSE(candidate.proper_noun_spans[0].verified_personal_full_name);
+    }
+  };
+
+  verify("あいおいし", "相生市", geographic_lid, city_rid, true);
+  verify("あいおいちょう", "相生町", geographic_lid, town_rid, true);
+  verify("あいおいまち", "相生町", geographic_lid, town_rid, true);
+  verify("しぶやく", "渋谷区", geographic_lid,
+         pos.GetGeographicWardSuffixId(), true);
+  verify("あおがしまむら", "青ヶ島村", geographic_lid,
+         pos.GetGeographicVillageSuffixId(), true);
+  verify("やまぐちけん", "山口県", geographic_lid,
+         pos.GetGeographicPrefectureKenSuffixId(), true);
+  verify("おおさかふ", "大阪府", geographic_lid,
+         pos.GetGeographicPrefectureFuSuffixId(), true);
+  verify("えちぜんぐん", "越前郡", geographic_lid,
+         pos.GetGeographicCountySuffixId(), true);
+  verify("はかたえき", "博多駅", geographic_lid,
+         pos.GetGeographicStationSuffixId(), true);
+
+  // The ending must agree with the exact regional-suffix subtype, not merely
+  // with some ending in the region family. Generic region suffix is unsafe.
+  verify("あいおいまち", "相生町", geographic_lid, city_rid, false);
+  verify("あいおいし", "相生市", geographic_lid, town_rid, false);
+  verify("あいおいし", "相生市", geographic_lid,
+         pos.GetGeographicSuffixId(), false);
+  verify("あいおいし", "相生市", pos.GetGeneralNounId(), city_rid, false);
+  verify("あいおいし", "相生市", geographic_lid,
+         pos.GetGeneralNounId(), false);
+  verify("あいおいし", "相生市", pos.GetLastNameId(), city_rid, false);
+  verify("あいおいか", "相生市", geographic_lid, city_rid, false);
+  verify("あいおいし", "相生山", geographic_lid, city_rid, false);
+  verify("あいおいし", "相生市", geographic_lid, city_rid, false, true);
+}
+
+TEST_F(NBestGeneratorTest, GeographicCompoundSpanDoesNotIncludeSurroundingText) {
+  auto fixture = std::make_unique<MockDataAndImmutableConverter>();
+  const auto& pos = fixture->GetPosMatcher();
+  Lattice lattice;
+  lattice.SetKey("きょうはあいおいしにいく");
+  auto* prefix = lattice.NewNode();
+  prefix->key = "きょうは";
+  prefix->value = "今日は";
+  prefix->lid = prefix->rid = pos.GetGeneralNounId();
+  lattice.Insert(0, prefix);
+  auto* place = lattice.NewNode();
+  place->key = "あいおいし";
+  place->value = "相生市";
+  place->lid = pos.GetGeographicProperNounId();
+  place->rid = pos.GetGeographicCitySuffixId();
+  lattice.Insert(prefix->key.size(), place);
+  auto* particle = lattice.NewNode();
+  particle->key = "に";
+  particle->value = "に";
+  particle->lid = particle->rid = pos.GetGeneralNounId();
+  lattice.Insert(prefix->key.size() + place->key.size(), particle);
+  auto* verb = lattice.NewNode();
+  verb->key = "いく";
+  verb->value = "行く";
+  verb->lid = verb->rid = pos.GetGeneralNounId();
+  lattice.Insert(prefix->key.size() + place->key.size() + particle->key.size(),
+                 verb);
+  auto generator = fixture->CreateNBestGenerator(
+      lattice, ConvReq(ConversionRequest::CONVERSION));
+  NBestGeneratorTestPeer peer(*generator);
+  const std::vector<const Node*> selected = {prefix, place, particle, verb};
+  Candidate candidate;
+  peer.MakeCandidate(candidate, 0, 0, 0,
+                     absl::Span<const Node* const>(selected.data(),
+                                                   selected.size()));
+  ASSERT_EQ(candidate.proper_noun_spans.size(), 1u);
+  const auto& span = candidate.proper_noun_spans[0];
+  EXPECT_EQ(span.key, "あいおいし");
+  EXPECT_EQ(span.value, "相生市");
+  EXPECT_EQ(span.key_offset, prefix->key.size());
+  EXPECT_EQ(span.value_offset, prefix->value.size());
+  EXPECT_FALSE(span.verified_personal_full_name);
+  EXPECT_EQ(candidate.value, "今日は相生市に行く");
+}
+
+TEST_F(NBestGeneratorTest, AmbiguousCityHasSameFullSpanForOneOrTwoNodes) {
+  auto fixture = std::make_unique<MockDataAndImmutableConverter>();
+  const auto& pos = fixture->GetPosMatcher();
+
+  // One selected dictionary node with a regional city suffix RID.
+  {
+    Lattice lattice;
+    lattice.SetKey("あきたし");
+    auto* place = lattice.NewNode();
+    place->key = "あきたし";
+    place->value = "秋田市";
+    place->lid = pos.GetGeographicProperNounId();
+    place->rid = pos.GetGeographicCitySuffixId();
+    lattice.Insert(0, place);
+    auto generator = fixture->CreateNBestGenerator(
+        lattice, ConvReq(ConversionRequest::CONVERSION));
+    NBestGeneratorTestPeer peer(*generator);
+    const std::vector<const Node*> selected = {place};
+    Candidate candidate;
+    peer.MakeCandidate(candidate, 0, 0, 0,
+                       absl::Span<const Node* const>(selected.data(),
+                                                     selected.size()));
+    ASSERT_EQ(candidate.proper_noun_spans.size(), 1u);
+    EXPECT_EQ(candidate.proper_noun_spans[0].key, "あきたし");
+    EXPECT_EQ(candidate.proper_noun_spans[0].value, "秋田市");
+    EXPECT_EQ(candidate.proper_noun_spans[0].token_readings,
+              (std::vector<std::string>{"あきたし"}));
+  }
+
+  // Alternative selected path: ordinary geographical noun + city ending.
+  {
+    Lattice lattice;
+    lattice.SetKey("あきたし");
+    auto* place = lattice.NewNode();
+    place->key = "あきた";
+    place->value = "秋田";
+    place->lid = place->rid = pos.GetGeographicProperNounId();
+    lattice.Insert(0, place);
+    auto* suffix = lattice.NewNode();
+    suffix->key = "し";
+    suffix->value = "市";
+    suffix->lid = suffix->rid = pos.GetGeneralNounId();
+    lattice.Insert(place->key.size(), suffix);
+    auto generator = fixture->CreateNBestGenerator(
+        lattice, ConvReq(ConversionRequest::CONVERSION));
+    NBestGeneratorTestPeer peer(*generator);
+    const std::vector<const Node*> selected = {place, suffix};
+    Candidate candidate;
+    peer.MakeCandidate(candidate, 0, 0, 0,
+                       absl::Span<const Node* const>(selected.data(),
+                                                     selected.size()));
+    ASSERT_EQ(candidate.proper_noun_spans.size(), 1u);
+    EXPECT_EQ(candidate.proper_noun_spans[0].key, "あきたし");
+    EXPECT_EQ(candidate.proper_noun_spans[0].value, "秋田市");
+    EXPECT_EQ(candidate.proper_noun_spans[0].token_readings,
+              (std::vector<std::string>{"あきた", "し"}));
+  }
+}
+
 }  // namespace mozc
