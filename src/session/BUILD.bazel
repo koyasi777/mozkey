@@ -436,6 +436,7 @@ mozc_cc_test(
         "//dictionary:pos_matcher",
         "//engine",
         "//engine:engine_converter",
+        "//engine:engine_factory",
         "//engine:engine_mock",
         "//engine:mock_data_engine_factory",
         "//protocol:candidate_window_cc_proto",
