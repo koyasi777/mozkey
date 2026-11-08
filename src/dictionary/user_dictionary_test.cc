@@ -1192,6 +1192,41 @@ TEST_F(UserDictionaryTest, TestPopulateTokenFromUserPosTokenWithEntryPenalty) {
   dic->PopulateTokenFromUserPosToken(user_token, UserDictionary::PREFIX,
                                      &token);
   EXPECT_EQ(token.cost, 5000);
+
+  // ABBREVIATION keeps a fixed cost independent of dictionary entry count.
+  user_token.set_pos_type(user_dictionary::UserDictionary::ABBREVIATION);
+  dic->PopulateTokenFromUserPosToken(user_token,
+                                               UserDictionary::PREFIX, &token);
+  EXPECT_EQ(token.cost, 200);
+
+  // At N = 148, cost_penalty = int(500 * ln(149)) = 2501, and all
+  // non-abbreviation POS base costs converge to 2500.
+  for (int i = 10; i < 148; ++i) {
+    user_dictionary::UserDictionary::Entry* entry = user_dic->add_entries();
+    entry->set_key(absl::StrCat("key", i));
+    entry->set_value(absl::StrCat("value", i));
+    entry->set_pos(user_dictionary::UserDictionary::NOUN);
+  }
+  dic->Load(storage);
+
+  const int penalty_148 = static_cast<int>(500.0 * std::log(149.0));
+  for (const auto pos_type : {
+           user_dictionary::UserDictionary::NOUN,
+           user_dictionary::UserDictionary::PERSONAL_NAME,
+           user_dictionary::UserDictionary::SYMBOL,
+           user_dictionary::UserDictionary::EMOTICON,
+           user_dictionary::UserDictionary::FREE_STANDING_WORD,
+       }) {
+    user_token.set_pos_type(pos_type);
+    dic->PopulateTokenFromUserPosToken(
+        user_token, UserDictionary::PREFIX, &token);
+    EXPECT_EQ(token.cost, 2500 + penalty_148);
+  }
+
+  user_token.set_pos_type(user_dictionary::UserDictionary::ABBREVIATION);
+  dic->PopulateTokenFromUserPosToken(user_token,
+                                               UserDictionary::PREFIX, &token);
+  EXPECT_EQ(token.cost, 200);
 }
 
 TEST_F(UserDictionaryTest, AsyncImportTest) {
