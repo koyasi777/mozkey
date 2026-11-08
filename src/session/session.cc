@@ -4490,8 +4490,12 @@ bool Session::MaybeStartLiveConversionInternal(
   ConversionPreferences live_preferences =
       context_->converter().conversion_preferences();
   live_preferences.prefer_zipcode_literal_top = true;
-  if (!context_->mutable_converter()->ConvertWithPreferences(
-          context_->composer(), live_preferences)) {
+  // Use the same client context as ordinary conversion.  The compatibility
+  // ConvertWithPreferences wrapper supplies an empty Context, which discards
+  // preceding_text needed by the contextual particle reranker in live mode.
+  if (!context_->mutable_converter()->Convert(
+          context_->composer(), context_->client_context(),
+          live_preferences)) {
     if (ShouldKeepPendingLiveConversionForTransientSokuon(live_conversion_key) &&
         OutputPendingLiveConversion(command)) {
       ClearZenzLiveCorrectionState();
@@ -8802,6 +8806,31 @@ bool Session::InsertCharacter(commands::Command* command) {
     // neutralize the observation before it is persisted as rejected feedback.
     if (!defer_pending_zenz_comparison_for_conversion_direct_commit) {
       ConfirmPendingZenzFeedback();
+    }
+
+    // This key commits the previous conversion and begins a new composition.
+    // The next key's client context may still describe the document *before*
+    // this commit.  Refresh it rather than replaying the previous composition's
+    // context when OnStartComposition() validates the newly committed history.
+    if (command->input().has_context()) {
+      *context_->mutable_client_context() = command->input().context();
+    } else {
+      context_->mutable_client_context()->Clear();
+    }
+    // Preserve client metadata (e.g. privacy and field type), but trust a
+    // supplied preceding_text only if it includes the result just committed.
+    // Otherwise discard its stale left text and revision so the converter's
+    // fresh committed history remains available for the next conversion.
+    commands::Context* next_client_context = context_->mutable_client_context();
+    if (command->output().has_result()) {
+      const std::string& committed_value = command->output().result().value();
+      if (!committed_value.empty() &&
+          (!next_client_context->has_preceding_text() ||
+           !absl::EndsWith(next_client_context->preceding_text(),
+                           committed_value))) {
+        next_client_context->clear_preceding_text();
+        next_client_context->clear_revision();
+      }
     }
 
     if (key.input_style() == commands::KeyEvent::DIRECT_INPUT) {

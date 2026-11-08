@@ -68,6 +68,7 @@
 #include "dictionary/pos_matcher.h"
 #include "engine/engine.h"
 #include "engine/engine_converter.h"
+#include "engine/engine_factory.h"
 #include "engine/engine_mock.h"
 #include "engine/mock_data_engine_factory.h"
 #include "protocol/candidate_window.pb.h"
@@ -5170,6 +5171,46 @@ TEST_F(SessionTest,
             kSuggestionValue);
 }
 #endif  // defined(_WIN32)
+
+// Regression: live conversion must forward the same left context as ordinary
+// conversion.  ConvertWithPreferences(composer, preferences) silently supplies
+// an empty Context and prevents ni/shika correction after committed text.
+TEST_F(SessionTest, LiveConversionPreservesClientContext) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> backend = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+  commands::Command command;
+  InsertCharacterChars("aiueo", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(), "あいうえお");
+
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  session_peer.context_()->mutable_client_context()->set_preceding_text("API ");
+
+  EXPECT_CALL(*backend, StartConversion(_, _))
+      .WillOnce([](const ConversionRequest& request, Segments* segments) {
+        EXPECT_EQ(request.context().preceding_text(), "API ");
+        segments->InitForConvert(request.key());
+        Segment* segment = segments->mutable_conversion_segment(0);
+        AddCandidate(request.key(), "あいうえお", segment);
+        return true;
+      });
+  command.Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+  EXPECT_TRUE(command.output().live_conversion());
+}
 
 TEST_F(SessionTest, PostalLiveFirstSpaceSelectsExistingAddressCandidate) {
   for (const char* key : {"1000001", "100-0001"}) {
@@ -26083,6 +26124,171 @@ TEST_F(SessionTest, ZenzV12UnpositionedNameFallsBackToOrdinaryPrompt) {
   EXPECT_EQ(peer.pending_zenz_live_().prompt_reading,
             "きのうみかみあいにあった");
   std::cout << "SESSION_V12_INVALID_OFFSETS_BYPASS=YES\n";
+}
+
+// Regression test using the real engine and production dictionary.
+// Covers explicit Enter commits and implicit commits on the next keypress.
+TEST_F(SessionTest, SelectedDateNextKeyCommitPreservesParticleContext) {
+  for (bool automatic_commit : {true, false}) {
+    // mode 2 models a client that reports the still-uncommitted left text
+    // on the same key that commits the selected date.  Explicit Enter has
+    // already finished the commit, so this is tested for next-key only.
+    for (int next_context_mode : {0, 1, 2}) {
+      if (!automatic_commit && next_context_mode == 2) {
+        continue;
+      }
+      for (bool enable_followon_live_conversion : {false, true}) {
+        SCOPED_TRACE(absl::StrCat("auto=", automatic_commit,
+                                  " next_context_mode=", next_context_mode,
+                                  " live=", enable_followon_live_conversion));
+        std::unique_ptr<Engine> real_engine = EngineFactory::Create().value();
+        ASSERT_TRUE(real_engine);
+        real_engine->ClearUserHistory();
+        real_engine->ClearUserPrediction();
+        real_engine->Wait();
+        Session session(*real_engine);
+        InitSessionToPrecomposition(&session);
+
+        config::Config config;
+        config::ConfigHandler::GetDefaultConfig(&config);
+        config.set_session_keymap(config::Config::MSIME);
+        config.set_use_live_conversion(false);
+        config.set_use_zenz_live_correction(false);
+        config.set_use_auto_conversion(false);
+        config.set_use_direct_commit(false);
+        config.set_show_candidate_window_on_initial_conversion(true);
+        session.SetConfig(config);
+        session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+
+        commands::Context before_date;
+        before_date.set_preceding_text("前文。");
+        commands::Command command;
+        InsertCharacterCharsWithContext("kyou", before_date, &session,
+                                        &command);
+        ASSERT_EQ(session.context().composer().GetQueryForConversion(),
+                  "きょう");
+        command.Clear();
+        ASSERT_TRUE(session.Convert(&command));
+        ASSERT_TRUE(command.output().has_candidate_window())
+            << command.output().DebugString();
+
+        bool found_date = false;
+        int selected_id = 0;
+        std::string selected_date;
+        for (const auto& candidate :
+             command.output().candidate_window().candidate()) {
+          const std::string& surface = candidate.value();
+          if (surface.size() >= 8 && surface.size() <= 16 &&
+              surface.find('/') != std::string::npos &&
+              surface.find('/', surface.find('/') + 1) !=
+                  std::string::npos &&
+              candidate.has_id()) {
+            selected_id = candidate.id();
+            selected_date = surface;
+            found_date = true;
+            break;
+          }
+        }
+        ASSERT_TRUE(found_date)
+            << "No real date candidate for きょう: "
+            << command.output().DebugString();
+
+        command.Clear();
+        command.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+        command.mutable_input()->mutable_command()->set_type(
+            commands::SessionCommand::SELECT_CANDIDATE);
+        command.mutable_input()->mutable_command()->set_id(selected_id);
+        ASSERT_TRUE(session.SendCommand(&command));
+        ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+        ASSERT_TRUE(command.output().has_preedit());
+        ASSERT_GE(command.output().preedit().segment_size(), 1);
+        ASSERT_EQ(command.output().preedit().segment(0).value(),
+                  selected_date) << command.output().DebugString();
+
+        if (!automatic_commit) {
+          command.Clear();
+          ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ENTER, &session,
+                                     &command));
+          ASSERT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+        }
+
+        // Enable live conversion for follow-on input, keeping date selection
+        // deterministic across scenarios. No installed binary is touched.
+        if (enable_followon_live_conversion) {
+          config.set_use_live_conversion(true);
+          config.set_live_conversion_delay_msec(0);
+          session.SetConfig(config);
+          session.SetKeyMapManager(
+              std::make_shared<keymap::KeyMapManager>(config));
+        }
+
+        ASSERT_TRUE(SetSendKeyCommand("n", &command));
+        if (next_context_mode == 1) {
+          command.mutable_input()->mutable_context()->set_preceding_text(
+              selected_date);
+        } else if (next_context_mode == 2) {
+          command.mutable_input()->mutable_context()->set_preceding_text(
+              "前文。");
+          command.mutable_input()->mutable_context()->set_revision(42);
+        }
+        ASSERT_TRUE(session.SendKey(&command));
+        const std::string first_key_result = command.output().has_result()
+            ? command.output().result().value() : "<none>";
+        const commands::Context& left = session.context().client_context();
+        const std::string stored_left = left.has_preceding_text()
+            ? left.preceding_text() : "<unset>";
+
+        std::string live_surface;
+        for (char key : std::string("itaiou")) {
+          const std::string physical_key(1, key);
+          ASSERT_TRUE(SendKey(physical_key, &session, &command));
+        }
+        if (command.output().has_preedit()) {
+          for (const auto& segment : command.output().preedit().segment()) {
+            live_surface += segment.value();
+          }
+        }
+        const std::string live_kind = command.output().live_conversion()
+            ? "yes" : "no";
+        if (session.context().state() != ImeContext::CONVERSION) {
+          command.Clear();
+          ASSERT_TRUE(session.Convert(&command));
+        }
+        // Capture the final visible conversion, not merely the stored context.
+        std::string final_surface;
+        std::string first_segment;
+        if (command.output().has_preedit()) {
+          for (const auto& segment : command.output().preedit().segment()) {
+            if (first_segment.empty()) {
+              first_segment = segment.value();
+            }
+            final_surface += segment.value();
+          }
+        }
+        // A key that accepts the selected candidate and starts the next
+        // composition must refresh the left context just like a key typed
+        // after an explicit Enter.  Both paths must preserve the committed
+        // date as converter history and render a particle rather than digit.
+        EXPECT_EQ(first_key_result,
+                  automatic_commit ? selected_date : "<none>");
+        EXPECT_EQ(stored_left,
+                  next_context_mode == 1 ? selected_date : "<unset>");
+        if (next_context_mode == 2) {
+          EXPECT_FALSE(left.has_revision());
+        }
+        EXPECT_EQ(first_segment, "に");
+        EXPECT_EQ(final_surface, "に対応");
+        if (enable_followon_live_conversion) {
+          EXPECT_EQ(live_kind, "yes");
+          EXPECT_EQ(live_surface, "に対応");
+        } else {
+          EXPECT_EQ(live_kind, "no");
+          EXPECT_EQ(live_surface, "にたいおう");
+        }
+      }
+    }
+  }
+  std::cout << "MOZKEY_DATE_NEXT_KEY_REGRESSION=PASS scenarios=10" << std::endl;
 }
 
 }  // namespace session

@@ -292,7 +292,7 @@ bool EngineConverter::Convert(const composer::Composer& composer,
   }
 
   ContextualCandidateReranker contextual_candidate_reranker;
-  contextual_candidate_reranker.Rerank(&segments_);
+  contextual_candidate_reranker.Rerank(&segments_, context.preceding_text());
   // The numeric TOP1 override belongs to the ZIP feature. When that feature
   // is disabled, retain the converter's original ranking even in live mode.
   if (preferences.prefer_zipcode_literal_top &&

@@ -927,6 +927,7 @@ bool HasKnownFunctionalKanaHijackPath(
   const absl::string_view kHijackPhrases[] = {
       "には",
       "にも",
+      "にしか",
       "では",
       "とは",
       "たの",
@@ -946,6 +947,15 @@ bool HasKnownFunctionalKanaHijackPath(
     }
 
     if (phrase.size() <= node.key.size()) {
+      continue;
+    }
+    if (phrase == "にしか" &&
+        !(rest == "にしか" && node.key == "に" &&
+          (pos_matcher.IsKanjiNumber(node.lid) ||
+           pos_matcher.IsKanjiNumber(node.rid)))) {
+      // A longer reading may represent a quantity ("二しかない") or may be
+      // reranked using real left context after candidate generation. Do not
+      // globally penalize a numeric node before that context is available.
       continue;
     }
 
