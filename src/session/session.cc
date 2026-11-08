@@ -4490,8 +4490,12 @@ bool Session::MaybeStartLiveConversionInternal(
   ConversionPreferences live_preferences =
       context_->converter().conversion_preferences();
   live_preferences.prefer_zipcode_literal_top = true;
-  if (!context_->mutable_converter()->ConvertWithPreferences(
-          context_->composer(), live_preferences)) {
+  // Use the same client context as ordinary conversion.  The compatibility
+  // ConvertWithPreferences wrapper supplies an empty Context, which discards
+  // preceding_text needed by the contextual particle reranker in live mode.
+  if (!context_->mutable_converter()->Convert(
+          context_->composer(), context_->client_context(),
+          live_preferences)) {
     if (ShouldKeepPendingLiveConversionForTransientSokuon(live_conversion_key) &&
         OutputPendingLiveConversion(command)) {
       ClearZenzLiveCorrectionState();

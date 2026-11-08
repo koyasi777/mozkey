@@ -68,6 +68,7 @@ class ImmutableConverterTestPeer : testing::TestPeer<ImmutableConverter> {
   PEER_METHOD(MakeLattice);
   PEER_METHOD(Viterbi);
   PEER_METHOD(InsertDummyCandidates);
+  PEER_METHOD(ApplyFunctionalKanaGuard);
 };
 
 namespace {
@@ -122,6 +123,9 @@ class MockDataAndImmutableConverter {
   }
 
   ImmutableConverter* GetConverter() { return immutable_converter_.get(); }
+  const dictionary::PosMatcher& GetPosMatcher() const {
+    return modules_->GetPosMatcher();
+  }
   ImmutableConverterTestPeer GetConverterTestPeer() {
     return ImmutableConverterTestPeer(*immutable_converter_);
   }
@@ -783,6 +787,102 @@ TEST(ImmutableConverterTest,
   EXPECT_EQ(segments.history_segment(0).candidate(0).value, "2");
   EXPECT_TRUE(
       segments.history_segment(0).candidate(0).inner_segment_boundary.empty());
+}
+
+TEST(ImmutableConverterTest, FunctionalNiShikaPenalizesKanjiHijack) {
+  auto fixture = std::make_unique<MockDataAndImmutableConverter>();
+  const dictionary::PosMatcher& pos = fixture->GetPosMatcher();
+  const uint16_t particle_id = pos.GetAcceptableParticleAtBeginOfSegmentId();
+  const uint16_t number_id = pos.GetKanjiNumberId();
+  ASSERT_TRUE(pos.IsFunctional(particle_id));
+  ASSERT_TRUE(pos.IsKanjiNumber(number_id));
+
+  Lattice lattice;
+  lattice.SetKey("にしか");
+  Node* numeral = lattice.NewNode();
+  numeral->key = "に";
+  numeral->value = "二";
+  numeral->lid = number_id;
+  numeral->rid = number_id;
+  numeral->node_type = Node::NOR_NODE;
+  numeral->wcost = 0;
+  lattice.Insert(0, numeral);
+
+  Node* ni = lattice.NewNode();
+  ni->key = "に";
+  ni->value = "に";
+  ni->lid = particle_id;
+  ni->rid = particle_id;
+  ni->node_type = Node::NOR_NODE;
+  lattice.Insert(0, ni);
+
+  Node* shika = lattice.NewNode();
+  shika->key = "しか";
+  shika->value = "しか";
+  shika->lid = particle_id;
+  shika->rid = particle_id;
+  shika->node_type = Node::NOR_NODE;
+  lattice.Insert(std::string("に").size(), shika);
+
+  fixture->GetConverterTestPeer().ApplyFunctionalKanaGuard("", &lattice);
+  EXPECT_GT(numeral->wcost, 0);
+}
+
+TEST(ImmutableConverterTest, FunctionalNiShikaNeedsRealKanaPath) {
+  auto fixture = std::make_unique<MockDataAndImmutableConverter>();
+  const dictionary::PosMatcher& pos = fixture->GetPosMatcher();
+  Lattice lattice;
+  lattice.SetKey("にしか");
+  Node* numeral = lattice.NewNode();
+  numeral->key = "に";
+  numeral->value = "二";
+  numeral->lid = pos.GetKanjiNumberId();
+  numeral->rid = pos.GetKanjiNumberId();
+  numeral->node_type = Node::NOR_NODE;
+  numeral->wcost = 0;
+  lattice.Insert(0, numeral);
+  // With no alternate functional path, the guard must not change numeric cost.
+  fixture->GetConverterTestPeer().ApplyFunctionalKanaGuard("", &lattice);
+  EXPECT_EQ(numeral->wcost, 0);
+}
+
+TEST(ImmutableConverterTest, FunctionalNiShikaDoesNotBiasLongNumericReading) {
+  auto fixture = std::make_unique<MockDataAndImmutableConverter>();
+  const dictionary::PosMatcher& pos = fixture->GetPosMatcher();
+  const uint16_t particle_id = pos.GetAcceptableParticleAtBeginOfSegmentId();
+  const uint16_t number_id = pos.GetKanjiNumberId();
+  ASSERT_TRUE(pos.IsFunctional(particle_id));
+  ASSERT_TRUE(pos.IsKanjiNumber(number_id));
+
+  for (const absl::string_view key : {"にしかない", "にしかできない"}) {
+    Lattice lattice;
+    lattice.SetKey(std::string(key));
+    Node* numeral = lattice.NewNode();
+    numeral->key = "に";
+    numeral->value = "二";
+    numeral->lid = number_id;
+    numeral->rid = number_id;
+    numeral->node_type = Node::NOR_NODE;
+    numeral->wcost = 0;
+    lattice.Insert(0, numeral);
+
+    Node* ni = lattice.NewNode();
+    ni->key = "に";
+    ni->value = "に";
+    ni->lid = particle_id;
+    ni->rid = particle_id;
+    ni->node_type = Node::NOR_NODE;
+    lattice.Insert(0, ni);
+    Node* shika = lattice.NewNode();
+    shika->key = "しか";
+    shika->value = "しか";
+    shika->lid = particle_id;
+    shika->rid = particle_id;
+    shika->node_type = Node::NOR_NODE;
+    lattice.Insert(std::string("に").size(), shika);
+    fixture->GetConverterTestPeer().ApplyFunctionalKanaGuard("", &lattice);
+    EXPECT_EQ(numeral->wcost, 0) << std::string(key);
+  }
 }
 
 }  // namespace mozc

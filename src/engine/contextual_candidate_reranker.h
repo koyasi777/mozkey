@@ -3,6 +3,7 @@
 #ifndef MOZC_ENGINE_CONTEXTUAL_CANDIDATE_RERANKER_H_
 #define MOZC_ENGINE_CONTEXTUAL_CANDIDATE_RERANKER_H_
 
+#include "absl/strings/string_view.h"
 #include "converter/segments.h"
 
 namespace mozc {
@@ -16,7 +17,10 @@ class ContextualCandidateReranker {
   ContextualCandidateReranker& operator=(const ContextualCandidateReranker&) =
       delete;
 
-  void Rerank(converter::Segments* segments) const;
+  // preceding_text provides optional client left context when Segments lacks
+  // a committed HISTORY segment. It is never retained or logged.
+  void Rerank(converter::Segments* segments,
+              absl::string_view preceding_text = {}) const;
 };
 
 }  // namespace engine

@@ -5171,6 +5171,46 @@ TEST_F(SessionTest,
 }
 #endif  // defined(_WIN32)
 
+// Regression: live conversion must forward the same left context as ordinary
+// conversion.  ConvertWithPreferences(composer, preferences) silently supplies
+// an empty Context and prevents ni/shika correction after committed text.
+TEST_F(SessionTest, LiveConversionPreservesClientContext) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> backend = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+  commands::Command command;
+  InsertCharacterChars("aiueo", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(), "あいうえお");
+
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  session_peer.context_()->mutable_client_context()->set_preceding_text("API ");
+
+  EXPECT_CALL(*backend, StartConversion(_, _))
+      .WillOnce([](const ConversionRequest& request, Segments* segments) {
+        EXPECT_EQ(request.context().preceding_text(), "API ");
+        segments->InitForConvert(request.key());
+        Segment* segment = segments->mutable_conversion_segment(0);
+        AddCandidate(request.key(), "あいうえお", segment);
+        return true;
+      });
+  command.Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+  EXPECT_TRUE(command.output().live_conversion());
+}
+
 TEST_F(SessionTest, PostalLiveFirstSpaceSelectsExistingAddressCandidate) {
   for (const char* key : {"1000001", "100-0001"}) {
     SCOPED_TRACE(key);

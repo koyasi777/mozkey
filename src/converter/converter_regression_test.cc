@@ -226,5 +226,50 @@ TEST_F(ConverterRegressionTest, HyphenlessZipcodeAliasRequestScope) {
   EXPECT_FALSE(realtime.options().enable_hyphenless_zipcode_alias);
 }
 
+// Real production dictionary regression.  Unlike a synthetic reranker
+// fixture, this covers lattice segmentation, N-best candidates, and the
+// EngineConverter's actual converted preedit surface.
+TEST_F(ConverterRegressionTest,
+       NiParticleAfterCommittedLeftContextBeforeDemonstrative) {
+  std::unique_ptr<Engine> engine = EngineFactory::Create().value();
+  ASSERT_TRUE(engine);
+  for (absl::string_view left : {"()", "（管理者）", "API", "API "}) {
+    SCOPED_TRACE(std::string(left));
+    auto converter = engine->CreateEngineConverter();
+    ASSERT_TRUE(converter);
+    composer::Composer composer;
+    composer.SetPreeditTextForTestOnly("にそのないようを");
+    commands::Context context;
+    context.set_preceding_text(std::string(left));
+    ASSERT_TRUE(converter->Convert(composer, context));
+    commands::Output output;
+    converter->FillOutput(composer, &output);
+    ASSERT_GE(output.preedit().segment_size(), 3) << output.DebugString();
+    EXPECT_EQ(output.preedit().segment(0).value(), "に")
+        << output.DebugString();
+    EXPECT_EQ(output.preedit().segment(1).value(), "その")
+        << output.DebugString();
+    EXPECT_EQ(output.preedit().segment(2).value(), "内容を")
+        << output.DebugString();
+  }
+}
+
+TEST_F(ConverterRegressionTest,
+       NiParticleDoesNotOverrideNumericShikaAfterTopicContext) {
+  std::unique_ptr<Engine> engine = EngineFactory::Create().value();
+  ASSERT_TRUE(engine);
+  auto converter = engine->CreateEngineConverter();
+  composer::Composer composer;
+  composer.SetPreeditTextForTestOnly("にしかない");
+  commands::Context context;
+  context.set_preceding_text("候補は");
+  ASSERT_TRUE(converter->Convert(composer, context));
+  commands::Output output;
+  converter->FillOutput(composer, &output);
+  ASSERT_GE(output.preedit().segment_size(), 1);
+  EXPECT_EQ(output.preedit().segment(0).value(), "二しか")
+      << output.DebugString();
+}
+
 }  // namespace
 }  // namespace mozc
