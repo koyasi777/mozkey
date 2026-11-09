@@ -60,35 +60,36 @@ TEST_F(SystemUtilTest, GetUserProfileDirectory) {
   FileUtilMock file_util_mock;
   SystemUtil::SetUserProfileDirectory("");
 
-  // The default path is "$HOME/.config/mozc".
-  EXPECT_FALSE(FileUtil::DirectoryExists("/home/mozcuser/.config/mozc").ok());
-  EXPECT_EQ("/home/mozcuser/.config/mozc",
+  // The default path is "$HOME/.config/mozkey".
+  EXPECT_FALSE(FileUtil::DirectoryExists("/home/mozcuser/.config/mozkey").ok());
+  EXPECT_EQ("/home/mozcuser/.config/mozkey",
             SystemUtil::GetUserProfileDirectory());
-  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.config/mozc"));
+  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.config/mozkey"));
 
   environ_mock.SetEnv("XDG_CONFIG_HOME", "/tmp/config");
 
   // Once the dir is initialized, the value is not changed.
-  EXPECT_EQ("/home/mozcuser/.config/mozc",
+  EXPECT_EQ("/home/mozcuser/.config/mozkey",
             SystemUtil::GetUserProfileDirectory());
 
   // Resets the cache by setting an empty string.
   SystemUtil::SetUserProfileDirectory("");
 
-  // $XDG_CONFIG_HOME is already set with "/tmp/config" in above.
-  // If $XDG_CONFIG_HOME is specified, "$XDG_CONFIG_HOME/mozc" is used.
-  EXPECT_FALSE(FileUtil::DirectoryExists("/tmp/config/mozc").ok());
-  EXPECT_EQ("/tmp/config/mozc", SystemUtil::GetUserProfileDirectory());
-  EXPECT_OK(FileUtil::DirectoryExists("/tmp/config/mozc"));
+  // $XDG_CONFIG_HOME is already set to "/tmp/config" above.
+  EXPECT_FALSE(FileUtil::DirectoryExists("/tmp/config/mozkey").ok());
+  EXPECT_EQ("/tmp/config/mozkey", SystemUtil::GetUserProfileDirectory());
+  EXPECT_OK(FileUtil::DirectoryExists("/tmp/config/mozkey"));
 
   // Resets again.
   SystemUtil::SetUserProfileDirectory("");
 
-  // If "$HOME/.mozc" exists, it is used for backward compatibility.
+  // A pre-existing Mozc legacy directory must not redirect Mozkey's profile.
   EXPECT_OK(FileUtil::CreateDirectory("/home/mozcuser/.mozc"));
   EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.mozc"));
-  EXPECT_EQ("/home/mozcuser/.mozc", SystemUtil::GetUserProfileDirectory());
-  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.mozc"));
+  environ_mock.SetEnv("XDG_CONFIG_HOME", "");
+  EXPECT_EQ("/home/mozcuser/.config/mozkey",
+            SystemUtil::GetUserProfileDirectory());
+  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.config/mozkey"));
 
   // Resets again to avoid side effects to other tests.
   SystemUtil::SetUserProfileDirectory("");
