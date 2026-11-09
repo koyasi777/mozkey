@@ -70,6 +70,22 @@ class PostflightSafetyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'UNEXPECTED_GENERATED_POSTFLIGHT_FORMAT'):
             filter_script.transform(expected_base().replace(b'\n', b'\r\n'), expected_tail())
 
+    def test_checked_in_oss_tail_registers_after_signature_check(self):
+        tail = (HERE / 'postflight_mozkey_oss_cleanup.sh').read_bytes()
+        combined = filter_script.transform(expected_base(), tail)
+        signature_check = (
+            b'if ! /usr/bin/codesign --verify --deep --strict "$_mozkey_app"; then'
+        )
+        register_command = b'--register_input_source'
+        self.assertIn(signature_check, combined)
+        self.assertEqual(combined.count(register_command), 1)
+        self.assertLess(combined.rfind(signature_check),
+                        combined.index(register_command))
+        self.assertIn(b'${COMMAND_LINE_INSTALL:-}', combined)
+        self.assertIn(b'/usr/bin/sudo -u "$_mozkey_console_user"', combined)
+        self.assertNotIn(filter_script.UNSAFE_LINE, combined)
+        self.assertTrue(combined.endswith(b'\nexit 0\n'))
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
