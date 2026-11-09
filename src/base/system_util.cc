@@ -333,12 +333,9 @@ std::string UserProfileDirectoryImpl::GetUserProfileDirectory() const {
 #endif  //  GOOGLE_JAPANESE_INPUT_BUILD
 
 #elif defined(__linux__)
-    // 1. If "$HOME/.mozc" already exists,
-    //    use "$HOME/.mozc" for backward compatibility.
-    // 2. If $XDG_CONFIG_HOME is defined
-    //    use "$XDG_CONFIG_HOME/mozc".
-    // 3. Otherwise
-    //    use "$HOME/.config/mozc" as the default value of $XDG_CONFIG_HOME
+    // Keep Mozkey's Linux profile separate from upstream Mozc.  In
+    // particular, never adopt ~/.mozc even if it exists.  No automatic
+    // migration of existing Mozc history or user dictionaries is performed.
     // https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
     const std::string home = Environ::GetEnv("HOME");
     if (home.empty()) {
@@ -349,19 +346,14 @@ std::string UserProfileDirectoryImpl::GetUserProfileDirectory() const {
           << "Can't get passwd entry for uid " << uid << ".";
       CHECK_LT(0, strlen(pw.pw_dir))
           << "Home directory for uid " << uid << " is not set.";
-      return FileUtil::JoinPath(pw.pw_dir, ".mozc");
-    }
-
-    std::string old_dir = FileUtil::JoinPath(home, ".mozc");
-    if (FileUtil::DirectoryExists(old_dir).ok()) {
-      return old_dir;
+      return FileUtil::JoinPath(pw.pw_dir, ".mozkey");
     }
 
     const std::string xdg_config_home = Environ::GetEnv("XDG_CONFIG_HOME");
     if (!xdg_config_home.empty()) {
-      return FileUtil::JoinPath(xdg_config_home, "mozc");
+      return FileUtil::JoinPath(xdg_config_home, "mozkey");
     }
-    return FileUtil::JoinPath(home, ".config/mozc");
+    return FileUtil::JoinPath(home, ".config/mozkey");
 
 #else  // Supported platforms
     LOG(ERROR) << "Undefined target platform.";
