@@ -100,6 +100,16 @@ TEST_F(SystemUtilTest, GetUserProfileDirectory) {
 #endif  // Platforms
 }
 
+#if defined(__linux__) && !defined(__ANDROID__)
+TEST_F(SystemUtilTest, LinuxInstallationPathsAreMozkeySpecific) {
+  EXPECT_EQ(SystemUtil::GetServerDirectory(), "/usr/lib/mozkey");
+  EXPECT_EQ(SystemUtil::GetServerPath(), "/usr/lib/mozkey/mozc_server");
+  EXPECT_EQ(SystemUtil::GetRendererPath(), "/usr/lib/mozkey/mozc_renderer");
+  EXPECT_EQ(SystemUtil::GetToolPath(), "/usr/lib/mozkey/mozc_tool");
+  EXPECT_EQ(SystemUtil::GetDocumentDirectory(), "/usr/lib/mozkey/documents");
+}
+#endif  // __linux__ && !__ANDROID__
+
 TEST_F(SystemUtilTest, GetTotalPhysicalMemoryTest) {
   EXPECT_GT(SystemUtil::GetTotalPhysicalMemory(), 0);
 }

@@ -38,8 +38,8 @@
 # string fields are limited to 100 bytes.
 
 engines {
-  name : "mozc-jp"
-  longname : "Mozc"
+  name : "mozkey-jp"
+  longname : "Mozkey"
   layout : "default"
   layout_variant : ""
   layout_option : ""
@@ -47,8 +47,8 @@ engines {
   symbol : "あ"
 }
 engines {
-  name : "mozc-on"
-  longname : "Mozc:あ"
+  name : "mozkey-on"
+  longname : "Mozkey:あ"
   layout : "default"
   layout_variant : ""
   layout_option : ""
@@ -57,8 +57,8 @@ engines {
   composition_mode : HIRAGANA
 }
 engines {
-  name : "mozc-off"
-  longname : "Mozc:A_"
+  name : "mozkey-off"
+  longname : "Mozkey:A_"
   layout : "default"
   layout_variant : ""
   layout_option : ""

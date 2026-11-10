@@ -30,8 +30,6 @@
 load("//:build_defs.bzl", "mozc_py_binary", "mozc_select")
 load(
     "//:config.bzl",
-    "EMACS_MOZC_CLIENT_DIR",
-    "EMACS_MOZC_HELPER_DIR",
     "IBUS_COMPONENT_DIR",
     "IBUS_MOZC_INSTALL_DIR",
     "IBUS_MOZC_PATH",
@@ -92,10 +90,8 @@ genrule(
         ":icons",
         "//gui/tool:mozc_tool",
         "//server:mozc_server",
-        "//unix/emacs:mozc_emacs_helper",
         "//unix/ibus:gen_mozc_xml",
         "//unix/ibus:ibus_mozc",
-        "//unix/emacs:mozc.el",
         "//renderer/qt:mozc_renderer",
     ],
     outs = ["mozc.zip"],
@@ -106,8 +102,6 @@ genrule(
         '--ibus_component_dir "' + IBUS_COMPONENT_DIR + '"',
         '--ibus_mozc_path "' + IBUS_MOZC_PATH + '"',
         '--ibus_mozc_install_dir "' + IBUS_MOZC_INSTALL_DIR + '"',
-        '--emacs_client_dir "' + EMACS_MOZC_CLIENT_DIR + '"',
-        '--emacs_helper_dir "' + EMACS_MOZC_HELPER_DIR + '"',
     ]),
     tools = [":build_package"],
     visibility = ["//:__pkg__"],

@@ -47,14 +47,10 @@ class Packager:
     self.ibus_icons_dir = args.ibus_mozc_install_dir
     self.location_rules = {
         'ibus_mozc': args.ibus_mozc_path,
-        'icons.zip': '/tmp/icons.zip',
-        'mozc.xml': os.path.join(args.ibus_component_dir, 'mozc.xml'),
+        'mozkey.xml': os.path.join(args.ibus_component_dir, 'mozkey.xml'),
         'mozc_server': os.path.join(args.mozc_dir, 'mozc_server'),
         'mozc_tool': os.path.join(args.mozc_dir, 'mozc_tool'),
         'mozc_renderer': os.path.join(args.mozc_dir, 'mozc_renderer'),
-        'mozc_emacs_helper': os.path.join(args.emacs_helper_dir,
-                                          'mozc_emacs_helper'),
-        'mozc.el': os.path.join(args.emacs_client_dir, 'mozc.el'),
     }
 
   def PackageFiles(self, inputs: List[str], output: str) -> None:
@@ -65,21 +61,30 @@ class Packager:
 
   def GetDestName(self, src: str) -> str:
     basename = os.path.basename(src)
-    return self.location_rules.get(basename, basename)
+    if basename not in self.location_rules:
+      raise ValueError(f'Unexpected Linux package input: {basename}')
+    return self.location_rules[basename]
 
   def JoinTopDir(self, top_dir: str, path: str) -> str:
     return os.path.join(top_dir, path.lstrip('/'))
 
   def LocateFiles(self, top_dir: str, files: List[str]) -> None:
     """Locate files to install directories."""
+    # A missing or unexpected input must not silently change the install
+    # manifest.  The Emacs integration is intentionally not shipped yet.
+    expected = set(self.location_rules) | {'icons.zip'}
+    basenames = [os.path.basename(src) for src in files]
+    if len(basenames) != len(expected) or set(basenames) != expected:
+      raise ValueError(f'Unexpected Linux package inputs: {basenames}')
+
     for src in files:
-      dest_name = self.GetDestName(src)
-      dest_path = self.JoinTopDir(top_dir, dest_name)
+      # icons.zip is a build intermediate, not an installed payload file.
+      if os.path.basename(src) == 'icons.zip':
+        self.LocateIconFiles(top_dir, src)
+        continue
+      dest_path = self.JoinTopDir(top_dir, self.GetDestName(src))
       os.makedirs(os.path.dirname(dest_path), exist_ok=True)
       shutil.copy(src, dest_path)
-
-      if src.endswith('icons.zip'):
-        self.LocateIconFiles(top_dir, src)
 
   def LocateIconFiles(self, top_dir: str, icons_zip: str) -> None:
     """Locate icon files archived in icons.zip."""
@@ -104,24 +109,20 @@ def ParseArguments() -> argparse.Namespace:
   parser = argparse.ArgumentParser()
   parser.add_argument('--inputs', nargs='+')
   # For mozc_server, mozc_tool, mozc_renderer
-  parser.add_argument('--mozc_dir', default='/usr/lib/mozc')
+  parser.add_argument('--mozc_dir', default='/usr/lib/mozkey')
   # For icons
-  parser.add_argument('--mozc_icons_dir', default='/usr/share/icons/mozc')
-  # For mozc.xml
+  parser.add_argument('--mozc_icons_dir', default='/usr/share/icons/mozkey')
+  # For mozkey.xml
   parser.add_argument(
       '--ibus_component_dir', default='/usr/share/ibus/component'
   )
   # For ibus-engine-mozc. It's not dir but a file path.
   parser.add_argument(
-      '--ibus_mozc_path', default='/usr/lib/ibus-mozc/ibus-engine-mozc'
+      '--ibus_mozc_path', default='/usr/lib/ibus-mozkey/ibus-engine-mozkey'
   )
   # For ibus icons.
-  parser.add_argument('--ibus_mozc_install_dir', default='/usr/share/ibus-mozc')
-  # For mozc_emacs_helper
-  parser.add_argument('--emacs_helper_dir', default='/usr/bin')
-  # For mozc.el
   parser.add_argument(
-      '--emacs_client_dir', default='/usr/share/emacs/site-lisp/emacs-mozc'
+      '--ibus_mozc_install_dir', default='/usr/share/ibus-mozkey'
   )
   parser.add_argument('--output')
   return parser.parse_args()

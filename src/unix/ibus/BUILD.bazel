@@ -57,11 +57,11 @@ mozc_py_binary(
 
 genrule(
     name = "gen_mozc_xml",
-    outs = ["mozc.xml"],
+    outs = ["mozkey.xml"],
     cmd = " ".join([
         "LANG=C",
         "$(location :gen_mozc_xml_main)",
-        "--branding=Mozc",
+        "--branding=Mozkey",
         "--server_dir=" + LINUX_MOZC_SERVER_DIR,
         "--ibus_mozc_path=" + IBUS_MOZC_PATH,
         "--ibus_mozc_icon_path=" + IBUS_MOZC_ICON_PATH,
@@ -77,7 +77,7 @@ genrule(
     cmd = " ".join([
         "LANG=C",
         "$(location :gen_mozc_xml_main)",
-        "--branding=Mozc",
+        "--branding=Mozkey",
         "--output_cpp",
         "--server_dir=" + LINUX_MOZC_SERVER_DIR,
         "--ibus_mozc_path=" + IBUS_MOZC_PATH,
