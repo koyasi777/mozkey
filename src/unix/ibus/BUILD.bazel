@@ -172,6 +172,28 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "delayed_command_scheduler",
+    srcs = mozc_select(linux = ["delayed_command_scheduler.cc"]),
+    hdrs = mozc_select(linux = ["delayed_command_scheduler.h"]),
+    deps = [
+        ":ibus_header",
+        "//protocol:commands_cc_proto",
+    ],
+)
+
+mozc_cc_test(
+    name = "delayed_command_scheduler_test",
+    size = "small",
+    srcs = mozc_select(linux = ["delayed_command_scheduler_test.cc"]),
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":delayed_command_scheduler",
+        "//protocol:commands_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "ibus_mozc_lib",
     srcs = mozc_select(
         linux = [
@@ -202,6 +224,7 @@ mozc_cc_library(
     ],
     deps = [
         ":candidate_window_handler",
+        ":delayed_command_scheduler",
         ":ibus_config",
         ":ibus_header",
         ":ibus_property_handler",
@@ -320,6 +343,7 @@ mozc_cc_test(
             "key_event_handler_test.cc",
             "key_translator_test.cc",
             "mozc_engine_test.cc",
+            "preedit_handler_test.cc",
             "surrounding_text_util_test.cc",
         ],
     ),

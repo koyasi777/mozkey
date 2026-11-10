@@ -57,6 +57,7 @@
 #include "protocol/config.pb.h"
 #include "renderer/renderer_client.h"
 #include "unix/ibus/candidate_window_handler.h"
+#include "unix/ibus/delayed_command_scheduler.h"
 #include "unix/ibus/engine_registrar.h"
 #include "unix/ibus/ibus_candidate_window_handler.h"
 #include "unix/ibus/ibus_config.h"
@@ -235,6 +236,18 @@ MozcEngine::MozcEngine()
       key_event_handler_(std::make_unique<KeyEventHandler>()),
       client_(CreateAndConfigureClient()),
       preedit_handler_(std::make_unique<PreeditHandler>()),
+      delayed_commands_([this](GObject* object,
+                               const commands::SessionCommand& command) {
+        IbusEngineWrapper wrapper(IBUS_ENGINE(object));
+        commands::Output output;
+        if (!client_->SendCommand(command, &output)) {
+          LOG(ERROR) << "Delayed IBus session command failed";
+          return;
+        }
+        // This may schedule another delayed callback. Always apply the
+        // server's current Output on the GLib main thread.
+        UpdateAll(&wrapper, output);
+      }),
       use_mozc_candidate_window_(false),
       mozc_candidate_window_handler_(renderer::RendererClient::Create()),
       preedit_method_(config::Config::ROMAN) {
@@ -279,6 +292,7 @@ void MozcEngine::CursorUp(IbusEngineWrapper* engine) {
 }
 
 void MozcEngine::Disable(IbusEngineWrapper* engine) {
+  delayed_commands_.Deactivate(G_OBJECT(engine->GetEngine()));
   RevertSession(engine);
   GetCandidateWindowHandler(engine)->Hide(engine);
   key_event_handler_->Clear();
@@ -307,6 +321,7 @@ commands::CompositionMode ConvertCompositionMode(
 }  // namespace
 
 void MozcEngine::Enable(IbusEngineWrapper* engine) {
+  delayed_commands_.Activate(G_OBJECT(engine->GetEngine()));
   // Launch mozc_server
   client_->EnsureConnection();
   UpdatePreeditMethod();
@@ -341,11 +356,13 @@ void MozcEngine::Enable(IbusEngineWrapper* engine) {
 }
 
 void MozcEngine::FocusIn(IbusEngineWrapper* engine) {
+  delayed_commands_.Activate(G_OBJECT(engine->GetEngine()));
   property_handler_->Register(engine);
   UpdatePreeditMethod();
 }
 
 void MozcEngine::FocusOut(IbusEngineWrapper* engine) {
+  delayed_commands_.Deactivate(G_OBJECT(engine->GetEngine()));
   GetCandidateWindowHandler(engine)->Hide(engine);
   property_handler_->ResetContentType(engine);
 
@@ -377,6 +394,9 @@ bool MozcEngine::ProcessKeyEvent(IbusEngineWrapper* engine, uint keyval,
   if (property_handler_->IsDisabled()) {
     return false;
   }
+  // The registrar shares a MozcEngine across IBusEngine instances.  Never
+  // deliver a delayed result to a previous engine after an implicit switch.
+  delayed_commands_.Activate(G_OBJECT(engine->GetEngine()));
 
   // layout_is_jp is only used determine Kana input with US layout.
   const absl::string_view layout = ibus_config_.GetLayout(engine->GetName());
@@ -433,7 +453,10 @@ void MozcEngine::PropertyShow(IbusEngineWrapper* engine,
   // We can ignore the signal.
 }
 
-void MozcEngine::Reset(IbusEngineWrapper* engine) { RevertSession(engine); }
+void MozcEngine::Reset(IbusEngineWrapper* engine) {
+  delayed_commands_.Cancel();
+  RevertSession(engine);
+}
 
 void MozcEngine::SetCapabilities(IbusEngineWrapper* engine, uint capabilities) {
   // Do nothing.
@@ -450,6 +473,7 @@ void MozcEngine::SetContentType(IbusEngineWrapper* engine, uint purpose,
   property_handler_->UpdateContentType(engine);
   if (!prev_disabled && property_handler_->IsDisabled()) {
     // Make sure on-going composition is reverted.
+    delayed_commands_.Cancel();
     RevertSession(engine);
   }
 }
@@ -576,6 +600,15 @@ bool MozcEngine::ExecuteCallback(IbusEngineWrapper* engine,
   if (!callback_command.has_type()) {
     LOG(ERROR) << "callback_command has no type";
     return false;
+  }
+
+  if (output.callback().has_delay_millisec() &&
+      output.callback().delay_millisec() > 0) {
+    // Copy the whole command, including the live-conversion key and generation.
+    // The server will reject callbacks whose generation has gone stale.
+    return delayed_commands_.Schedule(G_OBJECT(engine->GetEngine()),
+                                      callback_command,
+                                      output.callback().delay_millisec());
   }
 
   commands::SessionCommand session_command;
