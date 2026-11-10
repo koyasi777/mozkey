@@ -90,21 +90,32 @@ IbusTextWrapper ComposePreeditText(const commands::Preedit& preedit) {
   return text;
 }
 
-// Returns a cursor position used for updating preedit.
-// NOTE: We do not use a cursor position obtained from Mozc when the candidate
-// window is shown since ibus uses the cursor position to locate the candidate
-// window and the position obtained from Mozc is not what we expect.
-int CursorPos(const commands::Output& output) {
+}  // namespace
+
+namespace internal {
+
+int GetPreeditCursorPosition(const commands::Output& output) {
   if (!output.has_preedit()) {
     return 0;
   }
+
+  // Live conversion is an editable composition. Its highlighted segment is
+  // not the insertion caret: using that position makes the caret jump to the
+  // beginning as a delayed conversion reply materializes or a clause changes.
+  // Windows TSF likewise positions the caret from Preedit::cursor.
+  if (output.live_conversion() || output.live_conversion_pending()) {
+    return output.preedit().cursor();
+  }
+
+  // In conventional conversion, IBus also uses this position to anchor its
+  // candidate panel. Preserve the existing upstream Mozc behavior there.
   if (output.preedit().has_highlighted_position()) {
     return output.preedit().highlighted_position();
   }
   return output.preedit().cursor();
 }
 
-}  // namespace
+}  // namespace internal
 
 bool PreeditHandler::Update(IbusEngineWrapper* engine,
                             const commands::Output& output) {
@@ -114,7 +125,8 @@ bool PreeditHandler::Update(IbusEngineWrapper* engine,
     return true;
   }
   IbusTextWrapper text = ComposePreeditText(output.preedit());
-  engine->UpdatePreeditTextWithMode(&text, CursorPos(output));
+  engine->UpdatePreeditTextWithMode(
+      &text, internal::GetPreeditCursorPosition(output));
   // |text| is released by ibus_engine_update_preedit_text.
   return true;
 }

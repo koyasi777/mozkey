@@ -36,6 +36,14 @@
 namespace mozc {
 namespace ibus {
 
+namespace internal {
+// Returns the position to report as the IBus preedit caret (UTF-32 character
+// index). The active editing caret must win over the highlighted segment when
+// displaying live conversion; ordinary conversion retains Mozc's legacy IBus
+// candidate-window positioning behavior.
+int GetPreeditCursorPosition(const commands::Output& output);
+}  // namespace internal
+
 class PreeditHandler {
  public:
   PreeditHandler() = default;
