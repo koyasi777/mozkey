@@ -40,8 +40,8 @@ namespace ibus {
 TEST(IbusConfigTest, LoadConfig) {
   IbusConfig config;
   const std::string config_data = R"(engines {
-  name : "mozc-jp"
-  longname : "Mozc"
+  name : "mozkey-jp"
+  longname : "Mozkey"
   layout : "default"
   layout_variant : ""
   layout_option : ""
@@ -53,15 +53,15 @@ active_on_launch: False
 
   const std::string expected_xml = R"(<engines>
 <engine>
-  <description>Mozc (Japanese Input Method)</description>
+  <description>Mozkey (Japanese Input Method)</description>
   <language>ja</language>
-  <icon>/usr/share/ibus-mozc/product_icon.png</icon>
+  <icon>/usr/share/ibus-mozkey/product_icon.png</icon>
   <rank>80</rank>
   <icon_prop_key>InputMode</icon_prop_key>
   <symbol>あ</symbol>
-  <setup>/usr/lib/mozc/mozc_tool --mode=config_dialog</setup>
-  <name>mozc-jp</name>
-  <longname>Mozc</longname>
+  <setup>/usr/lib/mozkey/mozc_tool --mode=config_dialog</setup>
+  <name>mozkey-jp</name>
+  <longname>Mozkey</longname>
   <layout>default</layout>
   <layout_variant></layout_variant>
   <layout_option></layout_option>
@@ -74,8 +74,8 @@ active_on_launch: False
 TEST(IbusConfigTest, NormalizeLayout) {
   IbusConfig config;
   const std::string config_data = R"(engines {
-  name : "mozc-jp"
-  longname : "Mozc"
+  name : "mozkey-jp"
+  longname : "Mozkey"
   layout : "nec_vndr/jp"
   layout_variant : "Hello World!"
   layout_option : "09AZaz!@#$%^&*()_+|;-"

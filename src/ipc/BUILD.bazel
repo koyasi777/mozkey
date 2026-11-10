@@ -34,6 +34,7 @@ load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load(
     "//:build_defs.bzl",
+    "mozc_cc_binary",
     "mozc_cc_library",
     "mozc_cc_test",
     "mozc_select",
@@ -301,4 +302,36 @@ cc_proto_library(
     name = "window_info_cc_proto",
     visibility = ["//gui:__subpackages__"],
     deps = [":window_info_proto"],
+)
+
+# Linux-only regression tests for runtime namespacing against upstream Mozc.
+mozc_cc_test(
+    name = "linux_mozkey_namespace_test",
+    size = "small",
+    srcs = ["linux_mozkey_namespace_test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":ipc_path_manager",
+        ":named_event",
+        "//base:const",
+        "//base:hash",
+        "//base:system_util",
+        "//testing:gunit_main",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+# P2-b4 test-only helper exercising the production IPCClient peer-path check.
+mozc_cc_binary(
+    name = "linux_mozkey_ipcclient_probe",
+    testonly = True,
+    srcs = ["linux_mozkey_ipcclient_probe.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":ipc",
+        "//base:system_util",
+        "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/time",
+    ],
 )

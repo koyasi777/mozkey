@@ -140,7 +140,12 @@ inline constexpr char kEventPathPrefix[] = "Mozc.event.";
 #else   // __linux__ including __ANDROID__
 inline constexpr char kMozcServerName[] = "mozc_server";
 inline constexpr char kMozcRenderer[] = "mozc_renderer";
+// Keep Android/ChromeOS and the other platforms' event names unchanged.
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(OS_CHROMEOS)
+inline constexpr char kEventPathPrefix[] = "mozkey.event.";
+#else
 inline constexpr char kEventPathPrefix[] = "mozc.event.";
+#endif  // Linux Mozkey
 inline constexpr char kMozcTool[] = "mozc_tool";
 #endif  // _WIN32, __APPLE__, or else
 

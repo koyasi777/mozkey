@@ -43,6 +43,7 @@ import sys
 # properties above.
 PRODUCT_NAMES = {
     'Mozc': 'Mozc',
+    'Mozkey': 'Mozkey',
     'GoogleJapaneseInput': 'Google Japanese Input',
 }
 
@@ -67,7 +68,7 @@ def GetXmlElement(key, value):
   return '  <%s>%s</%s>' % (key, value, key)
 
 
-def OutputXml(component, ibus_mozc_path):
+def OutputXml(component, ibus_mozc_path, branding):
   """Outputs a XML data for ibus-daemon.
 
   Args:
@@ -81,14 +82,14 @@ def OutputXml(component, ibus_mozc_path):
   print('  <engines exec="%s --xml" />' % ibus_mozc_path)
   print('</component>')
 
-  print("""
-<!-- Settings of <engines> and <layout> are stored in ibus_config.textproto -->
-<!-- under the user configuration directory, which is either of: -->
-<!-- * $XDG_CONFIG_HOME/mozc/ibus_config.textproto -->
-<!-- * $HOME/.config/mozc/ibus_config.textproto -->
-<!-- * $HOME/.mozc/ibus_config.textproto -->
-<!-- `ibus write-cache; ibus restart` might be necessary to apply changes. -->
-""")
+  profile = 'mozkey' if branding == 'Mozkey' else 'mozc'
+  print('<!-- Settings of <engines> and <layout> are stored in ibus_config.textproto -->')
+  print('<!-- under the user configuration directory, which is either of: -->')
+  print(f'<!-- * $XDG_CONFIG_HOME/{profile}/ibus_config.textproto -->')
+  print(f'<!-- * $HOME/.config/{profile}/ibus_config.textproto -->')
+  if branding != 'Mozkey':
+    print('<!-- * $HOME/.mozc/ibus_config.textproto -->')
+  print('<!-- `ibus write-cache; ibus restart` might be necessary to apply changes. -->')
 
 
 def OutputCppVariable(prefix, key, value):
@@ -127,7 +128,7 @@ def main():
       '--branding',
       dest='branding',
       default=None,
-      help='GoogleJapaneseInput for the official build. Otherwise, Mozc.',
+      help='GoogleJapaneseInput, Mozc, or Linux Mozkey.',
   )
   parser.add_option(
       '--ibus_mozc_path',
@@ -154,17 +155,20 @@ def main():
   ibus_mozc_icon_path = options.ibus_mozc_icon_path
   setup_path = os.path.join(options.server_dir, 'mozc_tool')
 
-  # Information to generate <component> part of mozc.xml.
+  # Linux Mozkey must have a distinct IBus component identity.  Retain the
+  # existing values for the upstream branding options.
+  is_mozkey = options.branding == 'Mozkey'
   component = {
-      'name': 'com.google.IBus.Mozc',
+      'name': 'org.mozkey.IBus.Mozkey' if is_mozkey else 'com.google.IBus.Mozc',
       'description': product_name + ' Component',
       'exec': ibus_mozc_path + ' --ibus',
       # TODO(mazda): Generate the version number.
       'version': '0.0.0.0',
-      'author': 'Google LLC',
+      'author': 'Mozkey contributors' if is_mozkey else 'Google LLC',
       'license': 'New BSD',
-      'homepage': 'https://github.com/google/mozc',
-      'textdomain': 'ibus-mozc',
+      'homepage': ('https://github.com/koyasi777/mozkey' if is_mozkey
+                   else 'https://github.com/google/mozc'),
+      'textdomain': 'ibus-mozkey' if is_mozkey else 'ibus-mozc',
   }
 
   engine_common = {
@@ -180,7 +184,7 @@ def main():
   if options.output_cpp:
     OutputCpp(component, engine_common)
   else:
-    OutputXml(component, ibus_mozc_path)
+    OutputXml(component, ibus_mozc_path, options.branding)
   return 0
 
 
