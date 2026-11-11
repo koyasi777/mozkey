@@ -16,7 +16,7 @@ remains a normal CI test target, **not** a public release candidate.
 
 - On PR: source-contract regression tests only, with no secrets or build outputs.
 - On manual `workflow_dispatch` from `main` only: `release_version` MUST match
-  the canonical `src/version.bzl` public version (currently `1.0.0`).
+  the canonical public version defined in `src/version.bzl`.
   Exact `github.sha` and repository origin are validated.
 - Dictionary source preparation is run **once** on `windows-2025` (the same
   runner type as the ordinary Windows CI); it uploads same-run generated data
