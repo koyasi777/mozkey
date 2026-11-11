@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "config/config_handler.h"
@@ -216,7 +217,8 @@ RendererStyleHandler::RubyWindowStyle BuildRubyStyle(
 
 }  // namespace
 
-void UpdateRendererStyleFromConfig() {
+static void UpdateRendererStyleFromConfigImpl(
+    std::optional<SystemColorTheme> platform_theme) {
   config::ConfigHandler::Reload();
 
   const auto shared_config = config::ConfigHandler::GetSharedConfig();
@@ -237,7 +239,9 @@ void UpdateRendererStyleFromConfig() {
       suggest_configured_theme ==
           config::Config::RENDERER_WINDOW_COLOR_AUTO ||
       ruby_configured_theme == config::Config::RENDERER_WINDOW_COLOR_AUTO) {
-    system_color_theme = GetSystemColorTheme();
+    system_color_theme = platform_theme.has_value()
+                             ? *platform_theme
+                             : GetSystemColorTheme();
   }
 
   const ColorTheme candidate_color_theme = ResolveRendererWindowColorTheme(
@@ -342,6 +346,14 @@ void UpdateRendererStyleFromConfig() {
   RendererStyleHandler::SetRendererWindowStyles(
       candidate_style, suggestion_style, ruby_style, candidate_corner_radius,
       suggestion_corner_radius, candidate_effect_style, suggestion_effect_style);
+}
+
+void UpdateRendererStyleFromConfig() {
+  UpdateRendererStyleFromConfigImpl(std::nullopt);
+}
+
+void UpdateRendererStyleFromConfig(SystemColorTheme system_color_theme) {
+  UpdateRendererStyleFromConfigImpl(system_color_theme);
 }
 
 }  // namespace renderer

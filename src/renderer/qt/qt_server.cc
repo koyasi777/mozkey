@@ -35,6 +35,10 @@
 
 #include <QApplication>
 #include <QMetaType>
+#include <QGuiApplication>
+#include <QStyleHints>
+#include <QtGlobal>
+#include <chrono>
 #include <string>
 
 #include "absl/log/log.h"
@@ -45,6 +49,8 @@
 #include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/qt/qt_ipc_thread.h"
+#include "renderer/renderer_color_theme.h"
+#include "renderer/renderer_style_config.h"
 
 #ifndef NDEBUG
 #include "config/config_handler.h"
@@ -107,14 +113,41 @@ int QtServer::StartServer(int argc, char** argv) {
   notifier.Notify();
 
   renderer_.Initialize();
+  UpdateRendererAppearance();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+  QObject::connect(QGuiApplication::styleHints(),
+                   &QStyleHints::colorSchemeChanged, this,
+                   [this](Qt::ColorScheme) {
+                     UpdateRendererAppearance();
+                     renderer_.RefreshCurrentStyle();
+                   });
+#endif  // QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
   connect(&ipc_thread_, &QtIpcThread::EmitUpdated, this, &QtServer::Update);
   ipc_thread_.start();
   return app.exec();
 }
 
+void QtServer::UpdateRendererAppearance() {
+  SystemColorTheme system_theme = GetSystemColorTheme();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+  system_theme = QGuiApplication::styleHints()->colorScheme() ==
+                         Qt::ColorScheme::Dark
+                     ? SystemColorTheme::kDark
+                     : SystemColorTheme::kLight;
+#endif  // QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+  UpdateRendererStyleFromConfig(system_theme);
+  last_appearance_check_ = std::chrono::steady_clock::now();
+}
+
 bool QtServer::ExecCommandInternal(const commands::RendererCommand& command) {
   MOZC_VLOG(2) << command;
-
+  // Configuration is written by a separate mozc_tool process. Refresh at most
+  // once per second while renderer commands arrive, never on each keystroke.
+  if (command.type() == commands::RendererCommand::UPDATE &&
+      std::chrono::steady_clock::now() - last_appearance_check_ >=
+          std::chrono::seconds(1)) {
+    UpdateRendererAppearance();
+  }
   return renderer_.ExecCommand(command);
 }
 
