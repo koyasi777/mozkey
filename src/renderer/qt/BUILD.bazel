@@ -32,6 +32,7 @@ load(
     "//:build_defs.bzl",
     "mozc_cc_binary",
     "mozc_cc_library",
+    "mozc_cc_test",
 )
 load(
     "//bazel:qt.bzl",
@@ -99,6 +100,8 @@ mozc_cc_qt_library(
         "//ipc:named_event",
         "//protocol:config_cc_proto",
         "//protocol:renderer_cc_proto",
+        "//renderer:renderer_color_theme",
+        "//renderer:renderer_style_config",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings:string_view",
     ],
@@ -121,21 +124,39 @@ mozc_cc_library(
     ],
 )
 
+mozc_cc_library(
+    name = "qt_candidate_footer",
+    srcs = ["qt_candidate_footer.cc"],
+    hdrs = ["qt_candidate_footer.h"],
+    deps = [
+        "//protocol:candidate_window_cc_proto",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_test(
+    name = "qt_candidate_footer_test",
+    srcs = ["qt_candidate_footer_test.cc"],
+    deps = [
+        ":qt_candidate_footer",
+        "//protocol:candidate_window_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
 mozc_cc_qt_library(
     name = "qt_window_manager",
-    srcs = [
-        "qt_window_manager.cc",
-    ],
-    hdrs = [
-        "qt_window_manager.h",
-    ],
+    srcs = ["qt_window_manager.cc"],
+    hdrs = ["qt_window_manager.h"],
     deps = [
+        ":qt_candidate_footer",
         "//base:coordinates",
         "//client:client_interface",
         "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_style_handler",
+        "//renderer:window_effect_util",
         "//renderer:window_util",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",

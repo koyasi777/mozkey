@@ -30,6 +30,7 @@
 #ifndef MOZC_RENDERER_QT_QT_SERVER_H_
 #define MOZC_RENDERER_QT_QT_SERVER_H_
 
+#include <chrono>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -66,6 +67,9 @@ class QtServer : public QObject {
   QtWindowManager renderer_;
 
  private:
+  void UpdateRendererAppearance();
+
+  std::chrono::steady_clock::time_point last_appearance_check_;
   QtIpcThread ipc_thread_;
 };
 

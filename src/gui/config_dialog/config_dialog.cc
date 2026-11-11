@@ -43,6 +43,7 @@
 #include <QFont>
 #include <QCheckBox>
 #include <QFrame>
+#include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -368,14 +369,8 @@ ConfigDialog::ConfigDialog()
   inputAppearanceContentLayout->insertWidget(0, preeditDisplayColorGroupBox);
   preeditDisplayColorGroupBox->show();
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-  // On Linux neither the detailed renderer appearance nor TSF preedit
-  // attributes are supported. Keep the tab out of the navigation entirely.
-  const int appearance_index = configDialogTabWidget->indexOf(inputAppearanceTab);
-  if (appearance_index >= 0) {
-    configDialogTabWidget->removeTab(appearance_index);
-  }
-#endif  // !defined(_WIN32) && !defined(__APPLE__)
+  // Linux uses a reduced, functional renderer appearance editor below. TSF-only
+  // preedit controls remain hidden, but the tab itself is available.
 
   Qt::WindowFlags flags = windowFlags();
   flags &= ~Qt::WindowContextHelpButtonHint;
@@ -3718,6 +3713,122 @@ void ConfigDialog::UpdateConversionStatusPreview() {
 
 void ConfigDialog::InitializeRendererAppearanceControls() {
 #if !defined(_WIN32) && !defined(__APPLE__)
+  // Initial Linux support exposes only settings actually implemented by the
+  // Qt renderer. Never display TSF, ruby or window-effects controls as working.
+  auto* linux_group = new QGroupBox(
+      StatusUiText("Candidate and suggestion windows",
+                   "候補・サジェストウィンドウ"),
+      inputAppearanceScrollAreaWidgetContents);
+  linux_group->setObjectName(QStringLiteral("linuxRendererAppearanceGroupBox"));
+  auto* layout = new QFormLayout(linux_group);
+  const auto add_theme = [&](const char* object_name, bool follow_candidate) {
+    auto* combo = new QComboBox(linux_group);
+    combo->setObjectName(QString::fromLatin1(object_name));
+    const auto add_item = [combo](const QString& label, int value) {
+      combo->addItem(label, value);
+    };
+    add_item(StatusUiText("System theme", "システムに合わせる"),
+             config::Config::RENDERER_WINDOW_COLOR_AUTO);
+    add_item(StatusUiText("Light", "ライト"),
+             config::Config::RENDERER_WINDOW_COLOR_LIGHT);
+    add_item(StatusUiText("Dark", "ダーク"),
+             config::Config::RENDERER_WINDOW_COLOR_DARK);
+    if (follow_candidate) {
+      add_item(StatusUiText("Follow candidate", "候補に合わせる"),
+               config::Config::RENDERER_WINDOW_COLOR_FOLLOW_CANDIDATE);
+    }
+    // Preserve palettes previously saved on other platforms. Palette editing
+    // is not exposed until the Qt renderer supports the complete editor.
+    add_item(StatusUiText("Custom (existing palette)",
+                           "カスタム（既存の配色）"),
+             config::Config::RENDERER_WINDOW_COLOR_CUSTOM);
+    QObject::connect(combo, SIGNAL(currentIndexChanged(int)), this,
+                     SLOT(EnableApplyButton()));
+    return combo;
+  };
+  layout->addRow(StatusUiText("Candidate window", "候補ウィンドウ"),
+                 add_theme("candidateWindowColorThemeComboBox", false));
+  layout->addRow(StatusUiText("Suggestion window", "サジェストウィンドウ"),
+                 add_theme("suggestWindowColorThemeComboBox", true));
+
+  // RendererStyle already carries independent text settings. Expose them only
+  // after the Qt renderer uses the selected font and scaled metrics.
+  const auto add_size = [&](const char* object_name) {
+    auto* spin = new QSpinBox(linux_group);
+    spin->setObjectName(QString::fromLatin1(object_name));
+    spin->setRange(80, 200);  // Matches renderer_style_config.cc clamps.
+    spin->setSingleStep(10);
+    spin->setSuffix(QStringLiteral(" %"));
+    QObject::connect(spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                     this, [this](int) { EnableApplyButton(); });
+    return spin;
+  };
+  layout->addRow(StatusUiText("Candidate size", "候補の大きさ"),
+                 add_size("candidateWindowSizePercentSpinBox"));
+  layout->addRow(StatusUiText("Suggestion size", "サジェストの大きさ"),
+                 add_size("suggestWindowSizePercentSpinBox"));
+
+  const auto add_font = [&](const char* object_name) {
+    auto* combo = new QComboBox(linux_group);
+    combo->setObjectName(QString::fromLatin1(object_name));
+    InitializeCandidateRubyFontComboBox(combo);
+    QObject::connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                     this, [this](int) { EnableApplyButton(); });
+    return combo;
+  };
+  layout->addRow(StatusUiText("Candidate font", "候補のフォント"),
+                 add_font("linuxCandidateWindowFontComboBox"));
+  layout->addRow(StatusUiText("Suggestion font", "サジェストのフォント"),
+                 add_font("linuxSuggestWindowFontComboBox"));
+
+  const auto add_weight = [&](const char* object_name) {
+    auto* combo = new QComboBox(linux_group);
+    combo->setObjectName(QString::fromLatin1(object_name));
+    InitializeRendererFontWeightComboBox(combo);
+    QObject::connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                     this, [this](int) { EnableApplyButton(); });
+    return combo;
+  };
+  layout->addRow(StatusUiText("Candidate font weight", "候補文字の太さ"),
+                 add_weight("linuxCandidateWindowFontWeightComboBox"));
+  layout->addRow(StatusUiText("Suggestion font weight", "サジェスト文字の太さ"),
+                 add_weight("linuxSuggestWindowFontWeightComboBox"));
+
+  // Only expose effects that the Qt top-level window actually implements.
+  // Custom shadow controls remain hidden until the translucent shell and its
+  // screen-edge geometry are implemented.
+  const auto add_effect_spin = [&](const char* name, int low, int high,
+                                   int value, const QString& suffix) {
+    auto* spin = new QSpinBox(linux_group);
+    spin->setObjectName(QString::fromLatin1(name));
+    spin->setRange(low, high);
+    spin->setValue(value);
+    spin->setSuffix(suffix);
+    QObject::connect(spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                     this, [this](int) { EnableApplyButton(); });
+    return spin;
+  };
+  layout->addRow(StatusUiText("Candidate corner radius", "候補の角丸"),
+                 add_effect_spin("candidateWindowCornerRadiusSpinBox", 0, 24,
+                                 6, QStringLiteral(" px")));
+  layout->addRow(StatusUiText("Suggestion corner radius", "サジェストの角丸"),
+                 add_effect_spin("suggestWindowCornerRadiusSpinBox", 0, 24,
+                                 6, QStringLiteral(" px")));
+  layout->addRow(StatusUiText("Candidate opacity", "候補の不透明度"),
+                 add_effect_spin("candidateWindowOpacityPercentSpinBox", 20,
+                                 100, 100, QStringLiteral(" %")));
+  layout->addRow(StatusUiText("Suggestion opacity", "サジェストの不透明度"),
+                 add_effect_spin("suggestWindowOpacityPercentSpinBox", 20,
+                                 100, 100, QStringLiteral(" %")));
+
+  auto* description = new QLabel(
+      StatusUiText("Themes, fonts, sizing, rounding and opacity are supported. "
+                   "Custom shadows and detailed palettes remain unavailable.",
+                   "テーマ・フォント・倍率・角丸・不透明度に対応。影と詳細な配色編集は未対応です。"),
+      linux_group);
+  description->setWordWrap(true);
+  layout->addRow(description);
+  inputAppearanceContentLayout->insertWidget(0, linux_group);
   return;
 #endif  // !defined(_WIN32) && !defined(__APPLE__)
 
@@ -5719,6 +5830,10 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
 
   ConvertRendererAppearanceToProto(config);
 
+#if defined(_WIN32) || defined(__APPLE__)
+  // Linux uses the dedicated candidate/suggestion font selectors in
+  // ConvertRendererAppearanceToProto().  The hidden legacy widgets are not
+  // initialized there and would overwrite the selected fonts with "Default".
   const auto selected_font = [](const QComboBox* combo) -> std::string {
     return combo == nullptr ? std::string()
                             : combo->currentData().toString().trimmed()
@@ -5740,6 +5855,7 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   config->set_candidate_window_font_name(candidate_font);
   config->set_suggest_window_font_name(suggest_font);
   config->set_ruby_window_font_name(ruby_font);
+#endif  // _WIN32 || __APPLE__
 
   GET_CHECKBOX(dimPendingRomanInputCheckBox, dim_pending_roman_input);
   config->set_pending_roman_dimness_percent(
@@ -5884,9 +6000,51 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
 void ConfigDialog::ConvertRendererAppearanceFromProto(
     const config::Config &config) {
 #if !defined(_WIN32) && !defined(__APPLE__)
-  if (useDarkModeCandidateWindow != nullptr) {
-    useDarkModeCandidateWindow->setChecked(
-        config.use_dark_mode_candidate_window());
+  const int candidate_theme = config.has_candidate_window_color_theme()
+      ? static_cast<int>(config.candidate_window_color_theme())
+      : config.has_use_dark_mode_candidate_window()
+            ? static_cast<int>(config.use_dark_mode_candidate_window()
+                                   ? config::Config::RENDERER_WINDOW_COLOR_DARK
+                                   : config::Config::RENDERER_WINDOW_COLOR_LIGHT)
+            : static_cast<int>(config::Config::RENDERER_WINDOW_COLOR_AUTO);
+  SetComboCurrentData(FindComboBox(this, "candidateWindowColorThemeComboBox"),
+                      candidate_theme);
+  SetComboCurrentData(FindComboBox(this, "suggestWindowColorThemeComboBox"),
+                      static_cast<int>(config.suggest_window_color_theme()));
+  if (QSpinBox* spin = FindSpinBox(this, "candidateWindowSizePercentSpinBox")) {
+    spin->setValue(static_cast<int>(config.candidate_window_size_percent()));
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "suggestWindowSizePercentSpinBox")) {
+    spin->setValue(static_cast<int>(config.suggest_window_size_percent()));
+  }
+  const std::string& legacy_font = config.candidate_ruby_font_name();
+  SetComboBoxCurrentFontNameOrAdd(
+      FindComboBox(this, "linuxCandidateWindowFontComboBox"),
+      QString::fromStdString(config.has_candidate_window_font_name()
+                               ? config.candidate_window_font_name()
+                               : legacy_font));
+  SetComboBoxCurrentFontNameOrAdd(
+      FindComboBox(this, "linuxSuggestWindowFontComboBox"),
+      QString::fromStdString(config.has_suggest_window_font_name()
+                               ? config.suggest_window_font_name()
+                               : legacy_font));
+  SetComboCurrentData(
+      FindComboBox(this, "linuxCandidateWindowFontWeightComboBox"),
+      NormalizeRendererFontWeight(config.candidate_window_font_weight()));
+  SetComboCurrentData(
+      FindComboBox(this, "linuxSuggestWindowFontWeightComboBox"),
+      NormalizeRendererFontWeight(config.suggest_window_font_weight()));
+  if (QSpinBox* spin = FindSpinBox(this, "candidateWindowCornerRadiusSpinBox")) {
+    spin->setValue(static_cast<int>(config.candidate_window_custom_corner_radius()));
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "suggestWindowCornerRadiusSpinBox")) {
+    spin->setValue(static_cast<int>(config.suggest_window_custom_corner_radius()));
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "candidateWindowOpacityPercentSpinBox")) {
+    spin->setValue(static_cast<int>(config.candidate_window_opacity_percent()));
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "suggestWindowOpacityPercentSpinBox")) {
+    spin->setValue(static_cast<int>(config.suggest_window_opacity_percent()));
   }
   return;
 #endif  // !defined(_WIN32) && !defined(__APPLE__)
@@ -6075,9 +6233,55 @@ void ConfigDialog::ConvertRendererAppearanceFromProto(
 void ConfigDialog::ConvertRendererAppearanceToProto(
     config::Config *config) const {
 #if !defined(_WIN32) && !defined(__APPLE__)
-  if (useDarkModeCandidateWindow != nullptr) {
-    config->set_use_dark_mode_candidate_window(
-        useDarkModeCandidateWindow->isChecked());
+  const int candidate_theme = GetComboCurrentData(
+      FindComboBox(this, "candidateWindowColorThemeComboBox"),
+      config::Config::RENDERER_WINDOW_COLOR_AUTO);
+  config->set_candidate_window_color_theme(
+      static_cast<config::Config::RendererWindowColorTheme>(candidate_theme));
+  config->set_use_dark_mode_candidate_window(
+      candidate_theme == config::Config::RENDERER_WINDOW_COLOR_DARK);
+  config->set_suggest_window_color_theme(
+      static_cast<config::Config::RendererWindowColorTheme>(
+          GetComboCurrentData(
+              FindComboBox(this, "suggestWindowColorThemeComboBox"),
+              config::Config::RENDERER_WINDOW_COLOR_AUTO)));
+  if (const QSpinBox* spin = FindSpinBox(this, "candidateWindowSizePercentSpinBox")) {
+    config->set_candidate_window_size_percent(static_cast<uint32_t>(spin->value()));
+  }
+  if (const QSpinBox* spin = FindSpinBox(this, "suggestWindowSizePercentSpinBox")) {
+    config->set_suggest_window_size_percent(static_cast<uint32_t>(spin->value()));
+  }
+  if (const QComboBox* font =
+          FindComboBox(this, "linuxCandidateWindowFontComboBox")) {
+    config->set_candidate_window_font_name(
+        font->currentData().toString().toStdString());
+  }
+  if (const QComboBox* font =
+          FindComboBox(this, "linuxSuggestWindowFontComboBox")) {
+    config->set_suggest_window_font_name(
+        font->currentData().toString().toStdString());
+  }
+  config->set_candidate_window_font_weight(static_cast<uint32_t>(
+      GetComboCurrentData(
+          FindComboBox(this, "linuxCandidateWindowFontWeightComboBox"), 400)));
+  config->set_suggest_window_font_weight(static_cast<uint32_t>(
+      GetComboCurrentData(
+          FindComboBox(this, "linuxSuggestWindowFontWeightComboBox"), 400)));
+  if (const QSpinBox* spin = FindSpinBox(this, "candidateWindowCornerRadiusSpinBox")) {
+    config->set_candidate_window_custom_corner_radius(
+        static_cast<uint32_t>(spin->value()));
+  }
+  if (const QSpinBox* spin = FindSpinBox(this, "suggestWindowCornerRadiusSpinBox")) {
+    config->set_suggest_window_custom_corner_radius(
+        static_cast<uint32_t>(spin->value()));
+  }
+  if (const QSpinBox* spin = FindSpinBox(this, "candidateWindowOpacityPercentSpinBox")) {
+    config->set_candidate_window_opacity_percent(
+        static_cast<uint32_t>(spin->value()));
+  }
+  if (const QSpinBox* spin = FindSpinBox(this, "suggestWindowOpacityPercentSpinBox")) {
+    config->set_suggest_window_opacity_percent(
+        static_cast<uint32_t>(spin->value()));
   }
   return;
 #endif  // !defined(_WIN32) && !defined(__APPLE__)

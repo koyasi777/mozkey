@@ -29,10 +29,20 @@
 
 #include "renderer/qt/qt_window_manager.h"
 
+#include <QPainterPath>
+#include <QGraphicsEffect>
+#include <QImage>
+#include <QScreen>
+#include <QPolygon>
+#include <QRegion>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <string>
+#include <utility>
+#include <vector>
+#include <limits>
 
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -42,8 +52,10 @@
 #include "client/client_interface.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
+#include "renderer/qt/qt_candidate_footer.h"
 #include "renderer/renderer_style_handler.h"
 #include "renderer/window_util.h"
+#include "renderer/window_effect_util.h"
 
 namespace mozc {
 namespace renderer {
@@ -53,16 +65,13 @@ constexpr int kMarginHeight = 5;
 constexpr int kMarginWidth = 20;
 constexpr int kColumn0Width = 20;
 constexpr int kColumn3Width = 6;
+// A passive page marker; not QScrollBar (which would desynchronize selection).
+constexpr int kPageIndicatorWidth = 6;
 constexpr int kInfolistWidth = 520;
 
-// #RRGGBB or #AARRGGBB
-constexpr char kBackgroundColor[] = "#FFFFFF";
-constexpr char kHighlightColor[] = "#D1EAFF";
-constexpr char kIndicatorColor[] = "#7FACDD";
-constexpr char kFooterBackgroundColor[] = "#EEEEEE";
-constexpr char kDescriptionColor[] = "#888888";
-constexpr char kShortcutColor[] = "#616161";
-constexpr char kShortcutBackgroundColor[] = "#F3F4FF";
+constexpr int kHasInformationRole = Qt::UserRole;
+constexpr int kIsFocusedRole = Qt::UserRole + 1;
+constexpr int kIsFooterRole = Qt::UserRole + 2;
 
 QString QStr(absl::string_view str) {
   return QString::fromUtf8(str.data(), str.size());
@@ -72,7 +81,237 @@ QColor QColorFromRGBAColor(RendererStyle::RGBAColor rgba) {
   return QColor(rgba.r(), rgba.g(), rgba.b(), 255 * rgba.a());
 }
 
+// The renderer style uses logical text pixels (not points). Explicitly set the
+// per-cell font before computing metrics, otherwise window size controls have
+// no effect in Qt and the computed table width/height clips larger fonts.
+void ApplyTextStyle(QTableWidgetItem* item,
+                    const RendererStyle::TextStyle& text_style,
+                    const QFont& base_font) {
+  QFont font = base_font;
+  if (!text_style.font_name().empty()) {
+    font.setFamily(QString::fromStdString(text_style.font_name()));
+  }
+  if (text_style.font_size() > 0) {
+    font.setPixelSize(std::max(1, static_cast<int>(
+                                      std::lround(text_style.font_size()))));
+  }
+  font.setWeight(static_cast<QFont::Weight>(
+      std::clamp(text_style.font_weight(), 100, 900)));
+  item->setFont(font);
+}
+
+// The Qt graphics effect handles the smooth visual clip. Removing the old
+// binary QRegion mask is essential: a native region would clip even the
+// antialiased edge pixels. For popup windows, clicks near the tiny transparent
+// corners are still checked by the table's normal hit-testing logic.
+void ApplyCandidateWindowShape(QTableWidget* table,
+                               QtRoundedClipEffect* effect,
+                               uint32_t corner_radius,
+                               uint32_t opacity_percent) {
+  if (!table || !effect) return;
+  const qreal opacity =
+      static_cast<qreal>(std::clamp(opacity_percent, 20u, 100u)) / 100.0;
+  if (std::abs(table->windowOpacity() - opacity) > 0.001) {
+    table->setWindowOpacity(opacity);
+  }
+  const int radius = std::min({static_cast<int>(std::min(corner_radius, 24u)),
+                               table->width() / 2, table->height() / 2});
+  effect->SetRadius(radius);
+  if (!table->mask().isEmpty()) table->clearMask();
+}
+
 }  // namespace
+
+void QtRoundedClipEffect::SetRadius(int radius) {
+  radius = std::clamp(radius, 0, 24);
+  if (radius_ == radius) return;
+  radius_ = radius;
+  update();
+}
+
+void QtRoundedClipEffect::draw(QPainter* painter) {
+  if (radius_ <= 0) {
+    drawSource(painter);
+    return;
+  }
+  QPoint offset;
+  const QPixmap source = sourcePixmap(Qt::LogicalCoordinates, &offset,
+                                     QGraphicsEffect::NoPad);
+  if (source.isNull()) return;
+  // Render to a premultiplied image at the source's native DPR, preserving
+  // subpixel coverage at 125%, 150%, and 200% monitor scaling.
+  QImage clipped(source.size(), QImage::Format_ARGB32_Premultiplied);
+  clipped.setDevicePixelRatio(source.devicePixelRatio());
+  clipped.fill(Qt::transparent);
+  QPainter clip(&clipped);
+  clip.setRenderHint(QPainter::Antialiasing);
+  QPainterPath rounded;
+  const qreal dpr = source.devicePixelRatio();
+  rounded.addRoundedRect(QRectF(0, 0, source.width() / dpr,
+                                source.height() / dpr), radius_, radius_);
+  clip.setClipPath(rounded);
+  clip.drawPixmap(QPoint(0, 0), source);
+  clip.end();
+  painter->drawImage(offset, clipped);
+}
+
+QtWindowShadow::QtWindowShadow()
+    : QWidget(nullptr, Qt::ToolTip | Qt::FramelessWindowHint |
+                            Qt::WindowStaysOnTopHint |
+                            Qt::WindowTransparentForInput) {
+  setAttribute(Qt::WA_TranslucentBackground);
+  setAttribute(Qt::WA_NoSystemBackground);
+  setAttribute(Qt::WA_ShowWithoutActivating);
+  setAttribute(Qt::WA_TransparentForMouseEvents);
+  hide();
+}
+
+void QtWindowShadow::UpdateFor(
+    const QWidget* owner, uint32_t corner_radius,
+    const RendererStyleHandler::WindowShadowStyle& style) {
+  if (!owner || style.size == 0 || style.opacity_percent == 0) {
+    hide();
+    return;
+  }
+  const QScreen* screen = owner->screen();
+  const qreal dpr = std::clamp(screen ? screen->devicePixelRatio() : 1.0,
+                               1.0, 4.0);
+  const int physical_width = std::max(1, qRound(owner->width() * dpr));
+  const int physical_height = std::max(1, qRound(owner->height() * dpr));
+  const int physical_size = qRound(std::min(style.size, 96u) * dpr);
+  const int physical_distance = qRound(std::min(style.distance, 96u) * dpr);
+  const int physical_radius = qRound(std::min(corner_radius, 24u) * dpr);
+  const std::array<int, 8> key = {
+      physical_width, physical_height, physical_size, physical_distance,
+      physical_radius, static_cast<int>(style.angle_degrees % 360u),
+      static_cast<int>(std::min(style.opacity_percent, 100u)), qRound(dpr * 1000)};
+  const WindowShadowGeometry shadow_geometry = ComputeWindowShadowGeometry(
+      physical_width, physical_height, physical_size, physical_distance,
+      style.angle_degrees, physical_radius);
+  constexpr int64_t kMaxPixels = 6000000;
+  const int64_t pixel_count =
+      static_cast<int64_t>(shadow_geometry.width) * shadow_geometry.height;
+  if (!shadow_geometry.enabled() || pixel_count <= 0 || pixel_count > kMaxPixels) {
+    hide();
+    return;
+  }
+  const bool image_changed = !has_cache_ || cache_key_ != key;
+  if (image_changed) {
+    std::vector<uint8_t> mask(static_cast<size_t>(pixel_count));
+    if (!RenderWindowShadowAlphaMask(
+            shadow_geometry, style.opacity_percent, mask.data(), mask.size())) {
+      hide();
+      return;
+    }
+    QImage image(shadow_geometry.width, shadow_geometry.height,
+                 QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull()) {
+      hide();
+      return;
+    }
+    image.setDevicePixelRatio(dpr);
+    for (int y = 0; y < image.height(); ++y) {
+      auto* row = reinterpret_cast<QRgb*>(image.scanLine(y));
+      for (int x = 0; x < image.width(); ++x) {
+        row[x] = qRgba(0, 0, 0, mask[static_cast<size_t>(y) * image.width() + x]);
+      }
+    }
+    image_ = std::move(image);
+    cache_key_ = key;
+    has_cache_ = true;
+  }
+  const QSize target_size(qCeil(shadow_geometry.width / dpr),
+                          qCeil(shadow_geometry.height / dpr));
+  const QPoint target_pos = owner->pos() -
+      QPoint(qRound(shadow_geometry.owner_left / dpr),
+             qRound(shadow_geometry.owner_top / dpr));
+  const QRect target_geometry(target_pos, target_size);
+  const bool geometry_changed = geometry() != target_geometry;
+  if (geometry_changed) setGeometry(target_geometry);
+  if (!isVisible()) show();
+  if (image_changed || geometry_changed) update();
+}
+
+void QtWindowShadow::paintEvent(QPaintEvent*) {
+  if (image_.isNull()) return;
+  QPainter painter(this);
+  painter.setRenderHint(QPainter::SmoothPixmapTransform);
+  painter.drawImage(QPoint(0, 0), image_);
+}
+
+void CandidateTableDelegate::paint(QPainter* painter,
+                                  const QStyleOptionViewItem& option,
+                                  const QModelIndex& index) const {
+  const QRect rect = option.rect;
+  if (index.data(kIsFooterRole).toBool()) {
+    QRect content = rect;
+    for (int i = 0; i < separators_.size() && i < content.height(); ++i) {
+      painter->fillRect(content.left(), content.top() + i, content.width(), 1,
+                        separators_[i]);
+    }
+    const int separator_height =
+        std::min(static_cast<int>(separators_.size()), content.height());
+    content.adjust(0, separator_height, 0, 0);
+    if (content.height() > 0) {
+      QLinearGradient gradient(content.topLeft(), content.bottomLeft());
+      gradient.setColorAt(0.0, footer_top_);
+      gradient.setColorAt(1.0, footer_bottom_);
+      painter->fillRect(content, gradient);
+    }
+  }
+  QStyledItemDelegate::paint(painter, option, index);
+  if (index.data(kIsFocusedRole).toBool()) {
+    painter->fillRect(rect.left(), rect.top(), rect.width(), 1,
+                      focused_border_);
+    painter->fillRect(rect.left(), rect.bottom(), rect.width(), 1,
+                      focused_border_);
+    if (index.column() == 0) {
+      painter->fillRect(rect.left(), rect.top(), 1, rect.height(),
+                        focused_border_);
+    }
+    if (index.column() == index.model()->columnCount() - 1) {
+      painter->fillRect(rect.right(), rect.top(), 1, rect.height(),
+                        focused_border_);
+    }
+  }
+  if (index.data(kHasInformationRole).toBool()) {
+    const QRect marker_rect = rect.adjusted(0, 2, -2, -2);
+    if (marker_rect.width() > 0 && marker_rect.height() > 0) {
+      painter->fillRect(marker_rect, information_marker_);
+    }
+  }
+}
+
+CandidatePageIndicator::CandidatePageIndicator(QWidget* parent)
+    : QWidget(parent) {
+  setAttribute(Qt::WA_TransparentForMouseEvents);
+  setAttribute(Qt::WA_NoSystemBackground);
+  hide();
+}
+
+void CandidatePageIndicator::Configure(int total, int first, int visible,
+                                      QColor track, QColor thumb) {
+  total_ = std::max(0, total);
+  first_ = std::clamp(first, 0, std::max(0, total_ - 1));
+  visible_ = std::clamp(visible, 0, total_);
+  track_ = track;
+  thumb_ = thumb;
+  setVisible(total_ > visible_ && visible_ > 0);
+  update();
+}
+
+void CandidatePageIndicator::paintEvent(QPaintEvent* event) {
+  Q_UNUSED(event);
+  if (total_ <= visible_ || visible_ <= 0 || height() <= 0) return;
+  QPainter painter(this);
+  painter.fillRect(rect(), track_);
+  const int thumb_height = std::clamp(
+      static_cast<int>((static_cast<double>(visible_) / total_) * height()),
+      3, height());
+  const int range = std::max(1, total_ - visible_);
+  const int y = (height() - thumb_height) * std::min(first_, range) / range;
+  painter.fillRect(0, y, width(), thumb_height, thumb_);
+}
 
 QtWindowManager::QtWindowManager() {
   RendererStyleHandler::GetRendererStyle(&style_);
@@ -100,6 +339,9 @@ void QtWindowManager::Initialize() {
   const auto initialize_table = [](QTableWidget* table) {
     table->setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint |
                           Qt::WindowStaysOnTopHint);
+    // The rounded clip runs on an ARGB top-level surface.
+    table->setAttribute(Qt::WA_TranslucentBackground);
+    table->setAttribute(Qt::WA_NoSystemBackground);
     table->setSelectionMode(QTableWidget::NoSelection);
     table->setShowGrid(false);
 
@@ -116,6 +358,12 @@ void QtWindowManager::Initialize() {
 
   candidates_ = new QTableWidget();
   initialize_table(candidates_);
+  candidate_delegate_ = new CandidateTableDelegate(candidates_);
+  candidates_->setItemDelegate(candidate_delegate_);
+  page_indicator_ = new CandidatePageIndicator(candidates_);
+  candidate_clip_ = new QtRoundedClipEffect(candidates_);
+  candidates_->setGraphicsEffect(candidate_clip_);
+  candidate_shadow_ = new QtWindowShadow;
   QObject::connect(candidates_, &QTableWidget::cellClicked,
                    [&](int row, int col) { OnClicked(row, col); });
 
@@ -124,14 +372,87 @@ void QtWindowManager::Initialize() {
   infolist_->setColumnCount(1);
   infolist_->setRowCount(3);
   infolist_->setColumnWidth(0, kInfolistWidth);
+  infolist_clip_ = new QtRoundedClipEffect(infolist_);
+  infolist_->setGraphicsEffect(infolist_clip_);
+  infolist_shadow_ = new QtWindowShadow;
+  ApplyStyleToWidgets();
+}
+
+void QtWindowManager::ApplyStyleToWidgets() {
+  if (candidates_ == nullptr || infolist_ == nullptr) return;
+  auto apply = [](QTableWidget* table, const QColor& background,
+                  const QColor& foreground) {
+    QPalette palette = table->palette();
+    palette.setColor(QPalette::Window, background);
+    palette.setColor(QPalette::Base, background);
+    palette.setColor(QPalette::Text, foreground);
+    table->setPalette(palette);
+    table->viewport()->setAutoFillBackground(true);
+  };
+  apply(candidates_,
+        QColorFromRGBAColor(style_.candidate_style().background_color()),
+        QColorFromRGBAColor(style_.candidate_style().foreground_color()));
+  apply(infolist_,
+        QColorFromRGBAColor(style_.infolist_style().title_style().background_color()),
+        QColorFromRGBAColor(style_.infolist_style().title_style().foreground_color()));
+
+  // A stylesheet (not only palette) is required for Qt to honor a custom
+  // frame and to avoid stale system colors after switching dark/light themes.
+  const auto apply_frame = [](QTableWidget* table, int thickness,
+                              const QColor& border, const QColor& background,
+                              const QColor& foreground) {
+    table->setStyleSheet(QStringLiteral(
+        "QTableWidget { border: %1px solid %2; background-color: %3; "
+        "color: %4; }")
+        .arg(thickness)
+        .arg(border.name())
+        .arg(background.name())
+        .arg(foreground.name()));
+  };
+  apply_frame(candidates_, std::clamp(style_.window_border(), 0, 4),
+              QColorFromRGBAColor(style_.border_color()),
+              QColorFromRGBAColor(style_.candidate_style().background_color()),
+              QColorFromRGBAColor(style_.candidate_style().foreground_color()));
+  apply_frame(infolist_,
+              std::clamp(style_.infolist_style().window_border(), 0, 4),
+              QColorFromRGBAColor(style_.infolist_style().border_color()),
+              QColorFromRGBAColor(
+                  style_.infolist_style().title_style().background_color()),
+              QColorFromRGBAColor(
+                  style_.infolist_style().title_style().foreground_color()));
+  if (candidate_delegate_ != nullptr) {
+    QList<QColor> separators;
+    for (const auto& color : style_.footer_border_colors()) {
+      separators.push_back(QColorFromRGBAColor(color));
+    }
+    candidate_delegate_->SetColors(
+        QColorFromRGBAColor(style_.footer_top_color()),
+        QColorFromRGBAColor(style_.footer_bottom_color()),
+        std::move(separators),
+        QColorFromRGBAColor(style_.focused_border_color()),
+        QColorFromRGBAColor(style_.scrollbar_indicator_color()));
+  }
+}
+
+void QtWindowManager::RefreshCurrentStyle() {
+  if (candidates_ == nullptr || !candidates_->isVisible() ||
+      !prev_command_.has_output()) {
+    return;
+  }
+  const commands::RendererCommand last = prev_command_;
+  prev_command_.Clear();
+  UpdateLayout(last);
 }
 
 void QtWindowManager::HideAllWindows() {
   candidates_->hide();
   infolist_->hide();
+  candidate_shadow_->hide();
+  infolist_shadow_->hide();
 }
 
 void QtWindowManager::ShowAllWindows() {
+  // The shadow windows are intentionally not shown without their owner.
   candidates_->show();
   infolist_->show();
 }
@@ -208,43 +529,39 @@ Rect GetRect(const commands::RendererCommand::Rectangle& prect) {
 
 bool IsUpdated(const commands::RendererCommand& prev_command,
                const commands::RendererCommand& new_command) {
+  if (!prev_command.has_output() || !new_command.has_output()) {
+    return true;
+  }
   const commands::CandidateWindow& prev_cands =
       prev_command.output().candidate_window();
   const commands::CandidateWindow& new_cands =
       new_command.output().candidate_window();
-  if (prev_cands.candidate_size() != new_cands.candidate_size()) {
+  // Comparing only the first candidate misses updated text/annotations farther
+  // down the page, new footer hints, and total-count changes.
+  if (prev_cands.candidate_size() != new_cands.candidate_size() ||
+      prev_cands.size() != new_cands.size() ||
+      prev_cands.category() != new_cands.category() ||
+      prev_cands.footer().SerializeAsString() !=
+          new_cands.footer().SerializeAsString()) {
     return true;
   }
-  if (prev_cands.candidate(0).id() != new_cands.candidate(0).id()) {
-    return true;
-  }
-  if (prev_cands.candidate(0).value() != new_cands.candidate(0).value()) {
-    return true;
+  for (int i = 0; i < new_cands.candidate_size(); ++i) {
+    if (prev_cands.candidate(i).SerializeAsString() !=
+        new_cands.candidate(i).SerializeAsString()) {
+      return true;
+    }
   }
   return false;
 }
 
 int GetItemWidth(const QTableWidgetItem& item) {
   QFontMetrics metrics(item.font());
-  return metrics.boundingRect(item.text()).width() + kMarginWidth;
+  return metrics.horizontalAdvance(item.text()) + kMarginWidth;
 }
 
 int GetItemHeight(const QTableWidgetItem& item) {
   QFontMetrics metrics(item.font());
   return metrics.height() + kMarginHeight;
-}
-
-std::string GetIndexGuideString(
-    const commands::CandidateWindow& candidate_window) {
-  if (!candidate_window.has_footer() ||
-      !candidate_window.footer().index_visible()) {
-    return "";
-  }
-
-  const int focused_index = candidate_window.focused_index();
-  const int total_items = candidate_window.size();
-
-  return absl::StrCat(focused_index + 1, "/", total_items);
 }
 
 int GetFocusedRow(const commands::CandidateWindow& candidate_window) {
@@ -256,51 +573,68 @@ int GetFocusedRow(const commands::CandidateWindow& candidate_window) {
 }
 
 void FillCandidateHighlight(const commands::CandidateWindow& candidate_window,
-                            const int row, QTableWidget* table) {
-  if (row < 0) {
+                            const int row, const RendererStyle& style,
+                            QTableWidget* table) {
+  if (row < 0 || row >= candidate_window.candidate_size() ||
+      row >= table->rowCount()) {
     return;
   }
 
-  const bool has_info = candidate_window.candidate(row).has_information_id();
-  const QBrush indicator = QBrush(QColor(kIndicatorColor));
-
-  if (row == GetFocusedRow(candidate_window)) {
-    const QBrush highlight = QBrush(QColor(kHighlightColor));
-    table->item(row, 0)->setBackground(highlight);
-    table->item(row, 1)->setBackground(highlight);
-    table->item(row, 2)->setBackground(highlight);
-    table->item(row, 3)->setBackground(has_info ? indicator : highlight);
+  // Decoration is handled by CandidateTableDelegate so the border is a
+  // continuous frame across all four cells, not four independent boxes.
+  table->item(row, 3)->setData(
+      kHasInformationRole,
+      candidate_window.candidate(row).has_information_id());
+  const bool focused = row == GetFocusedRow(candidate_window);
+  for (int col = 0; col < table->columnCount(); ++col) {
+    table->item(row, col)->setData(kIsFocusedRole, focused);
+  }
+  if (focused) {
+    const QBrush highlight =
+        QBrush(QColorFromRGBAColor(style.focused_background_color()));
+    for (int col = 0; col < table->columnCount(); ++col) {
+      table->item(row, col)->setBackground(highlight);
+    }
     return;
   }
 
-  const QBrush background = QBrush(QColor(kBackgroundColor));
+  const QBrush background = QBrush(
+      QColorFromRGBAColor(style.candidate_style().background_color()));
   if (candidate_window.candidate(row).annotation().shortcut().empty()) {
     table->item(row, 0)->setBackground(background);
   } else {
-    const QBrush shortcut_background = QBrush(QColor(kShortcutBackgroundColor));
-    table->item(row, 0)->setBackground(shortcut_background);
+    table->item(row, 0)->setBackground(
+        QBrush(QColorFromRGBAColor(style.shortcut_style().background_color())));
   }
-  table->item(row, 1)->setBackground(background);
-  table->item(row, 2)->setBackground(background);
-  table->item(row, 3)->setBackground(has_info ? indicator : background);
+  for (int col = 1; col < table->columnCount(); ++col) {
+    table->item(row, col)->setBackground(background);
+  }
 }
 
 void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
-                         QTableWidget* table) {
+                         const RendererStyle& style, QTableWidget* table) {
   const size_t cands_size = candidate_window.candidate_size();
+  table->clearSpans();
   table->clear();
-  table->setRowCount(cands_size + 1);  // +1 is for footer.
+  const QtCandidateFooter footer = GetQtCandidateFooter(candidate_window);
+  table->setRowCount(cands_size + (footer.visible ? 1 : 0));
   table->setColumnCount(4);
   table->setColumnWidth(0, kColumn0Width);  // shortcut
   table->setColumnWidth(3, kColumn3Width);  // infolist indicator
 
+  int max_width0 = kColumn0Width;
   int max_width1 = 0;
   int max_width2 = 0;
   int total_height = 0;
 
-  const QBrush shortcut_brush = QBrush(QColor(kShortcutColor));
-  const QBrush description_brush = QBrush(QColor(kDescriptionColor));
-  const QBrush footer_bg_brush = QBrush(QColor(kFooterBackgroundColor));
+  const QBrush shortcut_brush =
+      QBrush(QColorFromRGBAColor(style.shortcut_style().foreground_color()));
+  const QBrush candidate_brush =
+      QBrush(QColorFromRGBAColor(style.candidate_style().foreground_color()));
+  const QBrush description_brush =
+      QBrush(QColorFromRGBAColor(style.description_style().foreground_color()));
+  const QBrush footer_text_brush =
+      QBrush(QColorFromRGBAColor(style.footer_style().foreground_color()));
 
   // Fill the candidates
   std::string shortcut, value, description;
@@ -311,50 +645,86 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
 
     // shortcut
     auto item0 = new QTableWidgetItem(QStr(shortcut));
+    ApplyTextStyle(item0, style.shortcut_style(), table->font());
     item0->setForeground(shortcut_brush);
     item0->setTextAlignment(Qt::AlignCenter);
     table->setItem(i, 0, item0);
 
     // value
     auto item1 = new QTableWidgetItem(QStr(value));
+    ApplyTextStyle(item1, style.candidate_style(), table->font());
+    item1->setForeground(candidate_brush);
     table->setItem(i, 1, item1);
 
     // description
     auto item2 = new QTableWidgetItem(QStr(description));
+    ApplyTextStyle(item2, style.description_style(), table->font());
     item2->setForeground(description_brush);
     table->setItem(i, 2, item2);
 
     // indicator
     auto item3 = new QTableWidgetItem();
     table->setItem(i, 3, item3);
-    FillCandidateHighlight(candidate_window, i, table);
+    FillCandidateHighlight(candidate_window, i, style, table);
 
+    max_width0 = std::max(max_width0, GetItemWidth(*item0));
     max_width1 = std::max(max_width1, GetItemWidth(*item1));
     max_width2 = std::max(max_width2, GetItemWidth(*item2));
-    const int height = GetItemHeight(*item1);
+    const int height = std::max({GetItemHeight(*item0), GetItemHeight(*item1),
+                                 GetItemHeight(*item2)});
     table->setRowHeight(i, height);
     total_height += height;
   }
 
-  // Footer
-  for (int i = 0; i < table->columnCount(); ++i) {
-    auto footer_item = new QTableWidgetItem();
-    footer_item->setBackground(footer_bg_brush);
-    table->setItem(cands_size, i, footer_item);
+  // A passive suggestion must have no footer whatsoever, not even an
+  // empty gradient row. This is the same rule used by Windows and macOS.
+  if (footer.visible) {
+    for (int i = 0; i < table->columnCount(); ++i) {
+      auto* footer_item = new QTableWidgetItem();
+      ApplyTextStyle(footer_item, style.footer_style(), table->font());
+      footer_item->setForeground(footer_text_brush);
+      footer_item->setData(kIsFooterRole, true);
+      table->setItem(cands_size, i, footer_item);
+    }
+    auto* footer0 = table->item(cands_size, 0);
+    footer0->setText(QStr(footer.label));
+    if (footer.is_sub_label) {
+      ApplyTextStyle(footer0, style.footer_sub_label_style(), table->font());
+    }
+    footer0->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    table->setSpan(cands_size, 0, 1, 2);
+    if (!footer.label.empty()) {
+      const int left_width = std::min(360, GetItemWidth(*footer0) + kMarginWidth);
+      max_width1 += std::max(0, left_width - (max_width0 + max_width1));
+    }
+    auto* footer2 = table->item(cands_size, 2);
+    footer2->setText(QStr(footer.index));
+    footer2->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    // Merge the unused information-marker column only in the footer.
+    // Without this, a blank six-pixel strip sits to the right of "1/101".
+    table->setSpan(cands_size, 2, 1, 2);
+    const QFontMetrics footer_metrics(footer2->font());
+    constexpr int kFooterIndexRightPadding = 5;
+    max_width2 = std::max(
+        max_width2,
+        std::max(0, footer_metrics.horizontalAdvance(footer2->text()) +
+                        kFooterIndexRightPadding - kColumn3Width));
+    const int footer_height =
+        std::max(GetItemHeight(*footer0), GetItemHeight(*footer2)) +
+        style.footer_border_colors_size();
+    table->setRowHeight(cands_size, footer_height);
+    total_height += footer_height;
   }
-  QTableWidgetItem* footer2 = table->item(cands_size, 2);
-  footer2->setText(QStr(GetIndexGuideString(candidate_window)));
-  footer2->setTextAlignment(Qt::AlignRight);
-  max_width2 = std::max(max_width2, GetItemWidth(*footer2));
-  const int footer_height = GetItemHeight(*footer2);
-  table->setRowHeight(cands_size, footer_height);
-  total_height += footer_height;
 
   // Resize
+  table->setColumnWidth(0, max_width0);
   table->setColumnWidth(1, max_width1);
   table->setColumnWidth(2, max_width2);
-  const int width = kColumn0Width + max_width1 + max_width2 + kColumn3Width;
-  table->resize(width, total_height);
+  const int border = std::clamp(style.window_border(), 0, 4);
+  const int width = max_width0 + max_width1 + max_width2 + kColumn3Width +
+                    (candidate_window.size() > candidate_window.candidate_size()
+                         ? kPageIndicatorWidth : 0);
+  table->resize(width + 2 * border, total_height + 2 * border);
 }
 
 class VirtualRect {
@@ -366,16 +736,33 @@ class VirtualRect {
 
       // Use top left to locate a screen
       if (screen_rect.contains(rect.Left(), rect.Top())) {
-        return VirtualRect(rect, mozc::renderer::GetRect(screen->geometry()));
+        return VirtualRect(rect, mozc::renderer::GetRect(screen->availableGeometry()));
       }
     }
 
-    // fall back to primary screen
-    // TODO: Return the nearest monitor rect instead.
-    // See GetMonitorRect
+    // If the caret is just outside a monitor (or mixed-DPI conversion is
+    // ambiguous), pick the closest available working area, not the primary
+    // monitor unconditionally.
     const QScreen* screen = QGuiApplication::primaryScreen();
+    qint64 best_distance = std::numeric_limits<qint64>::max();
+    for (const QScreen* candidate : QGuiApplication::screens()) {
+      const Rect rect = TranslateToVirtual(candidate, native_rect);
+      const QRect area = candidate->availableGeometry();
+      const qint64 dx = std::max<qint64>(
+          {static_cast<qint64>(area.left()) - rect.Left(), 0,
+           static_cast<qint64>(rect.Left()) - area.right()});
+      const qint64 dy = std::max<qint64>(
+          {static_cast<qint64>(area.top()) - rect.Top(), 0,
+           static_cast<qint64>(rect.Top()) - area.bottom()});
+      const qint64 distance = dx * dx + dy * dy;
+      if (distance < best_distance) {
+        best_distance = distance;
+        screen = candidate;
+      }
+    }
+    if (screen == nullptr) return VirtualRect(native_rect, native_rect);
     const Rect rect = TranslateToVirtual(screen, native_rect);
-    return VirtualRect(rect, mozc::renderer::GetRect(screen->geometry()));
+    return VirtualRect(rect, mozc::renderer::GetRect(screen->availableGeometry()));
   }
 
   Rect GetRect() const { return rect_; }
@@ -433,27 +820,69 @@ Rect QtWindowManager::UpdateCandidateWindow(
   const commands::CandidateWindow& candidate_window =
       command.output().candidate_window();
 
+  RendererStyle selected_style;
+  const auto kind =
+      RendererStyleHandler::GetRendererStyleTypeForCandidateWindow(candidate_window);
+  if (RendererStyleHandler::GetRendererStyleForWindowType(kind,
+                                                         &selected_style) &&
+      (kind != active_style_type_ ||
+       selected_style.SerializeAsString() != style_.SerializeAsString())) {
+    style_ = std::move(selected_style);
+    active_style_type_ = kind;
+    ApplyStyleToWidgets();
+    // A style change needs a full refill, not only a focused-row update.
+    prev_command_.Clear();
+  }
+
   if (IsUpdated(prev_command_, command)) {
-    FillCandidateWindow(candidate_window, candidates_);
-    const Size win_size(candidates_->width(), candidates_->height());
-    const Point win_pos = GetWindowPosition(command, win_size);
-    candidates_->move(win_pos.x, win_pos.y);
+    FillCandidateWindow(candidate_window, style_, candidates_);
   } else {
     // Reset the previous focused highlight
     const int prev_focused =
         GetFocusedRow(prev_command_.output().candidate_window());
-    FillCandidateHighlight(candidate_window, prev_focused, candidates_);
+    FillCandidateHighlight(candidate_window, prev_focused, style_, candidates_);
   }
+
+  // Window shape and position must be recomputed even for focus-only updates.
+  // The same candidate list can move when the text caret or monitor changes.
+  const auto effects =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(active_style_type_);
+  const uint32_t corner_radius =
+      RendererStyleHandler::GetCandidateWindowCornerRadius(active_style_type_);
+  ApplyCandidateWindowShape(candidates_, candidate_clip_, corner_radius,
+                            effects.opacity_percent);
+  const Size win_size(candidates_->width(), candidates_->height());
+  const Point win_pos = GetWindowPosition(command, win_size);
+  candidates_->move(win_pos.x, win_pos.y);
 
   // Set the focused highlight
   FillCandidateHighlight(candidate_window, GetFocusedRow(candidate_window),
-                         candidates_);
+                         style_, candidates_);
 
-  // Footer index
-  candidates_->item(candidates_->rowCount() - 1, 2)
-      ->setText(QStr(GetIndexGuideString(candidate_window)));
+  // Footer index. Keep the page indicator outside the selectable rows; a
+  // native Qt scrollbar would scroll the table independently of Mozc's pages.
+  const QtCandidateFooter footer = GetQtCandidateFooter(candidate_window);
+  if (footer.visible) {
+    candidates_->item(candidates_->rowCount() - 1, 2)
+        ->setText(QStr(footer.index));
+  }
+  const int border = std::clamp(style_.window_border(), 0, 4);
+  const int footer_height =
+      footer.visible ? candidates_->rowHeight(candidates_->rowCount() - 1) : 0;
+  page_indicator_->setGeometry(
+      candidates_->width() - border - kPageIndicatorWidth, border,
+      kPageIndicatorWidth,
+      std::max(0, candidates_->height() - 2 * border - footer_height));
+  page_indicator_->Configure(
+      candidate_window.size(), candidate_window.candidate(0).index(),
+      candidate_window.candidate_size(),
+      QColorFromRGBAColor(style_.scrollbar_background_color()),
+      QColorFromRGBAColor(style_.scrollbar_indicator_color()));
+  page_indicator_->raise();
 
+  candidate_shadow_->UpdateFor(candidates_, corner_radius, effects.shadow);
   candidates_->show();
+  candidates_->raise();
   prev_command_ = command;
   return GetRect(candidates_->geometry());
 }
@@ -481,7 +910,7 @@ bool QtWindowManager::ShouldShowInfolistWindow(
   // Converts candidate's index to column row index.
   const int focused_row =
       candidate_window.focused_index() - candidate_window.candidate(0).index();
-  if (candidate_window.candidate_size() < focused_row) {
+  if (focused_row < 0 || focused_row >= candidate_window.candidate_size()) {
     return false;
   }
 
@@ -499,10 +928,10 @@ Rect QtWindowManager::GetMonitorRect(int x, int y) {
     // (x, y) does not belong to any screen. Fall back to the primary screen.
     // TODO: Return the nearest monitor rect instead.
     // c.f. GetWorkingAreaFromPointImpl in win32_renderer_util.cc.
-    return GetRect(QGuiApplication::primaryScreen()->geometry());
+    return GetRect(QGuiApplication::primaryScreen()->availableGeometry());
   }
 
-  return GetRect(screen->geometry());
+  return GetRect(screen->availableGeometry());
 }
 
 void QtWindowManager::UpdateInfolistWindow(
@@ -510,6 +939,7 @@ void QtWindowManager::UpdateInfolistWindow(
     const Rect& candidate_window_rect) {
   if (!ShouldShowInfolistWindow(command)) {
     infolist_->hide();
+    infolist_shadow_->hide();
     return;
   }
 
@@ -527,9 +957,14 @@ void QtWindowManager::UpdateInfolistWindow(
   // Caption title
   absl::string_view caption = style_.infolist_style().caption_string();
   QTableWidgetItem* infolist_title = new QTableWidgetItem(QStr(caption));
+  ApplyTextStyle(infolist_title, style_.infolist_style().caption_style(),
+                 infolist_->font());
   infolist_title->setBackground(QBrush(
       QColorFromRGBAColor(style_.infolist_style().caption_background_color())));
+  infolist_title->setForeground(QBrush(
+      QColorFromRGBAColor(style_.infolist_style().caption_style().foreground_color())));
   infolist_->setItem(0, 0, infolist_title);
+  infolist_->setRowHeight(0, GetItemHeight(*infolist_title));
   total_height += GetItemHeight(*infolist_title);
 
   for (int i = 0; i < size; ++i) {
@@ -539,6 +974,21 @@ void QtWindowManager::UpdateInfolistWindow(
     const std::string desc = info.information(i).description();
     const auto qtitle = new QTableWidgetItem(QString::fromUtf8(title.c_str()));
     const auto qdesc = new QTableWidgetItem(QString::fromUtf8(desc.c_str()));
+    ApplyTextStyle(qtitle, style_.infolist_style().title_style(),
+                   infolist_->font());
+    ApplyTextStyle(qdesc, style_.infolist_style().description_style(),
+                   infolist_->font());
+    qtitle->setForeground(QBrush(QColorFromRGBAColor(
+        style_.infolist_style().title_style().foreground_color())));
+    qdesc->setForeground(QBrush(QColorFromRGBAColor(
+        style_.infolist_style().description_style().foreground_color())));
+    // The infolist has a translucent top-level surface for rounded corners.
+    // Paint every row explicitly; otherwise unfocused rows remain transparent.
+    // The focused row below overrides these base colors as intended.
+    qtitle->setBackground(QBrush(QColorFromRGBAColor(
+        style_.infolist_style().title_style().background_color())));
+    qdesc->setBackground(QBrush(QColorFromRGBAColor(
+        style_.infolist_style().description_style().background_color())));
 
     const int title_height = GetItemHeight(*qtitle);
     const int desc_height =
@@ -547,11 +997,14 @@ void QtWindowManager::UpdateInfolistWindow(
     infolist_->setRowHeight(desc_row, desc_height);
     total_height += (title_height + desc_height);
 
-    infolist_->setItem(0, title_row, qtitle);
-    infolist_->setItem(0, desc_row, qdesc);
+    // setItem(row, column, item): the old code reversed the two indices and
+    // silently discarded information for every column >= 1.
+    infolist_->setItem(title_row, 0, qtitle);
+    infolist_->setItem(desc_row, 0, qdesc);
 
     if (info.focused_index() == i) {
-      const QBrush highlight = QBrush(QColor(kHighlightColor));
+      const QBrush highlight = QBrush(
+          QColorFromRGBAColor(style_.infolist_style().focused_background_color()));
       qtitle->setBackground(highlight);
       qdesc->setBackground(highlight);
     }
@@ -565,7 +1018,17 @@ void QtWindowManager::UpdateInfolistWindow(
 
   infolist_->move(infolist_rect.Left(), infolist_rect.Top());
   infolist_->resize(kInfolistWidth, total_height);
+  // The infolist currently inherits the candidate window effect; its palette
+  // remains independent, as defined in RendererStyle::InfolistStyle.
+  const auto effects =
+      RendererStyleHandler::GetCandidateWindowEffectStyle(active_style_type_);
+  const uint32_t radius =
+      RendererStyleHandler::GetCandidateWindowCornerRadius(active_style_type_);
+  ApplyCandidateWindowShape(infolist_, infolist_clip_, radius,
+                            effects.opacity_percent);
+  infolist_shadow_->UpdateFor(infolist_, radius, effects.shadow);
   infolist_->show();
+  infolist_->raise();
 }
 
 void QtWindowManager::UpdateLayout(const commands::RendererCommand& command) {

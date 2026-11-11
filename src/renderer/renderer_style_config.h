@@ -30,9 +30,14 @@
 #ifndef MOZC_RENDERER_RENDERER_STYLE_CONFIG_H_
 #define MOZC_RENDERER_RENDERER_STYLE_CONFIG_H_
 
+#include "renderer/renderer_color_theme.h"
+
 namespace mozc {
 namespace renderer {
 
+// Use the platform-supplied appearance when AUTO is selected. The Qt renderer
+// obtains this from QStyleHints instead of the non-Qt platform API.
+void UpdateRendererStyleFromConfig(SystemColorTheme system_color_theme);
 void UpdateRendererStyleFromConfig();
 
 }  // namespace renderer
