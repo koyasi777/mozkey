@@ -32,6 +32,7 @@
 #include <QEvent>
 #include <QHelpEvent>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QTableWidgetItem>
@@ -56,11 +57,13 @@ namespace gui {
 namespace {
 enum {
   NEW_INDEX = 0,
-  REMOVE_INDEX = 1,
-  IMPORT_FROM_FILE_INDEX = 2,
-  EXPORT_TO_FILE_INDEX = 3,
-  RESET_INDEX = 4,
-  MENU_SIZE = 5
+  INSERT_ABOVE_INDEX = 1,
+  INSERT_BELOW_INDEX = 2,
+  REMOVE_INDEX = 3,
+  IMPORT_FROM_FILE_INDEX = 4,
+  EXPORT_TO_FILE_INDEX = 5,
+  RESET_INDEX = 6,
+  MENU_SIZE = 7
 };
 constexpr char kRomanTableFile[] = "system://romanji-hiragana.tsv";
 constexpr char kDisplayAmbiguousResult[] = "DisplayAmbiguousResult";
@@ -118,6 +121,10 @@ RomanTableEditorDialog::RomanTableEditorDialog(QWidget *parent)
       default_table_requested_(false),
       loading_table_(false) {
   actions_[NEW_INDEX] = mutable_edit_menu()->addAction(tr("New entry"));
+  actions_[INSERT_ABOVE_INDEX] =
+      mutable_edit_menu()->addAction(tr("Insert entry above"));
+  actions_[INSERT_BELOW_INDEX] =
+      mutable_edit_menu()->addAction(tr("Insert entry below"));
   actions_[REMOVE_INDEX] =
       mutable_edit_menu()->addAction(tr("Remove selected entries"));
   mutable_edit_menu()->addSeparator();
@@ -146,6 +153,8 @@ RomanTableEditorDialog::RomanTableEditorDialog(QWidget *parent)
 
   QObject::connect(mutable_table_widget(), SIGNAL(itemChanged(QTableWidgetItem *)),
                    this, SLOT(MarkRomanTableEdited(QTableWidgetItem *)));
+  QObject::connect(mutable_table_widget(), &QTableWidget::itemSelectionChanged,
+                   this, &RomanTableEditorDialog::UpdateMenuStatus);
 
   mutable_table_widget()->horizontalHeader()->viewport()->installEventFilter(this);
 
@@ -324,23 +333,97 @@ bool RomanTableEditorDialog::Update() {
 }
 
 void RomanTableEditorDialog::UpdateMenuStatus() {
-  const bool status = (mutable_table_widget()->rowCount() > 0);
-  actions_[RESET_INDEX]->setEnabled(status);
-  actions_[REMOVE_INDEX]->setEnabled(status);
-  UpdateOKButton(status);
+  QTableWidget *table = mutable_table_widget();
+  const bool has_rows = table->rowCount() > 0;
+  const bool can_insert =
+      static_cast<size_t>(table->rowCount()) < max_entry_size();
+  const bool has_current = table->currentItem() != nullptr;
+  actions_[NEW_INDEX]->setEnabled(can_insert);
+  actions_[INSERT_ABOVE_INDEX]->setEnabled(has_current && can_insert);
+  actions_[INSERT_BELOW_INDEX]->setEnabled(has_current && can_insert);
+  actions_[RESET_INDEX]->setEnabled(has_rows);
+  actions_[REMOVE_INDEX]->setEnabled(has_rows);
+  UpdateOKButton(has_rows);
+}
+
+bool RomanTableEditorDialog::InsertRomanTableEntry(int row) {
+  QTableWidget *table = mutable_table_widget();
+  if (static_cast<size_t>(table->rowCount()) >= max_entry_size()) {
+    QMessageBox::warning(
+        this, dialog_title_,
+        tr("You can't have more than %1 entries").arg(max_entry_size()));
+    return false;
+  }
+  if (row < 0 || row > table->rowCount()) {
+    return false;
+  }
+
+  // Keep all existing rows in their original order.  The fourth column is a
+  // checkable item with hidden rule attributes, not an ordinary text cell.
+  InsertEmptyItem(row);
+  delete table->takeItem(row, 3);
+  table->setItem(row, 3,
+                 CreateDisplayAmbiguousResultItem(false, std::string()));
+  default_table_requested_ = false;
+  return true;
+}
+
+void RomanTableEditorDialog::OnContextMenuRequested(const QPoint &pos) {
+  QTableWidget *table = mutable_table_widget();
+  QTableWidgetItem *item = table->itemAt(pos);
+  if (item == nullptr) {
+    return;
+  }
+  const int row = item->row();
+  // Use the row that was right-clicked, not a previously selected row.
+  // Preserve multi-selection when clicking one of its selected cells.
+  if (item->isSelected()) {
+    table->setCurrentItem(item, QItemSelectionModel::NoUpdate);
+  } else {
+    table->setCurrentItem(item, QItemSelectionModel::ClearAndSelect);
+  }
+
+  QMenu menu(this);
+  QAction *edit_action = nullptr;
+  if (table->selectedItems().size() == 1) {
+    edit_action =
+        menu.addAction(GenericTableEditorDialog::tr("Edit entry"));
+  }
+  QAction *new_action = menu.addAction(tr("New entry"));
+  QAction *above_action = menu.addAction(tr("Insert entry above"));
+  QAction *below_action = menu.addAction(tr("Insert entry below"));
+  QAction *remove_action =
+      menu.addAction(GenericTableEditorDialog::tr("Remove entry"));
+  const bool can_insert =
+      static_cast<size_t>(table->rowCount()) < max_entry_size();
+  new_action->setEnabled(can_insert);
+  above_action->setEnabled(can_insert);
+  below_action->setEnabled(can_insert);
+
+  QAction *selected_action = menu.exec(table->viewport()->mapToGlobal(pos));
+  if (edit_action != nullptr && selected_action == edit_action) {
+    table->editItem(item);
+  } else if (selected_action == new_action) {
+    InsertRomanTableEntry(table->rowCount());
+  } else if (selected_action == above_action) {
+    InsertRomanTableEntry(row);
+  } else if (selected_action == below_action) {
+    InsertRomanTableEntry(row + 1);
+  } else if (selected_action == remove_action) {
+    default_table_requested_ = false;
+    DeleteSelectedItems();
+  }
 }
 
 void RomanTableEditorDialog::OnEditMenuAction(QAction *action) {
   if (action == actions_[NEW_INDEX]) {
-    default_table_requested_ = false;
-    AddNewItem();
-    const int row = (mutable_table_widget()->currentRow() >= 0)
-                        ? mutable_table_widget()->currentRow()
-                        : (mutable_table_widget()->rowCount() - 1);
+    InsertRomanTableEntry(mutable_table_widget()->rowCount());
+  } else if (action == actions_[INSERT_ABOVE_INDEX] ||
+             action == actions_[INSERT_BELOW_INDEX]) {
+    const int row = mutable_table_widget()->currentRow();
     if (row >= 0) {
-      delete mutable_table_widget()->takeItem(row, 3);
-      mutable_table_widget()->setItem(
-          row, 3, CreateDisplayAmbiguousResultItem(false, std::string()));
+      InsertRomanTableEntry(
+          row + (action == actions_[INSERT_BELOW_INDEX] ? 1 : 0));
     }
   } else if (action == actions_[REMOVE_INDEX]) {
     default_table_requested_ = false;

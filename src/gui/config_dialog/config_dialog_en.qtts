@@ -1643,6 +1643,16 @@ The current Windows default IME override will be saved so it can be restored lat
         <translation></translation>
     </message>
     <message>
+        <location filename="keymap_editor.cc" line="319"/>
+        <source>Insert entry above</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="keymap_editor.cc" line="321"/>
+        <source>Insert entry below</source>
+        <translation></translation>
+    </message>
+    <message>
         <location filename="keymap_editor.cc" line="227"/>
         <source>Remove selected entries</source>
         <translation></translation>
@@ -1732,6 +1742,16 @@ These assignments can match the same physical key input. Choose non-overlapping 
     <message>
         <location filename="roman_table_editor.cc" line="36"/>
         <source>New entry</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="roman_table_editor.cc" line="123"/>
+        <source>Insert entry above</source>
+        <translation></translation>
+    </message>
+    <message>
+        <location filename="roman_table_editor.cc" line="125"/>
+        <source>Insert entry below</source>
         <translation></translation>
     </message>
     <message>
