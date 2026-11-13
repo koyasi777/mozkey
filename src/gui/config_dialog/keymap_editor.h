@@ -63,6 +63,7 @@ class KeyMapEditorDialog : public GenericTableEditorDialog {
  protected slots:
   void UpdateMenuStatus() override;
   void OnEditMenuAction(QAction *action) override;
+  void OnContextMenuRequested(const QPoint &pos) override;
 
  protected:
   QLatin1String GetDefaultFilename() const override {
@@ -72,6 +73,7 @@ class KeyMapEditorDialog : public GenericTableEditorDialog {
   bool Update() override;
 
  private:
+  bool InsertKeyMapEntry(int row);
   std::string invisible_keymap_table_;
   // This is used for deciding whether the user has changed the settings that
   // are valid only for new applications.

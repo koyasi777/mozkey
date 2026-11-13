@@ -32,6 +32,7 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileDialog>
+#include <QItemSelectionModel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QtGui>
@@ -99,10 +100,12 @@ constexpr char kIMEOffCommand[] = "IMEOff";
 
 enum {
   NEW_INDEX = 0,
-  REMOVE_INDEX = 1,
-  IMPORT_FROM_FILE_INDEX = 2,
-  EXPORT_TO_FILE_INDEX = 3,
-  MENU_SIZE = 4
+  INSERT_ABOVE_INDEX = 1,
+  INSERT_BELOW_INDEX = 2,
+  REMOVE_INDEX = 3,
+  IMPORT_FROM_FILE_INDEX = 4,
+  EXPORT_TO_FILE_INDEX = 5,
+  MENU_SIZE = 6
 };
 
 std::vector<std::string> SplitCommandSequenceForEditor(
@@ -315,6 +318,10 @@ KeyMapEditorDialog::KeyMapEditorDialog(QWidget *parent)
       keybinding_delegate_(std::make_unique<KeyBindingEditorDelegate>()),
       validator_(std::make_unique<KeyMapValidator>()) {
   actions_[NEW_INDEX] = mutable_edit_menu()->addAction(tr("New entry"));
+  actions_[INSERT_ABOVE_INDEX] =
+      mutable_edit_menu()->addAction(tr("Insert entry above"));
+  actions_[INSERT_BELOW_INDEX] =
+      mutable_edit_menu()->addAction(tr("Insert entry below"));
   actions_[REMOVE_INDEX] =
       mutable_edit_menu()->addAction(tr("Remove selected entries"));
   mutable_edit_menu()->addSeparator();
@@ -390,6 +397,8 @@ KeyMapEditorDialog::KeyMapEditorDialog(QWidget *parent)
   QStringList headers;
   headers << tr("Mode") << tr("Key") << tr("Command");
   mutable_table_widget()->setHorizontalHeaderLabels(headers);
+  connect(mutable_table_widget(), &QTableWidget::itemSelectionChanged, this,
+          &KeyMapEditorDialog::UpdateMenuStatus);
 
   resize(500, 350);
 
@@ -593,10 +602,79 @@ bool KeyMapEditorDialog::Update() {
 }
 
 void KeyMapEditorDialog::UpdateMenuStatus() {
-  const bool status = (mutable_table_widget()->rowCount() > 0);
-  actions_[REMOVE_INDEX]->setEnabled(status);
-  actions_[EXPORT_TO_FILE_INDEX]->setEnabled(status);
-  UpdateOKButton(status);
+  QTableWidget *table = mutable_table_widget();
+  const bool has_rows = table->rowCount() > 0;
+  const bool can_insert =
+      static_cast<size_t>(table->rowCount()) < max_entry_size();
+  const bool has_current = table->currentItem() != nullptr;
+  actions_[NEW_INDEX]->setEnabled(can_insert);
+  actions_[INSERT_ABOVE_INDEX]->setEnabled(has_current && can_insert);
+  actions_[INSERT_BELOW_INDEX]->setEnabled(has_current && can_insert);
+  actions_[REMOVE_INDEX]->setEnabled(has_rows);
+  actions_[EXPORT_TO_FILE_INDEX]->setEnabled(has_rows);
+  UpdateOKButton(has_rows);
+}
+
+bool KeyMapEditorDialog::InsertKeyMapEntry(int row) {
+  QTableWidget *table = mutable_table_widget();
+  if (row < 0 || row > table->rowCount()) {
+    return false;
+  }
+  if (static_cast<size_t>(table->rowCount()) >= max_entry_size()) {
+    QMessageBox::warning(
+        this, windowTitle(),
+        tr("You can't have more than %1 entries").arg(max_entry_size()));
+    return false;
+  }
+
+  // This temporarily suspends table sorting while inserting a complete row.
+  // Do not change existing key bindings or the user-selected sort behavior.
+  InsertEmptyItem(row);
+  return true;
+}
+
+void KeyMapEditorDialog::OnContextMenuRequested(const QPoint &pos) {
+  QTableWidget *table = mutable_table_widget();
+  QTableWidgetItem *item = table->itemAt(pos);
+  if (item == nullptr) {
+    return;
+  }
+  const int row = item->row();
+  // Anchor insertion to the right-clicked row rather than a prior selection.
+  if (item->isSelected()) {
+    table->setCurrentItem(item, QItemSelectionModel::NoUpdate);
+  } else {
+    table->setCurrentItem(item, QItemSelectionModel::ClearAndSelect);
+  }
+
+  QMenu menu(this);
+  QAction *edit_action = nullptr;
+  if (table->selectedItems().size() == 1) {
+    edit_action = menu.addAction(GenericTableEditorDialog::tr("Edit entry"));
+  }
+  QAction *new_action = menu.addAction(tr("New entry"));
+  QAction *above_action = menu.addAction(tr("Insert entry above"));
+  QAction *below_action = menu.addAction(tr("Insert entry below"));
+  QAction *remove_action =
+      menu.addAction(GenericTableEditorDialog::tr("Remove entry"));
+  const bool can_insert =
+      static_cast<size_t>(table->rowCount()) < max_entry_size();
+  new_action->setEnabled(can_insert);
+  above_action->setEnabled(can_insert);
+  below_action->setEnabled(can_insert);
+
+  QAction *selected_action = menu.exec(table->viewport()->mapToGlobal(pos));
+  if (edit_action != nullptr && selected_action == edit_action) {
+    table->editItem(item);
+  } else if (selected_action == new_action) {
+    InsertKeyMapEntry(table->rowCount());
+  } else if (selected_action == above_action) {
+    InsertKeyMapEntry(row);
+  } else if (selected_action == below_action) {
+    InsertKeyMapEntry(row + 1);
+  } else if (selected_action == remove_action) {
+    DeleteSelectedItems();
+  }
 }
 
 void KeyMapEditorDialog::OnEditMenuAction(QAction *action) {
@@ -609,7 +687,14 @@ void KeyMapEditorDialog::OnEditMenuAction(QAction *action) {
   }
 
   if (action == actions_[NEW_INDEX]) {
-    AddNewItem();
+    InsertKeyMapEntry(mutable_table_widget()->rowCount());
+  } else if (action == actions_[INSERT_ABOVE_INDEX] ||
+             action == actions_[INSERT_BELOW_INDEX]) {
+    const int row = mutable_table_widget()->currentRow();
+    if (row >= 0) {
+      InsertKeyMapEntry(
+          row + (action == actions_[INSERT_BELOW_INDEX] ? 1 : 0));
+    }
   } else if (action == actions_[REMOVE_INDEX]) {
     DeleteSelectedItems();
   } else if (import_index != -1 || action == actions_[IMPORT_FROM_FILE_INDEX]) {

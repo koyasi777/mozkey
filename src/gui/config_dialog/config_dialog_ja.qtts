@@ -1714,6 +1714,16 @@ The active input method may require a sign-out or restart to update.</source>
         <translation>エントリーを追加</translation>
     </message>
     <message>
+        <location filename="keymap_editor.cc" line="319"/>
+        <source>Insert entry above</source>
+        <translation>選択行の上に挿入</translation>
+    </message>
+    <message>
+        <location filename="keymap_editor.cc" line="321"/>
+        <source>Insert entry below</source>
+        <translation>選択行の下に挿入</translation>
+    </message>
+    <message>
         <location filename="keymap_editor.cc" line="227"/>
         <source>Remove selected entries</source>
         <translation>選択されたエントリーを削除</translation>
@@ -1809,6 +1819,16 @@ These assignments can match the same physical key input. Choose non-overlapping 
         <location filename="roman_table_editor.cc" line="36"/>
         <source>New entry</source>
         <translation>新しいエントリー</translation>
+    </message>
+    <message>
+        <location filename="roman_table_editor.cc" line="123"/>
+        <source>Insert entry above</source>
+        <translation>選択行の上に挿入</translation>
+    </message>
+    <message>
+        <location filename="roman_table_editor.cc" line="125"/>
+        <source>Insert entry below</source>
+        <translation>選択行の下に挿入</translation>
     </message>
     <message>
         <location filename="roman_table_editor.cc" line="38"/>

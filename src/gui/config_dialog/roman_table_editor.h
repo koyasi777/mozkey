@@ -56,6 +56,7 @@ class RomanTableEditorDialog : public GenericTableEditorDialog {
  protected slots:
   void UpdateMenuStatus() override;
   void OnEditMenuAction(QAction *action) override;
+  void OnContextMenuRequested(const QPoint &pos) override;
 
  private slots:
   void MarkRomanTableEdited(QTableWidgetItem *item);
@@ -69,6 +70,7 @@ class RomanTableEditorDialog : public GenericTableEditorDialog {
   bool eventFilter(QObject *obj, QEvent *event) override;
 
  private:
+  bool InsertRomanTableEntry(int row);
   bool LoadDefaultRomanTable();
   static std::string GetDefaultRomanTable();
 
