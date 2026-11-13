@@ -162,6 +162,10 @@
 ^名詞 ^助詞,(終助詞|特殊|接続助詞|動詞非自立的) true
 ^名詞 ^名詞,非自立,(一般|助動詞語幹|形容動詞語幹) true
 ^名詞 ^形容詞,非自立 true
+# Treat the POS pair used by "気付ける" as one conversion segment.
+# The test dictionary may omit this specific POS; '?' permits skipping it.
+# Keep the match narrow in profiles where both POS IDs exist.
+?^名詞,一般,*,*,*,*,気 ^動詞,接尾,*,*,一段,基本形,付ける false
 ^名詞 ^動詞,(接尾|非自立) true
 
 # Rare connection from verb/adjective

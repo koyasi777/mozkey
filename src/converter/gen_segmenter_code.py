@@ -74,7 +74,7 @@ def PatternToRegexp(pattern):
   return pattern.replace("*", "[^,]+")
 
 
-def GetRange(pos, pattern, name):
+def GetRange(pos, pattern, name, allow_missing=False):
   if pattern == "*":
     return ""
 
@@ -109,6 +109,8 @@ def GetRange(pos, pattern, name):
       tmp.append("(%s >= %s && %s <= %s)" % (name, r[0], name, r[1]))
 
   if not tmp:
+    if allow_missing:
+      return None
     print("FATAL: No rule fiind %s" % (pattern))
     sys.exit(-1)
 
@@ -126,8 +128,18 @@ def main():
       continue
     (l, r, result) = line.split()
     result = result.lower()
-    lcond = GetRange(pos, l, "rid") or "true"
-    rcond = GetRange(pos, r, "lid") or "true"
+    # A leading '?' on the left pattern marks a profile-optional rule.
+    # Strict rules still fail if a POS pattern does not exist in id.def.
+    optional = l.startswith("?")
+    if optional:
+      l = l[1:]
+    lcond = GetRange(pos, l, "rid", allow_missing=optional)
+    rcond = GetRange(pos, r, "lid", allow_missing=optional)
+    if lcond is None or rcond is None:
+      print("INFO: skipped optional segmenter rule (missing POS)", file=sys.stderr)
+      continue
+    lcond = lcond or "true"
+    rcond = rcond or "true"
     print("  // %s %s %s" % (l, r, result), file=out)
     print(
         "  if ((%s) && (%s)) { return %s; }" % (lcond, rcond, result), file=out

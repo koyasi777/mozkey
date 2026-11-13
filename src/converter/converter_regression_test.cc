@@ -94,6 +94,23 @@ TEST_F(ConverterRegressionTest, Regression3323108) {
   EXPECT_EQ(segments.conversion_segment(1).key(), "きものをぬぐ");
 }
 
+// Verify a single conversion segment without an explicit ResizeSegments call.
+// This tests both the default segmenter decision and the top surface.
+TEST_F(ConverterRegressionTest, KizukeruIsOneSegmentWithoutManualResize) {
+  std::unique_ptr<Engine> engine = EngineFactory::Create().value();
+  ASSERT_TRUE(engine);
+  std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
+  ASSERT_TRUE(converter);
+
+  Segments segments;
+  ASSERT_TRUE(converter->StartConversion(ConvReq("きづける"), &segments));
+  ASSERT_EQ(segments.conversion_segments_size(), 1) << segments.DebugString();
+  const Segment& segment = segments.conversion_segment(0);
+  EXPECT_EQ(segment.key(), "きづける");
+  ASSERT_GT(segment.candidates_size(), 0);
+  EXPECT_EQ(segment.candidate(0).value, "気付ける");
+}
+
 TEST_F(ConverterRegressionTest, HyphenlessZipcodeConversion) {
   std::unique_ptr<Engine> engine = EngineFactory::Create().value();
   std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
