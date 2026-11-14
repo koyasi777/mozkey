@@ -9,8 +9,11 @@ namespace mozc {
 namespace zenz {
 
 // Returns the per-user directory reserved for the local Zenz scorer socket.
-// The scorer is responsible for creating and validating this directory with
-// user-only permissions before binding the socket.
+// On Linux, the endpoint is under a validated XDG_RUNTIME_DIR in a dedicated
+// mozkey-zenz directory.  An absent or invalid runtime root disables this
+// optional endpoint (no implicit /tmp fallback).  macOS retains its legacy
+// per-UID /tmp path.  The scorer creates and validates the private child
+// directory before binding; this function does not create any directories.
 std::string GetZenzUnixSocketDirectory();
 
 // Returns the deterministic Unix-domain socket path shared by mozc_server and

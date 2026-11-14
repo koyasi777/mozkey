@@ -5,6 +5,8 @@
 #include <functional>
 #include <string>
 
+#include <sys/types.h>
+
 namespace mozc {
 namespace zenz_scorer {
 
@@ -49,6 +51,9 @@ class PosixZenzScorerServer final {
   PosixZenzBackend backend_;
   int lock_fd_ = -1;
   int listen_fd_ = -1;
+  // Captured after bind; do not unlink a socket that replaced ours.
+  dev_t socket_device_ = 0;
+  ino_t socket_inode_ = 0;
   bool owns_socket_path_ = false;
 };
 

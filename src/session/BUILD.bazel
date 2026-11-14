@@ -285,6 +285,27 @@ mozc_cc_binary(
     target_compatible_with = ["@platforms//os:windows"],
 )
 
+# Exercises the real POSIX scorer socket server against the real session
+# transport without launching a model, guard, or installed IME.
+mozc_cc_test(
+    name = "zenz_posix_server_client_integration_test",
+    size = "small",
+    srcs = ["zenz_posix_server_client_integration_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":session",
+        "//testing:gunit_main",
+        "//zenz:unix_socket_path",
+        "//zenz:wire_protocol",
+        "//zenz_scorer:posix_server",
+        "@com_google_absl//absl/time",
+    ],
+)
+
 mozc_cc_test(
     name = "zenz_named_pipe_client_test",
     size = "small",
