@@ -94,6 +94,72 @@ TEST_F(ConverterRegressionTest, Regression3323108) {
   EXPECT_EQ(segments.conversion_segment(1).key(), "きものをぬぐ");
 }
 
+// Verify a single conversion segment without an explicit ResizeSegments call.
+// This tests both the default segmenter decision and the top surface.
+TEST_F(ConverterRegressionTest, KizukeruIsOneSegmentWithoutManualResize) {
+  std::unique_ptr<Engine> engine = EngineFactory::Create().value();
+  ASSERT_TRUE(engine);
+  std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
+  ASSERT_TRUE(converter);
+
+  Segments segments;
+  ASSERT_TRUE(converter->StartConversion(ConvReq("きづける"), &segments));
+  ASSERT_EQ(segments.conversion_segments_size(), 1) << segments.DebugString();
+  const Segment& segment = segments.conversion_segment(0);
+  EXPECT_EQ(segment.key(), "きづける");
+  ASSERT_GT(segment.candidates_size(), 0);
+  EXPECT_EQ(segment.candidate(0).value, "気付ける");
+}
+
+// A complete lexical verb should remain a conversion segment across
+// inflections.  This test intentionally does not change segmenter.def.
+TEST_F(ConverterRegressionTest, CompoundVerbLexicalInflections) {
+  std::unique_ptr<Engine> engine = EngineFactory::Create().value();
+  ASSERT_TRUE(engine);
+  std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
+  ASSERT_TRUE(converter);
+
+  struct TestCase {
+    const char* key;
+    const char* expected;
+  };
+  const TestCase cases[] = {
+      {"きづけない", "気付けない"},
+      {"きづけなければ", "気付けなければ"},
+      {"きづければ", "気付ければ"},
+      {"きづけよう", "気付けよう"},
+      {"きづけた", "気づけた"},
+      {"きづけて", "気づけて"},
+      {"けいきづける", "景気付ける"},
+      {"けいきづけない", "景気付けない"},
+      {"けいきづけよう", "景気付けよう"},
+      {"けいきづければ", "景気付ければ"},
+      {"りゆうづける", "理由づける"},
+      {"りゆうづけない", "理由づけない"},
+      {"りゆうづけよう", "理由づけよう"},
+      {"かちづける", "価値づける"},
+      {"かちづけなかった", "価値づけなかった"},
+      {"かちづければ", "価値づければ"},
+      {"せいかくづける", "性格づける"},
+      {"せいかくづけよう", "性格づけよう"},
+      {"なまえづける", "名前づける"},
+      {"なまえづけよう", "名前づけよう"},
+      {"なまえづければ", "名前づければ"},
+  };
+  for (const auto& test_case : cases) {
+    Segments segments;
+    ASSERT_TRUE(converter->StartConversion(ConvReq(test_case.key), &segments))
+        << test_case.key;
+    ASSERT_EQ(segments.conversion_segments_size(), 1)
+        << test_case.key << " " << segments.DebugString();
+    const Segment& segment = segments.conversion_segment(0);
+    EXPECT_EQ(segment.key(), test_case.key);
+    ASSERT_GT(segment.candidates_size(), 0) << test_case.key;
+    EXPECT_EQ(segment.candidate(0).value, test_case.expected)
+        << test_case.key;
+  }
+}
+
 TEST_F(ConverterRegressionTest, HyphenlessZipcodeConversion) {
   std::unique_ptr<Engine> engine = EngineFactory::Create().value();
   std::shared_ptr<const ConverterInterface> converter = engine->GetConverter();
