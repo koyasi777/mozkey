@@ -81,5 +81,18 @@ TEST(LocaleBasedMessageTranslatorTest, KnownJapaneseLocaleName) {
   }
 }
 
+TEST(LocaleBasedMessageTranslatorTest, AboutMenuBranding) {
+  LocaleBasedMessageTranslator japanese("ja_JP.UTF-8");
+  LocaleBasedMessageTranslator english("en_US.UTF-8");
+#ifdef GOOGLE_JAPANESE_INPUT_BUILD
+  EXPECT_EQ(japanese.MaybeTranslate("About Mozc"),
+            "Google 日本語入力について");
+  EXPECT_EQ(english.MaybeTranslate("About Mozc"), "About Mozc");
+#else  // GOOGLE_JAPANESE_INPUT_BUILD
+  EXPECT_EQ(japanese.MaybeTranslate("About Mozkey"), "Mozkey について");
+  EXPECT_EQ(english.MaybeTranslate("About Mozkey"), "About Mozkey");
+#endif  // GOOGLE_JAPANESE_INPUT_BUILD
+}
+
 }  // namespace ibus
 }  // namespace mozc

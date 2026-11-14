@@ -62,7 +62,7 @@ const TranslationMap kUTF8JapaneseMap[] = {
 #ifdef GOOGLE_JAPANESE_INPUT_BUILD
     {"About Mozc", "Google 日本語入力について"},
 #else   // GOOGLE_JAPANESE_INPUT_BUILD
-    {"About Mozc", "Mozc について"},
+    {"About Mozkey", "Mozkey について"},
 #endif  // GOOGLE_JAPANESE_INPUT_BUILD
 };
 

@@ -137,7 +137,11 @@ constexpr MozcEngineToolProperty kMozcEngineToolProperties[] = {
     {
         "Tool.AboutDialog",
         "about_dialog",
+#ifdef GOOGLE_JAPANESE_INPUT_BUILD
         "About Mozc",
+#else  // GOOGLE_JAPANESE_INPUT_BUILD
+        "About Mozkey",
+#endif  // GOOGLE_JAPANESE_INPUT_BUILD
         nullptr,
     },
 };
