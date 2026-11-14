@@ -35,6 +35,9 @@
 #include <QScreen>
 #include <QPolygon>
 #include <QRegion>
+#include <QScrollBar>
+#include <QStyle>
+#include <QStringList>
 
 #include <algorithm>
 #include <cmath>
@@ -67,7 +70,10 @@ constexpr int kColumn0Width = 20;
 constexpr int kColumn3Width = 6;
 // A passive page marker; not QScrollBar (which would desynchronize selection).
 constexpr int kPageIndicatorWidth = 6;
-constexpr int kInfolistWidth = 520;
+constexpr int kInfolistMinWidth = 220;
+constexpr int kInfolistMaxWidth = 520;
+constexpr int kInfolistScreenMargin = 12;
+constexpr int kInfolistTextPadding = 20;
 
 constexpr int kHasInformationRole = Qt::UserRole;
 constexpr int kIsFocusedRole = Qt::UserRole + 1;
@@ -371,7 +377,10 @@ void QtWindowManager::Initialize() {
   initialize_table(infolist_);
   infolist_->setColumnCount(1);
   infolist_->setRowCount(3);
-  infolist_->setColumnWidth(0, kInfolistWidth);
+  infolist_->setColumnWidth(0, kInfolistMinWidth);
+  infolist_->setWordWrap(true);
+  infolist_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  infolist_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
   infolist_clip_ = new QtRoundedClipEffect(infolist_);
   infolist_->setGraphicsEffect(infolist_clip_);
   infolist_shadow_ = new QtWindowShadow;
@@ -562,6 +571,27 @@ int GetItemWidth(const QTableWidgetItem& item) {
 int GetItemHeight(const QTableWidgetItem& item) {
   QFontMetrics metrics(item.font());
   return metrics.height() + kMarginHeight;
+}
+
+// Width of the longest explicit line, measured with the actual configured
+// per-row font. Wrapped text is constrained separately by the display width.
+int GetInfolistNaturalWidth(const QTableWidgetItem& item) {
+  const QFontMetrics metrics(item.font());
+  int max_width = 0;
+  for (const QString& line : item.text().split(QLatin1Char('\n'))) {
+    max_width = std::max(max_width, metrics.horizontalAdvance(line));
+  }
+  return max_width + kInfolistTextPadding;
+}
+
+// Use Qt text layout metrics instead of estimating line count from the full
+// string width. This accounts for explicit newlines and wrapping in Japanese.
+int GetInfolistWrappedHeight(const QTableWidgetItem& item, int text_width) {
+  const QFontMetrics metrics(item.font());
+  const QRect bounds = metrics.boundingRect(
+      QRect(0, 0, std::max(1, text_width), 1000000),
+      Qt::TextWordWrap | Qt::TextWrapAnywhere, item.text());
+  return std::max(metrics.height(), bounds.height()) + 2 * kMarginHeight;
 }
 
 int GetFocusedRow(const commands::CandidateWindow& candidate_window) {
@@ -950,9 +980,12 @@ void QtWindowManager::UpdateInfolistWindow(
   const size_t size = info.information_size();
 
   infolist_->setColumnCount(1);
-  infolist_->setColumnWidth(0, kInfolistWidth);
   infolist_->setRowCount(size * 2 + 1);  // +1 is for the caption title.
-  int total_height = 12;                 // Heuristics margin.
+
+  const Rect monitor_rect = GetMonitorRect(candidate_window_rect.Right(),
+                                           candidate_window_rect.Top());
+  const int border = std::clamp(style_.infolist_style().window_border(), 0, 4);
+  int natural_width = kInfolistMinWidth;
 
   // Caption title
   absl::string_view caption = style_.infolist_style().caption_string();
@@ -964,16 +997,15 @@ void QtWindowManager::UpdateInfolistWindow(
   infolist_title->setForeground(QBrush(
       QColorFromRGBAColor(style_.infolist_style().caption_style().foreground_color())));
   infolist_->setItem(0, 0, infolist_title);
-  infolist_->setRowHeight(0, GetItemHeight(*infolist_title));
-  total_height += GetItemHeight(*infolist_title);
+  natural_width = std::max(natural_width, GetInfolistNaturalWidth(*infolist_title));
 
   for (int i = 0; i < size; ++i) {
     const int title_row = i * 2 + 1;
     const int desc_row = i * 2 + 2;
     const std::string title = info.information(i).title();
     const std::string desc = info.information(i).description();
-    const auto qtitle = new QTableWidgetItem(QString::fromUtf8(title.c_str()));
-    const auto qdesc = new QTableWidgetItem(QString::fromUtf8(desc.c_str()));
+    auto* qtitle = new QTableWidgetItem(QString::fromUtf8(title.c_str()));
+    auto* qdesc = new QTableWidgetItem(QString::fromUtf8(desc.c_str()));
     ApplyTextStyle(qtitle, style_.infolist_style().title_style(),
                    infolist_->font());
     ApplyTextStyle(qdesc, style_.infolist_style().description_style(),
@@ -990,17 +1022,12 @@ void QtWindowManager::UpdateInfolistWindow(
     qdesc->setBackground(QBrush(QColorFromRGBAColor(
         style_.infolist_style().description_style().background_color())));
 
-    const int title_height = GetItemHeight(*qtitle);
-    const int desc_height =
-        GetItemHeight(*qdesc) * (GetItemWidth(*qdesc) / kInfolistWidth + 2);
-    infolist_->setRowHeight(title_row, title_height);
-    infolist_->setRowHeight(desc_row, desc_height);
-    total_height += (title_height + desc_height);
-
-    // setItem(row, column, item): the old code reversed the two indices and
-    // silently discarded information for every column >= 1.
+    // setItem(row, column, item): preserve the existing title/description order.
     infolist_->setItem(title_row, 0, qtitle);
     infolist_->setItem(desc_row, 0, qdesc);
+    natural_width = std::max({natural_width,
+                              GetInfolistNaturalWidth(*qtitle),
+                              GetInfolistNaturalWidth(*qdesc)});
 
     if (info.focused_index() == i) {
       const QBrush highlight = QBrush(
@@ -1009,15 +1036,49 @@ void QtWindowManager::UpdateInfolistWindow(
       qdesc->setBackground(highlight);
     }
   }
-  const Size infolist_size(kInfolistWidth, total_height);
-  const Rect monitor_rect = GetMonitorRect(candidate_window_rect.Right(),
-                                           candidate_window_rect.Top());
-  const Rect infolist_rect =
-      WindowUtil::WindowUtil::GetWindowRectForInfolistWindow(
-          infolist_size, candidate_window_rect, monitor_rect);
+
+  // A narrow monitor may be smaller than the nominal minimum width.
+  const int max_screen_width =
+      std::max(1, monitor_rect.Width() - 2 * kInfolistScreenMargin);
+  const int width = std::min({std::max(kInfolistMinWidth, natural_width + 2 * border),
+                              kInfolistMaxWidth, max_screen_width});
+  const int max_screen_height =
+      std::max(1, monitor_rect.Height() - 2 * kInfolistScreenMargin);
+
+  // A vertical scrollbar reduces the width available for text. Measure once
+  // without it, then remeasure with the scrollbar if clipping is necessary.
+  const auto measure_rows = [&](int scrollbar_width) {
+    const int text_width = std::max(
+        1, width - 2 * border - scrollbar_width - kInfolistTextPadding);
+    int height = 12;  // Preserve the existing outer vertical margin.
+    for (int row = 0; row < infolist_->rowCount(); ++row) {
+      const QTableWidgetItem* item = infolist_->item(row, 0);
+      const int row_height = GetInfolistWrappedHeight(*item, text_width);
+      infolist_->setRowHeight(row, row_height);
+      height += row_height;
+    }
+    return height + 2 * border;
+  };
+
+  int scrollbar_width = 0;
+  int content_height = measure_rows(0);
+  if (content_height > max_screen_height) {
+    scrollbar_width = infolist_->style()->pixelMetric(
+        QStyle::PM_ScrollBarExtent, nullptr, infolist_);
+    content_height = measure_rows(scrollbar_width);
+  }
+  const int height = std::min(content_height, max_screen_height);
+  infolist_->setColumnWidth(
+      0, std::max(1, width - 2 * border - scrollbar_width));
+  const Size infolist_size(width, height);
+  const Rect infolist_rect = WindowUtil::GetWindowRectForInfolistWindow(
+      infolist_size, candidate_window_rect, monitor_rect);
 
   infolist_->move(infolist_rect.Left(), infolist_rect.Top());
-  infolist_->resize(kInfolistWidth, total_height);
+  infolist_->resize(width, height);
+  // A new focused entry starts at the top; overflowing descriptions remain
+  // accessible through the standard table scrollbar.
+  infolist_->verticalScrollBar()->setValue(0);
   // The infolist currently inherits the candidate window effect; its palette
   // remains independent, as defined in RendererStyle::InfolistStyle.
   const auto effects =

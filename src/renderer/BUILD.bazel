@@ -343,7 +343,10 @@ mozc_cc_library(
         ":renderer_style_data",
     ],
     hdrs = ["renderer_style_handler.h"],
-    visibility = ["//renderer:__subpackages__"],
+    visibility = [
+        "//gui/config_dialog:__pkg__",
+        "//renderer:__subpackages__",
+    ],
     deps = [
         "//base:protobuf_util",
         "//base:text_normalizer",
