@@ -171,6 +171,8 @@ class Session {
                             bool allow_pass_through = true);
   bool InsertSpaceFullWidth(mozc::commands::Command* command);
   bool InsertCharacter(mozc::commands::Command* command);
+  void RefreshClientContextAfterCommitForNextInput(
+      const mozc::commands::Command& command);
   bool UpdateComposition(mozc::commands::Command* command);
   bool UpdateCompositionInternal(mozc::commands::Command* command);
   bool Delete(mozc::commands::Command* command);
@@ -344,6 +346,12 @@ class Session {
   // live-edit continuation unless conversion actually started from streaming
   // composition (including a pending live-conversion request).
   bool live_conversion_from_composition_ = false;
+
+  // An explicit Zenz conversion is accepted when the next ordinary text key
+  // starts a new composition. Automatic Zenz corrections keep live editing.
+  // Keep this intent independent of pending asynchronous Zenz state: a failed
+  // or delayed response still leaves an explicitly requested Mozc conversion.
+  bool manual_zenz_commit_on_next_input_ = false;
 
   // True while a live conversion request has been scheduled but not applied yet.
   bool live_conversion_pending_ = false;
