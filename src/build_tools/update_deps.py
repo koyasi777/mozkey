@@ -125,9 +125,9 @@ LLVM_WIN = ArchiveInfo(
 )
 
 LLVM_WIN_ARM64 = ArchiveInfo(
-    url='https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.1/clang+llvm-20.1.1-aarch64-pc-windows-msvc.tar.xz',
-    size=900502024,
-    sha256='6ee4c1a8c51cf081e19a7225d802d160cc888cdc3a8da07dcbdb5768e3160244',
+    url='https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-aarch64-pc-windows-msvc.tar.xz',
+    size=737955068,
+    sha256='de718c58ebbc5f61d58c17b90457fcf42983bc2c4a4aba3e010d108713bfd7f1',
 )
 
 MSYS2 = ArchiveInfo(
