@@ -51,7 +51,7 @@ using RubyPalette = config::Config::RubyWindowColorPalette;
 
 constexpr uint32_t kMaxCornerRadius = 24;
 constexpr uint32_t kMinWindowSizePercent = 80;
-constexpr uint32_t kMaxWindowSizePercent = 200;
+constexpr uint32_t kMaxWindowSizePercent = 300;
 constexpr uint32_t kMinWindowOpacityPercent = 20;
 constexpr uint32_t kMaxWindowOpacityPercent = 100;
 constexpr uint32_t kMaxRubyHorizontalPadding = 40;

@@ -412,7 +412,66 @@ bool WindowUtil::GetRubyWindowRect(
     return true;
   }
 
+  // On the first/last line of a screen, the preferred side may be outside
+  // the work area while the other side is occupied by a passive suggestion.
+  // Move past the suggestion before hiding the live reading.  Both candidates
+  // must also stay clear of the preedit itself.
+  if (avoid_rect != nullptr && avoid_rect->Width() > 0 &&
+      avoid_rect->Height() > 0) {
+    const Rect above_candidate(
+        left, avoid_rect->Top() - window_size.height - normalized_gap,
+        window_size.width, window_size.height);
+    if (is_usable(above_candidate) &&
+        !intersects(above_candidate, preedit_rect)) {
+      *window_rect = above_candidate;
+      return true;
+    }
+    const Rect below_candidate(
+        left, avoid_rect->Bottom() + normalized_gap,
+        window_size.width, window_size.height);
+    if (is_usable(below_candidate) &&
+        !intersects(below_candidate, preedit_rect)) {
+      *window_rect = below_candidate;
+      return true;
+    }
+  }
+
   return false;
+}
+
+bool WindowUtil::GetFixedRubyWindowRect(
+    const Rect& working_area, const Size& window_size,
+    uint32_t center_x_percent, uint32_t center_y_percent,
+    const Point& offset, Rect* window_rect) {
+  if (window_rect == nullptr || working_area.Width() <= 0 ||
+      working_area.Height() <= 0 || window_size.width <= 0 ||
+      window_size.height <= 0 ||
+      window_size.width > working_area.Width() ||
+      window_size.height > working_area.Height()) {
+    return false;
+  }
+
+  // Calculate in int64_t to avoid signed overflow for unusual monitor layouts
+  // or settings persisted by older/newer clients.
+  const int64_t center_x =
+      static_cast<int64_t>(working_area.Left()) +
+      static_cast<int64_t>(working_area.Width()) *
+          std::min(center_x_percent, 100u) / 100 + offset.x;
+  const int64_t center_y =
+      static_cast<int64_t>(working_area.Top()) +
+      static_cast<int64_t>(working_area.Height()) *
+          std::min(center_y_percent, 100u) / 100 + offset.y;
+  const int64_t left = std::clamp(
+      center_x - window_size.width / 2,
+      static_cast<int64_t>(working_area.Left()),
+      static_cast<int64_t>(working_area.Right()) - window_size.width);
+  const int64_t top = std::clamp(
+      center_y - window_size.height / 2,
+      static_cast<int64_t>(working_area.Top()),
+      static_cast<int64_t>(working_area.Bottom()) - window_size.height);
+  *window_rect = Rect(static_cast<int>(left), static_cast<int>(top),
+                      window_size.width, window_size.height);
+  return true;
 }
 
 bool WindowUtil::GetRubyWindowRectForVerticalWriting(

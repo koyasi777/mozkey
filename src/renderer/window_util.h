@@ -32,6 +32,8 @@
 #ifndef MOZC_RENDERER_WINDOW_UTIL_H_
 #define MOZC_RENDERER_WINDOW_UTIL_H_
 
+#include <cstdint>
+
 #include "base/coordinates.h"
 
 namespace mozc {
@@ -134,6 +136,15 @@ class WindowUtil {
                                 const Rect& working_area,
                                 const Rect* avoid_rect,
                                 Rect* window_rect);
+
+  // Fixed placement relative to the active monitor's usable area.  Both
+  // percentages anchor the *center* of the ruby, so its text can grow equally
+  // in both directions.  Offsets are in the caller's coordinate units.
+  // Rejects geometry that cannot fit entirely inside the work area.
+  static bool GetFixedRubyWindowRect(
+      const Rect& working_area, const Size& window_size,
+      uint32_t center_x_percent, uint32_t center_y_percent,
+      const Point& offset, Rect* window_rect);
 
   // Returns a vertical-writing ruby rectangle around the horizontally occupied
   // span of the active composition. |composition_span.Left()/Right()| are the

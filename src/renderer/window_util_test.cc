@@ -696,15 +696,50 @@ TEST_F(WindowUtilTest, RubyWindowMovesBelowAvoidRectangle) {
   EXPECT_EQ(result.Height(), 30);
 }
 
-TEST_F(WindowUtilTest, RubyWindowReturnsFalseWhenBothSidesAreBlocked) {
+TEST_F(WindowUtilTest, RubyWindowNearTopFallsBelowCandidate) {
+  const Rect preedit_rect(100, 4, 20, 18);
+  const Size ruby_size(100, 30);
+  const Rect working_area(0, 0, 400, 300);
+  const Rect candidate(90, 25, 140, 70);
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRect(
+      preedit_rect, ruby_size, 4, working_area, &candidate, &result));
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 99);
+}
+
+TEST_F(WindowUtilTest, RubyWindowNearBottomFallsAboveCandidate) {
+  const Rect preedit_rect(100, 275, 20, 20);
+  const Size ruby_size(100, 30);
+  const Rect working_area(0, 0, 400, 300);
+  const Rect candidate(90, 208, 140, 60);
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetRubyWindowRect(
+      preedit_rect, ruby_size, 4, working_area, &candidate, &result));
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 174);
+}
+
+TEST_F(WindowUtilTest, RubyWindowFallbackNeverOverlapsPreedit) {
+  const Rect preedit_rect(100, 100, 20, 30);
+  const Size ruby_size(100, 50);
+  const Rect work(0, 0, 300, 160);
+  const Rect candidate(60, 50, 180, 70);
+  Rect result;
+  // Neither candidate-side fallback should overlap the input or leave the
+  // work area, even when the preedit-side windows are blocked.
+  EXPECT_FALSE(WindowUtil::GetRubyWindowRect(
+      preedit_rect, ruby_size, 4, work, &candidate, &result));
+}
+
+TEST_F(WindowUtilTest, RubyWindowReturnsFalseWhenAllSpaceIsBlocked) {
   const Rect preedit_rect(100, 200, 20, 20);
   const Size ruby_size(100, 30);
   const Rect working_area(0, 0, 1000, 800);
-  const Rect avoid_rect(80, 140, 200, 140);
-
+  const Rect candidate(0, 0, 1000, 800);
   Rect result;
   EXPECT_FALSE(WindowUtil::GetRubyWindowRect(
-      preedit_rect, ruby_size, 4, working_area, &avoid_rect, &result));
+      preedit_rect, ruby_size, 4, working_area, &candidate, &result));
 }
 
 TEST_F(WindowUtilTest, VerticalRubyPrefersRightOfComposition) {
@@ -787,5 +822,56 @@ TEST_F(WindowUtilTest, VerticalRubyClampsTopInsideWorkingArea) {
   EXPECT_EQ(result.Top(), 700);
   EXPECT_EQ(result.Bottom(), 800);
 }
+TEST_F(WindowUtilTest, FixedRubyUsesWindowCenterNotLeftEdge) {
+  const Rect work(200, 100, 800, 600);
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetFixedRubyWindowRect(
+      work, Size(200, 60), 50, 70, Point(0, 0), &result));
+  EXPECT_EQ(result.Left(), 500);
+  EXPECT_EQ(result.Top(), 490);
+  ASSERT_TRUE(WindowUtil::GetFixedRubyWindowRect(
+      work, Size(300, 60), 50, 70, Point(0, 0), &result));
+  EXPECT_EQ(result.Left(), 450);
+  EXPECT_EQ(result.Top(), 490);
+}
+
+TEST_F(WindowUtilTest, FixedRubySupportsOffsetsAndNegativeMonitors) {
+  const Rect work(-1920, -100, 1920, 1080);
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetFixedRubyWindowRect(
+      work, Size(200, 60), 50, 50, Point(15, -10), &result));
+  EXPECT_EQ(result.Left(), -1045);
+  EXPECT_EQ(result.Top(), 400);
+}
+
+TEST_F(WindowUtilTest, FixedRubyClampsToUsableDisplayEdges) {
+  const Rect work(100, 200, 500, 400);
+  Rect result;
+  ASSERT_TRUE(WindowUtil::GetFixedRubyWindowRect(
+      work, Size(100, 40), 0, 100, Point(-300, 300), &result));
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 560);
+  ASSERT_TRUE(WindowUtil::GetFixedRubyWindowRect(
+      work, Size(100, 40), 150, 150, Point(0, 0), &result));
+  EXPECT_EQ(result.Left(), 500);
+  EXPECT_EQ(result.Top(), 560);
+}
+
+TEST_F(WindowUtilTest, FixedRubyRejectsOversizeOrInvalidGeometry) {
+  Rect result;
+  EXPECT_FALSE(WindowUtil::GetFixedRubyWindowRect(
+      Rect(0, 0, 500, 400), Size(501, 20), 50, 70,
+      Point(0, 0), &result));
+  EXPECT_FALSE(WindowUtil::GetFixedRubyWindowRect(
+      Rect(0, 0, 500, 400), Size(100, 0), 50, 70,
+      Point(0, 0), &result));
+  EXPECT_FALSE(WindowUtil::GetFixedRubyWindowRect(
+      Rect(0, 0, 0, 400), Size(100, 20), 50, 70,
+      Point(0, 0), &result));
+  EXPECT_FALSE(WindowUtil::GetFixedRubyWindowRect(
+      Rect(0, 0, 500, 400), Size(100, 20), 50, 70,
+      Point(0, 0), nullptr));
+}
+
 }  // namespace renderer
 }  // namespace mozc

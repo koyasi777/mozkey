@@ -4307,7 +4307,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   const auto add_size = [&](const char* object_name) {
     auto* spin = new QSpinBox(linux_group);
     spin->setObjectName(QString::fromLatin1(object_name));
-    spin->setRange(80, 200);  // Matches renderer_style_config.cc clamps.
+    spin->setRange(80, 300);  // Matches renderer_style_config.cc clamps.
     spin->setSingleStep(10);
     spin->setSuffix(QStringLiteral(" %"));
     QObject::connect(spin, QOverload<int>::of(&QSpinBox::valueChanged),
@@ -5426,7 +5426,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
 
     QSpinBox* size_spin = new QSpinBox(group);
     size_spin->setObjectName(QString::fromLatin1(size_name));
-    size_spin->setRange(80, 200);
+    size_spin->setRange(80, 300);
     size_spin->setSingleStep(1);
     size_spin->setSuffix(QStringLiteral(" %"));
     size_spin->setValue(100);
@@ -5908,6 +5908,128 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
       ruby_spacing_box->setParent(editor);
       editor_layout->addWidget(ruby_spacing_box);
       ruby_spacing_box->show();
+
+      auto* placement_box = new QGroupBox(
+          StatusUiText("Ruby placement", "ルビの表示位置"), editor);
+      auto* placement_layout = new QGridLayout(placement_box);
+      placement_layout->setHorizontalSpacing(9);
+      placement_layout->setVerticalSpacing(7);
+      auto* mode = new QComboBox(placement_box);
+      mode->setObjectName(QStringLiteral("rubyWindowPlacementModeComboBox"));
+      mode->addItem(StatusUiText("Follow input text", "入力文字に追従"),
+                    static_cast<int>(config::Config::RUBY_WINDOW_FOLLOW_PREEDIT));
+      mode->addItem(StatusUiText("Fixed on active screen", "入力中の画面に固定"),
+                    static_cast<int>(config::Config::RUBY_WINDOW_FIXED_SCREEN));
+      placement_layout->addWidget(
+          new QLabel(StatusUiText("Display mode", "表示方式"), placement_box),
+          0, 0);
+      placement_layout->addWidget(mode, 0, 1, 1, 3);
+
+      auto make_position_spin = [&](const char* object_name, int minimum,
+                                    int maximum, int value,
+                                    const QString& suffix) {
+        auto* spin = new QSpinBox(placement_box);
+        spin->setObjectName(QString::fromLatin1(object_name));
+        spin->setRange(minimum, maximum);
+        spin->setValue(value);
+        spin->setSuffix(suffix);
+        spin->setMinimumWidth(75);
+        QObject::connect(spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                         this, [this](int) { EnableApplyButton(); });
+        return spin;
+      };
+      auto* x = make_position_spin("rubyWindowFixedXPercentSpinBox",
+                                   0, 100, 50, QStringLiteral(" %"));
+      auto* y = make_position_spin("rubyWindowFixedYPercentSpinBox",
+                                   0, 100, 50, QStringLiteral(" %"));
+      auto* dx = make_position_spin("rubyWindowFixedOffsetXSpinBox",
+                                    -400, 400, 0, QStringLiteral(" px"));
+      auto* dy = make_position_spin("rubyWindowFixedOffsetYSpinBox",
+                                    -400, 400, 0, QStringLiteral(" px"));
+      auto* wrap_width = make_position_spin(
+          "rubyWindowFixedWrapWidthPercentSpinBox", 40, 100, 90,
+          QStringLiteral(" %"));
+      wrap_width->setToolTip(StatusUiText(
+          "Maximum ruby width relative to the active screen",
+          "ルビの最大幅を画面幅の割合で指定します"));
+      placement_layout->addWidget(
+          new QLabel(StatusUiText("Horizontal center", "横方向の中心"),
+                     placement_box), 1, 0);
+      placement_layout->addWidget(x, 1, 1);
+      placement_layout->addWidget(
+          new QLabel(StatusUiText("Vertical center", "縦方向の中心"),
+                     placement_box), 1, 2);
+      placement_layout->addWidget(y, 1, 3);
+      placement_layout->addWidget(
+          new QLabel(StatusUiText("Horizontal offset", "横方向の微調整"),
+                     placement_box), 2, 0);
+      placement_layout->addWidget(dx, 2, 1);
+      placement_layout->addWidget(
+          new QLabel(StatusUiText("Vertical offset", "縦方向の微調整"),
+                     placement_box), 2, 2);
+      placement_layout->addWidget(dy, 2, 3);
+
+      auto* presets = new QHBoxLayout();
+      presets->addWidget(new QLabel(StatusUiText("Presets", "定位置"),
+                                    placement_box));
+      auto add_preset = [&](const QString& label, int px, int py) {
+        auto* button = new QPushButton(label, placement_box);
+        QObject::connect(button, &QPushButton::clicked, this,
+                         [x, y, dx, dy, px, py]() {
+                           x->setValue(px);
+                           y->setValue(py);
+                           dx->setValue(0);
+                           dy->setValue(0);
+                         });
+        presets->addWidget(button);
+        return button;
+      };
+      auto* upper = add_preset(StatusUiText("Upper center", "中央上"), 50, 20);
+      auto* center = add_preset(StatusUiText("Center", "中央"), 50, 50);
+      auto* lower = add_preset(StatusUiText("Lower center", "中央下"), 50, 70);
+      placement_layout->addLayout(presets, 3, 0, 1, 4);
+      placement_layout->addWidget(
+          new QLabel(StatusUiText("Maximum ruby width",
+                                "折り返し最大幅"), placement_box),
+          4, 0, 1, 2);
+      placement_layout->addWidget(wrap_width, 4, 2, 1, 2);
+      QObject::connect(mode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                       this, [this, mode, x, y, dx, dy, wrap_width,
+                              upper, center, lower](int) {
+                         const bool fixed = mode->currentData().toInt() ==
+                             static_cast<int>(
+                                 config::Config::RUBY_WINDOW_FIXED_SCREEN);
+                         for (QWidget* widget : {static_cast<QWidget*>(x),
+                                                 static_cast<QWidget*>(y),
+                                                 static_cast<QWidget*>(dx),
+                                                 static_cast<QWidget*>(dy),
+                                                 static_cast<QWidget*>(upper),
+                                                 static_cast<QWidget*>(center),
+                                                 static_cast<QWidget*>(lower)}) {
+                         widget->setEnabled(fixed);
+                       }
+#if defined(_WIN32) || defined(__APPLE__)
+                       wrap_width->setEnabled(fixed);
+#else
+                       wrap_width->setEnabled(false);
+#endif
+                       EnableApplyButton();
+                       });
+      for (QWidget* widget : {static_cast<QWidget*>(x),
+                              static_cast<QWidget*>(y),
+                              static_cast<QWidget*>(dx),
+                              static_cast<QWidget*>(dy),
+                              static_cast<QWidget*>(wrap_width),
+                              static_cast<QWidget*>(upper),
+                              static_cast<QWidget*>(center),
+                              static_cast<QWidget*>(lower)}) {
+        widget->setEnabled(false);
+      }
+      editor_layout->addWidget(placement_box);
+#if !defined(_WIN32) && !defined(__APPLE__)
+      // Fixed ruby is not implemented by the Linux renderer.
+      placement_box->hide();
+#endif
     }
 
     auto* palette_group = findChild<QGroupBox*>(
@@ -6984,6 +7106,24 @@ void ConfigDialog::ConvertRendererAppearanceFromProto(
   if (QSpinBox* spin = FindSpinBox(this, "rubyWindowCompositionGapSpinBox")) {
     spin->setValue(static_cast<int>(config.ruby_window_composition_gap()));
   }
+  SetComboCurrentData(FindComboBox(this, "rubyWindowPlacementModeComboBox"),
+                      static_cast<int>(config.ruby_window_placement_mode()));
+  if (QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedXPercentSpinBox")) {
+    spin->setValue(static_cast<int>(config.ruby_window_fixed_x_percent()));
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedYPercentSpinBox")) {
+    spin->setValue(static_cast<int>(config.ruby_window_fixed_y_percent()));
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedOffsetXSpinBox")) {
+    spin->setValue(config.ruby_window_fixed_offset_x());
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedOffsetYSpinBox")) {
+    spin->setValue(config.ruby_window_fixed_offset_y());
+  }
+  if (QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedWrapWidthPercentSpinBox")) {
+    spin->setValue(static_cast<int>(
+        config.ruby_window_fixed_wrap_width_percent()));
+  }
 
   if (QSpinBox* spin = FindSpinBox(this, "candidateWindowShadowSizeSpinBox")) {
     spin->setValue(static_cast<int>(config.candidate_window_shadow_size()));
@@ -7279,6 +7419,29 @@ void ConfigDialog::ConvertRendererAppearanceToProto(
     config->set_ruby_window_composition_gap(
         static_cast<uint32_t>(spin->value()));
   }
+  config->set_ruby_window_placement_mode(
+      static_cast<config::Config::RubyWindowPlacementMode>(
+          GetComboCurrentData(FindComboBox(this, "rubyWindowPlacementModeComboBox"),
+                              config::Config::RUBY_WINDOW_FOLLOW_PREEDIT)));
+  if (const QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedXPercentSpinBox")) {
+    config->set_ruby_window_fixed_x_percent(
+        static_cast<uint32_t>(spin->value()));
+  }
+  if (const QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedYPercentSpinBox")) {
+    config->set_ruby_window_fixed_y_percent(
+        static_cast<uint32_t>(spin->value()));
+  }
+  if (const QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedOffsetXSpinBox")) {
+    config->set_ruby_window_fixed_offset_x(spin->value());
+  }
+  if (const QSpinBox* spin = FindSpinBox(this, "rubyWindowFixedOffsetYSpinBox")) {
+    config->set_ruby_window_fixed_offset_y(spin->value());
+  }
+  if (const QSpinBox* spin =
+          FindSpinBox(this, "rubyWindowFixedWrapWidthPercentSpinBox")) {
+    config->set_ruby_window_fixed_wrap_width_percent(
+        static_cast<uint32_t>(spin->value()));
+  }
 
   if (const QSpinBox* spin = FindSpinBox(this, "candidateWindowShadowSizeSpinBox")) {
     config->set_candidate_window_shadow_size(
@@ -7393,6 +7556,20 @@ void ConfigDialog::ResetRendererAppearanceControls() {
   }
   if (QSpinBox* spin = FindSpinBox(this, "rubyWindowCompositionGapSpinBox")) {
     spin->setValue(4);
+  }
+  SetComboCurrentData(FindComboBox(this, "rubyWindowPlacementModeComboBox"),
+                      static_cast<int>(config::Config::RUBY_WINDOW_FOLLOW_PREEDIT));
+  const struct { const char* name; int value; } ruby_placement_defaults[] = {
+      {"rubyWindowFixedXPercentSpinBox", 50},
+      {"rubyWindowFixedYPercentSpinBox", 50},
+      {"rubyWindowFixedOffsetXSpinBox", 0},
+      {"rubyWindowFixedOffsetYSpinBox", 0},
+      {"rubyWindowFixedWrapWidthPercentSpinBox", 90},
+  };
+  for (const auto& field : ruby_placement_defaults) {
+    if (QSpinBox* spin = FindSpinBox(this, field.name)) {
+      spin->setValue(field.value);
+    }
   }
 
   struct ShadowDefault {
