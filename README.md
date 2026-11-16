@@ -166,6 +166,9 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Windows / macOS 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、対応するキー設定では候補・文節移動も視覚方向に合わせて操作可能
 - Windows / macOS 版では、縦書き時の連鎖候補ウィンドウを現在候補から本文の外側へ展開するよう配置し、必要に応じて反対側へフォールバック
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
+- Windows / macOS 版のルビ表示に「入力文字に追従」（既定）と「入力中の画面に固定」を追加。固定表示では画面の使用可能領域を基準に中心位置（X/Y 各0～100%、既定50%）と微調整（各-400～400）、中央上・中央・中央下のプリセット、折り返し最大幅（40～100%、既定90%）を設定可能
+- 入力追従の横書きルビが画面上端・下端付近で候補ウィンドウと重なり、通常の上下位置に収まらない場合に、候補ウィンドウの上下へ代替配置する処理を追加
+- Windows / macOS の固定ルビ表示で、横書き・縦書きの長文に対する表示領域と描画を調整。候補・サジェスト・ルビの表示倍率上限を300%に拡張
 - Windows / macOS 版に、未確定文字の近くで「入力中 / Mozc / Zenz処理中 / Zenz適用済み」を示す変換状態インジケータを追加。ルビとは独立して表示でき、位置・状態別配色・形状・フォント・サイズ・影を設定可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能。「入力中の文字」「変換中の文節」「Zenz 補正中の文字」を個別に設定でき、「Zenz 補正中の文字」の下線は新規・未設定プロファイルで既定 ON、既定色は `#C4DC6C`
 - Windows 版のローマ字入力で、変換規則の途中にある末尾の未確定ローマ字だけを薄く表示する opt-in 機能を追加。既定は OFF で、薄さは 0～100%（既定 85%）の範囲で調整可能。100% は背景色と同じになり不可視
@@ -343,7 +346,7 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 - Backspace / Delete では、削除後の状態をすぐにライブ変換結果へ反映する
 - Enter で現在のライブ変換結果を確定する
 
-ライブ変換中は、変換後の文字を表示しながら元の読みも分かるように、未確定文字の上付近に Mozc 独自のルビ風 overlay window を表示します。
+ライブ変換中は、変換後の文字を表示しながら元の読みも分かるように、通常は未確定文字の上付近に Mozc 独自のルビ風 overlay window を表示します。Windows / macOS 版では、設定により入力中の画面への固定表示も選択できます。
 
 ライブ変換は設定画面から ON/OFF を切り替えられます。また、変換開始までの遅延時間と、ライブ変換を開始する最小文字数も設定画面から変更できます。
 
@@ -822,7 +825,17 @@ Windows 版のルビ表示では、左右の余白、上下の余白、入力文
 
 候補ウィンドウ、サジェストウィンドウ、ライブ変換中のルビ表示については、主要テキストの太さもそれぞれ 100～900 の範囲で個別に設定できます。既定値は 400（標準 / Regular）です。候補番号、説明、フッター、用例ウィンドウ内の文字などの補助情報は対象外で、従来の太さを維持します。
 
-ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。
+ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。候補・サジェスト・ルビの表示倍率は最大300%まで設定できます。
+
+### ルビウィンドウの表示位置（Windows / macOS）
+
+設定画面の「ルビの表示位置」では、従来どおり未確定文字の近くにルビを置く **「入力文字に追従」** と、入力している画面の指定位置に置く **「入力中の画面に固定」** を選択できます。既定は「入力文字に追従」で、保存済みの設定値も維持します。
+
+固定表示では、入力先があるモニターの使用可能領域を基準に、ルビウィンドウの**中心位置**を横・縦それぞれ0～100%で指定します（初期値は各50%）。X/Yの微調整はそれぞれ-400～400で指定でき、プリセットは「中央上」（50%, 20%）、「中央」（50%, 50%）、「中央下」（50%, 70%）です。折り返し最大幅は使用可能領域の幅に対する40～100%で設定でき、初期値は90%です。ウィンドウが画面端を越えないよう、配置可能な範囲内に位置を制限します。
+
+横書きの入力追従モードでは、画面上端・下端付近でルビが隠れないよう、入力文字の上下に配置できない場合に候補ウィンドウの上下も代替位置として探索します。候補や未確定文字を避けられる位置が見つからない場合は非表示にするため、あらゆる状況で表示を保証するものではありません。
+
+固定表示モードでは、長い読みの折り返しや縦書きの描画・表示領域も調整しています。Linuxではこの固定表示モードは未対応で、設定UIは表示しません。
 
 ### 変換状態インジケータ（Windows / macOS）
 
@@ -1204,6 +1217,9 @@ Main features added in this fork
 - Adds vertical-writing layouts for candidate, suggestion, infolist, and live-conversion ruby displays on Windows and macOS, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
 - On Windows and macOS, places cascading candidate windows outward from the focused vertical candidate, with fallback to the opposite side when necessary
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
+- Adds Follow input text (default) and Fixed on active screen modes for the live-conversion ruby on Windows/macOS; fixed mode offers X/Y center coordinates (0–100%, default 50% each), offsets (-400 to 400), upper/center/lower presets, and wrap-width limits (40–100%, default 90%)
+- Improves horizontal follow-mode ruby placement near the top/bottom of the screen by seeking fallback positions above/below an obstructing candidate window when ordinary placement fails
+- Improves fixed-mode long-text and vertical ruby layout on Windows/macOS, and raises the candidate/suggestion/ruby scaling limit to 300%
 - Adds an independent conversion-status indicator for Windows/macOS near the composition, with Reading / Mozc / Zenz processing / Zenz applied states and configurable placement, colors, shape, font, size, and shadow
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog for input text, converting segments, and "Text being corrected by Zenz" separately; the underline for Zenz-corrected text defaults to enabled with `#C4DC6C` for new or otherwise unset profiles
 - Adds an opt-in Windows feature for Roman input that dims only the unresolved trailing romaji still forming an incomplete conversion-rule prefix; it defaults to OFF and the dimness can be adjusted from 0% to 100% (default 85%); 100% matches the background and becomes invisible
@@ -1332,7 +1348,7 @@ For example:
 - Pressing Backspace or Delete updates the live conversion result immediately
 - Pressing Enter commits the current live conversion result
 
-During live conversion, this fork shows a small ruby-like overlay window above the preedit text so that the original reading remains visible while the converted text is shown.
+By default, live conversion shows a small ruby-like overlay window near the preedit text so that the original reading remains visible while the converted text is shown. On Windows/macOS, the overlay can instead be fixed to a position on the active screen.
 
 The live conversion feature can be enabled or disabled from the config dialog. The debounce delay and the minimum number of characters required to start live conversion can also be configured there.
 
@@ -2119,7 +2135,32 @@ The default is 400 (Regular). Auxiliary text such as candidate shortcuts,
 descriptions, footer labels, and infolist text keeps its existing weight.
 
 The ruby display shown during live conversion can be enabled or disabled from
-the config dialog.
+the config dialog. The candidate, suggestion, and ruby scaling controls support
+up to 300%.
+
+### Ruby window placement (Windows / macOS)
+
+The config dialog provides two display modes: **Follow input text** (default),
+which keeps the reading overlay near the composition, and **Fixed on active
+screen**, which places it at a user-defined position on the monitor containing
+the active input. Existing saved settings are preserved.
+
+In fixed mode, the **window center** is configured with horizontal and vertical
+percentages (0–100%, both defaulting to 50%) relative to the monitor's usable
+area. X/Y offsets range from -400 to 400. Presets are Upper center (50%, 20%),
+Center (50%, 50%), and Lower center (50%, 70%). The maximum wrap width is 40–100%
+of the usable screen width (default 90%). Placement is clamped to the usable
+screen bounds where possible.
+
+In horizontal follow mode, when the reading cannot fit above or below the
+composition near the top or bottom of the screen, the renderer also checks
+positions above or below the candidate window. It avoids overlapping the
+composition or candidate window; if no suitable position exists, the ruby can
+still be hidden.
+
+Fixed mode also improves long-reading wrapping and vertical text layout on
+Windows and macOS. It is not implemented on Linux, where the fixed-placement
+controls are hidden.
 
 ### Conversion status indicator (Windows / macOS)
 
