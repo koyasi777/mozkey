@@ -736,6 +736,23 @@ message Config {
   optional string suggest_window_font_name = 1048 [default = ""];
   optional string ruby_window_font_name = 1049 [default = ""];
 
+  // Ruby placement independent of the glyph/layout appearance.  Old profiles
+  // preserve caret-following behavior. Percentages refer to the active
+  // monitor's usable screen area; offsets are logical pixels/points.
+  enum RubyWindowPlacementMode {
+    RUBY_WINDOW_FOLLOW_PREEDIT = 0;
+    RUBY_WINDOW_FIXED_SCREEN = 1;
+  }
+  optional RubyWindowPlacementMode ruby_window_placement_mode = 1051
+      [default = RUBY_WINDOW_FOLLOW_PREEDIT];
+  optional uint32 ruby_window_fixed_x_percent = 1052 [default = 50];
+  optional uint32 ruby_window_fixed_y_percent = 1053 [default = 50];
+  optional int32 ruby_window_fixed_offset_x = 1054 [default = 0];
+  optional int32 ruby_window_fixed_offset_y = 1055 [default = 0];
+  // Maximum ruby width as a percentage of the active monitor's work area.
+  // Used by the Windows and macOS fixed-mode renderers.
+  optional uint32 ruby_window_fixed_wrap_width_percent = 1056 [default = 90];
+
   enum WindowsImeIconStyle {
     WINDOWS_IME_ICON_DEFAULT = 0;
     WINDOWS_IME_ICON_MONOCHROME_BLACK = 1;

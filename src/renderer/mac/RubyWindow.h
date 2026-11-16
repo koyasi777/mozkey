@@ -52,6 +52,8 @@ class RubyWindow : public RendererBaseWindow {
   ~RubyWindow() override;
 
   void SetWritingDirection(WritingDirection writing_direction);
+  // Zero disables fixed-mode bounds. Values are Cocoa points.
+  void SetFixedLayoutBounds(int32_t maximum_width, int32_t maximum_height);
   bool Update(const commands::RendererCommand &command);
 
   // Returns the scaled distance between the composition text and ruby window.
@@ -69,6 +71,8 @@ class RubyWindow : public RendererBaseWindow {
                         std::string *reading) const;
 
   WritingDirection writing_direction_ = WritingDirection::kHorizontal;
+  int32_t fixed_maximum_width_ = 0;
+  int32_t fixed_maximum_height_ = 0;
   int32_t composition_gap_ = 4;
   int32_t text_top_offset_ = 0;
 };

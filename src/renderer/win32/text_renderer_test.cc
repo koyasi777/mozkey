@@ -1,7 +1,10 @@
 #include "renderer/win32/text_renderer.h"
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "testing/gunit.h"
 
@@ -73,6 +76,73 @@ TEST(TextRendererTest, VerticalRubyMeasurementProducesSingleColumn) {
   EXPECT_GT(size.width, 0);
   EXPECT_GT(size.height, 0);
   EXPECT_GT(size.height, size.width);
+}
+
+// Render the same long vertical prefix with two distinct final glyphs.
+// Only the newest (leftmost) columns should remain inside the viewport.
+TEST(TextRendererTest, VerticalWrappedViewportDisplaysLatestCharacter) {
+  std::unique_ptr<TextRenderer> renderer = TextRenderer::Create(kTestDpi);
+  ASSERT_NE(renderer, nullptr);
+  ASSERT_TRUE(renderer->SupportsVerticalWrappedText(
+      TextRenderer::FONTSET_RUBY))
+      << "This regression requires native DirectWrite vertical wrapping.";
+
+  constexpr int kBitmapWidth = 120;
+  constexpr int kBitmapHeight = 100;
+  constexpr int kColumnHeight = 70;
+  constexpr int kVisibleWidth = 64;
+  const std::wstring common(160, L'\u65E5');
+  const std::wstring reading_a = common + L'\u6728';  // 木
+  const std::wstring reading_b = common + L'\u76EE';  // 目
+  const Size a_layout = renderer->MeasureStringVerticalWrapped(
+      TextRenderer::FONTSET_RUBY, reading_a, kColumnHeight);
+  const Size b_layout = renderer->MeasureStringVerticalWrapped(
+      TextRenderer::FONTSET_RUBY, reading_b, kColumnHeight);
+  ASSERT_GT(a_layout.width, kVisibleWidth);
+  ASSERT_GT(b_layout.width, kVisibleWidth);
+  ASSERT_EQ(a_layout.width, b_layout.width)
+      << "Same-length full-width suffix glyphs should have equal layout width.";
+
+  const auto render = [&](const std::wstring &text, int full_width) {
+    std::vector<uint8_t> output;
+    HDC dc = ::CreateCompatibleDC(nullptr);
+    if (dc == nullptr) {
+      return output;
+    }
+    BITMAPINFO info = {};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = kBitmapWidth;
+    info.bmiHeader.biHeight = -kBitmapHeight;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void *bits = nullptr;
+    HBITMAP bitmap = ::CreateDIBSection(
+        dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (bitmap != nullptr && bits != nullptr) {
+      HGDIOBJ previous = ::SelectObject(dc, bitmap);
+      if (previous != nullptr && previous != HGDI_ERROR) {
+        std::memset(bits, 0xff, kBitmapWidth * kBitmapHeight * 4);
+        renderer->RenderTextVerticalWrappedViewport(
+            dc, text, Rect(8, 8, kVisibleWidth, kColumnHeight),
+            full_width, TextRenderer::FONTSET_RUBY);
+        ::GdiFlush();
+        const auto *bytes = static_cast<const uint8_t *>(bits);
+        output.assign(bytes, bytes + kBitmapWidth * kBitmapHeight * 4);
+        ::SelectObject(dc, previous);
+      }
+      ::DeleteObject(bitmap);
+    }
+    ::DeleteDC(dc);
+    return output;
+  };
+
+  const std::vector<uint8_t> image_a = render(reading_a, a_layout.width);
+  const std::vector<uint8_t> image_b = render(reading_b, b_layout.width);
+  ASSERT_FALSE(image_a.empty());
+  ASSERT_FALSE(image_b.empty());
+  EXPECT_TRUE(image_a != image_b)
+      << "Different final characters must alter visible vertical pixels.";
 }
 
 TEST(TextRendererTest, VerticalWrappedMeasurementFlowsIntoLeftColumns) {

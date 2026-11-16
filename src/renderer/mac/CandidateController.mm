@@ -30,6 +30,8 @@
 #import "renderer/mac/CandidateView.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 
 #include "base/coordinates.h"
 #include "protocol/commands.pb.h"
@@ -72,7 +74,7 @@ mozc::Rect RectInMozcCoord(const NSRect &rect) {
 // Find the display including the specified point and if it fails to
 // find it, pick up the nearest display.  Returns the geometry of the
 // found display.
-mozc::Rect GetNearestDisplayRect(const mozc::Rect &rect) {
+NSScreen *GetNearestScreen(const mozc::Rect &rect) {
   NSPoint point = OriginPointInCocoaCoord(rect);
   float nearest_distance = FLT_MAX;
   NSRect result_rect = NSMakeRect(0, 0, 0, 0);
@@ -95,7 +97,18 @@ mozc::Rect GetNearestDisplayRect(const mozc::Rect &rect) {
       result_rect = rect;
     }
   }
-  return RectInMozcCoord(result_rect);
+  for (NSScreen *screen in [NSScreen screens]) {
+    if (NSEqualRects([screen frame], result_rect)) {
+      return screen;
+    }
+  }
+  return [NSScreen mainScreen];
+}
+
+mozc::Rect GetNearestDisplayRect(const mozc::Rect &rect) {
+  NSScreen *screen = GetNearestScreen(rect);
+  return screen != nil ? RectInMozcCoord([screen frame])
+                       : mozc::Rect(0, 0, 0, 0);
 }
 
 // Returns the height of the base screen.
@@ -160,6 +173,43 @@ bool CandidateController::ExecCommand(const RendererCommand &command) {
   cascading_window_->SetWritingDirection(writing_direction_);
   infolist_window_->SetWritingDirection(writing_direction_);
   ruby_window_->SetWritingDirection(writing_direction_);
+
+  // The screen is selected from the active composition, as in the placement
+  // path. Bounds must be installed before RubyWindow::Update measures text.
+  const auto placement = config::ConfigHandler::GetSharedConfig();
+  if (placement != nullptr &&
+      placement->ruby_window_placement_mode() ==
+          config::Config::RUBY_WINDOW_FIXED_SCREEN) {
+    NSScreen *screen = [NSScreen mainScreen];
+    if (command_.has_ruby_preedit_rectangle() ||
+        command_.has_preedit_rectangle()) {
+      const RendererCommand::Rectangle &anchor =
+          command_.has_ruby_preedit_rectangle()
+              ? command_.ruby_preedit_rectangle()
+              : command_.preedit_rectangle();
+      const mozc::Rect preedit(
+          anchor.left(), anchor.top() - GetBaseScreenHeight(),
+          anchor.right() - anchor.left(),
+          anchor.bottom() - anchor.top());
+      screen = GetNearestScreen(preedit);
+    }
+    if (screen != nil) {
+      const NSRect area = [screen visibleFrame];
+      const uint32_t width_percent = std::clamp(
+          placement->ruby_window_fixed_wrap_width_percent(), 40u, 100u);
+      const int32_t maximum_width = static_cast<int32_t>(
+          std::floor(NSWidth(area) * width_percent / 100.0));
+      const int32_t maximum_height = static_cast<int32_t>(
+          std::floor(NSHeight(area) * 0.90));
+      ruby_window_->SetFixedLayoutBounds(
+          std::max<int32_t>(1, maximum_width),
+          std::max<int32_t>(1, maximum_height));
+    } else {
+      ruby_window_->SetFixedLayoutBounds(0, 0);
+    }
+  } else {
+    ruby_window_->SetFixedLayoutBounds(0, 0);
+  }
 
   if (!command_.visible()) {
     candidate_window_->Hide();
@@ -434,6 +484,42 @@ void CandidateController::AlignWindows() {
 
 bool CandidateController::AlignRubyWindow(
     const mozc::Rect *avoid_rect) {
+  const auto placement_config = config::ConfigHandler::GetSharedConfig();
+  if (placement_config != nullptr &&
+      placement_config->ruby_window_placement_mode() ==
+          config::Config::RUBY_WINDOW_FIXED_SCREEN) {
+    const mozc::Size size = ruby_window_->GetWindowSize();
+    NSScreen *screen = [NSScreen mainScreen];
+    if (command_.has_ruby_preedit_rectangle() ||
+        command_.has_preedit_rectangle()) {
+      const RendererCommand::Rectangle &anchor =
+          command_.has_ruby_preedit_rectangle()
+              ? command_.ruby_preedit_rectangle()
+              : command_.preedit_rectangle();
+      const mozc::Rect preedit(
+          anchor.left(), anchor.top() - GetBaseScreenHeight(),
+          anchor.right() - anchor.left(),
+          anchor.bottom() - anchor.top());
+      screen = GetNearestScreen(preedit);
+    }
+    if (screen == nil) {
+      return false;
+    }
+    const mozc::Rect area = RectInMozcCoord([screen visibleFrame]);
+    mozc::Rect placement;
+    if (!WindowUtil::GetFixedRubyWindowRect(
+            area, size,
+            placement_config->ruby_window_fixed_x_percent(),
+            placement_config->ruby_window_fixed_y_percent(),
+            mozc::Point(placement_config->ruby_window_fixed_offset_x(),
+                        placement_config->ruby_window_fixed_offset_y()),
+            &placement)) {
+      return false;
+    }
+    ruby_window_->MoveWindow(OriginPointInCocoaCoord(placement));
+    return true;
+  }
+
   if (!command_.has_preedit_rectangle()) {
     return false;
   }
