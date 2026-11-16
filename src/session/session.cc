@@ -2256,6 +2256,7 @@ bool Session::SendCommand(commands::Command* command) {
   if (context_->state() != ImeContext::CONVERSION) {
     live_conversion_active_ = false;
     live_conversion_from_composition_ = false;
+    manual_zenz_commit_on_next_input_ = false;
     ClearZenzLiveCorrectionState();
   }
 
@@ -2423,6 +2424,7 @@ bool Session::SendKey(commands::Command* command) {
   if (context_->state() != ImeContext::CONVERSION) {
     live_conversion_active_ = false;
     live_conversion_from_composition_ = false;
+    manual_zenz_commit_on_next_input_ = false;
     ClearZenzLiveCorrectionState();
   }
 
@@ -3463,6 +3465,7 @@ bool Session::SendKeyConversionState(commands::Command* command) {
       }
       live_conversion_active_ = false;
       live_conversion_from_composition_ = false;
+      manual_zenz_commit_on_next_input_ = false;
       context_->mutable_converter()->SetCandidateListVisible(true);
     }
   }
@@ -4234,6 +4237,7 @@ void Session::ClearLiveConversionState() {
   live_conversion_active_ = false;
 
   live_conversion_from_composition_ = false;
+  manual_zenz_commit_on_next_input_ = false;
   live_conversion_pending_ = false;
   pending_live_conversion_generation_ = 0;
   pending_live_conversion_key_.clear();
@@ -4255,6 +4259,7 @@ void Session::ClearLiveConversionState() {
 }
 
 void Session::CancelLiveConversionForEditing() {
+  manual_zenz_commit_on_next_input_ = false;
   if (HasDeferredZenzLivePresentation()) {
     RestoreDeferredZenzLivePresentationForEditing();
     pending_live_conversion_presentation_.reset();
@@ -7193,12 +7198,16 @@ bool Session::ForceZenzLiveCorrection(
   live_conversion_preedit_output_ = command->output().preedit();
   live_conversion_protected_spans_ = BuildZenzProtectedConversionSpans(
       context_->converter(), command->output(), key, mozc_value);
-  if (!MaybeScheduleZenzLiveCorrection(
-          command, /*forced=*/true, bypass_automatic_feedback) &&
-      !previously_live) {
+  const bool scheduled = MaybeScheduleZenzLiveCorrection(
+      command, /*forced=*/true, bypass_automatic_feedback);
+  if (!scheduled && !previously_live) {
     // Rejected by the regular privacy/eligibility gates. Preserve ordinary
     // conversion semantics rather than leaving a spurious live-conversion mode.
     ClearLiveConversionState();
+  } else {
+    // Even when the asynchronous response fails, the user's explicit
+    // conversion decision remains until text insertion or another command.
+    manual_zenz_commit_on_next_input_ = true;
   }
   return true;
 }
@@ -8198,6 +8207,9 @@ bool Session::RevertZenzLiveCorrectionToNormalConversion(
   if (!HasVisibleZenzLiveCorrection()) {
     return false;
   }
+  // Space/explicit revert overrides the manual acceptance intent and keeps
+  // the existing Mozc candidate-navigation or live-edit semantics.
+  manual_zenz_commit_on_next_input_ = false;
 
   ZenzDebugOutput(absl::StrCat(
       "[zenz-feedback] revert zenz correction to mozc normal conversion ",
@@ -8511,6 +8523,28 @@ bool Session::CommitPendingRerankedPreeditAfterConvertCancelForDirectCommit(
   return true;
 }
 
+void Session::RefreshClientContextAfterCommitForNextInput(
+    const commands::Command& command) {
+  // The physical key initiating the next composition may carry the document
+  // context from before the result committed on this same keypress.
+  if (command.input().has_context()) {
+    *context_->mutable_client_context() = command.input().context();
+  } else {
+    context_->mutable_client_context()->Clear();
+  }
+
+  commands::Context* next_context = context_->mutable_client_context();
+  if (command.output().has_result()) {
+    const std::string& committed = command.output().result().value();
+    if (!committed.empty() &&
+        (!next_context->has_preceding_text() ||
+         !absl::EndsWith(next_context->preceding_text(), committed))) {
+      next_context->clear_preceding_text();
+      next_context->clear_revision();
+    }
+  }
+}
+
 bool Session::InsertCharacter(commands::Command* command) {
   if (!command->input().has_key()) {
     LOG(ERROR) << "No key event: " << command->input();
@@ -8541,22 +8575,23 @@ bool Session::InsertCharacter(commands::Command* command) {
   // Capture its final value, but keep the comparison pending until the short
   // rollback window closes so Backspace/Escape/Ctrl+Z can still neutralize it.
   const config::Config& config = context_->GetConfig();
+  const bool is_direct_commit_from_conversion =
+      context_->state() == ImeContext::CONVERSION &&
+      config.use_direct_commit() && !config.use_auto_conversion() &&
+      key.input_style() == commands::KeyEvent::FOLLOW_MODE &&
+      key.mode() != commands::HALF_ASCII &&
+      key.mode() != commands::FULL_ASCII &&
+      context_->composer().GetLength() > 0 &&
+      context_->composer().GetLength() ==
+          context_->composer().GetCursor() &&
+      IsValidDirectCommitTriggerKey(config, key);
   const bool
       defer_pending_zenz_comparison_for_conversion_direct_commit =
           pending_zenz_feedback_.pending &&
           pending_zenz_feedback_.action ==
               PendingZenzFeedback::Action::kCompareFinalCommit &&
           !pending_zenz_feedback_.has_final_committed_value &&
-          context_->state() == ImeContext::CONVERSION &&
-          config.use_direct_commit() &&
-          !config.use_auto_conversion() &&
-          key.input_style() == commands::KeyEvent::FOLLOW_MODE &&
-          key.mode() != commands::HALF_ASCII &&
-          key.mode() != commands::FULL_ASCII &&
-          context_->composer().GetLength() > 0 &&
-          context_->composer().GetLength() ==
-              context_->composer().GetCursor() &&
-          IsValidDirectCommitTriggerKey(config, key);
+          is_direct_commit_from_conversion;
 
   // A pending direct-commit learning entry is finalized only when the next real
   // text input starts. If the next key is Backspace/Escape, it is discarded.
@@ -8648,6 +8683,40 @@ bool Session::InsertCharacter(commands::Command* command) {
     return true;
   }
 
+  // Unlike automatic Zenz, an explicitly requested correction is a conversion
+  // decision. The next ordinary text input accepts the *visible* result and
+  // starts a fresh composition. Do this before live editing cancels the Zenz
+  // layer and restores the underlying Mozc composition.
+  // Keep the existing single-action punctuation/direct-commit path unchanged.
+  if (manual_zenz_commit_on_next_input_ &&
+      context_->state() == ImeContext::CONVERSION &&
+      !is_direct_commit_from_conversion &&
+      !ShouldCommitLiveConversionBeforeShiftAsciiInput(
+          config, context_->composer(), key)) {
+    bool committed = false;
+    if (HasVisibleZenzLiveCorrection()) {
+      committed = CommitZenzLiveCorrectionResult(command);
+    } else if (HasDeferredZenzLivePresentation()) {
+      // An unseen speculative Mozc result must not be silently committed.
+      committed = CommitDeferredZenzLivePresentationForSubmit(command);
+    } else {
+      // The manual request may still be pending or may have failed. Commit
+      // the Mozc conversion actually visible to the user.
+      ClearLiveConversionState();
+      committed = CommitNotTriggeringZeroQuerySuggest(command);
+    }
+    if (!committed) {
+      return false;
+    }
+    RefreshClientContextAfterCommitForNextInput(*command);
+    if (key.input_style() == commands::KeyEvent::DIRECT_INPUT) {
+      context_->mutable_composer()->InsertCharacterKeyEvent(key);
+      ClearUndoContext();
+      CommitCompositionDirectly(command);
+      return true;
+    }
+  }
+
   const bool was_live_conversion = live_conversion_active_;
   const bool was_pending_live_conversion = live_conversion_pending_;
   const bool was_deferred_zenz_live_presentation =
@@ -8694,6 +8763,7 @@ bool Session::InsertCharacter(commands::Command* command) {
       CommitPendingLiveConversionDisplayDirectly(command);
     }
 
+    RefreshClientContextAfterCommitForNextInput(*command);
     context_->mutable_composer()->InsertCharacterKeyEvent(key);
     ClearUndoContext();
     SetSessionState(ImeContext::COMPOSITION, context_.get());
@@ -8808,30 +8878,9 @@ bool Session::InsertCharacter(commands::Command* command) {
       ConfirmPendingZenzFeedback();
     }
 
-    // This key commits the previous conversion and begins a new composition.
-    // The next key's client context may still describe the document *before*
-    // this commit.  Refresh it rather than replaying the previous composition's
-    // context when OnStartComposition() validates the newly committed history.
-    if (command->input().has_context()) {
-      *context_->mutable_client_context() = command->input().context();
-    } else {
-      context_->mutable_client_context()->Clear();
-    }
-    // Preserve client metadata (e.g. privacy and field type), but trust a
-    // supplied preceding_text only if it includes the result just committed.
-    // Otherwise discard its stale left text and revision so the converter's
-    // fresh committed history remains available for the next conversion.
-    commands::Context* next_client_context = context_->mutable_client_context();
-    if (command->output().has_result()) {
-      const std::string& committed_value = command->output().result().value();
-      if (!committed_value.empty() &&
-          (!next_client_context->has_preceding_text() ||
-           !absl::EndsWith(next_client_context->preceding_text(),
-                           committed_value))) {
-        next_client_context->clear_preceding_text();
-        next_client_context->clear_revision();
-      }
-    }
+    // Apply the same left-context freshness rule to every conversion commit
+    // that begins a new composition on this keypress.
+    RefreshClientContextAfterCommitForNextInput(*command);
 
     if (key.input_style() == commands::KeyEvent::DIRECT_INPUT) {
       // Do ClearUndoContext() because it is a direct input.

@@ -135,6 +135,7 @@ class SessionTestPeer : testing::TestPeer<Session> {
   PEER_VARIABLE(undo_contexts_);
   PEER_VARIABLE(live_conversion_active_);
   PEER_VARIABLE(live_conversion_from_composition_);
+  PEER_VARIABLE(manual_zenz_commit_on_next_input_);
   PEER_VARIABLE(live_conversion_pending_);
   PEER_VARIABLE(pending_live_conversion_key_);
   PEER_VARIABLE(pending_live_conversion_input_);
@@ -18781,6 +18782,145 @@ TEST_F(SessionTest, ManualZenzBypassRecordsAcceptedWhenEnabled) {
 #else
   GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
 #endif
+}
+
+// A manual Zenz request, unlike automatic Zenz live correction, accepts the
+// visible conversion when the next ordinary text key is typed. Exercise the
+// actual key dispatch for both commands and with live conversion on/off.
+TEST_F(SessionTest, ManualZenzNextTextCommitsVisibleCorrection) {
+  for (const int variant : {0, 1, 2, 3}) {
+    SCOPED_TRACE(variant);
+    const bool bypass_feedback = (variant & 1) != 0;
+    const bool use_live_conversion = (variant & 2) != 0;
+    MockEngine engine;
+    std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+    Session session(engine);
+    InitSessionToPrecomposition(&session);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(use_live_conversion);
+    config.set_live_conversion_delay_msec(0);
+    config.set_live_conversion_min_key_length(2);
+    config.set_use_zenz_live_correction(false);
+    config.set_use_zenz_synthetic_candidate(true);
+    config.set_zenz_live_correction_min_key_length(2);
+    config.set_zenz_live_correction_delay_msec(1000);
+    config.set_session_keymap(config::Config::CUSTOM);
+    config.set_custom_keymap_table(absl::StrCat(
+        "status\tkey\tcommand\n",
+        "Composition\tShift Space\t",
+        bypass_feedback ? "ForceZenzLiveCorrectionWithoutFeedback\n"
+                        : "ForceZenzLiveCorrection\n",
+        "Conversion\tShift Space\t",
+        bypass_feedback ? "ForceZenzLiveCorrectionWithoutFeedback\n"
+                        : "ForceZenzLiveCorrection\n",
+        "Conversion\tEnter\tCommit\n"));
+    session.SetConfig(config);
+    session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+    SessionTestPeer peer(session);
+
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key("あい");
+    AddCandidate("あい", "愛", segment);
+    // Live conversion may already own a baseline. Bypass then re-converts it.
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+    commands::Command command;
+    InsertCharacterString("あい", "ai", &session, &command);
+    ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+    ASSERT_TRUE(command.output().zenz_live_correction_pending());
+    ASSERT_TRUE(peer.manual_zenz_commit_on_next_input_());
+    Mock::VerifyAndClearExpectations(converter.get());
+
+    ZenzLiveResponse response;
+    response.ok = true;
+    response.value = "亜衣";
+    command.Clear();
+    ASSERT_TRUE(peer.ApplyZenzLiveCorrectionResult(response, &command));
+    ASSERT_TRUE(command.output().zenz_live_correction_applied());
+    EXPECT_PREEDIT("亜衣", command);
+
+    // Exercise both a fresh host context and a stale pre-commit context.
+    // The next composition must not reconstruct its history from an old
+    // preceding_text, while a context containing the committed result is safe.
+    command.Clear();
+    command.mutable_input()->set_type(commands::Input::SEND_KEY);
+    commands::KeyEvent* inserted = command.mutable_input()->mutable_key();
+    inserted->set_key_code('u');
+    inserted->set_key_string("う");
+    commands::Context* next_context =
+        command.mutable_input()->mutable_context();
+    const bool host_context_is_current = (variant & 1) == 0;
+    next_context->set_preceding_text(
+        host_context_is_current ? "前文脈亜衣" : "前文脈");
+    next_context->set_revision(123);
+    ASSERT_TRUE(session.SendKey(&command));
+    ASSERT_TRUE(command.output().has_result());
+    EXPECT_EQ(command.output().result().key(), "あい");
+    EXPECT_EQ(command.output().result().value(), "亜衣");
+    EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+    EXPECT_EQ(session.context().composer().GetQueryForConversion(), "う");
+    EXPECT_PREEDIT("う", command);
+    if (host_context_is_current) {
+      EXPECT_EQ(session.context().client_context().preceding_text(),
+                "前文脈亜衣");
+      EXPECT_EQ(session.context().client_context().revision(), 123);
+    } else {
+      EXPECT_FALSE(session.context().client_context().has_preceding_text());
+      EXPECT_FALSE(session.context().client_context().has_revision());
+    }
+    EXPECT_FALSE(peer.manual_zenz_commit_on_next_input_());
+  }
+}
+
+// An asynchronous manual reply that has not been shown must never replace the
+// visible Mozc baseline during the next physical text insertion.
+TEST_F(SessionTest, ManualZenzPendingNextTextCommitsVisibleMozc) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_use_zenz_synthetic_candidate(true);
+  config.set_zenz_live_correction_delay_msec(1000);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Composition\tShift Space\tForceZenzLiveCorrection\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  SessionTestPeer peer(session);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あい");
+  AddCandidate("あい", "愛", segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あい", "ai", &session, &command);
+  ASSERT_TRUE(SendKey("Shift Space", &session, &command));
+  ASSERT_TRUE(command.output().zenz_live_correction_pending());
+  ASSERT_TRUE(peer.manual_zenz_commit_on_next_input_());
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  InsertCharacterString("う", "u", &session, &command);
+  ASSERT_TRUE(command.output().has_result());
+  EXPECT_EQ(command.output().result().value(), "愛");
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_EQ(session.context().composer().GetQueryForConversion(), "う");
+  EXPECT_FALSE(peer.pending_zenz_live_().pending);
+  EXPECT_FALSE(peer.manual_zenz_commit_on_next_input_());
 }
 
 // A manual Zenz command is not equivalent to a live-composition origin.

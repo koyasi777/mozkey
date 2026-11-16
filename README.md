@@ -145,6 +145,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
 - `ForceZenzLiveCorrection` により、未確定文字列へ手動で Zenz 補正を要求可能。Zenz の自動ライブ補正が OFF でもキー設定から明示実行できる
 - `ForceZenzLiveCorrectionWithoutFeedback` により、保存済み Zenz feedback の自動利用をこの実行に限り無視して手動補正可能。通常の Mozc 履歴・ユーザー辞書および明示的な手動ブロックは維持し、新しい確定結果の学習も設定に従う
+- 手動 Zenz 補正の結果は、続く通常の文字入力で確定して新しい未確定入力を開始。自動 Zenz ライブ補正では入力継続だけで確定せず、同じ未確定文字列を編集できる状態を維持
 - `BlockVisibleZenzCorrection` を追加。Zenz 補正結果が表示されている間に標準キー設定の `Ctrl+Delete` を押すと、その補正を手動ブロック（`hard_reject`）として保存し、通常の Mozc 変換結果へ戻す。通常の候補に対する `DeleteSelectedCandidate` とは別の操作
 - キー設定のコマンド列に `Delay(700)` などの待機ステップ（0～5000 ms）を追加。選択文字列の再変換後に待機して手動 Zenz 補正する操作にも対応
 - 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには、選択中の候補の状態と現在のキー設定に応じて履歴削除または候補非表示の操作案内を表示
@@ -205,10 +206,10 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Zenz feedback の自動ブロック設定を追加。同じ読み全体・同じ文脈クラス・同じ補正結果について、通常却下回数が「最低拒否回数」と「採用回数 + 通常却下回数に占める最低拒否割合」の両方に達した場合だけ自動ブロックする。未保存の設定では既定で有効、最低拒否回数は 1 回、最低拒否割合は 50%。自動ブロックは TSV に hard reject を固定保存せず、現在の設定と既存 feedback から動的に再評価する
 - 自動ブロック中も Zenz 推論は shadow observation として継続する。同じ読みで非表示の Zenz 結果と最終確定値が一致すれば accepted feedback を加算して自己回復でき、拒否割合がしきい値を下回れば自動的にブロックを解除する。同じ読みで異なる値が確定した場合は通常却下を加算し、入力継続などで最終的な読みが変わった場合は neutral として扱う。明示的な hard reject はこの自己回復の対象外
 - 同じ読み全体・同じ文脈クラス・同じ補正結果で通常却下回数が採用回数を上回る場合は、auto-block 無効時でも Zenz feedback による優先候補・保存済み feedback による即時補正としては使わず、「却下数優勢」の中立状態として扱います。これは hard block ではなく、Zenz が新しく同じ補正を返すことや通常 Mozc 候補を削除することはありません。
-- フィードバック記録（A）が ON の場合、Zenz 補正結果が表示されただけでは保存せず、Enter や句読点・記号の単打確定などで明示的に確定された時点で accepted feedback をローカル TSV へ即時保存する。採用記録の書き込みに失敗した場合は、Undo で補償レコードを追記して以前の正常な採用履歴を減算しないようにする
+- フィードバック記録（A）が ON の場合、Zenz 補正結果が表示されただけでは保存せず、Enter や句読点・記号の単打確定に加え、手動 Zenz 補正後の通常の文字入力で表示結果を確定した時点で accepted feedback をローカル TSV へ即時保存する。自動ライブ補正の入力継続では、その操作だけで accepted としない。採用記録の書き込みに失敗した場合は、Undo で補償レコードを追記して以前の正常な採用履歴を減算しないようにする
 - rollback window 内の Backspace / Escape / Revert / Undo / Ctrl+Z などでは、**書き込みに成功した accepted 記録だけ** `accepted_rollback` で補償する。これは rejected feedback ではない。Mozc 変換履歴（C）の取消は別の可逆履歴ハンドルで処理する。次の実テキスト入力や確定後の context transition で window が閉じた場合は accepted を保持し、IMEOff / MakeSureIMEOff も確定扱いにする
 - Zenz 補正表示後に Space や候補移動などで通常変換へ移った場合は、その操作だけで rejected feedback を即時確定せず、通常 Mozc 側で最終的に確定された値を確認してから判定する。最終確定値が Zenz 補正結果と異なる場合は通常却下として記録し、同じ結果を確定した場合は不要な reject を残さない。通常操作由来の rejected feedback は候補を殺す hard reject ではなく、順位調整用の弱い negative signal として扱う
-- Zenz 補正表示中に Space で Mozc 通常変換結果へ戻した場合は、次の文字入力や句読点・記号の単打確定で、戻した通常 Mozc の結果を先に最終確定値として取得する。句読点・記号の単打確定後も短い rollback window を維持し、直後の Backspace / Escape / Ctrl+Z / Revert / Undo などでは pending な Zenz reject を破棄する。次の通常入力や確定後の context transition、Windows Search などでの pass-through Enter を含む通常の pass-through 操作へ進んだ時点で rollback window を閉じ、最終確定結果に基づいて feedback を確定する
+- Zenz 補正表示中に Space で Mozc の結果へ戻した場合、通常変換として次の文字入力で確定する経路や句読点・記号の単打確定では、戻した Mozc の結果を最終確定値として取得する。ライブ変換由来で未確定入力を継続する場合は、その Space 自体を最終的な採否とせず、最終確定値を確認して判定する。句読点・記号の単打確定後も短い rollback window を維持し、直後の Backspace / Escape / Ctrl+Z / Revert / Undo などでは pending な Zenz reject を破棄する。次の通常入力や確定後の context transition、Windows Search などでの pass-through Enter を含む通常の pass-through 操作へ進んだ時点で rollback window を閉じ、最終確定結果に基づいて feedback を確定する
 - Zenz の**フィードバック学習データ**を設定画面から管理できる UI を追加。TSV を直接編集せず検索、インポート、エクスポート、選択項目削除、全削除が可能。ここで管理・削除するのは A/B の記録であり、C で Mozc の通常変換履歴に学習済みの内容は削除しない
 - フィードバック学習データ管理画面から、選択した Zenz 補正を明示的に手動ブロック可能。手動ブロックは B の自動利用設定が OFF でも Zenz 補正の採用判定に有効。解除するには該当エントリを削除し、必要なら再学習する
 - Zenz 補正表示中の `Ctrl+Delete` からも手動ブロックを実行可能。同じ読み全体・文脈クラス・補正文字列の組に対する永続的な `hard_reject` として保存し、同時に通常 Mozc 変換へ戻る。通常却下の統計記録は二重に行わず、通常候補の学習履歴や「非表示候補」の辞書項目も削除しない
@@ -461,7 +462,7 @@ Zenz が、Mozc の通常変換で正しく選択された人名・地名・組�
 
 A・B・C は相互に独立しています。例えば **A=OFF / B=ON** なら既存データの利用だけを続けられ、**A=OFF / C=ON** ならフィードバック TSV を増やさずに Mozc 変換履歴への追加学習を行えます。新規 Mozkey 設定では3つとも ON が既定です。旧統合設定を保存済みの場合は、新項目がまだ明示されていないときだけその値を引き継ぎ、設定済みの新項目は上書きしません。
 
-A が ON の場合でも、Zenz 補正を表示しただけでは記録しません。Enter や句読点・記号の単打確定などで明示的に確定した場合に、full-sequence accepted feedback を TSV へ追加します。C による Mozc 履歴の学習は別の保存先・条件で動作します。
+A が ON の場合でも、Zenz 補正を表示しただけでは記録しません。Enter や句読点・記号の単打確定、または明示的な手動 Zenz 補正後の次の通常文字入力で表示結果を確定した場合に、full-sequence accepted feedback を TSV へ追加します。自動ライブ補正中に入力を続けただけでは採用の確定とみなしません。C による Mozc 履歴の学習は別の保存先・条件で動作します。
 
 #### 短い読みの Zenz feedback 自動適用制限
 
@@ -483,7 +484,7 @@ Zenz feedback の自動ブロックは、通常却下回数だけではなく拒
 
 Zenz feedback TSV は、完全な読み key、完全な補正 value、粗い非可逆 context class からなる full-sequence 単位に限定します。segment-local や lexical-unit の feedback は保存しません。accepted Zenz 補正は **C が ON** でプライバシー保護や通常履歴設定の条件を満たす場合、明示的確定の同じ commit 点で Mozc user history へ外部変換結果として即時学習されます。これは **A の ON/OFF とは独立した** Mozc-history 経路であり、Zenz feedback store の追加 record ではありません。この generalized learning では in-process の rollback handle を保持し、rollback window 内の Backspace、Escape、Revert、Undo などでは直前の学習を revert します。次の実テキスト入力や ResetContext / IMEOff などで window が閉じた後は学習を保持します。exact TSV の `accepted` / `accepted_rollback` と generalized Mozc-history の revert は別々の仕組みです。また、この rollback は process 内の短い取り消し窓を対象とするもので、crash や process termination をまたぐ durable transaction / ACID rollback ではありません。局所学習では、まず直前の通常 Mozc ライブ変換で既知の文節境界を優先し、ユーザー履歴を参照しない固定境界再評価で accepted surface を正確に再現できるか確認します。その境界で説明できない範囲だけ Mozc native の再文節化と forward verification を行い、accepted surface を説明する境界・読みの経路が一意に検証できる場合だけ、その推定境界を局所学習に使います。複数の境界解釈が成立する範囲や安全に解決できない aggregate は、推定境界を学習せず非学習の barrier として扱います。その前後に独立して安全な lexical island があれば、そこは別々に学習できます。句読点などの非学習単位も lexical island の区切りとして扱い、その区切りをまたぐ境界履歴は作りません。Zenz が実際に変更したことを最終的な key/value 対応で確認できる語彙単位だけを強い選択履歴として扱います。安全な structured / local commit が1件でも成立した場合は、同じ accepted result を全文単位で重ねて Mozc history に学習しません。一方、安全な projected / local evidence を1件も commit できなかった場合は、曖昧な局所境界を捏造せず、別経路として exact accepted result の full-sequence Mozc-history fallback を試みます。Zenz feedback store 側の full-sequence accepted record はこの局所境界判定とは別に保持されます。privacy / password gate に該当する入力は、この Mozc-history 学習自体の対象外です。
 
-特に Space は、Zenz 補正を単にキャンセルしてライブ変換中の入力列へ戻すキーではなく、通常変換候補へ戻る候補変更操作として扱います。deferred 表示でまだ Zenz の応答待ちの場合は、最初の Space でその時点の Mozc 通常変換結果を表示しますが、候補は次へ進めません。すでに Zenz 補正が表示されている場合も、Space を押すと補正前の Mozc 変換結果を通常変換状態として表示し、候補ウィンドウはまだ開きません。そのまま次の文字を入力した場合は、戻した Mozc 変換結果を確定してから新しい入力を開始します。さらに Space を押した場合は、従来どおり通常変換の候補ウィンドウを開いて次候補へ進みます。
+特に Space は、表示中の Zenz 補正を確定せず、元の Mozc 変換結果へ戻す操作です。deferred 表示でまだ Zenz の応答待ちの場合は、最初の Space でその時点の Mozc 変換結果を表示しますが、候補は次へ進めません。すでに Zenz 補正が表示されている場合も、Space で補正前の Mozc 変換結果へ戻し、候補ウィンドウはまだ開きません。**通常変換から手動 Zenz 補正を実行した場合**は、戻した Mozc 変換結果を次の文字入力で確定し、新しい入力を開始します。一方、**元々自動ライブ変換から移行した場合**は、Space 後も同じ未確定入力を編集・継続できます。さらに Space を押した場合は、通常変換の候補移動操作へ進みます。
 
 Zenz feedback の再利用方法は、単文節と複数文節で異なります。
 
@@ -632,6 +633,14 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 - **フィードバック無視の手動補正**: この実行に限り、保存済み Zenz feedback による通常候補の順位調整・補正結果の高速再利用・統計的な自動ブロックを無視します。変換中から実行した場合は、フィードバック抜きの Mozc 変換結果を再計算して基準にします。通常の Mozc 学習履歴とユーザー辞書は利用でき、ユーザーが明示的に指定した手動ブロック（hard reject）は引き続き有効です。「無視」は**過去の feedback の参照**についてであり、補正結果を確定した場合の新しい feedback 記録（A）や Mozc 履歴への学習（C）は、それぞれの設定に従って行われます。
 - **両コマンド共通**: 自動の「Zenz ライブ補正を有効にする」が OFF でも実行でき、手動実行には自動補正開始用の最小読み文字数を適用しません。パスワード欄やプライバシー・入力内容の適格性検査は維持し、Zenz の出力が必ず採用されるわけではありません。変換中のフィードバック無視補正で再変換が失敗した場合、元の候補・入力モード・学習取り消し情報を維持します。
 - **遅延**: `Delay(700)` は後続コマンドを 700 ms 後に再開する指定です。設定できる値は 0～5000 ms で、`Delay(0)` は待機しません。これは自動ライブ変換や自動 Zenz 補正の遅延設定とは独立した、キー割り当て専用の待機です。
+
+**手動補正後の追加入力**
+
+自動 Zenz ライブ補正は、入力途中に IME が提示する**暫定的な変換表示**です。ユーザーが文字を続けて入力しても、その時点で変換結果を採用したとは限らないため、同じ未確定文字列として編集・再変換を続けます。
+
+一方、上記2種類の**手動 Zenz 補正はユーザー自身が明示的に変換を要求する操作**です。その結果を表示した状態で次の通常の文字を入力した場合は、「現在表示されている変換を採用し、次の入力へ進む」という意図として扱います。これにより、通常の Space 変換後に文字を入力したときと同じように、**表示中の補正結果を確定して、新しい未確定文字列を開始**します。ライブ変換の ON/OFF にかかわらず、両方の手動コマンドに適用されます。**手動コマンドを実行した瞬間には確定されません。**
+
+Zenz の非同期応答がまだ表示されていないうちに次の文字を入力した場合は、未表示の応答を勝手に採用せず、その時点で画面に表示されている変換結果を確定します。Zenz が採用されず Mozc の変換結果が表示された場合も、明示的な変換操作後の追加入力として扱います。Space で Zenz 補正を取り消して Mozc へ戻した場合は Zenz の補正結果を採用せず、元のライブ変換／通常変換の入力状態に応じた既存の操作へ戻ります。Enter での確定やキャンセル操作も引き続き利用できます。
 
 実用的なキー割り当て例（**カスタム設定例**であり、標準の既定割り当てではありません）:
 
@@ -1183,6 +1192,7 @@ Main features added in this fork
 - Allows assigning multiple commands to a single key binding as an ordered command sequence
 - Adds `ForceZenzLiveCorrection` to explicitly request Zenz correction for uncommitted text, including when automatic Zenz live correction is disabled
 - Adds `ForceZenzLiveCorrectionWithoutFeedback` to request a one-shot correction without automatically reusing stored Zenz feedback, while retaining normal Mozc history, user-dictionary entries, explicit manual blocks, and settings-controlled learning of newly committed results
+- Commits the currently visible conversion on the next ordinary text key after either explicit manual Zenz command, starting a fresh composition; automatic Zenz live correction instead continues editing the same uncommitted text
 - Adds `BlockVisibleZenzCorrection`: while a Zenz correction is visibly applied, the built-in `Ctrl+Delete` shortcut records a persistent manual hard rejection and restores ordinary Mozc conversion. This differs from deleting or hiding an ordinary candidate with `DeleteSelectedCandidate`.
 - Adds `Delay(700)`-style waiting steps (0–5000 ms) in keymap command sequences, including after selected-text reconversion
 - Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows history-delete or hide guidance for the currently selected candidate using the active key binding
@@ -1243,10 +1253,10 @@ Main features added in this fork
 - Adds adaptive Zenz feedback auto-blocking. For the same full reading, context class, and correction value, auto-blocking activates only when both the minimum ordinary-reject count and the minimum reject percentage over accepted plus ordinary-rejected observations are met. For configurations without a saved value, auto-blocking defaults to enabled with a minimum of 1 rejection and 50%. Auto-blocking does not persist irreversible hard-reject rows; it is re-evaluated dynamically from the current settings and stored feedback.
 - Keeps evaluating an auto-blocked Zenz result as a hidden shadow observation. If the final committed value for the same reading matches that hidden Zenz value, accepted feedback is added so the entry can recover automatically once its reject percentage falls below the threshold. A different final value for the same reading adds an ordinary rejection; a changed final reading is neutral. Explicit hard rejects are not eligible for shadow recovery.
 - Stops reusing a Zenz feedback entry as a preferred candidate or live-correction fast path when ordinary rejected observations outnumber accepted observations for the same full reading, context class, and correction value. This is a neutral reject-count-dominant state, not a hard block, so it does not delete ordinary Mozc candidates or prevent newly produced Zenz corrections by itself.
-- When feedback recording (A) is ON, does not persist a correction merely because it was displayed; only an explicit commit appends accepted full-sequence feedback. A failed append is not treated as a successful observation for Undo compensation
+- When feedback recording (A) is ON, does not persist a correction merely because it was displayed; acceptance is recorded on an explicit commit, including the next ordinary text key following manual Zenz correction. Continuing to type during automatic live correction does not by itself record acceptance. A failed append is not treated as a successful observation for Undo compensation
 - If Backspace, Escape, Revert, Undo, Ctrl+Z, or a similar correction action occurs inside the rollback window, Mozkey appends `accepted_rollback` only for an acceptance successfully written to the feedback TSV. Failed writes are not compensated, preventing accidental subtraction from earlier valid acceptance records. Mozc-history revert uses a separate handle. IMEOff / MakeSureIMEOff confirm rather than cancel the commit
 - Treats a visible Zenz correction as rejected feedback when the user moves to normal conversion operations such as Space or candidate movement. Ordinary rejected feedback from these operations is used as a negative ranking signal rather than as a hard command to suppress the candidate
-- When Space restores the underlying Mozc normal conversion from a visible Zenz correction, the next text input commits that restored conversion before starting a new composition
+- When Space restores Mozc from a visible Zenz correction, a manual correction originating from ordinary conversion returns to ordinary conversion and the next text key commits the Mozc result; a correction originating from automatic live conversion can instead continue the same uncommitted reading
 - Adds a feedback-learning data management UI to the config dialog. Users can search, import, export, delete entries, and clear the feedback TSV. Deleting this feedback does **not** delete separately learned Mozc conversion history from C
 - Allows explicitly blocking selected Zenz corrections from the feedback management UI. Manual hard rejects continue to apply even when automatic feedback reuse (B) is OFF; unblocking requires deleting the corresponding entry
 - Allows manually blocking a currently visible Zenz correction with `Ctrl+Delete`, persisting a `hard_reject` for the full reading, context class, and corrected value, then restoring the underlying Mozc result without double-counting an ordinary rejection or deleting regular Mozc candidate history.
@@ -1574,7 +1584,7 @@ The configuration dialog separates **Zenz learning (Mozc conversion history)** f
 
 These three preferences are independent. **A=OFF/B=ON** continues to use existing feedback without adding new observations, while **A=OFF/C=ON** can still learn into Mozc history. For new Mozkey configurations all three default to ON. Previously saved legacy preferences are inherited only for fields not explicitly saved under the new settings.
 
-With A enabled, a displayed Zenz result is not recorded simply because it was shown. Accepted full-sequence feedback is appended when the user explicitly commits the result (for example with Enter or direct-commit punctuation). C writes to Mozc history separately.
+With A enabled, a displayed Zenz result is not recorded simply because it was shown. Accepted full-sequence feedback is appended when the user commits the result (for example with Enter, direct-commit punctuation, or the next ordinary text key after an explicit manual correction). Continued input in automatic live correction is not, by itself, acceptance. C writes to Mozc history separately.
 
 #### Minimum reading length for automatic Zenz feedback reuse
 
@@ -1881,6 +1891,12 @@ The keymap editor provides `ForceZenzLiveCorrection` (normal manual correction),
 - **Manual correction without feedback reuse** bypasses stored Zenz feedback for normal-candidate ranking, immediate correction reuse, and statistical auto-blocking on this invocation. When invoked from Conversion, it recomputes a feedback-free Mozc baseline. Normal Mozc user history and user-dictionary entries remain available, and explicit user-defined manual hard rejects still apply. "Ignore feedback learning" refers to **previously stored feedback being consulted**: new accepted-feedback recording (A) and Mozc-history learning (C) still follow their independent settings when the result is committed.
 - **Both manual commands** work even when automatic Zenz live correction is OFF and bypass the automatic minimum-reading-length threshold. Password/privacy and input eligibility checks remain in effect, and the result is not guaranteed to be adopted. If feedback-bypass reconversion fails, the prior candidates, input mode, and learning rollback ownership are preserved.
 - **Delay**: `Delay(700)` resumes the remaining steps after 700 ms. Values from 0 through 5000 milliseconds are supported; `Delay(0)` does not wait. This delay is separate from the automatic live-conversion and Zenz debounce settings.
+
+**Typing after manual correction**
+
+Automatic Zenz live correction is a provisional preview while the user is still composing a phrase. Further typing extends the same uncommitted composition; it is not an acceptance signal. By contrast, either manual Zenz command represents an explicit request to convert the current text. Once its result is visible, the next ordinary text key is treated as acceptance of that visible result and starts a new composition, mirroring ordinary conversion followed by continued typing. The manual command itself does **not** commit the text. This applies with live conversion enabled or disabled.
+
+If the asynchronous Zenz response has not appeared by the next keystroke, Mozkey commits only the conversion actually visible at that time, not an unseen response. If the Zenz result is rejected, the visible Mozc result is used. Space still discards the Zenz presentation and restores the previous Mozc conversion/editing behavior; Enter and explicit cancellation retain their existing semantics.
 
 Practical custom bindings (examples, **not the defaults**):
 
