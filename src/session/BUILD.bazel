@@ -245,6 +245,11 @@ mozc_cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ] + mozc_select(
+        linux = [
+            ":zenz_linux_scorer_launch_manager",
+            "//base:file_util",
+            "//base:system_util",
+        ],
         macos = [
             "//base:file_util",
             "//base:process",
@@ -260,11 +265,23 @@ mozc_cc_test(
     deps = [
         ":session",
         "//testing:gunit_main",
+        "//zenz:unix_socket_path",
     ] + mozc_select(
         macos = [
             "//base:process",
         ],
     ),
+)
+
+# Worker-only lifetime tests; never start llama-server or the installed IME.
+mozc_cc_test(
+    name = "zenz_live_corrector_test",
+    size = "small",
+    srcs = ["zenz_live_corrector_test.cc"],
+    deps = [
+        ":session",
+        "//testing:gunit_main",
+    ],
 )
 
 mozc_cc_test(
@@ -1089,4 +1106,14 @@ mozc_cc_test(
         "//protocol:config_cc_proto",
         "//testing:gunit_main",
     ],
+)
+
+# Linux-only long-lived spawning-thread manager for PR_SET_PDEATHSIG.
+# Used by the desktop Linux factory; packaging remains a separate gate.
+mozc_cc_library(
+    name = "zenz_linux_scorer_launch_manager",
+    srcs = ["zenz_linux_scorer_launch_manager.cc"],
+    hdrs = ["zenz_linux_scorer_launch_manager.h"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//session:__pkg__"],
 )

@@ -2,10 +2,13 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -340,6 +343,74 @@ TEST(PosixZenzScorerServerTest, ClientDisconnectDoesNotSendSigpipe) {
     EXPECT_TRUE(client_ok);
     EXPECT_TRUE(backend_called.load());
     EXPECT_EQ(error, "response_write_failed");
+  }
+  Cleanup(directory);
+}
+
+TEST(PosixZenzScorerServerTest, UnreadClientCannotBlockWritePastDeadline) {
+  const std::string directory = MakeTestDirectory();
+  Cleanup(directory);
+  const std::string socket_path = directory + "/scorer.sock";
+
+  {
+    PosixZenzScorerServer server(
+        socket_path, [](const PosixZenzRequest&) {
+          PosixZenzResponse response;
+          response.status = kZenzWireStatusOk;
+          // Within the protocol maximum, but much larger than the socket
+          // send buffer. A peer that does not read must not hang the scorer.
+          response.value.assign(1024 * 1024, 'x');
+          return response;
+        });
+    std::string error;
+    ASSERT_TRUE(server.Start(&error)) << error;
+
+    std::mutex mu;
+    std::condition_variable cv;
+    bool served = false;
+    bool client_ok = false;
+    std::thread client([&] {
+      const int fd = Connect(socket_path);
+      if (fd < 0) {
+        return;
+      }
+      const int small_buffer = 4096;
+      ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &small_buffer,
+                   sizeof(small_buffer));
+      constexpr char kPrompt[] = "p";
+      ZenzWireRequestHeader header = {};
+      header.magic = kZenzWireMagic;
+      header.version = kZenzWireVersion;
+      header.kind = kZenzWireKindRequest;
+      header.generation = 19;
+      header.timeout_msec = 1500;
+      header.max_output_chars = 256;
+      header.prompt_size = sizeof(kPrompt) - 1;
+      client_ok = WriteChunks(fd, &header, sizeof(header)) &&
+                  WriteChunks(fd, kPrompt, sizeof(kPrompt) - 1);
+      // The old blocking send() only returns when this client finally closes.
+      // A short bounded watchdog avoids an indefinitely hung regression test.
+      {
+        std::unique_lock<std::mutex> lock(mu);
+        cv.wait_for(lock, std::chrono::seconds(4), [&] { return served; });
+      }
+      ::close(fd);
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    const bool serve_ok = server.ServeOne(2000, &error);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    {
+      std::lock_guard<std::mutex> lock(mu);
+      served = true;
+    }
+    cv.notify_all();
+    client.join();
+
+    EXPECT_TRUE(client_ok);
+    EXPECT_TRUE(serve_ok) << error;
+    EXPECT_EQ(error, "response_write_failed");
+    EXPECT_LT(elapsed, std::chrono::milliseconds(2500));
   }
   Cleanup(directory);
 }

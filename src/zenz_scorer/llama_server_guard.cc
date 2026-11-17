@@ -1,22 +1,27 @@
 // Dedicated owner of a single llama-server child.  The scorer is the only
 // writer of the lifetime pipe; EOF also works when the scorer is SIGKILLed.
-#if !defined(__APPLE__)
-#error "llama_server_guard is only supported on macOS"
+#if !defined(__APPLE__) && !(defined(__linux__) && !defined(__ANDROID__))
+#error "llama_server_guard requires macOS or desktop Linux"
 #endif
 
+#include <algorithm>
 #include <cerrno>
-#include <fcntl.h>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <chrono>
+#include <fcntl.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "zenz_scorer/llama_server_guard_protocol.h"
 
 #include <poll.h>
 #include <sys/socket.h>
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <sys/mman.h>
+#endif
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -30,6 +35,44 @@ constexpr int kStartupFd = mozc::zenz_scorer::kGuardStartupFd;
 constexpr int kApiKeyFd = mozc::zenz_scorer::kGuardApiKeyFd;
 constexpr int kWorkerScorerFd = mozc::zenz_scorer::kWorkerScorerLifetimeFd;
 constexpr int kWorkerGuardFd = mozc::zenz_scorer::kWorkerGuardLifetimeFd;
+#if defined(__linux__) && !defined(__ANDROID__)
+constexpr int kWorkerKeyFd = mozc::zenz_scorer::kWorkerApiKeyFd;
+constexpr char kWorkerKeyPath[] = "/proc/self/fd/25";
+
+// Keep the key outside argv, process environment, and filesystem paths. The
+// pinned llama-server v0.7.0 supports --api-key-file. A sealed memfd is used
+// so the worker can read the exact key without a named or writable file.
+int CreateSealedKeyFile(std::string_view key) {
+  int fd = ::memfd_create("mozkey-zenz-auth", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  if (fd < 0) return -1;
+  const int raised = ::fcntl(fd, F_DUPFD_CLOEXEC, 64);
+  ::close(fd);
+  if (raised < 0) return -1;
+  fd = raised;
+  auto write_all = [&](std::string_view value) {
+    size_t offset = 0;
+    while (offset < value.size()) {
+      const ssize_t n = ::write(fd, value.data() + offset,
+                                value.size() - offset);
+      if (n > 0) {
+        offset += static_cast<size_t>(n);
+      } else if (n < 0 && errno == EINTR) {
+        continue;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (!write_all(key) || !write_all("\n") || ::lseek(fd, 0, SEEK_SET) != 0 ||
+      ::fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW |
+                                    F_SEAL_SEAL) != 0) {
+    ::close(fd);
+    return -1;
+  }
+  return fd;
+}
+#endif
 
 constexpr int kPollIntervalMsec = 50;
 constexpr int kGracePollCount = 40;  // 2 seconds before SIGKILL.
@@ -168,7 +211,10 @@ bool CreateGuardLifetimePipe(int pipe_fds[2]) {
   return true;
 }
 
-int RunGuard(const char* const* argv) {
+int RunGuard(const char* const* argv, int api_key_fd) {
+#if defined(__APPLE__)
+  static_cast<void>(api_key_fd);
+#endif
   // The scorer's existing lifetime pipe is read by both guard (FD20) and
   // worker (FD23).  Only the scorer owns its write end.  A *separate* pipe
   // held open by guard supplies worker FD24.  Thus guard SIGKILL closes FD24's
@@ -190,6 +236,12 @@ int RunGuard(const char* const* argv) {
     rc = ::posix_spawn_file_actions_adddup2(
         &actions, guard_pipe[0], kWorkerGuardFd);
   }
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (rc == 0) {
+    rc = ::posix_spawn_file_actions_adddup2(
+        &actions, api_key_fd, kWorkerKeyFd);
+  }
+#endif
   if (rc == 0) {
     rc = ::posix_spawn_file_actions_addclose(&actions, kLifetimeFd);
   }
@@ -202,6 +254,29 @@ int RunGuard(const char* const* argv) {
   if (rc == 0) {
     rc = ::posix_spawn_file_actions_addclose(&actions, guard_pipe[1]);
   }
+#if defined(__linux__) && !defined(__ANDROID__)
+  // FD23/24 are the worker's only inherited lifetime channels. After
+  // duplicating their sources, close every unrelated descriptor, including
+  // a future descriptor opened by another thread during spawn.
+#if defined(__GLIBC__)
+#if __GLIBC_PREREQ(2, 34)
+  if (rc == 0) {
+    rc = ::posix_spawn_file_actions_addclosefrom_np(
+        &actions, kWorkerKeyFd + 1);
+  }
+#else
+  if (rc == 0) rc = ENOTSUP;
+#endif
+#else
+  if (rc == 0) rc = ENOTSUP;
+#endif
+  for (int fd = STDERR_FILENO + 1; fd < kWorkerScorerFd && rc == 0;
+       ++fd) {
+    if (fd != kLifetimeFd && fd != kStartupFd) {
+      rc = ::posix_spawn_file_actions_addclose(&actions, fd);
+    }
+  }
+#endif
 
   posix_spawnattr_t attributes;
   bool attr_initialized = false;
@@ -226,11 +301,34 @@ int RunGuard(const char* const* argv) {
   }
   worker_argv.push_back(nullptr);
 
+  // Ignore inherited external API credentials: llama.cpp appends keys from
+  // LLAMA_API_KEY and LLAMA_ARG_API_KEY_FILE rather than replacing them.
+  // The one key supplied by Mozkey must be the only accepted credential.
+#if defined(__linux__) && !defined(__ANDROID__)
+  std::vector<char*> worker_environment;
+  for (char** item = environ; *item != nullptr; ++item) {
+    const std::string_view variable(*item);
+    if (variable.starts_with("LLAMA_API_KEY=") ||
+        variable.starts_with("LLAMA_ARG_API_KEY_FILE=")) {
+      continue;
+    }
+    worker_environment.push_back(*item);
+  }
+  worker_environment.push_back(nullptr);
+#endif
   pid_t child_pid = -1;
   if (rc == 0) {
     rc = ::posix_spawn(&child_pid, argv[0], &actions, &attributes,
-                       const_cast<char* const*>(worker_argv.data()), environ);
+                       const_cast<char* const*>(worker_argv.data()),
+#if defined(__linux__) && !defined(__ANDROID__)
+                       worker_environment.data());
+#else
+                       environ);
+#endif
   }
+#if defined(__linux__) && !defined(__ANDROID__)
+  ::close(api_key_fd);
+#endif
   if (attr_initialized) {
     ::posix_spawnattr_destroy(&attributes);
   }
@@ -308,12 +406,25 @@ int main(int argc, char** argv) {
     ReportStartup(false);
     return 65;
   }
+#if defined(__linux__) && !defined(__ANDROID__)
+  const int key_fd = CreateSealedKeyFile(key);
+  std::fill(key.begin(), key.end(), '\0');
+  key.clear();
+  if (key_fd < 0) {
+    ReportStartup(false);
+    return 66;
+  }
+  arguments[static_cast<size_t>(key_index)] = "--api-key-file";
+  arguments[static_cast<size_t>(key_index + 1)] = kWorkerKeyPath;
+#else
   arguments[static_cast<size_t>(key_index + 1)] = std::move(key);
+  const int key_fd = -1;
+#endif
   std::vector<const char*> worker_argv;
   worker_argv.reserve(arguments.size() + 1);
   for (std::string& argument : arguments) {
     worker_argv.push_back(argument.c_str());
   }
   worker_argv.push_back(nullptr);
-  return RunGuard(worker_argv.data());
+  return RunGuard(worker_argv.data(), key_fd);
 }

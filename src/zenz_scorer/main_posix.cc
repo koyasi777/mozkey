@@ -6,8 +6,14 @@
 #include <string_view>
 #include <vector>
 
+#if defined(__APPLE__)
 #include <limits.h>
 #include <mach-o/dyld.h>
+#elif defined(__linux__) && !defined(__ANDROID__)
+#include <unistd.h>
+#else
+#error "Zenz POSIX scorer requires macOS or desktop Linux"
+#endif
 
 #include "zenz/zenz_unix_socket_path.h"
 #include "zenz_scorer/posix_runtime.h"
@@ -34,6 +40,7 @@ std::string JoinPath(std::string_view directory, std::string_view name) {
 }
 
 std::string GetExecutablePath() {
+#if defined(__APPLE__)
   uint32_t size = PATH_MAX;
   std::vector<char> buffer(size, '\0');
   if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
@@ -48,6 +55,22 @@ std::string GetExecutablePath() {
     return resolved;
   }
   return buffer.data();
+#else
+  // /proc/self/exe identifies the running binary, even if invoked via a
+  // symlink. Grow the buffer rather than accepting a truncated result.
+  for (size_t capacity = 256; capacity <= 65536; capacity *= 2) {
+    std::vector<char> buffer(capacity);
+    const ssize_t size = ::readlink("/proc/self/exe", buffer.data(),
+                                    buffer.size());
+    if (size <= 0) {
+      return "";
+    }
+    if (static_cast<size_t>(size) < buffer.size()) {
+      return std::string(buffer.data(), static_cast<size_t>(size));
+    }
+  }
+  return "";
+#endif
 }
 
 std::string DirectoryName(std::string_view path) {
@@ -61,11 +84,10 @@ std::string DirectoryName(std::string_view path) {
   return std::string(path.substr(0, separator));
 }
 
-mozc::zenz_scorer::PosixScorerRuntimeOptions LoadRuntimeOptions() {
-  const std::string executable_directory = DirectoryName(GetExecutablePath());
-
+mozc::zenz_scorer::PosixScorerRuntimeOptions LoadRuntimeOptions(
+    std::string_view executable_directory, std::string_view socket_path) {
   mozc::zenz_scorer::PosixScorerRuntimeOptions options;
-  options.socket_path = mozc::zenz::GetZenzUnixSocketPath();
+  options.socket_path = std::string(socket_path);
   options.llama_server.executable_path =
       JoinPath(executable_directory, "llama-server");
   options.llama_server.guard_executable_path =
@@ -88,7 +110,20 @@ int main() {
   std::signal(SIGINT, HandleSignal);
   std::signal(SIGTERM, HandleSignal);
 
-  mozc::zenz_scorer::PosixScorerRuntime runtime(LoadRuntimeOptions());
+  const std::string executable_path = GetExecutablePath();
+  if (executable_path.empty() || executable_path.front() != '/') {
+    std::cerr << "[mozc-zenz-scorer] executable_path_unavailable\n";
+    return 1;
+  }
+  const std::string socket_path = mozc::zenz::GetZenzUnixSocketPath();
+  if (socket_path.empty()) {
+    // Do not start the model or guard when the user runtime root is invalid.
+    std::cerr << "[mozc-zenz-scorer] socket_path_unavailable\n";
+    return 1;
+  }
+
+  mozc::zenz_scorer::PosixScorerRuntime runtime(
+      LoadRuntimeOptions(DirectoryName(executable_path), socket_path));
   std::string error;
   if (!runtime.Start(&error)) {
     std::cerr << "[mozc-zenz-scorer] start failed: " << error << '\n';

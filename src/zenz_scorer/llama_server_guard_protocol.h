@@ -18,6 +18,9 @@ inline constexpr int kGuardApiKeyFd = 22;
 // guard owns a newly created second writer.  No third process owns either.
 inline constexpr int kWorkerScorerLifetimeFd = 23;
 inline constexpr int kWorkerGuardLifetimeFd = 24;
+// Linux-only sealed anonymous file descriptor containing the ephemeral key.
+// Worker reads it through /proc/self/fd/25; the key is never in worker argv.
+inline constexpr int kWorkerApiKeyFd = 25;
 inline constexpr char kWorkerDualLifetimeSwitch[] =
     "--mozkey-zenz-dual-liveness-v1";
 // Placeholder is non-secret; the actual per-launch key travels via an

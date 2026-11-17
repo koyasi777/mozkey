@@ -22,12 +22,21 @@ class ZenzUnixSocketClient final : public ZenzClient {
   // both a newly spawned process and a launch already in progress. Returns
   // false only when launch definitively failed.
   using ScorerLauncher = std::function<bool()>;
+  using CancelCheck = std::function<bool()>;
+  // Linux's process-owner launch manager may wait for another thread.
+  // Allow the waiting worker to abandon a superseded launch request without
+  // interrupting the shared manager's process ownership or reaping.
+  using CancellableScorerLauncher =
+      std::function<bool(const CancelCheck&)>;
 
   explicit ZenzUnixSocketClient(std::string socket_path);
   ZenzUnixSocketClient(std::string socket_path,
                        ScorerLauncher scorer_launcher);
   ZenzUnixSocketClient(std::string socket_path,
                        ScorerLauncher scorer_launcher,
+                       absl::Duration startup_timeout);
+  ZenzUnixSocketClient(std::string socket_path,
+                       CancellableScorerLauncher scorer_launcher,
                        absl::Duration startup_timeout);
   ~ZenzUnixSocketClient() override = default;
 
@@ -37,6 +46,7 @@ class ZenzUnixSocketClient final : public ZenzClient {
  private:
   const std::string socket_path_;
   const ScorerLauncher scorer_launcher_;
+  const CancellableScorerLauncher cancellable_scorer_launcher_;
   const absl::Duration startup_timeout_;
 };
 

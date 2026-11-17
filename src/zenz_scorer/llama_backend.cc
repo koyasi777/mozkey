@@ -48,6 +48,7 @@ PosixZenzBackend CreateLlamaHttpBackend(LlamaBackendOptions options) {
     completion_request.timeout_msec = request.timeout_msec;
     completion_request.max_output_chars = request.max_output_chars;
     completion_request.prompt = request.prompt;
+    completion_request.cancellation_fd = request.peer_fd;
     return ConvertResponse(
         PostLlamaHttpCompletion(completion_request));
   };

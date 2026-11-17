@@ -63,6 +63,14 @@ bool SetCloseOnExec(int fd) {
   return flags >= 0 && ::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0;
 }
 
+bool SetNonBlockingAndCloseOnExec(int fd) {
+  if (!SetCloseOnExec(fd)) {
+    return false;
+  }
+  const int flags = ::fcntl(fd, F_GETFL, 0);
+  return flags >= 0 && ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+}
+
 bool DisableSigPipe(int fd) {
 #if defined(SO_NOSIGPIPE)
   const int enabled = 1;
@@ -436,7 +444,10 @@ bool PosixZenzScorerServer::ServeOne(int timeout_msec,
     *error = ErrnoTag("socket_accept_failed");
     return false;
   }
-  if (!SetCloseOnExec(client_fd) || !DisableSigPipe(client_fd)) {
+  // poll() deadlines are not enforceable with a blocking send() on an
+  // accepted stream socket when the peer stops reading a large response.
+  if (!SetNonBlockingAndCloseOnExec(client_fd) ||
+      !DisableSigPipe(client_fd)) {
     *error = ErrnoTag("client_configure_failed");
     ::close(client_fd);
     return false;
@@ -498,6 +509,9 @@ bool PosixZenzScorerServer::HandleClient(int client_fd,
     return true;
   }
 
+  // The synchronous backend can monitor peer closure while it waits for
+  // llama-server. A disconnected client must not occupy the serial scorer.
+  request.peer_fd = client_fd;
   PosixZenzResponse response =
       backend_ ? backend_(request)
                : ErrorResponse("backend_unavailable");
