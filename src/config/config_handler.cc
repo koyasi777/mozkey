@@ -303,6 +303,9 @@ void ApplyMozkeyProductDefaults(Config* config) {
   if (!config->has_use_live_conversion()) {
     config->set_use_live_conversion(true);
   }
+  if (!config->has_show_live_conversion_ruby_window()) {
+    config->set_show_live_conversion_ruby_window(true);
+  }
   if (!config->has_show_candidate_window_on_initial_conversion()) {
     config->set_show_candidate_window_on_initial_conversion(true);
   }
@@ -351,7 +354,7 @@ void ApplyMozkeyProductDefaults(Config* config) {
     config->set_use_zenz_live_correction_right_context(true);
   }
   if (!config->has_use_realtime_conversion()) {
-    config->set_use_realtime_conversion(true);
+    config->set_use_realtime_conversion(false);
   }
 
 #ifdef _WIN32
