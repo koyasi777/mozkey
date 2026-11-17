@@ -298,6 +298,169 @@ TEST_F(LanguageAwareRewriterTest, LanguageAwareInput) {
   }
 }
 
+TEST_F(LanguageAwareRewriterTest, KnownJapanesePrefixOutranksRawLatin) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+
+  // The standard candidate is more useful than raw "mouGoogle".
+  Segments japanese_segments;
+  PushFrontCandidate("もうGoogle", japanese_segments.add_segment());
+  std::string composition;
+  EXPECT_CALL(dictionary, HasKey(StrEq("もう"))).WillOnce(Return(true));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "mouGoogle", false,
+                                            &composition, &japanese_segments));
+  EXPECT_EQ(composition, "もうGoogle");
+  ASSERT_EQ(japanese_segments.conversion_segment(0).candidates_size(), 2);
+  EXPECT_EQ(japanese_segments.conversion_segment(0).candidate(0).value,
+            "もうGoogle");
+  EXPECT_EQ(japanese_segments.conversion_segment(0).candidate(1).value,
+            "mouGoogle");
+  Mock::VerifyAndClearExpectations(&dictionary);
+
+  // An unknown-name prefix must not demote raw "azooKey".
+  Segments name_segments;
+  PushFrontCandidate("あぞおKey", name_segments.add_segment());
+  EXPECT_CALL(dictionary, HasKey(StrEq("あぞお"))).WillOnce(Return(false));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "azooKey", false,
+                                            &composition, &name_segments));
+  EXPECT_EQ(composition, "あぞおKey");
+  EXPECT_EQ(name_segments.conversion_segment(0).candidate(0).value,
+            "azooKey");
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+// Short Roman prefixes are ambiguous even if their kana readings appear in
+// the dictionary.  In mixed-case product names, raw ASCII must remain first.
+TEST_F(LanguageAwareRewriterTest, ShortRomanPrefixKeepsAsciiRescueFirst) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+
+  struct TestCase {
+    const char* raw;
+    const char* preedit;
+  };
+  constexpr TestCase kCases[] = {
+      {"iPhone", "いPhone"},
+      {"iPad", "いPad"},
+      {"aGoogle", "あGoogle"},
+  };
+
+  // A one-character Japanese prefix cannot prove Japanese-word intent;
+  // do not even ask the dictionary to promote these preedits.
+  EXPECT_CALL(dictionary, HasKey(::testing::_)).Times(0);
+  for (const TestCase& test : kCases) {
+    Segments segments;
+    std::string composition;
+    EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, test.raw, false,
+                                              &composition, &segments))
+        << test.raw;
+    EXPECT_EQ(composition, test.preedit) << test.raw;
+    ASSERT_EQ(segments.conversion_segments_size(), 1);
+    const Segment& segment = segments.conversion_segment(0);
+    ASSERT_EQ(segment.candidates_size(), 1) << test.raw;
+    EXPECT_EQ(segment.candidate(0).value, test.raw);
+  }
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+TEST_F(LanguageAwareRewriterTest, KnownJapanesePrefixWithNoNativeCandidate) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  Segments segments;
+  std::string composition;
+  EXPECT_CALL(dictionary, HasKey(StrEq("もう"))).WillOnce(Return(true));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "mouGoogle", false,
+                                            &composition, &segments));
+  EXPECT_EQ(composition, "もうGoogle");
+  ASSERT_EQ(segments.conversion_segments_size(), 1);
+  const Segment& segment = segments.conversion_segment(0);
+  // The native predictor returned no candidates. Both safe, selectable
+  // values must now be supplied by the language-aware rewriter itself.
+  ASSERT_EQ(segment.candidates_size(), 2);
+  EXPECT_EQ(segment.candidate(0).value, "もうGoogle");
+  EXPECT_EQ(segment.candidate(1).value, "mouGoogle");
+  EXPECT_EQ(segment.candidate(0).content_value, "もうGoogle");
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+TEST_F(LanguageAwareRewriterTest,
+       KnownJapanesePrefixWithUnrelatedNativeCandidate) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  Segments segments;
+  PushFrontCandidate("もうグーグル", segments.add_segment());
+  std::string composition;
+  EXPECT_CALL(dictionary, HasKey(StrEq("もう"))).WillOnce(Return(true));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "mouGoogle", false,
+                                            &composition, &segments));
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_EQ(segment.candidates_size(), 3);
+  EXPECT_EQ(segment.candidate(0).value, "もうGoogle");
+  EXPECT_EQ(segment.candidate(1).value, "mouGoogle");
+  EXPECT_EQ(segment.candidate(2).value, "もうグーグル");
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+TEST_F(LanguageAwareRewriterTest,
+       ExistingMixedCandidateIsPromotedNotDuplicated) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  PushFrontCandidate("もうGoogle", segment);
+  PushFrontCandidate("もうグーグル", segment);
+  std::string composition;
+  EXPECT_CALL(dictionary, HasKey(StrEq("もう"))).WillOnce(Return(true));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "mouGoogle", false,
+                                            &composition, &segments));
+  ASSERT_EQ(segment->candidates_size(), 3);
+  EXPECT_EQ(segment->candidate(0).value, "もうGoogle");
+  EXPECT_EQ(segment->candidate(1).value, "mouGoogle");
+  EXPECT_EQ(segment->candidate(2).value, "もうグーグル");
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+TEST_F(LanguageAwareRewriterTest, ExplicitJapaneseReturnSuppressesRawRescue) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  auto table = std::make_shared<composer::Table>();
+  table->InitializeWithRequestAndConfig(client_request, config);
+  composer::Composer composer(table, client_request, config);
+  InsertASCIISequence("AI", &composer);
+  ASSERT_EQ(composer.GetInputMode(), transliteration::HALF_ASCII);
+  composer.SuppressLanguageAwareRawInput();
+  composer.SetInputMode(transliteration::HIRAGANA);
+  InsertASCIISequence("de", &composer);
+  EXPECT_EQ(composer.GetRawString(), "AIde");
+  EXPECT_TRUE(
+      composer.CreateComposerData().suppress_language_aware_raw_input());
+
+  Segments segments;
+  segments.add_segment()->set_key(composer.GetQueryForPrediction());
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetComposer(composer)
+          .SetRequest(client_request)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 0);
+  composer.Reset();
+  EXPECT_FALSE(
+      composer.CreateComposerData().suppress_language_aware_raw_input());
+}
+
 TEST_F(LanguageAwareRewriterTest, NotRewriteFullWidthAsciiToHalfWidthAscii) {
   MockDictionary dictionary;
   LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
