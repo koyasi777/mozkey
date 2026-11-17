@@ -67,7 +67,8 @@ class ComposerData {
                commands::Context::InputFieldType input_field_type,
                std::string source_text,
                std::vector<commands::SessionCommand::CompositionEvent>
-                   compositions_for_handwriting);
+                   compositions_for_handwriting,
+               bool suppress_language_aware_raw_input = false);
 
   // Copyable and movable.
   ComposerData(const ComposerData& other) = default;
@@ -77,7 +78,13 @@ class ComposerData {
 
   transliteration::TransliterationType GetInputMode() const;
 
-  // Returns the input field type captured when ComposerData was created.
+  // True if explicit Japanese-mode selection disabled raw-ASCII rescue for
+  // the current composition. This is a snapshot of Composer's semantic state.
+  bool suppress_language_aware_raw_input() const {
+    return suppress_language_aware_raw_input_;
+  }
+
+  // Returns input field type captured when ComposerData was created.
   // This is authoritative even if commands::Context omits input_field_type.
   commands::Context::InputFieldType GetInputFieldType() const {
     return input_field_type_;
@@ -132,7 +139,7 @@ class ComposerData {
 
   // Input mode of IME (e.g. HIRAGANA, HALF_ASCII, etc.)
   transliteration::TransliterationType input_mode_ = transliteration::HIRAGANA;
-
+  bool suppress_language_aware_raw_input_ = false;
   // Type of the input field to input texts.
   commands::Context::InputFieldType input_field_type_ =
       commands::Context::NORMAL;
@@ -381,6 +388,17 @@ class Composer final {
 
   bool is_new_input() const { return is_new_input_; }
   size_t shifted_sequence_count() const { return shifted_sequence_count_; }
+
+  // Called on explicit return to Japanese from ASCII while preedit exists.
+  // Unlike a Shift-triggered automatic return, this disallows an ASCII rescue
+  // candidate spanning the explicitly selected Japanese input boundary.
+  void SuppressLanguageAwareRawInput() {
+    suppress_language_aware_raw_input_ = true;
+  }
+  bool suppress_language_aware_raw_input() const {
+    return suppress_language_aware_raw_input_;
+  }
+
   bool is_in_shifted_ascii_revert_context() const {
     return is_in_shifted_ascii_revert_context_;
   }
@@ -426,6 +444,7 @@ class Composer final {
   // two or more shifted alphabet keys temporarily enter ASCII mode, and the
   // following unshifted alphabet key returns input to the comeback mode.
   bool is_in_shifted_ascii_revert_context_;
+  bool suppress_language_aware_raw_input_ = false;
 
   // The original text for the composition.  The value is usually
   // empty, and used for reverse conversion.

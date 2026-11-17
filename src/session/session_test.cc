@@ -6306,6 +6306,44 @@ TEST_F(SessionTest,
   EXPECT_FALSE(session_peer.live_conversion_active_());
 }
 
+TEST_F(SessionTest, PendingRomanRefreshesStaleRawAsciiRescue) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(true);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  session.SetConfig(config);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillRepeatedly(Invoke([](const ConversionRequest& request,
+                                Segments* output) {
+        output->InitForConvert(request.key());
+        Segment* segment = output->mutable_conversion_segment(0);
+        AddCandidate(request.key(), request.composer().GetRawString(),
+                     segment);
+        return true;
+      }));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("A", &session, &command));
+  ASSERT_TRUE(SendKey("I", &session, &command));
+  ASSERT_TRUE(SendKey("d", &session, &command));
+  ASSERT_TRUE(SendKey("e", &session, &command));
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(), "AIde");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("v", &session, &command));
+  EXPECT_EQ(session.context().composer().GetRawString(), "AIdev");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(), "AIdev");
+}
+
 TEST_F(SessionTest,
        ShiftAsciiTemporaryModeRefreshesSuggestionForEveryCharacter) {
   MockEngine engine;
@@ -20503,6 +20541,89 @@ TEST_F(SessionTest, Issue2223755) {
 
     EXPECT_EQ(GetComposition(command), "ア　イ");  // fullwidth space
   }
+}
+
+TEST_F(SessionTest, ImeOnFromShiftAsciiInvalidatesOldSuggestions) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(true);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillRepeatedly(Invoke([](const ConversionRequest& request,
+                                Segments* output) {
+        output->InitForConvert(request.key());
+        AddCandidate(request.key(), request.composer().GetRawString(),
+                     output->mutable_conversion_segment(0));
+        return true;
+      }));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("A", &session, &command));
+  ASSERT_TRUE(SendKey("I", &session, &command));
+  EXPECT_EQ(session.context().composer().GetRawString(), "AI");
+  ASSERT_TRUE(command.output().has_candidate_window());
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ON, &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_FALSE(command.output().has_candidate_window());
+  EXPECT_TRUE(session.context().composer().suppress_language_aware_raw_input());
+  EXPECT_EQ(session.context().composer().GetInputMode(),
+            transliteration::HIRAGANA);
+  EXPECT_EQ(session.context().composer().GetRawString(), "AI");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("d", &session, &command));
+  ASSERT_TRUE(SendKey("e", &session, &command));
+  EXPECT_TRUE(session.context().composer().suppress_language_aware_raw_input());
+}
+
+TEST_F(SessionTest, SwitchToHiraganaCommandClearsAsciiSuggestion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_dictionary_suggest(true);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  session.SetConfig(config);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillRepeatedly(Invoke([](const ConversionRequest& request,
+                                Segments* output) {
+        output->InitForConvert(request.key());
+        AddCandidate(request.key(), request.composer().GetRawString(),
+                     output->mutable_conversion_segment(0));
+        return true;
+      }));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("A", &session, &command));
+  ASSERT_TRUE(SendKey("I", &session, &command));
+  ASSERT_TRUE(command.output().has_candidate_window());
+
+  command.Clear();
+  SetSendCommandCommand(commands::SessionCommand::SWITCH_COMPOSITION_MODE,
+                        &command);
+  command.mutable_input()->mutable_command()->set_composition_mode(
+      commands::HIRAGANA);
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_FALSE(command.output().has_candidate_window());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_TRUE(session.context().composer().suppress_language_aware_raw_input());
+  EXPECT_EQ(session.context().composer().GetRawString(), "AI");
 }
 
 TEST_F(SessionTest, ImeOnRestoresShiftAsciiWithoutCommittingPreedit) {

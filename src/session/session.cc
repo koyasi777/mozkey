@@ -4352,6 +4352,26 @@ bool HaveSamePassiveSuggestionCandidates(
   return true;
 }
 
+// Pending-Roman HOLD must not retain a raw-input rescue with an obsolete
+// value. This detects the actual displayed candidate, not merely a change in
+// keystrokes: unrelated Japanese suggestions keep their stable candidate IDs.
+bool HasStaleRawInputRescue(const composer::Composer& before,
+                            const composer::Composer& after,
+                            const commands::CandidateWindow& window) {
+  const std::string raw = before.GetRawString();
+  if (raw.size() <= 3 || raw == before.GetStringForPreedit() ||
+      raw == after.GetRawString() ||
+      !IsPassiveLiveSuggestionCandidateWindow(window)) {
+    return false;
+  }
+  for (const auto& candidate : window.candidate()) {
+    if (candidate.value() == raw) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool ShouldSuppressShiftedAsciiAutoSuggestion(
     const config::Config& config,
     const composer::Composer& composer);
@@ -8820,6 +8840,35 @@ bool Session::InsertCharacter(commands::Command* command) {
         should_hold_pending_roman_suggestion = false;
       }
     }
+
+    if (should_hold_pending_roman_suggestion) {
+      // Keep Japanese suggestions stable unless the list actually contains a
+      // stale raw-ASCII rescue. In that case generate a fresh semantic list
+      // so the candidate value, ID, and eventual commit remain consistent.
+      commands::Output converter_output;
+      const commands::CandidateWindow* visible = nullptr;
+      if (live_conversion_active_ &&
+          IsPassiveLiveSuggestionCandidateWindow(
+              live_conversion_suggestion_candidate_window_)) {
+        visible = &live_conversion_suggestion_candidate_window_;
+      } else if (live_conversion_pending_ &&
+                 IsPassiveLiveSuggestionCandidateWindow(
+                     pending_live_conversion_suggestion_candidate_window_)) {
+        visible = &pending_live_conversion_suggestion_candidate_window_;
+      } else {
+        context_->converter().FillOutput(context_->composer(),
+                                         &converter_output);
+        if (converter_output.has_candidate_window()) {
+          visible = &converter_output.candidate_window();
+        }
+      }
+      if (visible != nullptr &&
+          HasStaleRawInputRescue(context_->composer(),
+                                 composer_after_insert_for_suggestion,
+                                 *visible)) {
+        should_hold_pending_roman_suggestion = false;
+      }
+    }
     if (should_hold_pending_roman_suggestion) {
       CaptureVisiblePassiveSuggestionSnapshot(
           &held_pending_roman_suggestion);
@@ -10104,8 +10153,36 @@ bool Session::TranslateHalfASCII(commands::Command* command) {
 bool Session::CompositionModeHiragana(commands::Command* command) {
   command->mutable_output()->set_consumed(true);
   EnsureIMEIsOn();
-  // The temporary mode should not be overridden.
+
+  const composer::Composer& composer = context_->composer();
+  const bool explicit_ascii_to_japanese =
+      !composer.Empty() &&
+      (composer.GetInputMode() == transliteration::HALF_ASCII ||
+       composer.GetInputMode() == transliteration::FULL_ASCII);
+  if (explicit_ascii_to_japanese) {
+    // This is an intentional switch, unlike the automatic Shift-key return.
+    // Do not re-interpret the preceding ASCII as an accidental Roman input.
+    context_->mutable_composer()->SuppressLanguageAwareRawInput();
+  }
   SwitchInputMode(transliteration::HIRAGANA, context_->mutable_composer());
+
+  if (explicit_ascii_to_japanese) {
+    // An old suggestion belongs to the previous input mode. Drop its semantic
+    // candidate list together with any passive snapshot; never hide only its
+    // renderer surface while keeping an obsolete clickable candidate ID.
+    composition_holds_passive_suggestion_ = false;
+    live_conversion_holds_passive_suggestion_ = false;
+    pending_live_conversion_holds_passive_suggestion_ = false;
+    live_conversion_suggestion_candidate_window_.Clear();
+    pending_live_conversion_suggestion_candidate_window_.Clear();
+    live_conversion_suggestion_context_.reset();
+    pending_live_conversion_suggestion_context_.reset();
+    if (context_->converter().CheckState(
+            EngineConverterInterface::SUGGESTION)) {
+      context_->mutable_converter()->Cancel();
+    }
+  }
+
   OutputFromState(command);
   return true;
 }

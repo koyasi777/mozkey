@@ -137,6 +137,8 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
 - ローマ字入力中、単なる未解決の Roman suffix では直前の passive suggestion を保持して候補ウィンドウのちらつきを抑制。一方、カスタムローマ字規則の「曖昧なローマ字規則の途中表示」によって有効な読みが現れ、予測クエリが変化した場合は、suffix が未解決のままでもサジェストを更新。候補へ移動する場合は画面に表示中の候補集合を使用
+- 未解決ローマ字の入力中、表示中の英字救済候補が古くなった場合はサジェストを更新し、候補の表示・選択・確定の整合性を維持（例：`AIde` → `AIdev`）
+- 日本語と英字の混在入力では、条件を満たす `もうGoogle` を `mouGoogle` より優先。短い読みの `iPhone` / `iPad` などや未知語の `azooKey` は元の英字表記を優先
 - 明示的に選んで確定したサジェストについて、候補が持つ全文の読みと、通常変換で検証できた文節・候補順位を使ってユーザーセグメント履歴の学習を補強。確定結果やサジェスト履歴は従来どおり維持し、検証できない文節や順位は推測で学習しない
 - デフォルトでは 1 文字だけの未確定文字列で、助詞などの誤変換を避けるためライブ変換を実行しない
 - `え~`、`えー`、`ん？` のような「かな1文字 + 装飾的な末尾記号」でも、短すぎる漢字化を避けるためライブ変換を抑制
@@ -156,6 +158,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Windows 版のキー設定で、Ctrl / Shift の左右条件を独立して「左右どちらでも / 左のみ / 右のみ」から選択可能。従来の汎用 Ctrl / Shift 割り当ても維持し、競合する異なるコマンドの割り当ては保存時に検出
 - Windows 版で IMEOn / IMEOff に割り当てたキーを押した場合、すでに同じ状態でも IME モードインジケータを表示
 - Windows 版で Shift などによる一時的な半角英数字入力中に `IMEOn` を押すと、未確定文字列を確定せずにひらがな入力へ復帰
+- 英字入力から明示的にひらがなへ切り替えた際は、切り替え前の英字救済サジェストを無効化し、未確定文字列を維持
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
 - Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（ライト・ダーク対応）/ モノクロ（黒）/ モノクロ（白）から選択可能
 - Windows Search などの immersive TSF ホストでは、候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビをホストプロセス内の renderer 経路で表示し、前面表示とマウス操作を安定化。未選択のサジェストは mouse-down だけで通常変換へ移行せず、mouse-up で実際に押したサジェストを確定
@@ -311,6 +314,14 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 
 この上限はローマ字テーブルの 1 規則に設定する出力に対するものです。変換器全体の入力長制限を変更するものではありません。
 
+### 英字救済サジェストと日本語・英字の混在入力
+
+Mozkey は、英字の固有名詞や技術用語を入力できるよう、ローマ字の生打鍵列を救済候補として提示できます。未解決のローマ字入力中は通常、サジェストウィンドウのちらつきを避けるため直前の候補を保持しますが、表示中に古い英字救済候補が含まれる場合は、候補の値と実際の選択・確定先が食い違わないよう再生成します。例えば `AIde` に続けて `v` を入力しても、古い `AIde` を残さないようにします。
+
+日本語の読みの後に英字が続く場合は、例えば `mouGoogle` から作られる未確定表示 `もうGoogle` を、予測器が生成していなくても候補として補い、元の打鍵列 `mouGoogle` より優先することがあります。ただし、日本語部分が2文字以上で、対応するローマ字部分が3バイト以上あり、辞書にその読みが存在し、英字末尾と生打鍵列が一致する場合に限る保守的な判定です。`iPhone`、`iPad`、`aGoogle` のような短い読みや、`azooKey` のように辞書で確認できない読みでは、英字救済を優先します。すべての入力意図を判定するものではありません。
+
+未確定文字列の途中で英字モードから明示的にひらがなへ切り替えたときは、切り替え前の英字救済候補と古いサジェスト状態を無効化し、未確定文字列自体は確定しません。今回の修正は主として Windows の Zenz OFF・ライブ変換 OFF で実機確認しています。macOS での今回の変更、およびライブ変換 ON の全経路については未検証です。ライブ変換 ON で Shift 英字入力へ移る際に、それまでの表示結果を確定する既存動作は今回変更していません。
+
 ### ライブ変換
 
 ライブ変換を有効にすると、スペースキーを押さなくても、入力中の未確定文字列が自動で変換されます。
@@ -320,6 +331,8 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 また、`え~`、`えー`、`ん？` のように、かな1文字の後ろに装飾的な記号だけが続く場合もライブ変換を抑制します。これにより、入力途中の `え~` が `絵～` のように短すぎる漢字候補へ変換される挙動を避けます。
 
 サジェストについては、意味のある読みがまだ増えていない未解決ローマ字の打鍵ごとに候補を再生成し、候補ウィンドウがちらつくのを抑えるため、ライブ変換とは別に passive suggestion の更新を一時的に HOLD します。たとえば `今日は` の後で `s`、`sh` と入力している間は直前の候補集合を保持し、`shi` が `し` に解決すると、現在の読み `今日はし` に対するサジェストを更新します。新しい composition の先頭では、未解決のローマ字が 2 文字以下なら従来どおり更新を許可します。
+
+ただし、保持中の候補にすでに古くなった英字の生打鍵救済候補が含まれる場合は、表示候補と確定対象の整合性を優先して HOLD を解除し、現在の入力に基づく候補へ更新します。
 
 ただし、カスタムローマ字テーブルの「曖昧なローマ字規則の途中表示」（`DisplayAmbiguousResult`）が有効な規則では、後続の入力で変化する可能性のある未解決のローマ字でも、すでに有効な日本語の読みを表示できます。この状態で予測クエリが変化した場合は HOLD を解除し、新しい読みのサジェストを生成します。たとえば `a → あ`、`ms → ます`、`msn → ません` を持ち、`ms` と `msn` がさらに長い規則の接頭部分でもあるテーブルでは、`am` の候補は保持しますが、`ams` では `あます`、`amsn` では `あません` に対応して更新します。先頭からの `msn` のように未解決部分が 3 文字以上でも、同じ条件で更新できます。曖昧な読みが表示されない単なるローマ字 prefix については、従来の HOLD を維持します。
 
@@ -773,6 +786,8 @@ CapsLock が有効な場合も、左右指定の照合と汎用ショートカ�
 
 Shift などによって半角英数字の**一時入力モード**に切り替わっている場合、`IMEOn` に割り当てられたキーを押すと、既存の未確定文字列を確定せずに入力モードだけをひらがなへ変更します。タスクバーの入力モード表示も「あ」に更新されます。
 
+この明示的な復帰では、切り替え前の英字救済サジェストも無効化します。未確定文字列自体は保持し、Shift 入力が終わったことによる自動的な入力モード復帰とは区別します。
+
 たとえば、Shift による一時英数字切り替えが有効な設定で `Shift+G` → `o` → `o` → `IMEOn` → `a` と入力すると、`Gooあ` を同じ未確定文字列のまま入力できます。カタカナ入力から一時的に英数字へ切り替えた場合も、`IMEOn` の復帰先はひらがなです。
 
 対象は、現在の入力モードが半角英数字で、復帰先として異なる入力モードが保持されている場合です。通常のひらがな入力中や、復帰先も半角英数字である明示的な半角英数字入力中は、従来どおり `IMEOn` で入力モードを変更しません。`IMEOff` による直接入力への切り替えも従来どおりです。
@@ -1197,6 +1212,8 @@ Main features added in this fork
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
 - Reduces candidate-window flicker by holding passive suggestions for unresolved Roman prefixes that do not change the prediction reading; when a custom DisplayAmbiguousResult rule exposes a meaningful reading and changes the prediction query, suggestions refresh even while the Roman suffix remains pending. Entering the candidate list uses the exact displayed candidates
+- Refreshes a stale raw-ASCII rescue suggestion when more Roman keys are typed (for example, `AIde` → `AIdev`), keeping the displayed candidate consistent with its selectable value
+- Prefers a mixed Japanese/Latin preedit such as `もうGoogle` over `mouGoogle` under conservative dictionary and prefix-length checks, while retaining ASCII-first suggestions for names such as `iPhone`, `iPad`, and `azooKey`
 - For explicitly accepted suggestions, verifies the complete reading, native segment mapping, and actual normal-conversion candidate order before learning segment-level preferences; preserves the original committed text and suggestion history, and skips speculative learning when the mapping or displayed ranking cannot be verified
 - By default, suppresses live conversion for one-character compositions to avoid over-converting particles
 - Suppresses live conversion for very short kana compositions with decorative trailing symbols such as `え~`, `えー`, or `ん？`
@@ -1216,6 +1233,7 @@ Main features added in this fork
 - On Windows, allows independently selecting Either side / Left only / Right only for Ctrl and Shift in the keybinding editor; generic Ctrl/Shift shortcuts remain supported, while conflicting bindings for different commands are rejected when saving
 - Shows the IME mode indicator even when a key assigned to IMEOn or IMEOff is pressed while Mozc is already in that state
 - On Windows, pressing `IMEOn` during temporary half-width ASCII input restores hiragana input without committing the existing preedit
+- Explicitly returning from ASCII input to hiragana invalidates previous raw-ASCII rescue suggestions while keeping the composition uncommitted
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Light/Dark), Monochrome (Black), and Monochrome (White) in the config dialog
 - Supports candidate, suggestion, and live-conversion ruby rendering in immersive TSF hosts such as Windows Search through an in-process renderer path, keeping the UI above the host presentation layer and preserving correct mouse selection; an unfocused passive suggestion does not enter normal conversion on mouse-down, and mouse-up commits the suggestion that was actually clicked
@@ -1330,6 +1348,14 @@ Previously, input, output, and pending all shared the same limit below 300 bytes
 
 This is a per-rule romaji-table output limit. It does not change the converter's whole-composition input-length limit.
 
+### Raw-ASCII rescue and mixed Japanese/Latin suggestions
+
+Mozkey can offer the original Roman keystrokes as a rescue suggestion for Latin names and technical terms. While unresolved Roman input normally holds the current suggestion list to avoid flicker, a stale raw-ASCII rescue candidate is refreshed instead of leaving an obsolete displayed value or selectable candidate. For example, typing `v` after `AIde` no longer leaves the old `AIde` rescue candidate in place.
+
+For a mixed input such as `mouGoogle`, Mozkey can supply the uncommitted preedit `もうGoogle` even if prediction returned no matching candidate, and place it before the raw `mouGoogle` suggestion. This is a conservative heuristic: the Japanese prefix must contain at least two characters, its Roman input prefix at least three bytes, the reading must exist in the dictionary, and the literal Latin suffix must match the raw keystrokes. Short or unknown readings preserve ASCII-first behavior for names such as `iPhone`, `iPad`, `aGoogle`, and `azooKey`. This is not a general language-intent classifier.
+
+An explicit switch from ASCII input back to hiragana invalidates the previous rescue suggestion and stale suggestion state without committing the composition. The changes were tested on Windows, primarily with Zenz OFF and live conversion OFF. The modified behavior has not yet been verified on macOS hardware or across all live-conversion paths. The existing behavior that commits the visible live-conversion result when Shift-based ASCII input begins remains unchanged.
+
 ### Live conversion
 
 With live conversion enabled, Mozc automatically converts the current composition without committing it immediately.
@@ -1339,6 +1365,8 @@ To reduce distracting intermediate conversions, this fork applies live conversio
 Live conversion is also suppressed for very short kana compositions followed only by decorative trailing symbols, such as `え~`, `えー`, or `ん？`. This avoids noisy intermediate conversions such as `え~` becoming `絵～` while the user is still typing.
 
 To avoid candidate-window flicker from Roman keystrokes that do not yet add a meaningful reading, Mozkey temporarily holds passive-suggestion refresh separately from live conversion. For example, after `今日は`, typing `s` and then `sh` keeps the same suggestion set; when `shi` resolves to `し`, suggestions refresh for the current reading `今日はし`. At the start of a fresh composition, an unresolved Roman prefix of up to two characters can still refresh.
+
+If the held list contains a stale raw-ASCII rescue candidate, the hold is released and suggestions are refreshed for the current input to keep the visible candidate and commit target consistent.
 
 Custom romaji rules with the `DisplayAmbiguousResult` option can display a meaningful Japanese reading even though their Roman suffix is still pending and may be extended by a longer rule. If that displayed ambiguous result changes the prediction query, Mozkey refreshes suggestions instead of holding the previous set. For example, with `a → あ`, `ms → ます`, and `msn → ません`, where `ms` and `msn` are also prefixes of longer rules, typing `am` keeps the prior suggestions, while `ams` refreshes for `あます` and `amsn` refreshes for `あません`. The same exception applies to `msn` at the start of a composition even though its pending Roman suffix is longer than two characters. Ordinary unresolved prefixes without a displayed ambiguous reading continue to use the previous HOLD behavior.
 
@@ -2041,6 +2069,10 @@ This lets you use an IME on/off key not only to change the input mode, but also 
 ### Return to hiragana from temporary ASCII input with IME ON (Windows)
 
 When temporary half-width ASCII input is active (for example, after a Shift-triggered mode switch), pressing a key mapped to `IMEOn` changes the input mode to hiragana **without committing the current preedit**. The Windows taskbar mode indicator updates to hiragana (`あ`).
+The explicit switch also invalidates raw-ASCII rescue suggestions from the
+previous input mode. Unlike an automatic Shift-mode return, it preserves the
+current uncommitted text while discarding stale suggestion state.
+
 
 With Shift-based temporary ASCII input enabled, typing `Shift+G` → `o` → `o` → `IMEOn` → `a` keeps `Gooあ` in the same uncommitted composition. The return mode is hiragana even if the temporary ASCII input was entered from katakana.
 

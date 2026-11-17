@@ -459,10 +459,12 @@ ComposerData::ComposerData(
     transliteration::TransliterationType input_mode,
     commands::Context::InputFieldType input_field_type, std::string source_text,
     std::vector<commands::SessionCommand::CompositionEvent>
-        compositions_for_handwriting)
+        compositions_for_handwriting,
+    bool suppress_language_aware_raw_input)
     : composition_(std::move(composition)),
       position_(position),
       input_mode_(input_mode),
+      suppress_language_aware_raw_input_(suppress_language_aware_raw_input),
       input_field_type_(input_field_type),
       source_text_(std::move(source_text)),
       compositions_for_handwriting_(std::move(compositions_for_handwriting)) {}
@@ -575,7 +577,8 @@ const ComposerData& Composer::EmptyComposerData() {
 
 ComposerData Composer::CreateComposerData() const {
   return ComposerData(composition_, position_, input_mode_, input_field_type_,
-                      source_text_, compositions_for_handwriting_);
+                      source_text_, compositions_for_handwriting_,
+                      suppress_language_aware_raw_input_);
 }
 
 void Composer::Reset() {
@@ -956,6 +959,7 @@ void Composer::DeleteRange(size_t pos, size_t length) {
 void Composer::EditErase() {
   composition_.Erase();
   position_ = 0;
+  suppress_language_aware_raw_input_ = false;
   SetInputMode(comeback_input_mode_);
 }
 
