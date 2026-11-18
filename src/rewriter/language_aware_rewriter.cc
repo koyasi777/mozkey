@@ -29,6 +29,7 @@
 
 #include "rewriter/language_aware_rewriter.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -47,6 +48,7 @@
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
+#include "transliteration/transliteration.h"
 
 namespace mozc {
 
@@ -108,6 +110,34 @@ int LanguageAwareRewriter::capability(const ConversionRequest& request) const {
 }
 
 namespace {
+// A literal ASCII word followed by Japanese text indicates an intentional
+// mixed-script composition, not a mistaken attempt to type an English word.
+// Require at least two ASCII letters; full-width Roman pending input (as in
+// "python" -> "ｐｙてょｎ") is NOT a literal ASCII word.
+bool HasLiteralLatinWordFollowedByJapanese(absl::string_view preedit) {
+  size_t latin_letters = 0;
+  for (size_t i = 0; i < preedit.size();) {
+    const unsigned char byte = static_cast<unsigned char>(preedit[i]);
+    if ((byte >= 'a' && byte <= 'z') ||
+        (byte >= 'A' && byte <= 'Z')) {
+      ++latin_letters;
+      ++i;
+      continue;
+    }
+    size_t char_bytes = 0;
+    const Util::ScriptType script =
+        Util::GetFirstScriptType(preedit.substr(i), &char_bytes);
+    if (latin_letters >= 2 &&
+        (script == Util::HIRAGANA || script == Util::KATAKANA ||
+         script == Util::KANJI)) {
+      return true;
+    }
+    latin_letters = 0;
+    i += char_bytes == 0 ? 1 : char_bytes;
+  }
+  return false;
+}
+
 bool IsRawQuery(const composer::ComposerData& composer,
                 const DictionaryInterface* dictionary, int* rank) {
   const std::string raw_text = composer.GetRawString();
@@ -225,6 +255,28 @@ bool LanguageAwareRewriter::FillRawText(const ConversionRequest& request,
                                         Segments* segments) const {
   if (segments->conversion_segments_size() != 1) {
     return false;
+  }
+
+  // Do not insert the entire raw keystroke sequence (e.g. "githubwot")
+  // while composing intentional mixed Japanese + literal English text
+  // ("githubをｔ"). The existing language-aware rescue is still useful for
+  // truly mis-typed English ("python", "iPhone") and is untouched there.
+  // This applies only to passive suggestions with an unresolved Roman tail.
+  if (request.request_type() == ConversionRequest::SUGGESTION &&
+      request.config().enable_english_input_exceptions() &&
+      request.config().preedit_method() == config::Config::ROMAN &&
+      request.request().special_romanji_table() ==
+          commands::Request::DEFAULT_TABLE) {
+    const composer::ComposerData& composer = request.composer();
+    if (!composer.suppress_language_aware_raw_input() &&
+        composer.GetInputMode() == transliteration::HIRAGANA &&
+        composer.GetInputFieldType() != commands::Context::PASSWORD &&
+        composer.GetCursor() == composer.GetLength() &&
+        composer.GetPendingRomanInputLength() != 0 &&
+        HasLiteralLatinWordFollowedByJapanese(
+            composer.GetStringForPreedit())) {
+      return false;
+    }
   }
 
   int rank = 0;

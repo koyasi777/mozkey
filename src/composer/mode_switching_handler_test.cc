@@ -31,6 +31,9 @@
 
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "composer/table.h"
+#include "protocol/commands.pb.h"
+#include "protocol/config.pb.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 

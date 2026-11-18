@@ -605,6 +605,67 @@
           </widget>
          </item>
          <item>
+          <widget class="QFrame" name="englishExceptionsHeader">
+           <property name="frameShape">
+            <enum>QFrame::Shape::NoFrame</enum>
+           </property>
+           <layout class="QHBoxLayout" name="englishExceptionsHeaderLayout">
+            <property name="leftMargin"><number>9</number></property>
+            <property name="topMargin"><number>9</number></property>
+            <property name="rightMargin"><number>9</number></property>
+            <property name="bottomMargin"><number>9</number></property>
+            <property name="spacing"><number>6</number></property>
+            <item>
+             <widget class="QLabel" name="englishExceptionsHeaderLabel">
+              <property name="text"><string>英字表記辞書</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="Line" name="englishExceptionsHeaderLine">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QFrame" name="englishExceptionsGroup">
+           <property name="frameShape"><enum>QFrame::Shape::NoFrame</enum></property>
+           <layout class="QHBoxLayout" name="englishExceptionsControlsLayout">
+            <property name="leftMargin"><number>24</number></property>
+            <property name="topMargin"><number>9</number></property>
+            <property name="rightMargin"><number>24</number></property>
+            <property name="bottomMargin"><number>9</number></property>
+            <property name="spacing"><number>8</number></property>
+            <item>
+             <widget class="QCheckBox" name="enableEnglishExceptionsCheckBox">
+              <property name="text"><string>英字表記辞書を有効にする</string></property>
+              <property name="toolTip"><string>登録した入力列に対する表記の優先を有効にします。</string></property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="englishExceptionsControlsSpacer">
+              <property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property>
+              <property name="sizeHint" stdset="0">
+               <size><width>10</width><height>20</height></size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="editEnglishExceptionsButton">
+              <property name="text"><string>表記辞書を管理...</string></property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
           <widget class="QFrame" name="usageDictionaryHeader">
            <property name="frameShape">
             <enum>QFrame::Shape::NoFrame</enum>

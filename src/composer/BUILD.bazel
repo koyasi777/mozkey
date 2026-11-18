@@ -59,6 +59,7 @@ mozc_cc_library(
     deps = [
         ":composition",
         ":composition_input",
+        ":english_input_exceptions",
         ":key_event_util",
         ":mode_switching_handler",
         ":table",
@@ -399,6 +400,34 @@ mozc_cc_binary(
 )
 
 mozc_cc_library(
+    name = "english_input_exceptions",
+    srcs = ["english_input_exceptions.cc"],
+    hdrs = ["english_input_exceptions.h"],
+    visibility = [
+        "//engine:__pkg__",
+        "//gui/config_dialog:__pkg__",
+        "//rewriter:__pkg__",
+        "//session:__pkg__",
+    ],
+    deps = [
+        "//protocol:config_cc_proto",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_test(
+    name = "english_input_exceptions_test",
+    size = "small",
+    srcs = ["english_input_exceptions_test.cc"],
+    deps = [
+        ":english_input_exceptions",
+        "//protocol:config_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "mode_switching_handler",
     srcs = ["mode_switching_handler.cc"],
     hdrs = ["mode_switching_handler.h"],
@@ -413,6 +442,9 @@ mozc_cc_test(
     srcs = ["mode_switching_handler_test.cc"],
     deps = [
         ":mode_switching_handler",
+        ":table",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
         "//testing:gunit_main",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",

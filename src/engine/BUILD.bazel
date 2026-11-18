@@ -439,6 +439,7 @@ mozc_cc_library(
         "//base:vlog",
         "//base/strings:japanese",
         "//composer",
+        "//composer:english_input_exceptions",
         "//config:config_handler",
         "//converter:attribute",
         "//converter:converter_interface",

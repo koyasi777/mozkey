@@ -51,6 +51,7 @@
 #include "base/util.h"
 #include "base/vlog.h"
 #include "composer/composer.h"
+#include "composer/english_input_exceptions.h"
 #include "config/config_handler.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
@@ -206,6 +207,61 @@ absl::string_view GetCandidateShortcuts(
   return shortcut;
 }
 
+// Candidate-only exceptions describe the *whole typed token*. The normal
+// suggestion key may trim its final unresolved Roman consonant; that turns
+// "chatgpt" into a partial Japanese query and loses the spelling candidate.
+const composer::EnglishInputExceptions::Entry* ExactCandidateOnlyRule(
+    const composer::Composer& composer, const config::Config& config,
+    const commands::Request& request) {
+  if (!config.enable_english_input_exceptions() ||
+      config.preedit_method() != config::Config::ROMAN ||
+      request.special_romanji_table() != commands::Request::DEFAULT_TABLE ||
+      composer.suppress_language_aware_raw_input() ||
+      composer.GetInputMode() != transliteration::HIRAGANA ||
+      composer.GetInputFieldType() == commands::Context::PASSWORD ||
+      composer.GetCursor() != composer.GetLength()) {
+    return nullptr;
+  }
+  const auto* rule = composer::EnglishInputExceptions::Find(
+      config, composer.GetRawString());
+  return rule != nullptr &&
+                 rule->behavior() ==
+                     composer::EnglishInputExceptions::Entry::CANDIDATE_ONLY
+             ? rule
+             : nullptr;
+}
+
+// Only the *automatic live presentation* is forbidden from choosing the
+// English preferred spelling. Keep the converter running and preserve its
+// best available Japanese candidate. Explicit Space conversion is unchanged.
+bool PreferJapaneseOverCandidateOnlyEnglish(
+    const composer::Composer& composer, const config::Config& config,
+    const commands::Request& request, Segments* segments) {
+  const auto* rule = ExactCandidateOnlyRule(composer, config, request);
+  if (rule == nullptr || segments->conversion_segments_size() == 0) {
+    return true;
+  }
+  Segment* first = segments->mutable_conversion_segment(0);
+  if (first->candidates_size() == 0 ||
+      first->candidate(0).value != rule->preferred()) {
+    return true;
+  }
+  for (int i = 1; i < first->candidates_size(); ++i) {
+    const auto& candidate = first->candidate(i);
+    const Util::ScriptType script = Util::GetFirstScriptType(candidate.value);
+    if (candidate.value != rule->preferred() &&
+        (script == Util::HIRAGANA || script == Util::KATAKANA ||
+         script == Util::KANJI) &&
+        candidate.effective_converted_segment_count() == 1) {
+      first->move_candidate(i, 0);
+      return true;
+    }
+  }
+  // No Japanese candidate: let Session retain the unconverted composition,
+  // rather than displaying an English spelling the user did not select.
+  return false;
+}
+
 // Calculate cursor offset for committed text.
 int32_t CalculateCursorOffset(absl::string_view committed_text) {
   // If committed_text is a bracket pair, set the cursor in the middle.
@@ -293,6 +349,12 @@ bool EngineConverter::Convert(const composer::Composer& composer,
 
   ContextualCandidateReranker contextual_candidate_reranker;
   contextual_candidate_reranker.Rerank(&segments_, context.preceding_text());
+  if (preferences.prevent_candidate_only_english_auto_selection &&
+      !PreferJapaneseOverCandidateOnlyEnglish(
+          composer, *effective_config, *request_, &segments_)) {
+    ResetState();
+    return false;
+  }
   // The numeric TOP1 override belongs to the ZIP feature. When that feature
   // is disabled, retain the converter's original ranking even in live mode.
   if (preferences.prefer_zipcode_literal_top &&
@@ -675,14 +737,19 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
   }
 
   DCHECK(config_);
-  const ConversionRequest conversion_request =
-      ConversionRequestBuilder()
-          .SetComposer(composer)
-          .SetRequestView(*request_)
-          .SetContextView(context)
-          .SetConfigView(*config_)
-          .SetOptions(std::move(options))
-          .Build();
+  ConversionRequestBuilder suggestion_builder;
+  suggestion_builder.SetComposer(composer)
+      .SetRequestView(*request_)
+      .SetContextView(context)
+      .SetConfigView(*config_)
+      .SetOptions(std::move(options));
+  if (!use_partial_composition && !use_prediction_candidate &&
+      ExactCandidateOnlyRule(composer, *config_, *request_) != nullptr) {
+    // The full conversion key includes the unresolved final Roman suffix.
+    // Other suggestions must retain their original predictive trimming.
+    suggestion_builder.SetKey(composer.GetQueryForConversion());
+  }
+  const ConversionRequest conversion_request = suggestion_builder.Build();
 
   // Start actual suggestion/prediction.
   bool result = converter_->StartPrediction(conversion_request, &segments_);
