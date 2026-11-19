@@ -112,4 +112,24 @@ jobs:
       - name: bazel test
         working-directory: ./src
         run: |
-          bazelisk test ... -c dbg
+          bazelisk test ... -c dbg --test_output=errors
+
+      # Bazel testlogs is a symlink into the output base. Copy out the data
+      # so it remains downloadable after a failing test run.
+      - name: Collect Bazel test diagnostics
+        if: ${{ failure() }}
+        shell: bash
+        working-directory: ./src
+        run: |
+          mkdir -p "$RUNNER_TEMP/mozkey-bazel-testlogs"
+          if [ -d bazel-testlogs ]; then
+            cp -aL bazel-testlogs/. "$RUNNER_TEMP/mozkey-bazel-testlogs/"
+          fi
+
+      - name: Upload Bazel test diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-bazel-testlogs
+          path: ${{ runner.temp }}/mozkey-bazel-testlogs
+          if-no-files-found: warn
