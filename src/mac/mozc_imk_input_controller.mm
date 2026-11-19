@@ -1074,7 +1074,8 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
               marked.location + static_cast<NSUInteger>(position), 1);
           NSRect reference = [[self client]
               firstRectForCharacterRange:anchor_range actualRange:nullptr];
-          reference = NSStandardizeRect(reference);
+          reference = NSRectFromCGRect(
+              CGRectStandardize(NSRectToCGRect(reference)));
           if (!NSIsEmptyRect(reference)) {
             NSRect total = NSZeroRect;
             NSUInteger cursor = marked.location;
@@ -1086,7 +1087,8 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
               NSRect part = [[self client]
                   firstRectForCharacterRange:NSMakeRange(cursor, end - cursor)
                   actualRange:&actual];
-              part = NSStandardizeRect(part);
+              part = NSRectFromCGRect(
+                  CGRectStandardize(NSRectToCGRect(part)));
               if (NSIsEmptyRect(part) || actual.location == NSNotFound ||
                   actual.length == 0 || actual.location > cursor ||
                   NSMaxRange(actual) <= cursor || NSMaxRange(actual) > end) {
