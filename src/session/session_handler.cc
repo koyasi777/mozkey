@@ -40,11 +40,15 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
 #include "absl/log/log.h"
 #include "absl/random/random.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "base/clock.h"
+#include "base/port.h"
 #include "base/stopwatch.h"
 #include "base/version.h"
 #include "base/vlog.h"
@@ -136,6 +140,10 @@ SessionHandler::SessionHandler(std::unique_ptr<EngineInterface> engine)
   request_ = std::make_shared<commands::Request>();
   config_ = config::ConfigHandler::GetSharedConfig();
   key_map_manager_ = std::make_shared<keymap::KeyMapManager>(*config_);
+  // Match upstream policy: desktop reload paths are denied by default.
+  if constexpr (port::IsAndroid() || port::IsIos()) {
+    SetAllowedEngineReloadPaths({kAllowAllEngineReloadPaths});
+  }
 
   if (absl::GetFlag(FLAGS_restricted)) {
     MOZC_VLOG(1) << "Server starts with restricted mode";
@@ -172,6 +180,14 @@ void SessionHandler::StartWatchDog() {
         absl::Seconds(absl::GetFlag(FLAGS_watch_dog_interval)));
   }
 #endif  // MOZC_DISABLE_SESSION_WATCHDOG
+}
+
+void SessionHandler::SetAllowedEngineReloadPaths(
+    absl::Span<const absl::string_view> paths) {
+  allowed_engine_reload_paths_.clear();
+  for (const absl::string_view path : paths) {
+    allowed_engine_reload_paths_.emplace(path);
+  }
 }
 
 void SessionHandler::UpdateSessions(
@@ -683,12 +699,22 @@ bool SessionHandler::ImportUserDictionary(commands::Command* command) {
   return true;
 }
 
+bool SessionHandler::IsEngineReloadPathAllowed(absl::string_view path) const {
+  return allowed_engine_reload_paths_.contains(kAllowAllEngineReloadPaths) ||
+         allowed_engine_reload_paths_.contains(path);
+}
+
 bool SessionHandler::SendEngineReloadRequest(commands::Command* command) {
   if (!command->input().has_engine_reload_request()) {
     return false;
   }
-  if (!engine_->SendEngineReloadRequest(
-          command->input().engine_reload_request())) {
+  const EngineReloadRequest& request = command->input().engine_reload_request();
+  if (!IsEngineReloadPathAllowed(request.file_path())) {
+    DLOG(WARNING) << "SEND_ENGINE_RELOAD_REQUEST is rejected for path: "
+                  << request.file_path();
+    return NoOperation(command);
+  }
+  if (!engine_->SendEngineReloadRequest(request)) {
     return false;
   }
   command->mutable_output()->mutable_engine_reload_response()->set_status(
@@ -702,8 +728,13 @@ bool SessionHandler::ReloadSupplementalModel(commands::Command* command) {
   if (!command->input().has_engine_reload_request()) {
     return false;
   }
-  if (!engine_->SendSupplementalModelReloadRequest(
-          command->input().engine_reload_request())) {
+  const EngineReloadRequest& request = command->input().engine_reload_request();
+  if (!IsEngineReloadPathAllowed(request.file_path())) {
+    DLOG(WARNING) << "RELOAD_SUPPLEMENTAL_MODEL is rejected for path: "
+                  << request.file_path();
+    return NoOperation(command);
+  }
+  if (!engine_->SendSupplementalModelReloadRequest(request)) {
     return false;
   }
   command->mutable_output()->mutable_engine_reload_response()->set_status(
