@@ -35,10 +35,13 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/random/random.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "composer/table.h"
 #include "engine/engine_interface.h"
 #include "protocol/commands.pb.h"
@@ -56,6 +59,9 @@ namespace mozc {
 
 class SessionHandler {
  public:
+  // Wildcard entry allowing all engine and supplemental-model reload paths.
+  static constexpr absl::string_view kAllowAllEngineReloadPaths = "*";
+
   explicit SessionHandler(std::unique_ptr<EngineInterface> engine);
   SessionHandler(const SessionHandler&) = delete;
   SessionHandler& operator=(const SessionHandler&) = delete;
@@ -76,7 +82,11 @@ class SessionHandler {
 
   const EngineInterface& engine() const { return *engine_; }
 
+  // Replace the allowed reload paths. An empty list disables external reload.
+  void SetAllowedEngineReloadPaths(absl::Span<const absl::string_view> paths);
+
  private:
+  friend class EngineReloadAccessorTestPeer;
   friend class KeyMapManagerAccessorTestPeer;
 
   using SessionMap =
@@ -114,6 +124,7 @@ class SessionHandler {
   bool Cleanup(commands::Command* command);
   bool ImportUserDictionary(commands::Command* command);
   bool AddUserHistory(commands::Command* command);
+  bool IsEngineReloadPathAllowed(absl::string_view path) const;
   bool SendEngineReloadRequest(commands::Command* command);
   bool NoOperation(commands::Command* command);
   bool ReloadSupplementalModel(commands::Command* command);
@@ -129,6 +140,8 @@ class SessionHandler {
 #ifndef MOZC_DISABLE_SESSION_WATCHDOG
   std::optional<SessionWatchDog> session_watch_dog_;
 #endif  // MOZC_DISABLE_SESSION_WATCHDOG
+  // Empty on desktop by default; mobile platforms permit all paths.
+  absl::flat_hash_set<std::string> allowed_engine_reload_paths_;
   bool is_available_ = false;
   uint32_t max_session_size_ = 0;
   absl::Time last_session_empty_time_ = absl::InfinitePast();
