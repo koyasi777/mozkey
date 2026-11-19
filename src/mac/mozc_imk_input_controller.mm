@@ -37,7 +37,9 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <cstdlib>
 #include <functional>
 #include <map>
@@ -1022,6 +1024,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   }
 
   rendererCommand_.set_visible(true);
+  rendererCommand_.clear_conversion_status_preedit_bounds();
 
   NSRect preeditRect = NSZeroRect;
   const Output &output = rendererCommand_.output();
@@ -1051,6 +1054,84 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
     SetRendererRectangle(
         preeditRect, NSMakePoint(candidate_left, baseline.y),
         rendererCommand_.mutable_preedit_rectangle());
+
+    rendererCommand_.clear_conversion_status_preedit_bounds();
+    // A character-specific line-height rectangle is NOT the entire preedit.
+    // Ask for line fragments of the marked range, keeping the established
+    // candidate anchor untouched. Some IMK hosts do not implement reliable
+    // full-range geometry, so failure is an optional-data path.
+    if (useConversionStatusIndicator_ && output.has_preedit() &&
+        [composedString_ length] > 0) {
+      @try {
+        const NSRange marked = [[self client] markedRange];
+        const NSUInteger length = [composedString_ length];
+        if (marked.location != NSNotFound && marked.length == length &&
+            marked.location <= NSUIntegerMax - marked.length &&
+            length <= 1024 && position >= 0 &&
+            static_cast<NSUInteger>(position) < length) {
+          const NSUInteger end = NSMaxRange(marked);
+          const NSRange anchor_range = NSMakeRange(
+              marked.location + static_cast<NSUInteger>(position), 1);
+          NSRect reference = [[self client]
+              firstRectForCharacterRange:anchor_range actualRange:nullptr];
+          reference = NSStandardizeRect(reference);
+          if (!NSIsEmptyRect(reference)) {
+            NSRect total = NSZeroRect;
+            NSUInteger cursor = marked.location;
+            bool complete = false;
+            // Bounded by line fragments, not characters, on ordinary hosts.
+            for (int fragment = 0; fragment < 64 && cursor < end;
+                 ++fragment) {
+              NSRange actual = NSMakeRange(NSNotFound, 0);
+              NSRect part = [[self client]
+                  firstRectForCharacterRange:NSMakeRange(cursor, end - cursor)
+                  actualRange:&actual];
+              part = NSStandardizeRect(part);
+              if (NSIsEmptyRect(part) || actual.location == NSNotFound ||
+                  actual.length == 0 || actual.location > cursor ||
+                  NSMaxRange(actual) <= cursor || NSMaxRange(actual) > end) {
+                break;
+              }
+              total = cursor == marked.location ? part : NSUnionRect(total, part);
+              cursor = NSMaxRange(actual);
+              complete = cursor == end;
+            }
+            if (complete && std::isfinite(NSMinX(total)) &&
+                std::isfinite(NSMaxX(total)) &&
+                std::isfinite(NSMinY(total)) &&
+                std::isfinite(NSMaxY(total)) &&
+                std::isfinite(NSMinX(reference)) &&
+                std::isfinite(NSMaxY(reference))) {
+              // Use the anchor to translate and invert the Cocoa Y-axis into
+              // the same legacy host coordinates as preedit_rectangle.
+              const auto& anchor = rendererCommand_.preedit_rectangle();
+              const double x0 = baseline.x - NSMinX(reference);
+              const double y0 = anchor.top() + NSMaxY(reference);
+              const double left = x0 + NSMinX(total);
+              const double right = x0 + NSMaxX(total);
+              const double top = y0 - NSMaxY(total);
+              const double bottom = y0 - NSMinY(total);
+              if (left < right && top < bottom &&
+                  left >= std::numeric_limits<int32_t>::min() &&
+                  right <= std::numeric_limits<int32_t>::max() &&
+                  top >= std::numeric_limits<int32_t>::min() &&
+                  bottom <= std::numeric_limits<int32_t>::max()) {
+                auto* box = rendererCommand_
+                    .mutable_conversion_status_preedit_bounds();
+                box->set_left(static_cast<int32_t>(std::floor(left)));
+                box->set_top(static_cast<int32_t>(std::floor(top)));
+                box->set_right(static_cast<int32_t>(std::ceil(right)));
+                box->set_bottom(static_cast<int32_t>(std::ceil(bottom)));
+              }
+            }
+          }
+        }
+      } @catch (NSException *exception) {
+        // The main renderer command and its anchor remain usable.
+        DLOG(WARNING) << "Cannot obtain complete IMK preedit bounds: "
+                      << [[exception name] UTF8String];
+      }
+    }
 
     rendererCommand_.clear_ruby_preedit_rectangle();
 
