@@ -137,6 +137,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
 - ローマ字入力中、単なる未解決の Roman suffix では直前の passive suggestion を保持して候補ウィンドウのちらつきを抑制。一方、カスタムローマ字規則の「曖昧なローマ字規則の途中表示」によって有効な読みが現れ、予測クエリが変化した場合は、suffix が未解決のままでもサジェストを更新。候補へ移動する場合は画面に表示中の候補集合を使用
+- ライブ変換中も画面に表示されたサジェストに対するキー操作を優先。専用キー割り当てと通常の変換・編集操作は維持
 - 未解決ローマ字の入力中、表示中の英字救済候補が古くなった場合はサジェストを更新し、候補の表示・選択・確定の整合性を維持（例：`AIde` → `AIdev`）
 - 日本語と英字の混在入力では、条件を満たす `もうGoogle` を `mouGoogle` より優先。短い読みの `iPhone` / `iPad` などや未知語の `azooKey` は元の英字表記を優先
 - 明示的に選んで確定したサジェストについて、候補が持つ全文の読みと、通常変換で検証できた文節・候補順位を使ってユーザーセグメント履歴の学習を補強。確定結果やサジェスト履歴は従来どおり維持し、検証できない文節や順位は推測で学習しない
@@ -684,6 +685,12 @@ Conversion + Ctrl Shift Space -> ForceZenzLiveCorrectionWithoutFeedback
 
 キー設定には「ライブ変換中」（`LiveConversion`）と「Zenz補正中」（`ZenzConversion`）があります。前者は Mozc のライブ変換中、後者は Zenz の補正結果が表示されている間に適用されます。
 
+#### ライブ変換中のサジェストの選択・確定
+
+ライブ変換中は内部状態が `Conversion` でも、未選択のサジェストが画面に表示されていれば、その候補に対する明示的な `Suggestion` キー設定を一部の操作に限って優先します。標準の MS-IME 風キー設定では `Shift+Enter` で**表示中の先頭サジェスト**を確定し、標準の ATOK 風キー設定では `Down` で表示中のサジェスト候補へ移動できます。通常の `Enter` はライブ変換結果を確定し、`Space`・`Backspace` は従来の変換・編集操作を維持します。
+
+同じキーに `ZenzConversion` / `LiveConversion` の**明示的な割り当て**がある場合は、そちらが優先されます。`Suggestion` から引き継ぐのは、単独の `CommitFirstSuggestion`（先頭サジェスト確定）または `PredictAndConvert`（候補選択）のみです。複数コマンドのマクロを暗黙に引き継ぐことはありません。表示候補と確定対象の一致を検証し、古い候補を誤確定しないようにします。また、下位変換器による確定が失敗しても、入力中の読み・候補・Undo 状態を保持し、再試行できるようにしています。
+
 標準キー設定での Backspace の動作は次のとおりです。
 
 | 入力状態 | Backspace の動作 |
@@ -1212,6 +1219,7 @@ Main features added in this fork
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
 - Reduces candidate-window flicker by holding passive suggestions for unresolved Roman prefixes that do not change the prediction reading; when a custom DisplayAmbiguousResult rule exposes a meaningful reading and changes the prediction query, suggestions refresh even while the Roman suffix remains pending. Entering the candidate list uses the exact displayed candidates
+- Prioritizes eligible key actions for suggestions visible during live conversion, while preserving explicit state-specific key bindings and ordinary conversion/editing operations
 - Refreshes a stale raw-ASCII rescue suggestion when more Roman keys are typed (for example, `AIde` → `AIdev`), keeping the displayed candidate consistent with its selectable value
 - Prefers a mixed Japanese/Latin preedit such as `もうGoogle` over `mouGoogle` under conservative dictionary and prefix-length checks, while retaining ASCII-first suggestions for names such as `iPhone`, `iPad`, and `azooKey`
 - For explicitly accepted suggestions, verifies the complete reading, native segment mapping, and actual normal-conversion candidate order before learning segment-level preferences; preserves the original committed text and suggestion history, and skips speculative learning when the mapping or displayed ranking cannot be verified
@@ -1967,6 +1975,12 @@ Note: Selected-text reconversion (`ReconvertSelectionOrInsertSpace`) is Windows-
 ### Key bindings during live conversion and Zenz correction
 
 The keymap editor includes **Live converting** (`LiveConversion`) and **Zenz correction** (`ZenzConversion`). The first applies while Mozc live conversion is active; the second applies while a Zenz correction is displayed.
+
+#### Selecting and committing visible suggestions during live conversion
+
+Even when the internal state is `Conversion`, an unfocused passive suggestion shown on screen can be the intended key-action target. In the built-in MS-IME-style keymap, `Shift+Enter` commits the **first visible suggestion**; in the built-in ATOK-style keymap, `Down` focuses the visible suggestion candidates. Ordinary `Enter` still commits the live-conversion result, while Space and Backspace retain their normal conversion/editing behavior.
+
+An explicitly assigned `ZenzConversion` or `LiveConversion` rule for the same key takes precedence. Only a single explicit `Suggestion` command of `CommitFirstSuggestion` (commit first suggestion) or `PredictAndConvert` (select candidates) can override the regular `Conversion` fallback; multi-command macros are not implicitly carried across states. Mozkey validates candidates against the displayed snapshot rather than committing a hidden or stale converter candidate. If the backend commit fails, the current reading, suggestion candidates, and Undo state remain available for retry.
 
 With the built-in keymaps, Backspace behaves as follows:
 

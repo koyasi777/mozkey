@@ -2972,6 +2972,9 @@ bool Session::ExecuteConversionCommand(
     case keymap::ConversionState::COMMIT:
       return Commit(command);
 
+    case keymap::ConversionState::COMMIT_FIRST_SUGGESTION:
+      return CommitFirstSuggestion(command);
+
     case keymap::ConversionState::COMMIT_SEGMENT:
       return CommitSegment(command);
 
@@ -3229,6 +3232,28 @@ bool Session::SendKeyConversionState(commands::Command* command) {
                                                   &command_sequence);
   }
 
+  // Resolve keys against the visible interaction target, not merely the
+  // underlying CONVERSION state.  A specialized LiveConversion/ZenzConversion
+  // rule still wins; a passive Suggestion action overrides the ordinary
+  // Conversion fallback while that suggestion is visible.
+  //
+  // Only single-step, suggestion-specific actions cross this state boundary.
+  // Other keys (including Space and Backspace), and custom multi-step macros,
+  // keep their ordinary conversion semantics.
+  if (live_keymap_active && !is_prediction && !specialized_override &&
+      IsPassiveLiveSuggestionCandidateWindow(
+          live_conversion_suggestion_candidate_window_)) {
+    keymap::CommandSequence suggestion_sequence;
+    if (keymap->GetCommandSequenceExplicitSuggestion(
+            command->input().key(), &suggestion_sequence) &&
+        suggestion_sequence.size() == 1 &&
+        (suggestion_sequence.front() == "CommitFirstSuggestion" ||
+         suggestion_sequence.front() == "PredictAndConvert")) {
+      command_sequence = std::move(suggestion_sequence);
+      result = true;
+    }
+  }
+
   if (!result || command_sequence.empty()) {
     return DoNothing(command);
   }
@@ -3425,6 +3450,13 @@ bool Session::SendKeyConversionState(commands::Command* command) {
     if (key_command == keymap::ConversionState::IME_OFF &&
         (HasDeferredZenzLivePresentation() ||
          HasVisibleZenzLiveCorrection())) {
+      return ExecuteCommandSequence(command_sequence, command);
+    }
+
+    // Commit the exact passive suggestion snapshot before the generic
+    // promotion clears live provenance.  The snapshot commit also preserves
+    // ordinary suggestion learning and Undo semantics.
+    if (key_command == keymap::ConversionState::COMMIT_FIRST_SUGGESTION) {
       return ExecuteCommandSequence(command_sequence, command);
     }
 
@@ -9415,24 +9447,48 @@ bool Session::CommitHead(size_t count, commands::Command* command) {
 }
 
 bool Session::CommitFirstSuggestion(commands::Command* command) {
+  const bool active_live_suggestion =
+      context_->state() == ImeContext::CONVERSION && live_conversion_active_ &&
+      live_conversion_from_composition_ &&
+      context_->GetConfig().use_live_conversion();
   if (!(context_->state() == ImeContext::COMPOSITION ||
-        context_->state() == ImeContext::PRECOMPOSITION)) {
+        context_->state() == ImeContext::PRECOMPOSITION ||
+        active_live_suggestion)) {
     return DoNothing(command);
   }
 
-  // A delayed live conversion displays suggestions from a cloned context,
-  // while the real converter may still own suggestions for an older reading.
-  // Commit the exact displayed first suggestion, or fail closed.
-  if (live_conversion_pending_) {
+  // The live converter and the passive suggestion have different owners.
+  // Never mutate either owner until the displayed suggestion has committed.
+  const bool has_live_snapshot =
+      live_conversion_pending_ || active_live_suggestion;
+  auto preserve_output_on_failure = [&]() {
+    if (!has_live_snapshot) {
+      return DoNothing(command);
+    }
+    // A failed physical key must re-publish the actual visible preedit, not
+    // the hidden live converter's candidate list. Re-arm delayed conversion
+    // because this key response replaces the previous callback on some TSF
+    // clients.
+    const bool output_ok = IgnoreStaleDelayedLiveConversion(command);
+    if (output_ok && live_conversion_pending_) {
+      AttachDelayedLiveConversionCallback(command);
+    }
+    return output_ok;
+  };
+  const ImeContext* suggestion_context = context_.get();
+  if (has_live_snapshot) {
     const commands::CandidateWindow& window =
-        pending_live_conversion_suggestion_candidate_window_;
-    const ImeContext* suggestion_context =
-        pending_live_conversion_suggestion_context_.get();
+        live_conversion_pending_
+            ? pending_live_conversion_suggestion_candidate_window_
+            : live_conversion_suggestion_candidate_window_;
+    suggestion_context = live_conversion_pending_
+                             ? pending_live_conversion_suggestion_context_.get()
+                             : live_conversion_suggestion_context_.get();
     if (!IsPassiveLiveSuggestionCandidateWindow(window) ||
         suggestion_context == nullptr ||
         suggestion_context->composer().GetQueryForConversion() !=
             context_->composer().GetQueryForConversion()) {
-      return DoNothing(command);
+      return preserve_output_on_failure();
     }
     commands::Output snapshot_output;
     suggestion_context->converter().FillOutput(
@@ -9440,27 +9496,52 @@ bool Session::CommitFirstSuggestion(commands::Command* command) {
     if (!snapshot_output.has_candidate_window() ||
         !HaveSamePassiveSuggestionCandidates(
             window, snapshot_output.candidate_window())) {
-      return DoNothing(command);
+      return preserve_output_on_failure();
     }
-
-    auto displayed_context = std::make_unique<ImeContext>(*suggestion_context);
-    ClearLiveConversionState();
-    context_ = std::move(displayed_context);
   }
 
-  if (!context_->converter().IsActive()) {
-    return DoNothing(command);
+  // Commit on a detached converter. EngineConverter::CommitSuggestionByIndex()
+  // can fail after changing its internal result/state; on failure we must keep
+  // the original reading, candidate list, live state, Zenz feedback and Undo.
+  if (suggestion_context == nullptr ||
+      !suggestion_context->converter().CheckState(
+          EngineConverterInterface::SUGGESTION)) {
+    return preserve_output_on_failure();
   }
-  command->mutable_output()->set_consumed(true);
-
-  PushUndoContext();
-
+  auto committed_context = std::make_unique<ImeContext>(*suggestion_context);
   constexpr int kFirstIndex = 0;
   size_t committed_key_size = 0;
-  context_->mutable_converter()->CommitSuggestionByIndex(
-      kFirstIndex, context_->composer(), command->input().context(),
-      &committed_key_size);
+  if (!committed_context->mutable_converter()->CommitSuggestionByIndex(
+          kFirstIndex, committed_context->composer(),
+          command->input().context(), &committed_key_size)) {
+    return preserve_output_on_failure();
+  }
 
+  // Clone() drops reversible external-learning ownership. If an ordinary
+  // suggestion is being committed, move any outstanding ownership from its
+  // original context to the successful successor; do not lose the handles.
+  if (!has_live_snapshot &&
+      !context_->mutable_converter()
+           ->TransferExternalConversionLearningOwnershipTo(
+               committed_context->mutable_converter())) {
+    committed_context->mutable_converter()->Revert();
+    return preserve_output_on_failure();
+  }
+
+  // Only a successful commit is a user decision. Keep an unmodified snapshot
+  // for Undo, and reject visible Zenz only after success is established.
+  if (has_live_snapshot) {
+    auto undo_context = std::make_unique<ImeContext>(*suggestion_context);
+    if (active_live_suggestion && HasVisibleZenzLiveCorrection()) {
+      SetPendingZenzFeedbackRejected("commit_visible_suggestion_after_zenz");
+    }
+    ClearLiveConversionState();
+    context_ = std::move(undo_context);
+  }
+  command->mutable_output()->set_consumed(true);
+  PushUndoContext();
+
+  context_ = std::move(committed_context);
   SetSessionState(ImeContext::PRECOMPOSITION, context_.get());
 
   // Get suggestion if zero_query_suggestion is set.
