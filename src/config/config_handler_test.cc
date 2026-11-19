@@ -82,6 +82,7 @@ constexpr uint32_t kExpectedMozkeyDirectCommitKey =
 
 void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_use_live_conversion(true);
+  config->set_show_live_conversion_ruby_window(true);
   config->set_show_candidate_window_on_initial_conversion(true);
   config->set_use_direct_commit(true);
   config->set_direct_commit_key(kExpectedMozkeyDirectCommitKey);
@@ -96,7 +97,7 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_zenz_feedback_min_key_length(7);
   config->set_use_zenz_auto_block_rejected_correction(true);
   config->set_use_zenz_live_correction_right_context(true);
-  config->set_use_realtime_conversion(true);
+  config->set_use_realtime_conversion(false);
 #ifdef _WIN32
   config->set_dim_pending_roman_input(false);
   config->set_pending_roman_dimness_percent(85);
@@ -120,7 +121,7 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_TRUE(config.use_live_conversion());
   EXPECT_EQ(config.live_conversion_delay_msec(), 228);
   EXPECT_EQ(config.live_conversion_min_key_length(), 2);
-  EXPECT_FALSE(config.show_live_conversion_ruby_window());
+  EXPECT_TRUE(config.show_live_conversion_ruby_window());
   EXPECT_TRUE(config.show_candidate_window_on_initial_conversion());
 
   EXPECT_TRUE(config.use_direct_commit());
@@ -151,7 +152,7 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.history_learning_level(), Config::DEFAULT_HISTORY);
   EXPECT_TRUE(config.use_history_suggest());
   EXPECT_TRUE(config.use_dictionary_suggest());
-  EXPECT_TRUE(config.use_realtime_conversion());
+  EXPECT_FALSE(config.use_realtime_conversion());
 #ifdef _WIN32
   EXPECT_FALSE(config.dim_pending_roman_input());
   EXPECT_EQ(config.pending_roman_dimness_percent(), 85);
@@ -802,7 +803,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
 
   Config input;
   input.set_use_live_conversion(false);
-  input.set_show_live_conversion_ruby_window(true);
+  input.set_show_live_conversion_ruby_window(false);
   input.set_show_candidate_window_on_initial_conversion(false);
   input.set_use_direct_commit(false);
   input.set_direct_commit_key(0);
@@ -817,7 +818,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   input.set_zenz_feedback_min_key_length(4);
   input.set_use_zenz_auto_block_rejected_correction(false);
   input.set_use_zenz_live_correction_right_context(false);
-  input.set_use_realtime_conversion(false);
+  input.set_use_realtime_conversion(true);
 #ifdef _WIN32
   // Use values opposite to the product defaults so this test proves that
   // presence, not value equality, protects explicit user choices.
@@ -833,7 +834,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   const Config output = ConfigHandler::GetCopiedConfig();
 
   EXPECT_FALSE(output.use_live_conversion());
-  EXPECT_TRUE(output.show_live_conversion_ruby_window());
+  EXPECT_FALSE(output.show_live_conversion_ruby_window());
   EXPECT_FALSE(output.show_candidate_window_on_initial_conversion());
   EXPECT_FALSE(output.use_direct_commit());
   EXPECT_EQ(output.direct_commit_key(), 0);
@@ -848,7 +849,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_EQ(output.zenz_feedback_min_key_length(), 4);
   EXPECT_FALSE(output.use_zenz_auto_block_rejected_correction());
   EXPECT_FALSE(output.use_zenz_live_correction_right_context());
-  EXPECT_FALSE(output.use_realtime_conversion());
+  EXPECT_TRUE(output.use_realtime_conversion());
 #ifdef _WIN32
   EXPECT_TRUE(output.dim_pending_roman_input());
   EXPECT_EQ(output.pending_roman_dimness_percent(), 40);
@@ -1169,6 +1170,7 @@ TEST_F(ConfigHandlerTest, GetDefaultConfig) {
 #endif  // __APPLE__ || OS_CHROMEOS
 
   EXPECT_FALSE(output.has_use_live_conversion());
+  EXPECT_FALSE(output.has_show_live_conversion_ruby_window());
   EXPECT_FALSE(output.has_show_candidate_window_on_initial_conversion());
   EXPECT_FALSE(output.has_use_direct_commit());
   EXPECT_FALSE(output.has_direct_commit_key());
