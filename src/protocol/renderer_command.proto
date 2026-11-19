@@ -74,6 +74,11 @@ message RendererCommand {
   // CandidateWindow::position from shifting the full-reading ruby overlay.
   optional Rectangle ruby_preedit_rectangle = 1001;
 
+  // Full visible marked-text bounds, independent of the candidate anchor.
+  // The host may omit it when it cannot determine the entire composition.
+  // Uses the same host coordinate system as preedit_rectangle.
+  optional Rectangle conversion_status_preedit_bounds = 1002;
+
   // An equivalent to IMECHARPOSITION in IMM32. (For Windows only)
   // TODO(yukawa): make a common candidate form format for all platforms.
   message CharacterPosition {

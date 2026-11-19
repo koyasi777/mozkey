@@ -485,6 +485,29 @@ bool FillCharPosition(TipPrivateContext* private_context, ITfContext* context,
     return false;
   }
 
+  // The target range is just the character anchoring candidates.  In contrast,
+  // GetTextExt of the original composition range describes its full rendered
+  // bounding box, including wrapped lines. Keep it separate so existing
+  // candidate/ruby placement never changes. Clipped/incomplete rectangles
+  // must not be advertised as complete exclusion geometry.
+  if (has_composition &&
+      config::ConfigHandler::GetSharedConfig()
+          ->show_conversion_status_indicator()) {
+    RECT bounds{};
+    bool clipped_bounds = false;
+    if (SUCCEEDED(TipRangeUtil::GetTextExt(
+            context_view.get(), read_cookie, range.get(), &bounds,
+            &clipped_bounds)) &&
+        !clipped_bounds && bounds.right > bounds.left &&
+        bounds.bottom > bounds.top) {
+      auto* box = command->mutable_conversion_status_preedit_bounds();
+      box->set_left(bounds.left);
+      box->set_top(bounds.top);
+      box->set_right(bounds.right);
+      box->set_bottom(bounds.bottom);
+    }
+  }
+
   RendererCommand::CharacterPosition* composition_target =
       app_info->mutable_composition_target();
   composition_target->set_position(0);

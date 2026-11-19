@@ -77,18 +77,27 @@ inline int ConversionStatusVerticalFullLabelFontReduction(
              : 0;
 }
 
-// All rectangles use the Mozc top-left screen coordinate system. The placement
-// never covers the composition, ruby or candidate obstacle. The caller may
-// omit the ruby/obstacle rectangles. Return false rather than covering text.
+// All rectangles use the Mozc top-left screen coordinate system. preedit is
+// the local anchor; full_preedit is the optional host-verified bounds of the
+// *entire* composition. Separating them keeps the caret/suggestion anchor
+// stable while preventing overlap with other composing characters.
+// A requested placement is a preference, not a reason to hide at a screen edge.
 inline bool PlaceConversionStatusIndicator(
     const Rect& preedit, const Rect* ruby, const Rect* obstacle,
     const Rect& work, const Size& size, bool vertical,
-    const config::Config::ConversionStatusIndicatorStyle& style, Rect* result) {
+    const config::Config::ConversionStatusIndicatorStyle& style, Rect* result,
+    const Rect* full_preedit = nullptr) {
   if (result == nullptr || work.Width() <= 0 || work.Height() <= 0 ||
       size.width <= 0 || size.height <= 0 ||
       size.width > work.Width() || size.height > work.Height()) {
     return false;
   }
+  // Missing or malformed full geometry must not move the anchor.
+  // It also must not authorize a side-of-preedit fallback in AUTO mode: the
+  // caret rectangle is not the right edge of a multi-character composition.
+  const bool has_full_preedit = full_preedit != nullptr &&
+      full_preedit->Width() > 0 && full_preedit->Height() > 0;
+  const Rect& exclusion = has_full_preedit ? *full_preedit : preedit;
   const int gap = std::clamp(static_cast<int>(style.gap()), 0, 60);
   const int dx = std::clamp(style.offset_x(), -100, 100);
   const int dy = std::clamp(style.offset_y(), -100, 100);
@@ -100,7 +109,7 @@ inline bool PlaceConversionStatusIndicator(
     Rect rect(x + dx, y + dy, size.width, size.height);
     if (rect.Left() < work.Left() || rect.Right() > work.Right() ||
         rect.Top() < work.Top() || rect.Bottom() > work.Bottom() ||
-        intersects(rect, preedit) ||
+        intersects(rect, preedit) || intersects(rect, exclusion) ||
         (ruby != nullptr && intersects(rect, *ruby)) ||
         (obstacle != nullptr && intersects(rect, *obstacle))) {
       return false;
@@ -108,8 +117,12 @@ inline bool PlaceConversionStatusIndicator(
     *result = rect;
     return true;
   };
-  const auto above_preedit = [&]() { return check(preedit.Left(), preedit.Top() - size.height - gap); };
-  const auto below_preedit = [&]() { return check(preedit.Left(), preedit.Bottom() + gap); };
+  const auto above_preedit = [&]() {
+    return check(preedit.Left(), exclusion.Top() - size.height - gap);
+  };
+  const auto below_preedit = [&]() {
+    return check(preedit.Left(), exclusion.Bottom() + gap);
+  };
   // Center the indicator *only when it follows the ruby reading axis*:
   // horizontally beside the ruby in horizontal writing, or below the ruby
   // in vertical writing.  Other placements retain their leading-edge
@@ -140,11 +153,20 @@ inline bool PlaceConversionStatusIndicator(
     }
     return check(ruby->Left(), ruby->Top() - size.height - gap);
   };
-  const auto preedit_side = [&]() { return check(preedit.Right() + gap, preedit.Top()) ||
-                                           check(preedit.Left() - size.width - gap, preedit.Top()); };
-  // For explicit placement, stay on the requested side. An obstacle may
-  // require horizontal adjustment, but must not silently turn "below" into
-  // "above" (or vice versa). Returning false hides an unplaceable indicator.
+  const auto preedit_side = [&]() {
+    return check(exclusion.Right() + gap, preedit.Top()) ||
+           check(exclusion.Left() - size.width - gap, preedit.Top());
+  };
+  // After both above/below placements fail, try beside the visible passive
+  // suggestion. This uses the obstacle bounds already provided by each OS;
+  // check() also rejects overlap with ruby and any known full preedit bounds.
+  const auto suggestion_side = [&]() {
+    return obstacle != nullptr &&
+           (check(obstacle->Right() + gap, obstacle->Top()) ||
+            check(obstacle->Left() - size.width - gap, obstacle->Top()));
+  };
+  // Keep same-row obstacle avoidance first; only when it fails may an
+  // explicitly preferred side flip across the entire composition.
   const auto on_requested_row = [&](int x, int y) {
     if (check(x, y)) return true;
     if (ruby && (check(ruby->Right() + gap, y) ||
@@ -161,20 +183,28 @@ inline bool PlaceConversionStatusIndicator(
                   : (vertical ? below_preedit() : preedit_side());
     case config::Config::CONVERSION_STATUS_RUBY_ABOVE:
       if (vertical) return ruby ? ruby_above() : preedit_side();
-      return ruby ? on_requested_row(ruby->Left(),
+      return (ruby ? on_requested_row(ruby->Left(),
                           ruby->Top() - size.height - gap)
                   : on_requested_row(preedit.Left(),
-                          preedit.Top() - size.height - gap);
+                          exclusion.Top() - size.height - gap)) ||
+             below_preedit();
     case config::Config::CONVERSION_STATUS_PREEDIT_ABOVE:
       return on_requested_row(preedit.Left(),
-                              preedit.Top() - size.height - gap);
+                              exclusion.Top() - size.height - gap) ||
+             on_requested_row(preedit.Left(), exclusion.Bottom() + gap) ||
+             (has_full_preedit && preedit_side());
     case config::Config::CONVERSION_STATUS_PREEDIT_BELOW:
-      return on_requested_row(preedit.Left(), preedit.Bottom() + gap);
+      return on_requested_row(preedit.Left(), exclusion.Bottom() + gap) ||
+             on_requested_row(preedit.Left(),
+                              exclusion.Top() - size.height - gap) ||
+             (has_full_preedit && preedit_side());
     case config::Config::CONVERSION_STATUS_AUTO:
       if (ruby != nullptr && (ruby_side() || ruby_above())) return true;
       if (vertical && preedit_side()) return true;
       if (above_preedit()) return true;
-      return below_preedit() || preedit_side();
+      if (below_preedit()) return true;
+      if (suggestion_side()) return true;
+      return has_full_preedit && preedit_side();
   }
   return false;
 }
