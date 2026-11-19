@@ -359,6 +359,17 @@ void CandidateController::UpdateConversionStatus() {
       command_.preedit_rectangle().top() - GetBaseScreenHeight(),
       command_.preedit_rectangle().right() - command_.preedit_rectangle().left(),
       command_.preedit_rectangle().bottom() - command_.preedit_rectangle().top());
+  mozc::Rect full_preedit;
+  const mozc::Rect* full_preedit_ptr = nullptr;
+  if (command_.has_conversion_status_preedit_bounds()) {
+    const auto& box = command_.conversion_status_preedit_bounds();
+    if (box.right() > box.left() && box.bottom() > box.top()) {
+      full_preedit = mozc::Rect(
+          box.left(), box.top() - GetBaseScreenHeight(),
+          box.right() - box.left(), box.bottom() - box.top());
+      full_preedit_ptr = &full_preedit;
+    }
+  }
   mozc::Rect ruby_rect;
   const mozc::Rect *ruby_ptr = nullptr;
   if (ruby_window_->IsVisible()) {
@@ -376,7 +387,8 @@ void CandidateController::UpdateConversionStatus() {
       ? &candidate_rect_ : nullptr;
   mozc::Rect target;
   if (!PlaceConversionStatusIndicator(preedit, ruby_ptr, obstacle, display,
-        size, IsVerticalWriting(writing_direction_), style, &target)) {
+        size, IsVerticalWriting(writing_direction_), style, &target,
+        full_preedit_ptr)) {
     conversion_status_window_->Hide();
     return;
   }

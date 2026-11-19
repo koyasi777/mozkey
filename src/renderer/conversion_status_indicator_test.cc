@@ -178,13 +178,152 @@ TEST(ConversionStatusIndicatorTest, BelowAvoidsCandidateOnSameRow) {
   EXPECT_EQ(result.Top(), 127);
   EXPECT_EQ(result.Left(), 163);
 }
-TEST(ConversionStatusIndicatorTest, UnavailableBelowDoesNotFallBackAbove) {
+TEST(ConversionStatusIndicatorTest, UnavailableBelowFallsBackAbove) {
   config::Config::ConversionStatusIndicatorStyle style;
   style.set_placement(config::Config::CONVERSION_STATUS_PREEDIT_BELOW);
   Rect result;
-  EXPECT_FALSE(PlaceConversionStatusIndicator(
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
       Rect(100, 370, 20, 22), nullptr, nullptr,
       Rect(0, 0, 600, 400), Size(58, 24), false, style, &result));
+  EXPECT_EQ(result.Top(), 341);
+}
+TEST(ConversionStatusIndicatorTest, UnavailableAboveFallsBackBelow) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  style.set_placement(config::Config::CONVERSION_STATUS_PREEDIT_ABOVE);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      Rect(100, 0, 20, 22), nullptr, nullptr,
+      Rect(0, 0, 600, 400), Size(58, 24), false, style, &result));
+  EXPECT_EQ(result.Top(), 27);
+}
+TEST(ConversionStatusIndicatorTest, ExplicitFallbackUsesWholePreeditBounds) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  style.set_placement(config::Config::CONVERSION_STATUS_PREEDIT_ABOVE);
+  const Rect anchor(100, 0, 20, 22);
+  const Rect full(100, 0, 220, 75);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      anchor, nullptr, nullptr, Rect(0, 0, 600, 400),
+      Size(58, 24), false, style, &result, &full));
+  EXPECT_EQ(result.Top(), 80);  // Below all marked text, not its first line.
+}
+TEST(ConversionStatusIndicatorTest, AutoAvoidsWholeMarkedTextOnEdge) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  const Rect anchor(100, 370, 20, 22);
+  const Rect full(100, 370, 220, 22);
+  const Rect candidate(90, 338, 150, 32);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      anchor, nullptr, &candidate, Rect(0, 0, 600, 400),
+      Size(58, 24), false, style, &result, &full));
+  EXPECT_EQ(result.Left(), 245);
+  EXPECT_EQ(result.Top(), 338);
+  // Suggestion-relative placement is also available when the host cannot
+  // report full geometry; check() can then validate only the known anchor.
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      anchor, nullptr, &candidate, Rect(0, 0, 600, 400),
+      Size(58, 24), false, style, &result));
+  EXPECT_EQ(result.Left(), 245);
+  EXPECT_EQ(result.Top(), 338);
+}
+TEST(ConversionStatusIndicatorTest, ExplicitPlacementUsesSafeSideLast) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  style.set_placement(config::Config::CONVERSION_STATUS_PREEDIT_ABOVE);
+  const Rect anchor(100, 70, 20, 22);
+  const Rect full(100, 70, 220, 22);
+  const Rect above_candidate(0, 0, 600, 70);
+  const Rect below_ruby(0, 95, 600, 85);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      anchor, &below_ruby, &above_candidate,
+      Rect(0, 0, 600, 180), Size(58, 24), false, style,
+      &result, &full));
+  EXPECT_EQ(result.Left(), 325);
+  EXPECT_EQ(result.Top(), 70);
+}
+// Regression: at either screen edge, a passive suggestion can occupy the
+// only available above/below row. AUTO must then try beside the suggestion.
+TEST(ConversionStatusIndicatorTest, AutoTopEdgeUsesSuggestionRight) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  const Rect preedit(100, 0, 20, 22);
+  const Rect suggestion(90, 26, 150, 180);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      preedit, nullptr, &suggestion, Rect(0, 0, 600, 400),
+      Size(58, 24), false, style, &result));
+  EXPECT_EQ(result.Left(), 245);
+  EXPECT_EQ(result.Top(), 26);
+}
+TEST(ConversionStatusIndicatorTest, AutoBottomEdgeUsesSuggestionRight) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  const Rect preedit(100, 370, 20, 22);
+  const Rect suggestion(90, 200, 150, 170);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      preedit, nullptr, &suggestion, Rect(0, 0, 600, 400),
+      Size(58, 24), false, style, &result));
+  EXPECT_EQ(result.Left(), 245);
+  EXPECT_EQ(result.Top(), 200);
+}
+TEST(ConversionStatusIndicatorTest, AutoSuggestionSideFallsBackLeft) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  const Rect preedit(220, 0, 20, 22);
+  const Rect suggestion(200, 26, 80, 160);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      preedit, nullptr, &suggestion, Rect(0, 0, 300, 400),
+      Size(58, 24), false, style, &result));
+  EXPECT_EQ(result.Left(), 137);
+  EXPECT_EQ(result.Top(), 26);
+}
+TEST(ConversionStatusIndicatorTest, AutoSuggestionSideAvoidsFullPreedit) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  const Rect preedit(100, 0, 20, 22);
+  // The right side of the suggestion is occupied by marked text.
+  // The left side is safe; checking only the anchor would be insufficient.
+  const Rect full_preedit(100, 0, 350, 100);
+  const Rect suggestion(90, 20, 150, 180);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      preedit, nullptr, &suggestion, Rect(0, 0, 600, 400),
+      Size(58, 24), false, style, &result, &full_preedit));
+  EXPECT_EQ(result.Left(), 27);
+  EXPECT_EQ(result.Top(), 20);
+}
+TEST(ConversionStatusIndicatorTest, AutoStillPrefersAboveSuggestion) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  const Rect preedit(100, 100, 20, 22);
+  const Rect suggestion(90, 126, 150, 180);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      preedit, nullptr, &suggestion, Rect(0, 0, 600, 400),
+      Size(58, 24), false, style, &result));
+  EXPECT_EQ(result.Left(), 100);
+  EXPECT_EQ(result.Top(), 71);
+}
+TEST(ConversionStatusIndicatorTest, AutoHidesWhenSuggestionBlocksAllSides) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  const Rect preedit(100, 0, 20, 22);
+  const Rect suggestion(0, 26, 300, 340);
+  Rect result;
+  EXPECT_FALSE(PlaceConversionStatusIndicator(
+      preedit, nullptr, &suggestion, Rect(0, 0, 300, 400),
+      Size(58, 24), false, style, &result));
+}
+
+TEST(ConversionStatusIndicatorTest, AutoWithOffsetsDoesNotEnterFullPreedit) {
+  config::Config::ConversionStatusIndicatorStyle style;
+  style.set_offset_x(18);
+  style.set_offset_y(5);
+  const Rect anchor(100, 370, 20, 22);
+  const Rect full(100, 370, 220, 22);
+  const Rect candidate(90, 338, 150, 32);
+  Rect result;
+  ASSERT_TRUE(PlaceConversionStatusIndicator(
+      anchor, nullptr, &candidate, Rect(0, 0, 600, 400),
+      Size(58, 24), false, style, &result, &full));
+  EXPECT_EQ(result.Left(), 263);
+  EXPECT_EQ(result.Top(), 343);
 }
 TEST(ConversionStatusIndicatorTest, RubyPlacementWorksWithoutRubyWindow) {
   config::Config::ConversionStatusIndicatorStyle style;

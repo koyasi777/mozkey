@@ -856,7 +856,7 @@ Windows 版のルビ表示では、左右の余白、上下の余白、入力文
 
 候補ウィンドウ、サジェストウィンドウ、ライブ変換中のルビ表示については、主要テキストの太さもそれぞれ 100～900 の範囲で個別に設定できます。既定値は 400（標準 / Regular）です。候補番号、説明、フッター、用例ウィンドウ内の文字などの補助情報は対象外で、従来の太さを維持します。
 
-ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。候補・サジェスト・ルビの表示倍率は最大300%まで設定できます。
+ライブ変換中のルビ表示は新規・未設定のプロファイルでは既定で ON で、設定画面から切り替えられます。リアルタイム変換サジェストは既定で OFF ですが、ライブ変換そのものは ON のままです。明示的に保存した設定は維持します。候補・サジェスト・ルビの表示倍率は最大300%まで設定できます。
 
 ### ルビウィンドウの表示位置（Windows / macOS）
 
@@ -2196,9 +2196,11 @@ for the candidate window, suggestion window, and live-conversion ruby display.
 The default is 400 (Regular). Auxiliary text such as candidate shortcuts,
 descriptions, footer labels, and infolist text keeps its existing weight.
 
-The ruby display shown during live conversion can be enabled or disabled from
-the config dialog. The candidate, suggestion, and ruby scaling controls support
-up to 300%.
+The ruby display shown during live conversion defaults to ON for new or unset
+profiles and can be changed in the config dialog. Realtime conversion
+suggestions default to OFF without disabling live conversion itself. Explicitly
+saved settings are preserved. The candidate, suggestion, and ruby scaling
+controls support up to 300%.
 
 ### Ruby window placement (Windows / macOS)
 
