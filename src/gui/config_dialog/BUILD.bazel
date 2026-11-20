@@ -29,9 +29,9 @@
 
 load(
     "//:build_defs.bzl",
-    "mozc_infoplist_strings",
     "mozc_cc_library",
     "mozc_cc_test",
+    "mozc_infoplist_strings",
     "mozc_select",
 )
 load(
@@ -149,14 +149,14 @@ mozc_qt_rcc(
         "config_dialog_ja.qm",
         "keymap_en.qm",
         "keymap_ja.qm",
-        "roman_table_presets/simplified_azik.tsv",
-        "roman_table_presets/shingetsu.tsv",
-        "roman_table_presets/simplified_azik.LICENSE",
-        "roman_table_presets/shingetsu.LICENSE",
+        "roman_table_presets/seoto.BSD-LICENSE",
+        "roman_table_presets/seoto.LICENSE",
         "roman_table_presets/seoto.tsv",
         "roman_table_presets/seoto_plus.tsv",
-        "roman_table_presets/seoto.LICENSE",
-        "roman_table_presets/seoto.BSD-LICENSE",
+        "roman_table_presets/shingetsu.LICENSE",
+        "roman_table_presets/shingetsu.tsv",
+        "roman_table_presets/simplified_azik.LICENSE",
+        "roman_table_presets/simplified_azik.tsv",
         "//gui/base:tr_en.qm",
         "//gui/base:tr_ja.qm",
     ],
