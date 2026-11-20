@@ -5636,6 +5636,698 @@ TEST_F(SessionTest, LiveConversionRecoversAfterTransientSokuonPrefix) {
   EXPECT_PREEDIT("腐って", command);
 }
 
+TEST_F(SessionTest, ShiftEnterCommitsDisplayedSuggestionDuringLiveConversion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+
+  Segments suggestion_segments;
+  Segment* suggestion_segment = suggestion_segments.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+  AddCandidate("あ", "ありがたい", suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(1)
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_segments), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "ありがとう");
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("ありがとう", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+}
+
+// A passive suggestion is a user-visible interaction target in both pending
+// and materialized live conversion.  Conversion's fallback Down behavior
+// differs by keymap; the visible suggestion's explicit Down rule must win.
+TEST_F(SessionTest, LiveSuggestionDownUsesSuggestionRuleAcrossKeymaps) {
+  for (const auto keymap_type : {config::Config::ATOK,
+                                 config::Config::MOBILE,
+                                 config::Config::CHROMEOS,
+                                 config::Config::KOTOERI}) {
+    SCOPED_TRACE(static_cast<int>(keymap_type));
+    MockEngine engine;
+    std::shared_ptr<MockConverter> converter =
+        CreateEngineConverterMock(&engine);
+    Session session(engine);
+    InitSessionToPrecomposition(&session);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(true);
+    config.set_live_conversion_delay_msec(0);
+    config.set_live_conversion_min_key_length(1);
+    config.set_use_zenz_live_correction(false);
+    config.set_session_keymap(keymap_type);
+    session.SetConfig(config);
+    session.SetKeyMapManager(
+        std::make_shared<keymap::KeyMapManager>(config));
+
+    Segments live_segments;
+    Segment* live_segment = live_segments.add_segment();
+    live_segment->set_key("あ");
+    AddCandidate("あ", "亜", live_segment);
+
+    Segments suggestion_segments;
+    Segment* suggestion_segment = suggestion_segments.add_segment();
+    suggestion_segment->set_key("あ");
+    AddCandidate("あ", "ありがとう", suggestion_segment);
+    AddCandidate("あ", "ありがたい", suggestion_segment);
+
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+    EXPECT_CALL(*converter, StartPrediction(_, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArgPointee<1>(suggestion_segments), Return(true)));
+
+    commands::Command command;
+    InsertCharacterString("あ", "a", &session, &command);
+    ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+    ASSERT_TRUE(command.output().has_candidate_window());
+    ASSERT_EQ(command.output().candidate_window().candidate(0).value(),
+              "ありがとう");
+    Mock::VerifyAndClearExpectations(converter.get());
+
+    EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+        .Times(0);
+    EXPECT_CALL(*converter, FocusSegmentValue(_, 0, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(true));
+    command.Clear();
+    ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::DOWN, &session, &command));
+    EXPECT_TRUE(command.output().consumed());
+    EXPECT_PREEDIT("ありがとう", command);
+    EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+    ASSERT_TRUE(command.output().has_candidate_window());
+    EXPECT_EQ(command.output().candidate_window().category(),
+              commands::PREDICTION);
+    EXPECT_TRUE(command.output().candidate_window().has_focused_index());
+    Mock::VerifyAndClearExpectations(converter.get());
+  }
+}
+
+// A generic Conversion binding is a fallback, not an explicit override of
+// the displayed Suggestion interaction target.
+TEST_F(SessionTest, VisibleSuggestionOverridesCustomConversionBinding) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tShift Enter\tCommit\n"
+      "Suggestion\tShift Enter\tCommitFirstSuggestion\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("ありがとう", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+}
+
+// An explicit LiveConversion binding takes precedence over both the visible
+// Suggestion and the generic Conversion fallback.
+TEST_F(SessionTest, ExplicitLiveConversionBindingOverridesSuggestion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tShift Enter\tCommit\n"
+      "Suggestion\tShift Enter\tCommitFirstSuggestion\n"
+      "LiveConversion\tShift Enter\tCommit\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("亜", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+}
+
+// A macro is not silently imported across the Composition/Conversion state
+// boundary.  The Conversion binding must remain the fallback in this case.
+TEST_F(SessionTest, MultiStepSuggestionMacroDoesNotCrossLiveState) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Conversion\tShift Enter\tCommit\n"
+      "Suggestion\tShift Enter\tCommitFirstSuggestion|IMEOff\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("亜", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+}
+
+// Stale suggestion candidates must never be committed through the hidden
+// CONVERSION converter, even if the old candidate window remains cached.
+TEST_F(SessionTest, StaleLiveSuggestionSnapshotCannotCommit) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  ASSERT_NE(peer.live_conversion_suggestion_context_().get(), nullptr);
+  peer.live_conversion_suggestion_context_()->mutable_composer()->Reset();
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _)).Times(0);
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+}
+
+// Undo after committing a live suggestion restores a serviceable
+// composition/suggestion context rather than the hidden converted value.
+TEST_F(SessionTest, UndoAfterLiveSuggestionCommitRestoresComposition) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  session.set_client_capability(capability);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_RESULT("ありがとう", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  command.Clear();
+  ASSERT_TRUE(session.Undo(&command));
+  EXPECT_TRUE(command.output().has_deletion_range());
+  EXPECT_EQ(command.output().deletion_range().offset(), -5);
+  EXPECT_EQ(command.output().deletion_range().length(), 5);
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_PREEDIT("あ", command);
+}
+
+// The Zenz live-conversion fallback is not an override unless the actual
+// ZenzConversion table has a rule for this key.  The displayed suggestion
+// remains the Shift+Enter interaction target when Zenz is visible.
+TEST_F(SessionTest, VisibleZenzDoesNotEraseSuggestionBinding) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  peer.zenz_live_visible_generation_() = 1;
+  peer.zenz_live_key_() = "あ";
+  peer.zenz_live_value_() = "唖";
+  peer.zenz_live_mozc_value_() = "亜";
+  peer.live_conversion_key_() = "あ";
+  peer.live_conversion_value_() = "亜";
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("ありがとう", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+}
+
+// Failed backend commits must not discard a visible suggestion, converted
+// preedit, live state, or Undo history. Retrying the same key must still work.
+TEST_F(SessionTest, FailedLiveSuggestionCommitIsAtomicAndRetryable) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(peer.live_conversion_active_());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  const size_t undo_count = peer.undo_contexts_().size();
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*converter, FinishConversion(_, _)).Times(0);
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_EQ(session.context().composer().GetQueryForConversion(), "あ");
+  EXPECT_TRUE(peer.live_conversion_active_());
+  EXPECT_EQ(peer.undo_contexts_().size(), undo_count);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "ありがとう");
+  EXPECT_PREEDIT("亜", command);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_RESULT("ありがとう", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  EXPECT_EQ(peer.undo_contexts_().size(), undo_count + 1);
+}
+
+TEST_F(SessionTest, FailedPendingLiveSuggestionCommitIsAtomicAndRetryable) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(1000);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments first;
+  Segment* first_segment = first.add_segment();
+  first_segment->set_key("あ");
+  AddCandidate("あ", "old candidate", first_segment);
+  Segments current;
+  Segment* current_segment = current.add_segment();
+  current_segment->set_key("あい");
+  AddCandidate("あい", "visible first", current_segment);
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(first), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(current), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  command.Clear();
+  ASSERT_TRUE(SendKey("i", &session, &command));
+  ASSERT_TRUE(command.output().live_conversion_pending());
+  ASSERT_TRUE(peer.live_conversion_pending_());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  const size_t undo_count = peer.undo_contexts_().size();
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*converter, FinishConversion(_, _)).Times(0);
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_TRUE(peer.live_conversion_pending_());
+  EXPECT_TRUE(command.output().live_conversion_pending());
+  EXPECT_EQ(peer.undo_contexts_().size(), undo_count);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "visible first");
+  ASSERT_TRUE(command.output().has_callback());
+  EXPECT_EQ(command.output().callback().session_command().type(),
+            commands::SessionCommand::APPLY_LIVE_CONVERSION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_RESULT("visible first", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+}
+
+TEST_F(SessionTest, FailedOrdinarySuggestionCommitPreservesCandidates) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  const size_t undo_count = peer.undo_contexts_().size();
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*converter, FinishConversion(_, _)).Times(0);
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_EQ(peer.undo_contexts_().size(), undo_count);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::SUGGESTION);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "ありがとう");
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_RESULT("ありがとう", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+}
+
+TEST_F(SessionTest, FailedLiveSuggestionCommitKeepsVisibleZenzAndFeedback) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(1);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments live_segments;
+  Segment* live_segment = live_segments.add_segment();
+  live_segment->set_key("あ");
+  AddCandidate("あ", "亜", live_segment);
+  Segments suggestions;
+  Segment* suggestion_segment = suggestions.add_segment();
+  suggestion_segment->set_key("あ");
+  AddCandidate("あ", "ありがとう", suggestion_segment);
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  peer.zenz_live_visible_generation_() = 1;
+  peer.zenz_live_key_() = "あ";
+  peer.zenz_live_value_() = "唖";
+  peer.zenz_live_mozc_value_() = "亜";
+  peer.live_conversion_key_() = "あ";
+  peer.live_conversion_value_() = "亜";
+
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*converter, FinishConversion(_, _)).Times(0);
+  command.Clear();
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_TRUE(peer.live_conversion_active_());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_EQ(peer.zenz_live_value_(), "唖");
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_PREEDIT("唖", command);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "ありがとう");
+}
+
 TEST_F(SessionTest, LiveConversionAttachesPassiveSuggestionCandidateWindow) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -6301,6 +6993,7 @@ TEST_F(SessionTest,
   config.set_live_conversion_delay_msec(1000);
   config.set_live_conversion_min_key_length(2);
   config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
   session.SetConfig(config);
 
   Segments old_suggestion;
@@ -6334,7 +7027,7 @@ TEST_F(SessionTest,
   EXPECT_CALL(*converter, FinishConversion(_, _))
       .WillOnce(SetArgPointee<1>(Segments()));
   command.Clear();
-  ASSERT_TRUE(session.CommitFirstSuggestion(&command));
+  ASSERT_TRUE(SendKey("Shift Enter", &session, &command));
   EXPECT_TRUE(command.output().consumed());
   EXPECT_RESULT("visible first", command);
   EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
@@ -14800,9 +15493,12 @@ TEST_F(SessionTest, UndoForComposition) {
     InsertCharacterChars("ai", &session, &command);
     EXPECT_EQ(GetComposition(command), "あい");
 
+    // The successful path must return success from the backend commit.
+    EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+        .WillOnce(Return(true));
+    EXPECT_CALL(*converter, FinishConversion(_, _))
+        .WillOnce(SetArgPointee<1>(empty_segments));
     command.Clear();
-    // EXPECT_CALL(*converter, FinishConversion(_, _))
-    //    .WillOnce(SetArgPointee<1>(empty_segments));
     session.CommitFirstSuggestion(&command);
     EXPECT_FALSE(command.output().has_preedit());
     EXPECT_RESULT("あいうえお", command);
@@ -23615,6 +24311,11 @@ TEST_F(SessionTest, ZeroQuerySuggest) {
           .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
     }
 
+    // The backend commit must succeed before issuing zero-query suggestions.
+    EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+        .WillOnce(Return(true));
+    EXPECT_CALL(*converter, FinishConversion(_, _))
+        .WillOnce(SetArgPointee<1>(Segments()));
     command.Clear();
     session.CommitFirstSuggestion(&command);
     EXPECT_EQ(command.output().result().value(), "google");
@@ -23670,7 +24371,9 @@ TEST_F(SessionTest, CommandsAfterZeroQuerySuggest) {
     SetupZeroQuerySuggestion(&session, &request, &command, converter.get());
 
     command.Clear();
-    // FinishConversion is expected to return empty Segments.
+    // A zero-query suggestion is committed through the same backend contract.
+    EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+        .WillOnce(Return(true));
     EXPECT_CALL(*converter, FinishConversion(_, _))
         .WillRepeatedly(SetArgPointee<1>(Segments()));
     session.CommitFirstSuggestion(&command);
@@ -23680,6 +24383,10 @@ TEST_F(SessionTest, CommandsAfterZeroQuerySuggest) {
     // "search" is the first suggest candidate.
     EXPECT_RESULT("search", command);
     EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+
+    // This test reuses the MockConverter for subsequent independent cases.
+    // Verify and retire this case's one-shot CommitSegmentValue expectation.
+    EXPECT_TRUE(Mock::VerifyAndClearExpectations(converter.get()));
   }
 
   {  // Space should be inserted directly.

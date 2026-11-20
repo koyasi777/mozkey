@@ -318,6 +318,26 @@ TEST_F(KeyMapTest, ZenzConversionOverridesAndInheritsConversion) {
   EXPECT_EQ(sequence[0], "Commit");
 }
 
+TEST_F(KeyMapTest, ExplicitSuggestionDoesNotInheritComposition) {
+  KeyMapManager manager(GetDefaultConfig(config::Config::MSIME));
+  commands::KeyEvent key;
+  CommandSequence sequence;
+  ASSERT_TRUE(KeyParser::ParseKey("Shift Enter", &key));
+  ASSERT_TRUE(manager.GetCommandSequenceExplicitSuggestion(key, &sequence));
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence.front(), "CommitFirstSuggestion");
+
+  ConversionState::Commands command;
+  ASSERT_TRUE(manager.ResolveConversionCommandName("CommitFirstSuggestion",
+                                                   &command));
+  EXPECT_EQ(command, ConversionState::COMMIT_FIRST_SUGGESTION);
+
+  ASSERT_TRUE(KeyParser::ParseKey("Enter", &key));
+  EXPECT_FALSE(manager.GetCommandSequenceExplicitSuggestion(key, &sequence));
+  ASSERT_TRUE(manager.GetCommandSequenceSuggestion(key, &sequence));
+  EXPECT_EQ(sequence.front(), "Commit");
+}
+
 TEST_F(KeyMapTest, LiveAndZenzConversionPrecedenceAndFallback) {
   KeyMapManager manager;
   KeyMapManagerTestPeer peer(manager);

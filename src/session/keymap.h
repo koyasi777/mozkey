@@ -208,6 +208,7 @@ struct ConversionState {
     DELETE_SELECTED_CANDIDATE,
     REPORT_BUG,
     BLOCK_VISIBLE_ZENZ_CORRECTION,  // Manual full-sequence hard block.
+    COMMIT_FIRST_SUGGESTION,  // Explicit live passive-suggestion action.
   };
 };
 
@@ -325,6 +326,11 @@ class KeyMapManager {
 
   bool GetCommandSequenceSuggestion(const commands::KeyEvent& key_event,
                                     CommandSequence* commands) const;
+
+  // Only explicitly bound Suggestion rules; never inherits Composition.
+  // Live conversion uses these for actions safe in a CONVERSION state.
+  bool GetCommandSequenceExplicitSuggestion(
+      const commands::KeyEvent& key_event, CommandSequence* commands) const;
 
   bool GetCommandSequencePrediction(const commands::KeyEvent& key_event,
                                     CommandSequence* commands) const;
