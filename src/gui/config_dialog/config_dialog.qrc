@@ -19,5 +19,13 @@
   <file>keymap_en.qm</file>
   <file alias="tr_ja.qm">../base/tr_ja.qm</file>
   <file alias="tr_en.qm">../base/tr_en.qm</file>
+  <file>roman_table_presets/simplified_azik.tsv</file>
+  <file>roman_table_presets/shingetsu.tsv</file>
+  <file>roman_table_presets/simplified_azik.LICENSE</file>
+  <file>roman_table_presets/shingetsu.LICENSE</file>
+  <file>roman_table_presets/seoto.tsv</file>
+  <file>roman_table_presets/seoto_plus.tsv</file>
+  <file>roman_table_presets/seoto.LICENSE</file>
+  <file>roman_table_presets/seoto.BSD-LICENSE</file>
 </qresource>
 </RCC>

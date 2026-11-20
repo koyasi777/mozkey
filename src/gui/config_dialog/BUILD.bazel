@@ -30,6 +30,8 @@
 load(
     "//:build_defs.bzl",
     "mozc_infoplist_strings",
+    "mozc_cc_library",
+    "mozc_cc_test",
     "mozc_select",
 )
 load(
@@ -147,6 +149,14 @@ mozc_qt_rcc(
         "config_dialog_ja.qm",
         "keymap_en.qm",
         "keymap_ja.qm",
+        "roman_table_presets/simplified_azik.tsv",
+        "roman_table_presets/shingetsu.tsv",
+        "roman_table_presets/simplified_azik.LICENSE",
+        "roman_table_presets/shingetsu.LICENSE",
+        "roman_table_presets/seoto.tsv",
+        "roman_table_presets/seoto_plus.tsv",
+        "roman_table_presets/seoto.LICENSE",
+        "roman_table_presets/seoto.BSD-LICENSE",
         "//gui/base:tr_en.qm",
         "//gui/base:tr_ja.qm",
     ],
@@ -163,6 +173,22 @@ mozc_cc_qt_library(
     ],
     hdrs = [
         "combobox_delegate.h",
+    ],
+)
+
+mozc_cc_library(
+    name = "roman_table_rules",
+    srcs = ["roman_table_rules.cc"],
+    hdrs = ["roman_table_rules.h"],
+)
+
+mozc_cc_test(
+    name = "roman_table_rules_test",
+    size = "small",
+    srcs = ["roman_table_rules_test.cc"],
+    deps = [
+        ":roman_table_rules",
+        "//testing:gunit_main",
     ],
 )
 
@@ -211,9 +237,11 @@ mozc_cc_qt_library(
     ],
     deps = [
         ":combobox_delegate",
+        ":roman_table_rules",
         "//base:config_file_stream",
         "//base:file_stream",
         "//base:file_util",
+        "//base:hash",
         "//base:port",
         "//base:process",
         "//base:run_level",
@@ -228,6 +256,7 @@ mozc_cc_qt_library(
         "//composer:key_event_util",
         "//composer:key_parser",
         "//config:config_handler",
+        "//config:roman_table_presets",
         "//config:stats_config_util",
         "//gui/base:gui_base",
         "//gui/base:singleton_window_helper",
