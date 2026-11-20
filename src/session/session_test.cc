@@ -5173,6 +5173,105 @@ TEST_F(SessionTest,
 }
 #endif  // defined(_WIN32)
 
+// Candidate-only must not suppress Japanese live conversion.  The backend
+// mock represents a normal Japanese result; the real rewriter and the
+// EngineConverter TOP1 policy are tested independently.
+TEST_F(SessionTest, CandidateOnlyEnglishAllowsJapaneseLiveConversion) {
+  for (const char* spelling : {"ai", "sora", "jest"}) {
+    SCOPED_TRACE(spelling);
+    MockEngine engine;
+    std::shared_ptr<MockConverter> backend = CreateEngineConverterMock(&engine);
+    Session session(engine);
+    SessionTestPeer peer(session);
+    InitSessionToPrecomposition(&session);
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(false);
+    config.set_use_zenz_live_correction(false);
+    config.set_auto_switch_composition_mode(false);
+    config.set_shift_key_mode_switch(config::Config::OFF);
+    config.set_preedit_method(config::Config::ROMAN);
+    config.set_session_keymap(config::Config::MSIME);
+    config.set_enable_english_input_exceptions(true);
+    auto* entry = config.add_english_input_exceptions();
+    entry->set_input(spelling);
+    entry->set_preferred(spelling == std::string("ai") ? "AI" :
+                         spelling == std::string("sora") ? "Sora" : "Jest");
+    entry->set_behavior(config::Config::EnglishInputException::CANDIDATE_ONLY);
+    session.SetConfig(config);
+    commands::Command command;
+    InsertCharacterChars(spelling, &session, &command);
+    ASSERT_EQ(session.context().composer().GetRawString(), spelling);
+    ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+    config.set_use_live_conversion(true);
+    config.set_live_conversion_delay_msec(0);
+    session.SetConfig(config);
+    session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+    EXPECT_CALL(*backend, StartConversion(_, _))
+        .WillOnce([](const ConversionRequest& request, Segments* segments) {
+          segments->InitForConvert(request.key());
+          AddCandidate(request.key(), "通常日本語候補",
+                       segments->mutable_conversion_segment(0));
+          return true;
+        });
+    command.Clear();
+    ASSERT_TRUE(peer.MaybeStartLiveConversion(&command));
+    EXPECT_TRUE(peer.live_conversion_active_());
+    EXPECT_TRUE(command.output().live_conversion());
+    EXPECT_PREEDIT("通常日本語候補", command);
+    Mock::VerifyAndClearExpectations(backend.get());
+  }
+}
+
+// The same keystrokes without an enabled exception must still use ordinary
+// live conversion.  This guards against broad suppression of Roman input.
+TEST_F(SessionTest, CandidateOnlyLiveGuardIsDisabledWithDictionary) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> backend = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  config.set_auto_switch_composition_mode(false);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_enable_english_input_exceptions(false);
+  auto* entry = config.add_english_input_exceptions();
+  entry->set_input("jest");
+  entry->set_preferred("Jest");
+  entry->set_behavior(
+      config::Config::EnglishInputException::CANDIDATE_ONLY);
+  session.SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("jest", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetRawString(), "jest");
+  ASSERT_NE(session.context().composer().GetStringForPreedit(), "Jest");
+
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  EXPECT_CALL(*backend, StartConversion(_, _))
+      .WillOnce([](const ConversionRequest& request, Segments* segments) {
+        segments->InitForConvert(request.key());
+        AddCandidate(request.key(), "通常変換",
+                     segments->mutable_conversion_segment(0));
+        return true;
+      });
+  command.Clear();
+  ASSERT_TRUE(peer.MaybeStartLiveConversion(&command));
+  EXPECT_TRUE(peer.live_conversion_active_());
+  EXPECT_TRUE(command.output().live_conversion());
+  Mock::VerifyAndClearExpectations(backend.get());
+}
+
 // Regression: live conversion must forward the same left context as ordinary
 // conversion.  ConvertWithPreferences(composer, preferences) silently supplies
 // an empty Context and prevents ni/shika correction after committed text.
@@ -5693,6 +5792,84 @@ TEST_F(SessionTest,
   ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
   EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
             "resolved suggestion");
+}
+
+// An exact candidate-only spelling must refresh the passive suggestion even
+// if its final key is part of an unresolved Roman suffix (chatgpt -> ちゃtgpt).
+// Unregistered words must retain the existing pending-Roman HOLD behavior.
+TEST_F(SessionTest, CandidateOnlyChatGptRefreshesPendingRomanSuggestion) {
+  for (const bool enable_live : {false, true}) {
+    for (const bool enable_exception : {false, true}) {
+      SCOPED_TRACE(enable_live);
+      SCOPED_TRACE(enable_exception);
+      MockEngine engine;
+      std::shared_ptr<MockConverter> backend = CreateEngineConverterMock(&engine);
+      Session session(engine);
+      InitSessionToPrecomposition(&session);
+
+      config::Config config;
+      config::ConfigHandler::GetDefaultConfig(&config);
+      config.set_preedit_method(config::Config::ROMAN);
+      config.set_auto_switch_composition_mode(false);
+      config.set_shift_key_mode_switch(config::Config::OFF);
+      config.set_session_keymap(config::Config::MSIME);
+      config.set_use_zenz_live_correction(false);
+      config.set_use_dictionary_suggest(true);
+      config.set_use_live_conversion(enable_live);
+      config.set_live_conversion_delay_msec(0);
+      config.set_live_conversion_min_key_length(2);
+      config.set_enable_english_input_exceptions(enable_exception);
+      config.clear_english_input_exceptions();
+      auto* rule = config.add_english_input_exceptions();
+      rule->set_input("chatgpt");
+      rule->set_preferred("ChatGPT");
+      rule->set_behavior(
+          config::Config::EnglishInputException::CANDIDATE_ONLY);
+      session.SetConfig(config);
+
+      int full_token_prediction_calls = 0;
+      EXPECT_CALL(*backend, StartPrediction(_, _))
+          .WillRepeatedly(Invoke(
+              [&full_token_prediction_calls](const ConversionRequest& request,
+                                             Segments* output) {
+                output->InitForConvert(request.key());
+                Segment* segment = output->mutable_conversion_segment(0);
+                const bool exact =
+                    request.composer().GetRawString() == "chatgpt";
+                if (exact) ++full_token_prediction_calls;
+                AddCandidate(request.key(),
+                             exact ? "ChatGPT" : "older Japanese suggestion",
+                             segment);
+                return true;
+              }));
+      EXPECT_CALL(*backend, StartConversion(_, _))
+          .WillRepeatedly(Invoke(
+              [](const ConversionRequest& request, Segments* output) {
+                output->InitForConvert(request.key());
+                AddCandidate(request.key(), "通常日本語候補",
+                             output->mutable_conversion_segment(0));
+                return true;
+              }));
+
+      commands::Command command;
+      for (const char key : std::string("chatgpt")) {
+        command.Clear();
+        ASSERT_TRUE(SendKey(std::string(1, key), &session, &command));
+      }
+      ASSERT_EQ(session.context().composer().GetRawString(), "chatgpt");
+      ASSERT_TRUE(command.output().has_candidate_window());
+      ASSERT_GT(command.output().candidate_window().candidate_size(), 0);
+      if (enable_exception) {
+        EXPECT_GT(full_token_prediction_calls, 0);
+        EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+                  "ChatGPT");
+      } else {
+        EXPECT_EQ(full_token_prediction_calls, 0);
+        EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+                  "older Japanese suggestion");
+      }
+    }
+  }
 }
 
 TEST_F(SessionTest,

@@ -34,6 +34,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "protocol/config.pb.h"
@@ -79,6 +80,10 @@ class ConfigHandler {
   // includes Mozkey-specific settings used for a fresh profile and
   // "Reset to defaults".
   static Config GetProductDefaultConfig();
+
+  // Single immutable catalog used by config sync and the GUI.
+  static const std::vector<Config::EnglishInputException>&
+  RecommendedEnglishInputExceptions();
 
   static const Config& DefaultConfig();
   static std::shared_ptr<const config::Config> GetSharedDefaultConfig();

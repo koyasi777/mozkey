@@ -73,6 +73,10 @@ struct ConversionPreferences {
   // Keep a postal-code numeric literal TOP1 during live conversion, as well
   // as explicit conversion in live mode; leave the ZIP dictionary enabled.
   bool prefer_zipcode_literal_top = false;
+
+  // Live conversion must not select an exact CANDIDATE_ONLY English spelling.
+  // Ordinary explicit conversion and suggestion do not set this option.
+  bool prevent_candidate_only_english_auto_selection = false;
 };
 
 // Class handling ConverterInterface with a session state.  This class

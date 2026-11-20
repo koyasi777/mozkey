@@ -39,6 +39,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **縦書きに対応した入力 UI（Windows / macOS）：** 候補・サジェスト・用例・ルビを縦書きに合わせて配置し、対応するキー設定では候補や文節の移動方向も調整します。
 - **変換状態インジケータ（Windows / macOS）：** 未確定文字の近くで「入力中・Mozc・Zenz処理中・Zenz適用済み」を表示し、配色・形状・位置を調整できます。
 - **幅広い外観カスタマイズ：** 候補・サジェスト・ルビの配色（ライト／ダーク／自動／カスタム）、サイズ、角丸、透明度、影を個別に設定。Windows ではフォント・文字の太さ・未確定文字の色や下線、IME インジケータも調整できます。
+- **英字表記辞書（IME 切り替え不要）：** 日本語入力（ひらがなモード）のまま、`GitHub` や `ChatGPT` などの英字表記を入力・選択できます。別の IME や半角英数モードへの手動切り替えは不要です。登録語ごとに「自動英字化」と「候補のみ」を選べ、推奨語彙の管理や TSV / JSON の入出力にも対応します。
 - **柔軟なローマ字入力とキー設定：** ローマ字テーブルの編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
 - **日本語の変換品質と辞書の拡張：** 日常語彙・固有名詞・口語表現を補強し、文節分割や不自然な漢字化を抑制。日付・曜日の変換候補も拡張しています。
 - **ローカルファーストと OS 連携：** Zenz の推論はローカルで実行し、利用統計の送信機能を無効化。シークレット入力への配慮や、Windows Search などの入力欄での候補表示にも対応しています。
@@ -131,6 +132,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - 変換中に Esc / Ctrl+Z などのキャンセル操作でひらがなへ戻し、そのまま Enter または句読点・記号の単打確定で確定した場合、F6 ひらがな化確定に近い表記選好として学習されるようにした
 - 複数文節の変換キャンセル後は、キャンセル直前の文節境界を可能な限り保持し、全体 1 件としてではなく文節単位のひらがな表記選好としてユーザーセグメント履歴へ反映
 - 句読点・記号の単打確定でも、直前の通常変換確定による学習を次の実テキスト入力まで保留し、Backspace / Escape / Ctrl+Z などの Cancel 相当キー / Revert / Reset / Undo などでは取り消し、IMEOff / MakeSureIMEOff では確定扱いにするようにした
+- 英字表記辞書を追加。「自動英字化」または「候補のみ」で管理し、設定画面からの編集・検索・入出力・システム語彙の更新に対応。
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
 - ハイフンなし7桁の郵便番号（例：`1000001`）を、既存の郵便番号辞書を使って住所へ変換可能。ライブ変換では数字表記を第1候補に保ち、キー設定の `ConvertNext`（次候補、標準では Space）で住所などの後続候補を選択可能
@@ -321,6 +323,23 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 日本語の読みの後に英字が続く場合は、例えば `mouGoogle` から作られる未確定表示 `もうGoogle` を、予測器が生成していなくても候補として補い、元の打鍵列 `mouGoogle` より優先することがあります。ただし、日本語部分が2文字以上で、対応するローマ字部分が3バイト以上あり、辞書にその読みが存在し、英字末尾と生打鍵列が一致する場合に限る保守的な判定です。`iPhone`、`iPad`、`aGoogle` のような短い読みや、`azooKey` のように辞書で確認できない読みでは、英字救済を優先します。すべての入力意図を判定するものではありません。
 
 未確定文字列の途中で英字モードから明示的にひらがなへ切り替えたときは、切り替え前の英字救済候補と古いサジェスト状態を無効化し、未確定文字列自体は確定しません。今回の修正は主として Windows の Zenz OFF・ライブ変換 OFF で実機確認しています。macOS での今回の変更、およびライブ変換 ON の全経路については未検証です。ライブ変換 ON で Shift 英字入力へ移る際に、それまでの表示結果を確定する既存動作は今回変更していません。
+
+### 英字表記辞書（IME を切り替えずに英字表記を入力）
+
+英字表記辞書は、**日本語入力（ひらがなモード）を維持したまま、別の IME や半角英数モードに手動で切り替えずに、英字表記を入力・選択する**ための機能です。特定の**小文字ローマ字の打鍵列**と希望する英字表記を明示的に対応付け、`github` → `GitHub` や `chatgpt` → `ChatGPT` のような自動英字化と、`jest` → `Jest` のような候補提示を使い分けます。英語・日本語の入力意図を自動で完全判別するものではなく、**登録した語だけ**を対象とします。Mozc の通常辞書や、上記の英字救済サジェストとは別の仕組みです。
+
+設定画面の **「英字表記辞書を有効にする」** で機能を切り替え、**「表記辞書を管理...」** から語彙と動作を編集できます。
+
+| 動作 | 説明 |
+| --- | --- |
+| **自動英字化** | 明示的に登録した打鍵列が条件に一致した場合、その部分を英字入力として表示・変換し、優先表記を候補の先頭に置きます。日本語の途中入力と衝突する語には慎重に使ってください。 |
+| **候補のみ** | 入力中の日本語を勝手に英字表記へ切り替えず、受動サジェストや明示的な Space 変換で優先表記を選べるようにします。通常の日本語ライブ変換や Zenz の自動補正からは、当該英字表記を自動採用しません。 |
+
+「候補のみ」に設定した `chatgpt` は末尾に未解決のローマ字が残るため、通常のサジェスト更新抑制だけでは `ChatGPT` が表示されない場合があります。登録語の**生打鍵列が完全一致した時点**ではサジェストを更新し、Space 変換を待たずに `ChatGPT` を選べるようにしています。一般の未解決ローマ字については、従来のサジェスト保持動作を維持します。
+
+管理画面では検索・並べ替え・複数行の削除に加え、UTF-8 の TSV（`input` / `preferred` / `mode` / `enabled` の4列）と JSON（`schema_version: 1`、`rules` 配列）のインポート・エクスポートが可能です。推奨語彙の自動更新では**未編集のシステム管理語だけ**を同期し、編集・削除した語やカスタム語は原則として保持します。自動更新は OFF にできます。管理画面での変更は、親の設定画面で **「適用」** を押して保存してください。
+
+入力側は小文字 ASCII の `a`～`z` のみ（2～64文字）、優先表記は空白なしの印字可能 ASCII（1～128文字）、登録件数は最大4,096件です。数字・ハイフン・記号を含む**打鍵列**、未登録語の推測判定、あらゆる日本語との衝突回避には対応していません。パスワード欄や対象外の入力モードでは適用されません。**新規・既存プロファイルのどちらも、有効フラグが未設定なら有効**になります。明示的に保存した ON / OFF は維持されます。
 
 ### ライブ変換
 
@@ -1021,6 +1040,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **Vertical-writing UI on Windows and macOS:** Candidate, suggestion, infolist, and ruby layouts adapt to vertical text; supported keymaps can follow the visual navigation direction.
 - **Conversion-status indicator (Windows / macOS):** Displays Reading, Mozc, Zenz processing, or Zenz applied near the composition, with adjustable position, shape, and colors. The new macOS indicator has not yet been verified on native macOS hardware.
 - **Extensive appearance customization:** Configure colors (light/dark/system/custom), dimensions, rounded corners, opacity, and shadows per window. Windows additionally supports font/weight, preedit colors and underlines, and IME-indicator styling.
+- **English spelling dictionary (no manual IME switching):** Enter or select spellings such as `GitHub` and `ChatGPT` while remaining in Japanese hiragana input, without manually switching to another IME or alphanumeric input mode. Registered rules either present the preferred ASCII spelling automatically or offer it only as a selectable candidate. Manage built-in presets and custom TSV/JSON rules.
 - **Customizable romaji and shortcuts:** Edit romaji rules, show intermediate output for ambiguous sequences, commit punctuation with one key, and assign ordered key commands with delays.
 - **Improved Japanese conversion and dictionaries:** Enhances everyday expressions and names, reduces unwanted segmentation and kanji conversion, and adds date and weekday suggestions.
 - **Local-first operation and OS integration:** Runs Zenz inference locally, disables inherited usage-statistics reporting, supports privacy-aware input behavior, and improves candidate display in Windows Search and other immersive TSF hosts.
@@ -1207,6 +1227,7 @@ Main features added in this fork
 - Learns a hiragana choice when an active conversion is canceled with Esc, Ctrl+Z, or another key bound to Cancel and the restored hiragana preedit is immediately committed with Enter or a direct-commit punctuation/symbol, similarly to F6 -> Enter
 - For multi-segment conversions canceled back to hiragana, preserves conversion-time segment boundaries when possible and learns each hiragana segment as a spelling preference, rather than as a single whole restored preedit
 - Keeps learning caused by direct-commit punctuations/symbols pending until the next real text input, reverts it on Backspace, Escape, cancel-equivalent keys such as Ctrl+Z, Revert, Reset, or Undo, and confirms it on IMEOff / MakeSureIMEOff
+- Adds an English spelling dictionary with automatic ASCII and candidate-only modes, a searchable editor, TSV/JSON import/export, and managed system-preset updates
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
@@ -1355,6 +1376,23 @@ Mozkey can offer the original Roman keystrokes as a rescue suggestion for Latin 
 For a mixed input such as `mouGoogle`, Mozkey can supply the uncommitted preedit `もうGoogle` even if prediction returned no matching candidate, and place it before the raw `mouGoogle` suggestion. This is a conservative heuristic: the Japanese prefix must contain at least two characters, its Roman input prefix at least three bytes, the reading must exist in the dictionary, and the literal Latin suffix must match the raw keystrokes. Short or unknown readings preserve ASCII-first behavior for names such as `iPhone`, `iPad`, `aGoogle`, and `azooKey`. This is not a general language-intent classifier.
 
 An explicit switch from ASCII input back to hiragana invalidates the previous rescue suggestion and stale suggestion state without committing the composition. The changes were tested on Windows, primarily with Zenz OFF and live conversion OFF. The modified behavior has not yet been verified on macOS hardware or across all live-conversion paths. The existing behavior that commits the visible live-conversion result when Shift-based ASCII input begins remains unchanged.
+
+### English spelling dictionary (without manually switching IMEs)
+
+The English spelling dictionary lets you **enter or select English spellings while staying in Japanese hiragana input**, without manually switching to another IME or alphanumeric input mode. It associates specific **lowercase Roman keystroke sequences** with preferred ASCII spellings: for example, `github` → `GitHub` and `chatgpt` → `ChatGPT` can be automatic, while `jest` → `Jest` can be offered as a candidate. It only applies to registered entries; it does **not** attempt to infer whether arbitrary input is English or Japanese. It is separate from the ordinary Mozc dictionary and the raw-ASCII rescue suggestion described above.
+
+Use **「英字表記辞書を有効にする」** (Enable English spelling dictionary) in the configuration dialog, then **「表記辞書を管理...」** (Manage spelling dictionary) to edit entries.
+
+| Mode | Behavior |
+| --- | --- |
+| **Automatic ASCII** (`auto`) | For an explicitly registered matching sequence, presents the matching portion as ASCII and promotes the preferred spelling in conversion candidates. Use cautiously where romaji may also be Japanese input. |
+| **Candidate only** (`candidate`) | Keeps the Japanese preedit unchanged while exposing the preferred spelling in passive suggestions and explicit Space conversion. Automatic live conversion and Zenz correction do not automatically adopt that English spelling. |
+
+When `chatgpt` is configured as candidate-only, its trigger can leave a trailing unresolved Roman consonant. On an **exact full-keystroke match**, Mozkey refreshes passive suggestions so `ChatGPT` becomes selectable without first pressing Space. Ordinary incomplete Roman input retains the existing suggestion-hold behavior.
+
+The management dialog supports filtering, sorting, multirow deletion, UTF-8 TSV (`input`, `preferred`, `mode`, `enabled`), and JSON import/export (`schema_version: 1` with a `rules` array). Automatic catalog updates reconcile **untouched system-managed entries** while preserving edited, deleted, and custom entries; updates can be disabled. To persist changes, click **Apply** in the parent configuration dialog.
+
+Triggers are lowercase ASCII `a`–`z` only (2–64 characters); preferred spellings are printable ASCII without spaces (1–128 characters), with at most 4,096 rules. Trigger strings containing digits, hyphens, or punctuation are not supported. No automatic language inference or universal romaji-conflict prevention is claimed. Password fields and excluded input modes are not affected. For both new and existing profiles, the feature is **enabled by default when the feature flag is unset**. Explicitly saved ON/OFF choices are preserved.
 
 ### Live conversion
 

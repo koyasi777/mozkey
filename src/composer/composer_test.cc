@@ -1459,6 +1459,99 @@ TEST_F(ComposerTest, AutoSwitchCompositionModeEnabled) {
   }
 }
 
+TEST_F(ComposerTest, UserDefinedEnglishExceptionExactAndContext) {
+  config_->set_preedit_method(Config::ROMAN);
+  config_->set_auto_switch_composition_mode(false);
+  config_->set_enable_english_input_exceptions(true);
+  config_->set_shift_key_mode_switch(Config::OFF);
+  auto* rule = config_->add_english_input_exceptions();
+  rule->set_input("github");
+  rule->set_preferred("GitHub");
+  ASSERT_TRUE(table_->InitializeWithRequestAndConfig(*request_, *config_));
+  for (char c : std::string("github")) {
+    ASSERT_TRUE(InsertKey(std::string(1, c), composer_.get()));
+  }
+  EXPECT_EQ(composer_->GetStringForPreedit(), "github");
+  EXPECT_EQ(composer_->GetInputMode(), transliteration::HIRAGANA);
+  // The old Mozc auto-switch is off, but the explicit override still works.
+  composer_->Reset();
+  for (char c : std::string("korehagithubdesu")) {
+    ASSERT_TRUE(InsertKey(std::string(1, c), composer_.get()));
+  }
+  EXPECT_EQ(composer_->GetStringForPreedit(), "これはgithubです");
+}
+
+TEST_F(ComposerTest, UserDefinedEnglishExceptionDefaultOff) {
+  config_->set_preedit_method(Config::ROMAN);
+  config_->set_auto_switch_composition_mode(false);
+  config_->set_shift_key_mode_switch(Config::OFF);
+  auto* rule = config_->add_english_input_exceptions();
+  rule->set_input("github");
+  rule->set_preferred("GitHub");
+  ASSERT_TRUE(table_->InitializeWithRequestAndConfig(*request_, *config_));
+  for (char c : std::string("github")) {
+    ASSERT_TRUE(InsertKey(std::string(1, c), composer_.get()));
+  }
+  EXPECT_EQ(composer_->GetOutputMode(), transliteration::HIRAGANA);
+}
+
+TEST_F(ComposerTest, UserDefinedEnglishExceptionCustomRomanWinsByOptIn) {
+  config_->set_preedit_method(Config::ROMAN);
+  config_->set_auto_switch_composition_mode(false);
+  config_->set_enable_english_input_exceptions(true);
+  config_->set_shift_key_mode_switch(Config::OFF);
+  config_->set_custom_roman_table(
+      "th\tとは\t\tDisplayAmbiguousResult\nthu\tてゅ\n");
+  auto* rule = config_->add_english_input_exceptions();
+  rule->set_input("github");
+  rule->set_preferred("GitHub");
+  ASSERT_TRUE(table_->InitializeWithRequestAndConfig(*request_, *config_));
+  for (char c : std::string("github")) {
+    ASSERT_TRUE(InsertKey(std::string(1, c), composer_.get()));
+  }
+  EXPECT_EQ(composer_->GetStringForPreedit(), "github");
+  EXPECT_EQ(composer_->GetOutputMode(), transliteration::HALF_ASCII);
+
+  composer_->Reset();
+  composer_->SuppressLanguageAwareRawInput();
+  for (char c : std::string("github")) {
+    ASSERT_TRUE(InsertKey(std::string(1, c), composer_.get()));
+  }
+  EXPECT_EQ(composer_->GetOutputMode(), transliteration::HIRAGANA);
+}
+
+TEST_F(ComposerTest, UserDefinedCandidateOnlyDoesNotChangePreedit) {
+  config_->set_preedit_method(Config::ROMAN);
+  config_->set_auto_switch_composition_mode(false);
+  config_->set_enable_english_input_exceptions(true);
+  config_->set_shift_key_mode_switch(Config::OFF);
+  auto* rule = config_->add_english_input_exceptions();
+  rule->set_input("github");
+  rule->set_preferred("GitHub");
+  rule->set_behavior(Config::EnglishInputException::CANDIDATE_ONLY);
+  ASSERT_TRUE(table_->InitializeWithRequestAndConfig(*request_, *config_));
+  for (char c : std::string("github")) {
+    ASSERT_TRUE(InsertKey(std::string(1, c), composer_.get()));
+  }
+  EXPECT_EQ(composer_->GetOutputMode(), transliteration::HIRAGANA);
+}
+
+TEST_F(ComposerTest, CandidateOnlyOverridesLegacyGoogleSwitch) {
+  config_->set_preedit_method(Config::ROMAN);
+  config_->set_auto_switch_composition_mode(true);
+  config_->set_enable_english_input_exceptions(true);
+  config_->set_shift_key_mode_switch(Config::OFF);
+  auto* rule = config_->add_english_input_exceptions();
+  rule->set_input("google");
+  rule->set_preferred("Google");
+  rule->set_behavior(Config::EnglishInputException::CANDIDATE_ONLY);
+  ASSERT_TRUE(table_->InitializeWithRequestAndConfig(*request_, *config_));
+  for (char c : std::string("google")) {
+    ASSERT_TRUE(InsertKey(std::string(1, c), composer_.get()));
+  }
+  EXPECT_EQ(composer_->GetOutputMode(), transliteration::HIRAGANA);
+}
+
 TEST_F(ComposerTest, AutoSwitchCompositionModeDisabled) {
   config_->set_preedit_method(Config::ROMAN);
   config_->set_auto_switch_composition_mode(false);

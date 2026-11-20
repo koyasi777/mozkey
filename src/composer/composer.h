@@ -99,6 +99,10 @@ class ComposerData {
   // Returns a prediction query trimmed the tail alphabet characters.
   std::string GetQueryForPrediction() const;
 
+  // Returns unresolved trailing Roman input from this immutable snapshot.
+  // Independent of the pending-Roman display/dimming preference.
+  size_t GetPendingRomanInputLength() const;
+
   // Returns a expanded prediction query.
   std::pair<std::string, absl::btree_set<std::string>> GetQueriesForPrediction()
       const;
@@ -120,6 +124,8 @@ class ComposerData {
   // composed string.  For example, when [さ|sa][し|shi][み|mi] is the
   // composition, GetRawSubString(0, 2) returns "sashi".
   std::string GetRawSubString(size_t position, size_t size) const;
+
+  // True when the active Roman table agrees with default rules for this word.
 
   // Generate transliterations.
   void GetTransliterations(transliteration::Transliterations* t13ns) const;

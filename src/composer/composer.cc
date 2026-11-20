@@ -42,6 +42,7 @@
 #include "absl/container/btree_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
@@ -56,6 +57,7 @@
 #include "composer/composition.h"
 #include "composer/composition_input.h"
 #include "composer/key_event_util.h"
+#include "composer/english_input_exceptions.h"
 #include "composer/mode_switching_handler.h"
 #include "composer/table.h"
 #include "composer/transliterators.h"
@@ -490,6 +492,15 @@ std::string ComposerData::GetQueryForPrediction() const {
   return common::GetQueryForPrediction(composition_, input_mode_);
 }
 
+size_t ComposerData::GetPendingRomanInputLength() const {
+  if (position_ != composition_.GetLength() ||
+      input_mode_ == transliteration::HALF_ASCII ||
+      input_mode_ == transliteration::FULL_ASCII) {
+    return 0;
+  }
+  return composition_.GetTrailingPendingInputLength();
+}
+
 std::pair<std::string, absl::btree_set<std::string>>
 ComposerData::GetQueriesForPrediction() const {
   return common::GetQueriesForPrediction(composition_, input_mode_);
@@ -511,6 +522,8 @@ std::string ComposerData::GetRawSubString(const size_t position,
                                           const size_t size) const {
   return common::GetRawSubString(composition_, position, size);
 }
+
+
 
 void ComposerData::GetTransliterations(
     transliteration::Transliterations* t13ns) const {
@@ -1138,21 +1151,85 @@ bool Composer::EnableInsert() const {
 }
 
 void Composer::AutoSwitchMode() {
-  if (!config_->auto_switch_composition_mode()) {
+  // The legacy Mozc auto-switch and the user-defined exception dictionary
+  // are independent. The latter is opt-in and has no implicit built-in words.
+  if (!config_->auto_switch_composition_mode() &&
+      !config_->enable_english_input_exceptions()) {
     return;
   }
+  if (config_->preedit_method() != config::Config::ROMAN) return;
 
-  // AutoSwitchMode is only available on Roma input
-  if (config_->preedit_method() != config::Config::ROMAN) {
-    return;
-  }
-
-  // Key should be in half-width alphanumeric.
   const std::string key = composition_.GetStringWithTransliterator(
       GetTransliterator(transliteration::HALF_ASCII));
+  // An explicit candidate-only rule is authoritative even if the same key
+  // has a legacy Mozc auto-switch rule (for example, "google"). Unregistered
+  // words retain their original Mozc behavior.
+  if (config_->enable_english_input_exceptions() &&
+      request_->special_romanji_table() == commands::Request::DEFAULT_TABLE &&
+      GetInputFieldType() != commands::Context::PASSWORD &&
+      !suppress_language_aware_raw_input_ &&
+      input_mode_ == transliteration::HIRAGANA &&
+      position_ == composition_.GetLength()) {
+    const auto* explicit_rule = EnglishInputExceptions::Find(*config_, key);
+    if (explicit_rule != nullptr &&
+        explicit_rule->behavior() ==
+            EnglishInputExceptions::Entry::CANDIDATE_ONLY) {
+      return;
+    }
+  }
+  ModeSwitchingHandler::Rule mode_switching =
+      config_->auto_switch_composition_mode()
+          ? ModeSwitchingHandler::GetModeSwitchingRule(key)
+          : ModeSwitchingHandler::Rule{ModeSwitchingHandler::NO_CHANGE,
+                                       ModeSwitchingHandler::NO_CHANGE};
 
-  const ModeSwitchingHandler::Rule mode_switching =
-      ModeSwitchingHandler::GetModeSwitchingRule(key);
+  if (mode_switching.display_mode == ModeSwitchingHandler::NO_CHANGE &&
+      config_->enable_english_input_exceptions() &&
+      request_->special_romanji_table() == commands::Request::DEFAULT_TABLE &&
+      GetInputFieldType() != commands::Context::PASSWORD &&
+      !suppress_language_aware_raw_input_ &&
+      input_mode_ == transliteration::HIRAGANA &&
+      position_ == composition_.GetLength()) {
+    using Rules = EnglishInputExceptions;
+    const auto* exact = Rules::Find(*config_, key);
+    if (exact != nullptr && exact->behavior() == Rules::Entry::AUTO_ASCII) {
+      mode_switching = {ModeSwitchingHandler::PREFERRED_ALPHANUMERIC,
+                        ModeSwitchingHandler::REVERT_TO_PREVIOUS_MODE};
+    } else {
+      // A Japanese prefix must not be changed into raw ASCII. Apply the mode
+      // only to the matched English suffix; do not infer arbitrary substrings.
+      const size_t original_length = composition_.GetLength();
+      const std::string before = GetStringForPreedit();
+      const Rules::Index index(*config_);
+      for (const auto& entry : config_->english_input_exceptions()) {
+        if (!entry.enabled() || !Rules::IsValidEntry(entry) ||
+            entry.behavior() != Rules::Entry::AUTO_ASCII ||
+            key.size() <= entry.input().size() ||
+            key.compare(key.size() - entry.input().size(),
+                        entry.input().size(), entry.input()) != 0 ||
+            index.Find(entry.input()) != &entry) {
+          continue;
+        }
+        for (size_t start = 1; start < original_length; ++start) {
+          if (GetRawSubString(start, original_length - start) != entry.input()) {
+            continue;
+          }
+          std::string preceding;
+          Util::Utf8SubString(before, start - 1, 1, &preceding);
+          if (Util::GetScriptType(preceding) != Util::HIRAGANA &&
+              Util::GetScriptType(preceding) != Util::KATAKANA) {
+            continue;
+          }
+          // GetChunkAt(start) can resolve to the *previous* Japanese chunk.
+          composition_.SetTransliterator(
+              start + 1, original_length,
+              GetTransliterator(transliteration::HALF_ASCII));
+          position_ = composition_.GetLength();
+          return;
+        }
+      }
+    }
+  }
 
   // |display_mode| affects the existing composition the user typed.
   switch (mode_switching.display_mode) {

@@ -32,6 +32,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
+#include <set>
 #include <istream>
 #include <memory>
 #include <string>
@@ -299,6 +301,49 @@ bool MaybeMigrateMozkeyCustomKeymap(Config* config) {
 // product-default accessor so that a fresh profile, an older profile missing
 // newer fields, and "Reset to defaults" all resolve to the same values without
 // overwriting explicit user choices.
+// Reconcile only untouched system-managed rows. Custom rows always win.
+// This is deterministic and idempotent; the catalog is embedded and offline.
+void SyncEnglishPresetCatalog(Config* config) {
+  if (!config->auto_update_english_presets()) return;
+  using Entry = Config::EnglishInputException;
+  const auto& catalog = ConfigHandler::RecommendedEnglishInputExceptions();
+  std::map<std::string, const Entry*> official;
+  for (const auto& item : catalog) {
+    official.emplace(item.system_preset_id(), &item);
+  }
+  const std::set<std::string> suppressed(
+      config->suppressed_english_preset_ids().begin(),
+      config->suppressed_english_preset_ids().end());
+  std::set<std::string> custom_inputs;
+  for (const auto& rule : config->english_input_exceptions()) {
+    if (rule.system_preset_id().empty()) custom_inputs.insert(rule.input());
+  }
+  auto* entries = config->mutable_english_input_exceptions();
+  std::set<std::string> present;
+  for (int i = entries->size() - 1; i >= 0; --i) {
+    Entry* entry = entries->Mutable(i);
+    const std::string id = entry->system_preset_id();
+    if (id.empty()) continue;
+    const auto it = official.find(id);
+    if (it == official.end() || suppressed.count(id) != 0 ||
+        custom_inputs.count(it->second->input()) != 0 ||
+        !present.insert(id).second) {
+      entries->DeleteSubrange(i, 1);
+      continue;
+    }
+    // A managed row follows the packaged catalog's spelling and behavior.
+    // User edits are converted to custom rows in the UI before being saved.
+    *entry = *it->second;
+  }
+  for (const auto& preset : catalog) {
+    if (entries->size() >= 4096) break;
+    const std::string& id = preset.system_preset_id();
+    if (present.count(id) != 0 || suppressed.count(id) != 0 ||
+        custom_inputs.count(preset.input()) != 0) continue;
+    *entries->Add() = preset;
+  }
+}
+
 void ApplyMozkeyProductDefaults(Config* config) {
   if (!config->has_use_live_conversion()) {
     config->set_use_live_conversion(true);
@@ -384,6 +429,13 @@ void ApplyMozkeyProductDefaults(Config* config) {
     config->set_preedit_target_underline_color(0xc1a5ab);
   }
 #endif  // _WIN32
+  if (!config->has_enable_english_input_exceptions()) {
+    config->set_enable_english_input_exceptions(true);
+  }
+  if (!config->has_auto_update_english_presets()) {
+    config->set_auto_update_english_presets(true);
+  }
+  SyncEnglishPresetCatalog(config);
 }
 
 void AddCharacterFormRule(const absl::string_view group,
@@ -660,6 +712,35 @@ Config ConfigHandler::GetProductDefaultConfig() {
   Config config = DefaultConfig();
   ApplyMozkeyProductDefaults(&config);
   return config;
+}
+
+const std::vector<Config::EnglishInputException>&
+ConfigHandler::RecommendedEnglishInputExceptions() {
+  static const std::vector<Config::EnglishInputException> presets = [] {
+    struct Row {
+      const char* input;
+      const char* preferred;
+      bool automatic;
+    };
+    static constexpr Row kCatalog[] = {
+#include "config/english_preset_catalog.inc"
+    };
+    std::vector<Config::EnglishInputException> result;
+    result.reserve(sizeof(kCatalog) / sizeof(kCatalog[0]));
+    for (const auto& r : kCatalog) {
+      Config::EnglishInputException preset;
+      preset.set_input(r.input);
+      preset.set_preferred(r.preferred);
+      preset.set_behavior(r.automatic
+          ? Config::EnglishInputException::AUTO_ASCII
+          : Config::EnglishInputException::CANDIDATE_ONLY);
+      preset.set_enabled(true);
+      preset.set_system_preset_id(r.input);
+      result.push_back(std::move(preset));
+    }
+    return result;
+  }();
+  return presets;
 }
 
 std::shared_ptr<const Config> ConfigHandler::GetSharedDefaultConfig() {

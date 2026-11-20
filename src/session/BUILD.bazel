@@ -230,6 +230,7 @@ mozc_cc_library(
         "//base:clock",
         "//base:util",
         "//composer",
+        "//composer:english_input_exceptions",
         "//composer:key_event_util",
         "//composer:table",
         "//converter:converter_interface",

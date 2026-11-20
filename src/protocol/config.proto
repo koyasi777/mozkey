@@ -111,6 +111,27 @@ message Config {
     KANA = 1;
   }
 
+  // Explicit English spelling exceptions. The bundled catalog is opt-in per
+  // word via AUTO_ASCII / CANDIDATE_ONLY; the product enables the feature
+  // for both new and existing profiles when unset. Explicit OFF is kept.
+  message EnglishInputException {
+    enum Behavior {
+      AUTO_ASCII = 0;
+      CANDIDATE_ONLY = 1;
+    }
+    optional string input = 1;
+    optional string preferred = 2;
+    optional Behavior behavior = 3 [default = AUTO_ASCII];
+    optional bool enabled = 4 [default = true];
+    // Immutable catalog identifier for untouched Mozkey-managed entries.
+    // UI edits strip this value and record a suppression tombstone.
+    optional string system_preset_id = 5;
+  }
+  optional bool enable_english_input_exceptions = 1060 [default = false];
+  repeated EnglishInputException english_input_exceptions = 1061;
+  optional bool auto_update_english_presets = 1062 [default = true];
+  repeated string suppressed_english_preset_ids = 1063;
+
   // Roman/Kana
   optional PreeditMethod preedit_method = 40 [default = ROMAN];
 

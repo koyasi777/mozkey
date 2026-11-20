@@ -31,6 +31,7 @@
 #include "gui/config_dialog/config_dialog.h"
 
 #include <QAbstractItemView>
+#include <QAction>
 #include <QAbstractScrollArea>
 #include <QAbstractSpinBox>
 #include <QByteArray>
@@ -38,10 +39,17 @@
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QSaveFile>
 #include <QFileDialog>
 #include <QFontDatabase>
 #include <QFont>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QFrame>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -50,6 +58,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLocale>
 #include <QPainter>
@@ -58,6 +67,7 @@
 #include <QLinearGradient>
 #include <QFontMetrics>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -72,16 +82,19 @@
 #include <QPlainTextEdit>
 #include <QVBoxLayout>
 #include <QWheelEvent>
+#include <QVariant>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <istream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
+#include <utility>
 
 #ifdef _WIN32
 #include <msctf.h>
@@ -98,6 +111,7 @@
 #include "absl/strings/string_view.h"
 #include "base/config_file_stream.h"
 #include "client/client.h"
+#include "composer/english_input_exceptions.h"
 #include "config/config_handler.h"
 #include "gui/base/util.h"
 #include "gui/config_dialog/keymap_editor.h"
@@ -604,6 +618,10 @@ ConfigDialog::ConfigDialog()
                    SLOT(ResetToDefaults()));
   QObject::connect(editRomanTableButton, SIGNAL(clicked()), this,
                    SLOT(EditRomanTable()));
+  QObject::connect(editEnglishExceptionsButton, SIGNAL(clicked()), this,
+                   SLOT(EditEnglishInputExceptions()));
+  QObject::connect(enableEnglishExceptionsCheckBox, SIGNAL(toggled(bool)),
+                   this, SLOT(EnableApplyButton()));
   QObject::connect(inputModeComboBox, SIGNAL(currentIndexChanged(int)), this,
                    SLOT(SelectInputModeSetting(int)));
   QObject::connect(dimPendingRomanInputCheckBox, SIGNAL(toggled(bool)),
@@ -6095,6 +6113,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
 #endif  // _WIN32
 }
 
+
 void ConfigDialog::ConvertFromProto(const config::Config &config) {
   base_config_ = config;
   // tab1
@@ -6133,6 +6152,12 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
 
   // tab3
   SET_CHECKBOX(autoSwitchCompositionMode, auto_switch_composition_mode);
+  SET_CHECKBOX(enableEnglishExceptionsCheckBox,
+               enable_english_input_exceptions);
+  english_input_exceptions_.clear();
+  for (const auto& entry : config.english_input_exceptions()) {
+    english_input_exceptions_.push_back(entry);
+  }
 
   SET_CHECKBOX(liveConversionCheckBox, use_live_conversion);
   SET_CHECKBOX(showCandidateWindowOnInitialConversionCheckBox,
@@ -6538,6 +6563,12 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
 
   // tab3
   GET_CHECKBOX(autoSwitchCompositionMode, auto_switch_composition_mode);
+  GET_CHECKBOX(enableEnglishExceptionsCheckBox,
+               enable_english_input_exceptions);
+  config->clear_english_input_exceptions();
+  for (const auto& entry : english_input_exceptions_) {
+    *config->add_english_input_exceptions() = entry;
+  }
 
   GET_CHECKBOX(liveConversionCheckBox, use_live_conversion);
   GET_CHECKBOX(showCandidateWindowOnInitialConversionCheckBox,
@@ -7926,6 +7957,924 @@ void ConfigDialog::EditKeymap() {
     keymapSettingComboBox->setCurrentIndex(0);
     EnableApplyButton();
   }
+}
+
+namespace {
+using EnglishEntry = config::Config::EnglishInputException;
+using EnglishRules = composer::EnglishInputExceptions;
+
+// The settings table is hosted by its own QDialog, outside the parent
+// ConfigDialog's event filter.  Leave wheel input to the table's scroll area
+// instead of silently switching AUTO_ASCII / CANDIDATE_ONLY.
+class EnglishBehaviorComboBox final : public QComboBox {
+ public:
+  using QComboBox::QComboBox;
+
+ protected:
+  void wheelEvent(QWheelEvent* event) override { event->ignore(); }
+};
+
+// Qt::UserRole is the currently managed ID (empty for a custom row).  Keep
+// the original system specification separately so that reverting an edit
+// within this dialog can restore the system-managed state without ever
+// adopting an unrelated custom/imported row automatically.
+constexpr int kEnglishOriginalPresetRole = Qt::UserRole + 1;
+
+bool SameEnglishRuleContent(const EnglishEntry& a, const EnglishEntry& b) {
+  return a.input() == b.input() && a.preferred() == b.preferred() &&
+         a.behavior() == b.behavior() && a.enabled() == b.enabled();
+}
+
+void ShowEnglishExceptionsInfo(QWidget* parent) {
+  QDialog info(parent);
+  info.setWindowTitle(QString::fromUtf8("英字表記辞書について"));
+  info.resize(780, 610);
+  auto* layout = new QVBoxLayout(&info);
+  auto* guidance = new QLabel(QString::fromUtf8(
+      "Mozkey の英字表記辞書は、ローマ字入力中の特定の打鍵列を、"
+      "ユーザーが指定した英字表記に結びつける機能です。\n\n"
+      "英語と日本語のローマ字入力を完全に自動判別する機能ではありません。"
+      "人名、一般的な日本語、独自のローマ字テーブルとの衝突もあり得ます。\n\n"
+      "［自動英字化］は指定表記を優先し、［候補のみ］は候補として提示します。"
+      "短い略語や日本語の途中入力になり得る単語では［候補のみ］が無難です。\n\n"
+      "推奨語彙の自動更新を OFF にすると、バージョン更新時に管理語彙は"
+      "自動で増減しません。編集・削除したシステム語彙も勝手に元へ戻しません。\n\n"
+      "英語表記は多く登録すればよいわけではありません。"
+      "日本語のローマ字入力や独自の入力ルールと衝突すると、誤変換が増える"
+      "可能性があります。普段よく使う分野の単語を中心に登録してください。\n\n"
+      "TSV は UTF-8、4列の input / preferred / mode / enabled。"
+      "JSON は schema_version=1 と rules 配列を指定します。"
+      "インポートした規則はすべてカスタム語として管理します。"), &info);
+  guidance->setWordWrap(true);
+  guidance->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  layout->addWidget(guidance);
+  auto* ai_intro = new QLabel(QString::fromUtf8(
+      "自分がよく使う分野の英語表記をまとめて登録したい場合は、"
+      "AI に辞書ファイルを作らせることもできます。"
+      "次のプロンプトをコピーして対象分野を変更し、生成された規則を"
+      "確認してからインポートしてください。"), &info);
+  ai_intro->setWordWrap(true);
+  layout->addWidget(ai_intro);
+  auto* prompt = new QPlainTextEdit(&info);
+  prompt->setReadOnly(true);
+  prompt->setPlainText(QString::fromUtf8(R"MOZKEYAI(
+Mozkey の英字表記辞書にインポートできる TSV ファイルを作成してください。
+日本語のローマ字入力と英語表記の完全な自動判定はできません。
+短い略語・日本語入力の途中と衝突する語は必ず candidate としてください。
+UTF-8 TSV、先頭行は次の4列を実際のタブで区切ってください。
+input	preferred	mode	enabled
+- input: 小文字 ASCII 英字 a-z、2～64文字。重複禁止。
+- preferred: 空白を含まない印字可能 ASCII、1～128文字。
+- mode: auto または candidate。迷えば candidate。
+- enabled: true または false。
+- 入力と表記は正式な綴りを確認し、捏造しない。
+- Markdown のコードブロックや説明は付けず TSV のみを出力。
+- 4096件以下。
+例（別々の行です）:
+github	GitHub	auto	true
+ios	iOS	candidate	true
+対象分野: 【普段よく使う分野に書き換える。例：医学、統計、ソフトウェア開発】
+必要な語だけを30～100語程度。数合わせで増やさない。
+日本語のローマ字入力との衝突が大きい語は登録せず、迷う語は candidate にする。
+)MOZKEYAI"));
+  // Convert the human-readable escape sequences in the example into tabs.
+  prompt->setPlainText(prompt->toPlainText().replace(
+      QStringLiteral("\\t"), QStringLiteral("\t")));
+  layout->addWidget(prompt);
+  auto* controls = new QDialogButtonBox(QDialogButtonBox::Close, &info);
+  auto* copy_prompt = controls->addButton(
+      QString::fromUtf8("AI用プロンプトをコピー"), QDialogButtonBox::ActionRole);
+  QObject::connect(copy_prompt, &QPushButton::clicked, &info,
+                   [prompt]() {
+    if (auto* clipboard = QGuiApplication::clipboard()) {
+      clipboard->setText(prompt->toPlainText());
+    }
+  });
+  QObject::connect(controls, &QDialogButtonBox::rejected,
+                   &info, &QDialog::reject);
+  layout->addWidget(controls);
+  info.exec();
+}
+
+// Conservative, editable presets for new profiles and explicit import into
+// existing profiles. Avoid common romaji syllables and sentence-like strings.
+
+void UpdateEnglishRowManagement(QTableWidget* table, int row) {
+  if (row < 0 || row >= table->rowCount()) return;
+  auto* input = table->item(row, 0);
+  auto* origin = table->item(row, 4);
+  if (!input || !origin) return;
+  const QVariantMap original =
+      input->data(kEnglishOriginalPresetRole).toMap();
+  const QString original_id = original.value(QStringLiteral("id")).toString();
+  if (original_id.isEmpty()) return;  // Never adopt ordinary custom rows.
+  const auto* preferred = table->item(row, 1);
+  const auto* enabled = table->item(row, 3);
+  const auto* mode = qobject_cast<QComboBox*>(table->cellWidget(row, 2));
+  if (!preferred || !enabled || !mode) return;
+
+  // A user may edit a field and then undo it, even after a table sort.
+  const bool matches_original =
+      input->text() == original.value(QStringLiteral("input")).toString() &&
+      preferred->text() == original.value(QStringLiteral("preferred")).toString() &&
+      mode->currentIndex() == original.value(QStringLiteral("mode")).toInt() &&
+      (enabled->checkState() == Qt::Checked) ==
+          original.value(QStringLiteral("enabled")).toBool();
+  bool matches_catalog = false;
+  for (const auto& preset :
+       config::ConfigHandler::RecommendedEnglishInputExceptions()) {
+    if (preset.system_preset_id() != original_id.toStdString()) continue;
+    matches_catalog =
+        input->text().toStdString() == preset.input() &&
+        preferred->text().toStdString() == preset.preferred() &&
+        (mode->currentIndex() == 1) ==
+            (preset.behavior() == EnglishEntry::CANDIDATE_ONLY) &&
+        (enabled->checkState() == Qt::Checked) == preset.enabled();
+    break;
+  }
+  const bool managed = matches_original || matches_catalog;
+  const QSignalBlocker blocker(table);
+  input->setData(Qt::UserRole, managed ? original_id : QString());
+  origin->setText(managed ? QString::fromUtf8("システム")
+                          : QString::fromUtf8("カスタム"));
+}
+
+void InsertEnglishExceptionRow(QTableWidget* table, const EnglishEntry& rule,
+                               int row) {
+  table->insertRow(row);
+  auto* input_item = new QTableWidgetItem(QString::fromStdString(rule.input()));
+  input_item->setData(Qt::UserRole,
+                      QString::fromStdString(rule.system_preset_id()));
+  if (!rule.system_preset_id().empty()) {
+    QVariantMap original;
+    original.insert(QStringLiteral("id"),
+                    QString::fromStdString(rule.system_preset_id()));
+    original.insert(QStringLiteral("input"),
+                    QString::fromStdString(rule.input()));
+    original.insert(QStringLiteral("preferred"),
+                    QString::fromStdString(rule.preferred()));
+    original.insert(QStringLiteral("mode"),
+                    rule.behavior() == EnglishEntry::CANDIDATE_ONLY ? 1 : 0);
+    original.insert(QStringLiteral("enabled"), rule.enabled());
+    input_item->setData(kEnglishOriginalPresetRole, original);
+  }
+  table->setItem(row, 0, input_item);
+  table->setItem(row, 1,
+                 new QTableWidgetItem(QString::fromStdString(rule.preferred())));
+  auto* mode = new EnglishBehaviorComboBox(table);
+  mode->addItem(QString::fromUtf8("自動英字化"));
+  mode->addItem(QString::fromUtf8("候補のみ"));
+  mode->setCurrentIndex(rule.behavior() == EnglishEntry::CANDIDATE_ONLY ? 1 : 0);
+  table->setCellWidget(row, 2, mode);
+  QObject::connect(mode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                   table, [table, mode](int) {
+    for (int i = 0; i < table->rowCount(); ++i) {
+      if (table->cellWidget(i, 2) == mode) {
+        UpdateEnglishRowManagement(table, i);
+        break;
+      }
+    }
+  });
+  auto* enabled = new QTableWidgetItem();
+  enabled->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable |
+                    Qt::ItemIsUserCheckable);
+  enabled->setCheckState(rule.enabled() ? Qt::Checked : Qt::Unchecked);
+  table->setItem(row, 3, enabled);
+  auto* origin = new QTableWidgetItem(
+      QString::fromUtf8(rule.has_system_preset_id() &&
+                                !rule.system_preset_id().empty()
+                            ? "システム" : "カスタム"));
+  origin->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+  table->setItem(row, 4, origin);
+}
+
+void AddEnglishExceptionRow(QTableWidget* table, const EnglishEntry& rule) {
+  InsertEnglishExceptionRow(table, rule, table->rowCount());
+}
+
+// Keep incomplete edits intact when sorting the view. Validation belongs to
+// ReadEnglishExceptionRows, at import/export and dialog acceptance only.
+struct EnglishTableRowState {
+  QString input;
+  QString preferred;
+  int behavior = 0;
+  bool enabled = true;
+  QString system_preset_id;
+  QVariantMap original_system_preset;
+};
+
+std::vector<EnglishTableRowState> CaptureEnglishTableRows(
+    QTableWidget* table) {
+  std::vector<EnglishTableRowState> rows;
+  rows.reserve(table->rowCount());
+  for (int row = 0; row < table->rowCount(); ++row) {
+    const auto* input = table->item(row, 0);
+    const auto* preferred = table->item(row, 1);
+    const auto* enabled = table->item(row, 3);
+    auto* mode = qobject_cast<QComboBox*>(table->cellWidget(row, 2));
+    EnglishTableRowState state;
+    if (input) {
+      state.input = input->text();
+      state.system_preset_id = input->data(Qt::UserRole).toString();
+      state.original_system_preset =
+          input->data(kEnglishOriginalPresetRole).toMap();
+    }
+    if (preferred) state.preferred = preferred->text();
+    if (mode) state.behavior = mode->currentIndex();
+    if (enabled) state.enabled = enabled->checkState() == Qt::Checked;
+    rows.push_back(std::move(state));
+  }
+  return rows;
+}
+
+void RestoreEnglishTableRows(QTableWidget* table,
+                             const std::vector<EnglishTableRowState>& rows) {
+  QSignalBlocker blocker(table);
+  table->setRowCount(0);
+  for (const auto& state : rows) {
+    EnglishEntry rule;
+    rule.set_input(state.input.toStdString());
+    rule.set_preferred(state.preferred.toStdString());
+    rule.set_behavior(state.behavior == 1 ? EnglishEntry::CANDIDATE_ONLY
+                                         : EnglishEntry::AUTO_ASCII);
+    rule.set_enabled(state.enabled);
+    if (!state.system_preset_id.isEmpty()) {
+      rule.set_system_preset_id(state.system_preset_id.toStdString());
+    }
+    AddEnglishExceptionRow(table, rule);
+    if (auto* input = table->item(table->rowCount() - 1, 0)) {
+      input->setData(kEnglishOriginalPresetRole,
+                     state.original_system_preset);
+    }
+  }
+}
+
+std::vector<int> SelectedVisibleEnglishRows(QTableWidget* table) {
+  std::vector<int> rows;
+  for (const QModelIndex& index : table->selectionModel()->selectedRows()) {
+    if (!table->isRowHidden(index.row())) rows.push_back(index.row());
+  }
+  std::sort(rows.rbegin(), rows.rend());
+  rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+  return rows;
+}
+
+bool ReadEnglishExceptionRows(QTableWidget* table,
+                              std::vector<EnglishEntry>* out,
+                              QString* error) {
+  out->clear();
+  std::map<std::string, int> seen;
+  if (table->rowCount() > 4096) {
+    *error = QString::fromUtf8("登録数の上限は4096件です。");
+    return false;
+  }
+  for (int row = 0; row < table->rowCount(); ++row) {
+    const auto* input = table->item(row, 0);
+    const auto* preferred = table->item(row, 1);
+    const auto* enabled = table->item(row, 3);
+    auto* mode = qobject_cast<QComboBox*>(table->cellWidget(row, 2));
+    if (!input || !preferred || !enabled || !mode) {
+      *error = QString::fromUtf8("行%1の内容が不完全です。").arg(row + 1);
+      return false;
+    }
+    EnglishEntry rule;
+    rule.set_input(input->text().trimmed().toStdString());
+    rule.set_preferred(preferred->text().trimmed().toStdString());
+    rule.set_behavior(mode->currentIndex() == 1
+                          ? EnglishEntry::CANDIDATE_ONLY
+                          : EnglishEntry::AUTO_ASCII);
+    rule.set_enabled(enabled->checkState() == Qt::Checked);
+    const QString preset_id = input->data(Qt::UserRole).toString();
+    if (!preset_id.isEmpty()) {
+      rule.set_system_preset_id(preset_id.toStdString());
+    }
+    if (!EnglishRules::IsValidEntry(rule)) {
+      *error = QString::fromUtf8(
+          "行%1が無効です。入力は小文字a-zの2～64文字、表記は空白を含まないASCIIの1～128文字です。")
+                   .arg(row + 1);
+      return false;
+    }
+    if (!seen.emplace(rule.input(), row).second) {
+      *error = QString::fromUtf8("入力「%1」が重複しています。")
+                   .arg(QString::fromStdString(rule.input()));
+      return false;
+    }
+    out->push_back(std::move(rule));
+  }
+  return true;
+}
+
+bool LoadEnglishExceptionFile(const QByteArray& bytes, bool json,
+                              std::vector<EnglishEntry>* out,
+                              QString* error) {
+  out->clear();
+  if (bytes.size() > 2 * 1024 * 1024) {
+    *error = QString::fromUtf8("ファイルが2MiBを超えています。");
+    return false;
+  }
+  if (json) {
+    QJsonParseError parse_error;
+    const QJsonDocument doc = QJsonDocument::fromJson(bytes, &parse_error);
+    if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
+      *error = QString::fromUtf8("JSON形式に誤りがあります。");
+      return false;
+    }
+    const QJsonObject root = doc.object();
+    if (root.value(QStringLiteral("schema_version")).toInt(-1) != 1 ||
+        !root.value(QStringLiteral("rules")).isArray()) {
+      *error = QString::fromUtf8("未対応のJSONスキーマです。");
+      return false;
+    }
+    const QJsonArray rules = root.value(QStringLiteral("rules")).toArray();
+    for (const QJsonValue value : rules) {
+      if (!value.isObject()) {
+        *error = QString::fromUtf8("JSONのrulesにはオブジェクトのみ指定できます。");
+        return false;
+      }
+      const QJsonObject obj = value.toObject();
+      if (!obj.value(QStringLiteral("input")).isString() ||
+          !obj.value(QStringLiteral("preferred")).isString() ||
+          !obj.value(QStringLiteral("mode")).isString() ||
+          !obj.value(QStringLiteral("enabled")).isBool()) {
+        *error = QString::fromUtf8("JSONに必須項目がありません。");
+        return false;
+      }
+      const QString mode = obj.value(QStringLiteral("mode")).toString();
+      if (mode != QStringLiteral("auto") &&
+          mode != QStringLiteral("candidate")) {
+        *error = QString::fromUtf8("不明な動作モードです。");
+        return false;
+      }
+      EnglishEntry rule;
+      rule.set_input(obj.value(QStringLiteral("input")).toString().toStdString());
+      rule.set_preferred(obj.value(QStringLiteral("preferred")).toString().toStdString());
+      rule.set_behavior(mode == QStringLiteral("candidate")
+                            ? EnglishEntry::CANDIDATE_ONLY
+                            : EnglishEntry::AUTO_ASCII);
+      rule.set_enabled(obj.value(QStringLiteral("enabled")).toBool());
+      out->push_back(std::move(rule));
+    }
+  } else {
+    QString text = QString::fromUtf8(bytes);
+    if (text.startsWith(QChar(0xfeff))) text.remove(0, 1);
+    const QStringList lines = text.split(QChar('\n'));
+    if (lines.isEmpty() || lines.first().trimmed() !=
+          QStringLiteral("input\tpreferred\tmode\tenabled")) {
+      *error = QString::fromUtf8("TSVの先頭行は input / preferred / mode / enabled です。");
+      return false;
+    }
+    for (int i = 1; i < lines.size(); ++i) {
+      const QString line = lines.at(i).endsWith(QChar('\r'))
+                               ? lines.at(i).left(lines.at(i).size() - 1)
+                               : lines.at(i);
+      if (line.isEmpty()) continue;
+      const QStringList fields = line.split(QChar('\t'));
+      if (fields.size() != 4 ||
+          (fields[2] != QStringLiteral("auto") &&
+           fields[2] != QStringLiteral("candidate")) ||
+          (fields[3] != QStringLiteral("true") &&
+           fields[3] != QStringLiteral("false"))) {
+        *error = QString::fromUtf8("TSVの%1行目が不正です。").arg(i + 1);
+        return false;
+      }
+      EnglishEntry rule;
+      rule.set_input(fields[0].toStdString());
+      rule.set_preferred(fields[1].toStdString());
+      rule.set_behavior(fields[2] == QStringLiteral("auto")
+                            ? EnglishEntry::AUTO_ASCII
+                            : EnglishEntry::CANDIDATE_ONLY);
+      rule.set_enabled(fields[3] == QStringLiteral("true"));
+      out->push_back(std::move(rule));
+    }
+  }
+  std::map<std::string, bool> seen;
+  if (out->size() > 4096) {
+    *error = QString::fromUtf8("登録数の上限は4096件です。");
+    return false;
+  }
+  for (const auto& rule : *out) {
+    if (!EnglishRules::IsValidEntry(rule) ||
+        !seen.emplace(rule.input(), true).second) {
+      *error = QString::fromUtf8("無効または重複した登録があります: %1")
+                   .arg(QString::fromStdString(rule.input()));
+      return false;
+    }
+  }
+  return true;
+}
+
+QByteArray ExportEnglishExceptionFile(const std::vector<EnglishEntry>& rows,
+                                      bool json) {
+  if (json) {
+    QJsonArray array;
+    for (const auto& rule : rows) {
+      QJsonObject item;
+      item.insert(QStringLiteral("input"),
+                  QString::fromStdString(rule.input()));
+      item.insert(QStringLiteral("preferred"),
+                  QString::fromStdString(rule.preferred()));
+      item.insert(QStringLiteral("mode"),
+                  rule.behavior() == EnglishEntry::CANDIDATE_ONLY
+                      ? QStringLiteral("candidate") : QStringLiteral("auto"));
+      item.insert(QStringLiteral("enabled"), rule.enabled());
+      array.append(item);
+    }
+    QJsonObject root;
+    root.insert(QStringLiteral("schema_version"), 1);
+    root.insert(QStringLiteral("rules"), array);
+    return QJsonDocument(root).toJson(QJsonDocument::Indented);
+  }
+  QByteArray bytes("input\tpreferred\tmode\tenabled\n");
+  for (const auto& rule : rows) {
+    bytes.append(QByteArray::fromStdString(rule.input()) + '\t' +
+                 QByteArray::fromStdString(rule.preferred()) + '\t' +
+                 (rule.behavior() == EnglishEntry::CANDIDATE_ONLY
+                      ? "candidate" : "auto") + '\t' +
+                 (rule.enabled() ? "true" : "false") + '\n');
+  }
+  return bytes;
+}
+}  // namespace
+
+void ConfigDialog::EditEnglishInputExceptions() {
+  QDialog dialog(this);
+  dialog.setWindowTitle(QString::fromUtf8("英字表記辞書の管理"));
+  dialog.resize(880, 550);
+  auto* layout = new QVBoxLayout(&dialog);
+  auto* explanation = new QLabel(
+      QString::fromUtf8("登録した小文字の打鍵列に対して優先表記を指定します。"
+                        "新規追加は［自動英字化］です。"
+                        "後続の英字で別の単語になる場合は［候補のみ］も選べます。"
+                        "Ctrl / Shift で複数行選択、列見出しで並び替えができます。"),
+      &dialog);
+  explanation->setWordWrap(true);
+  layout->addWidget(explanation);
+  auto* help_row = new QHBoxLayout();
+  auto* save_hint = new QLabel(
+      QString::fromUtf8("設定を保存するには親画面で［適用］を押してください。"),
+      &dialog);
+  help_row->addWidget(save_hint, 1);
+  auto* details = new QPushButton(QString::fromUtf8("詳しく"), &dialog);
+  help_row->addWidget(details);
+  layout->addLayout(help_row);
+  QObject::connect(details, &QPushButton::clicked, &dialog,
+                   [&dialog]() { ShowEnglishExceptionsInfo(&dialog); });
+  auto* table = new QTableWidget(0, 5, &dialog);
+  table->setHorizontalHeaderLabels({QString::fromUtf8("入力"),
+                                    QString::fromUtf8("優先表記"),
+                                    QString::fromUtf8("動作"),
+                                    QString::fromUtf8("有効"),
+                                    QString::fromUtf8("管理区分")});
+  table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+  table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  table->setSelectionMode(QAbstractItemView::ExtendedSelection);
+  table->setContextMenuPolicy(Qt::CustomContextMenu);
+  for (const auto& entry : english_input_exceptions_) {
+    AddEnglishExceptionRow(table, entry);
+  }
+  auto* search_row = new QHBoxLayout();
+  auto* search = new QLineEdit(&dialog);
+  search->setPlaceholderText(
+      QString::fromUtf8("入力・優先表記を検索（大文字小文字を区別しません）"));
+  search->setClearButtonEnabled(true);
+  search_row->addWidget(search);
+  auto* search_count = new QLabel(&dialog);
+  search_row->addWidget(search_count);
+  layout->addLayout(search_row);
+  layout->addWidget(table);
+  auto* auto_update = new QCheckBox(
+      QString::fromUtf8("推奨語彙をバージョン更新時に自動更新する"), &dialog);
+  auto_update->setChecked(base_config_.auto_update_english_presets());
+  auto_update->setToolTip(QString::fromUtf8(
+      "システム管理行のみを更新します。自分で変更・削除した規則は復元しません。"));
+  layout->addWidget(auto_update);
+  auto* buttons = new QHBoxLayout();
+  auto* add = new QPushButton(QString::fromUtf8("追加"), &dialog);
+  auto* recommended = new QPushButton(
+      QString::fromUtf8("推奨語彙を追加"), &dialog);
+  auto* reset_system = new QPushButton(
+      QString::fromUtf8("推奨語彙を初期状態に戻す"), &dialog);
+  auto* reset_all = new QPushButton(
+      QString::fromUtf8("英字表記辞書を完全に初期化"), &dialog);
+  auto* remove = new QPushButton(QString::fromUtf8("選択行を削除"), &dialog);
+  remove->setToolTip(QString::fromUtf8(
+      "Ctrl / Shift で複数行を選択できます。Ctrl+A で全行選択できます。"));
+  auto* import_button = new QPushButton(QString::fromUtf8("インポート"), &dialog);
+  auto* export_button = new QPushButton(QString::fromUtf8("エクスポート"), &dialog);
+  for (auto* button : {add, recommended, remove, import_button,
+                       export_button}) {
+    buttons->addWidget(button);
+  }
+  layout->addLayout(buttons);
+  auto* reset_row = new QHBoxLayout();
+  reset_row->addWidget(reset_system);
+  reset_row->addWidget(reset_all);
+  reset_row->addStretch();
+  layout->addLayout(reset_row);
+  bool fully_reset = false;
+  bool reset_presets = false;
+  auto* confirm = new QDialogButtonBox(QDialogButtonBox::Ok |
+                                        QDialogButtonBox::Cancel, &dialog);
+  layout->addWidget(confirm);
+
+  // Search only hides rows. It never removes them from export or saving.
+  const auto refresh_search = [table, search, search_count]() {
+    const QString query = search->text().trimmed();
+    int visible = 0;
+    for (int row = 0; row < table->rowCount(); ++row) {
+      const auto* input = table->item(row, 0);
+      const auto* preferred = table->item(row, 1);
+      const bool match = query.isEmpty() ||
+          (input && input->text().contains(query, Qt::CaseInsensitive)) ||
+          (preferred &&
+           preferred->text().contains(query, Qt::CaseInsensitive));
+      table->setRowHidden(row, !match);
+      if (match) ++visible;
+    }
+    search_count->setText(QString::fromUtf8("%1 / %2 件")
+                              .arg(visible).arg(table->rowCount()));
+  };
+  QObject::connect(search, &QLineEdit::textChanged, &dialog,
+                   [table, refresh_search](const QString&) {
+    table->clearSelection();
+    refresh_search();
+  });
+  QObject::connect(table, &QTableWidget::itemChanged, &dialog,
+                   [table, refresh_search](QTableWidgetItem* changed) {
+    if (changed && changed->column() != 4) {
+      UpdateEnglishRowManagement(table, changed->row());
+    }
+    refresh_search();
+  });
+
+  // Sort by clicking any column heading. Snapshot and recreate complete rows
+  // so embedded mode combo boxes remain paired with their text/checkbox data.
+  table->horizontalHeader()->setSectionsClickable(true);
+  table->horizontalHeader()->setSortIndicatorShown(true);
+  table->horizontalHeader()->setSortIndicator(-1, Qt::AscendingOrder);
+  int sorted_column = -1;
+  Qt::SortOrder sorted_order = Qt::AscendingOrder;
+  QObject::connect(table->horizontalHeader(), &QHeaderView::sectionClicked,
+                   &dialog, [table, refresh_search, &sorted_column,
+                             &sorted_order](int column) {
+    if (column < 0 || column > 4) return;
+    if (sorted_column == column) {
+      sorted_order = sorted_order == Qt::AscendingOrder
+                         ? Qt::DescendingOrder : Qt::AscendingOrder;
+    } else {
+      sorted_order = Qt::AscendingOrder;
+    }
+    sorted_column = column;
+    auto rows = CaptureEnglishTableRows(table);
+    std::stable_sort(rows.begin(), rows.end(),
+                     [column, &sorted_order](const EnglishTableRowState& a,
+                                             const EnglishTableRowState& b) {
+      int result = 0;
+      switch (column) {
+        case 0:
+          result = QString::compare(a.input, b.input, Qt::CaseInsensitive);
+          break;
+        case 1:
+          result = QString::compare(a.preferred, b.preferred,
+                                    Qt::CaseInsensitive);
+          break;
+        case 2:
+          result = a.behavior - b.behavior;
+          break;
+        case 3:
+          result = static_cast<int>(a.enabled) -
+                   static_cast<int>(b.enabled);
+          break;
+        default:
+          result = QString::compare(
+              a.system_preset_id.isEmpty() ? QStringLiteral("カスタム")
+                                            : QStringLiteral("システム"),
+              b.system_preset_id.isEmpty() ? QStringLiteral("カスタム")
+                                            : QStringLiteral("システム"));
+          break;
+      }
+      return sorted_order == Qt::AscendingOrder ? result < 0 : result > 0;
+    });
+    RestoreEnglishTableRows(table, rows);
+    table->horizontalHeader()->setSortIndicator(column, sorted_order);
+    refresh_search();
+  });
+
+  const auto insert_row = [table, search, refresh_search,
+                           &sorted_column, &dialog](int at) {
+    if (table->rowCount() >= 4096) {
+      QMessageBox::warning(&dialog, dialog.windowTitle(),
+                           QString::fromUtf8("登録数の上限は4096件です。"));
+      return;
+    }
+    EnglishEntry row;
+    row.set_input("example");
+    row.set_preferred("Example");
+    row.set_behavior(EnglishEntry::AUTO_ASCII);
+    InsertEnglishExceptionRow(table, row, at);
+    // Insertions at an arbitrary position invalidate the displayed sort.
+    sorted_column = -1;
+    table->horizontalHeader()->setSortIndicator(-1, Qt::AscendingOrder);
+    if (!search->text().isEmpty()) search->clear();
+    refresh_search();
+    table->setCurrentCell(at, 0);
+    table->editItem(table->item(at, 0));
+  };
+  QObject::connect(add, &QPushButton::clicked, &dialog,
+                   [table, insert_row]() { insert_row(table->rowCount()); });
+  QObject::connect(recommended, &QPushButton::clicked, &dialog,
+                   [table, search, refresh_search, &dialog]() {
+    // Do not replace user-defined spellings, modes, or disabled rows.
+    // Commit the additions to the outer dialog only after its OK button.
+    std::vector<EnglishEntry> existing;
+    QString error;
+    if (!ReadEnglishExceptionRows(table, &existing, &error)) {
+      QMessageBox::warning(&dialog, dialog.windowTitle(), error);
+      return;
+    }
+    int appended = 0;
+    for (const auto& preset : config::ConfigHandler::RecommendedEnglishInputExceptions()) {
+      if (std::any_of(existing.begin(), existing.end(),
+                      [&preset](const EnglishEntry& old) {
+                        return old.input() == preset.input();
+                      })) {
+        continue;
+      }
+      if (table->rowCount() >= 4096) break;
+      AddEnglishExceptionRow(table, preset);
+      existing.push_back(preset);
+      ++appended;
+    }
+    if (!search->text().isEmpty()) search->clear();
+    refresh_search();
+    QMessageBox::information(&dialog, dialog.windowTitle(),
+                             QString::fromUtf8("推奨語彙を%1件追加しました。")
+                                 .arg(appended));
+  });
+  // A reset is intentionally explicit; the outer dialog's Apply button is
+  // still required before any configuration is persisted.
+  const auto replace_rows = [table, search, refresh_search](
+      const std::vector<EnglishEntry>& rows) {
+    const QSignalBlocker blocker(table);
+    table->setRowCount(0);
+    for (const auto& row : rows) AddEnglishExceptionRow(table, row);
+    search->clear();
+    refresh_search();
+  };
+  QObject::connect(reset_system, &QPushButton::clicked, &dialog,
+                   [table, replace_rows, &dialog, &reset_presets]() {
+    if (QMessageBox::question(&dialog, dialog.windowTitle(),
+        QString::fromUtf8("システム推奨語彙を現在の標準状態に戻します。"
+                          "カスタム行は維持します。続行しますか？"),
+        QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+    std::vector<EnglishEntry> existing;
+    QString error;
+    if (!ReadEnglishExceptionRows(table, &existing, &error)) {
+      QMessageBox::warning(&dialog, dialog.windowTitle(), error);
+      return;
+    }
+    std::vector<EnglishEntry> kept;
+    std::map<std::string, bool> keys;
+    for (const auto& row : existing) {
+      if (!row.has_system_preset_id() || row.system_preset_id().empty()) {
+        kept.push_back(row);
+        keys[row.input()] = true;
+      }
+    }
+    for (const auto& row :
+         config::ConfigHandler::RecommendedEnglishInputExceptions()) {
+      if (keys.emplace(row.input(), true).second) kept.push_back(row);
+    }
+    replace_rows(kept);
+    reset_presets = true;
+  });
+  QObject::connect(reset_all, &QPushButton::clicked, &dialog,
+                   [replace_rows, auto_update, &dialog, &fully_reset]() {
+    if (QMessageBox::question(&dialog, dialog.windowTitle(),
+        QString::fromUtf8("カスタム行もすべて削除し、英字表記辞書を初期状態に戻します。"
+                          "必要に応じて先にエクスポートしてください。続行しますか？"),
+        QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+    replace_rows(config::ConfigHandler::RecommendedEnglishInputExceptions());
+    auto_update->setChecked(true);
+    fully_reset = true;
+  });
+  const auto remove_selected = [table, refresh_search, &dialog]() {
+    const auto rows = SelectedVisibleEnglishRows(table);
+    if (rows.empty()) return;
+    if (rows.size() > 1 && QMessageBox::question(
+            &dialog, dialog.windowTitle(),
+            QString::fromUtf8("選択した%1行を削除しますか？")
+                .arg(static_cast<int>(rows.size())),
+            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+      return;
+    }
+    {
+      QSignalBlocker blocker(table);
+      // Descending indices prevent shifts from deleting the wrong rows.
+      for (int row : rows) table->removeRow(row);
+    }
+    refresh_search();
+  };
+  QObject::connect(table, &QWidget::customContextMenuRequested, &dialog,
+                   [table, insert_row, remove_selected](const QPoint& pos) {
+    const int row = table->rowAt(pos.y());
+    QMenu menu(table);
+    if (row < 0) {
+      QAction* append = menu.addAction(QString::fromUtf8("末尾に追加"));
+      if (menu.exec(table->viewport()->mapToGlobal(pos)) == append) {
+        insert_row(table->rowCount());
+      }
+      return;
+    }
+    auto chosen_rows = SelectedVisibleEnglishRows(table);
+    if (std::find(chosen_rows.begin(), chosen_rows.end(), row) ==
+        chosen_rows.end()) {
+      table->clearSelection();
+      table->selectRow(row);
+      chosen_rows = SelectedVisibleEnglishRows(table);
+    }
+    QAction* above = menu.addAction(QString::fromUtf8("この行の上に追加"));
+    QAction* below = menu.addAction(QString::fromUtf8("この行の下に追加"));
+    menu.addSeparator();
+    QAction* erase = menu.addAction(
+        chosen_rows.size() > 1
+            ? QString::fromUtf8("選択した%1行を削除")
+                  .arg(static_cast<int>(chosen_rows.size()))
+            : QString::fromUtf8("この行を削除"));
+    QAction* chosen = menu.exec(table->viewport()->mapToGlobal(pos));
+    if (chosen == above) {
+      insert_row(row);
+    } else if (chosen == below) {
+      insert_row(row + 1);
+    } else if (chosen == erase) {
+      remove_selected();
+    }
+  });
+  QObject::connect(remove, &QPushButton::clicked, &dialog, remove_selected);
+  QObject::connect(import_button, &QPushButton::clicked, &dialog,
+                   [&dialog, table, search, refresh_search]() {
+    const QString path = QFileDialog::getOpenFileName(
+        &dialog, QString::fromUtf8("例外規則をインポート"), {},
+        QStringLiteral("JSON (*.json);;TSV (*.tsv)"));
+    if (path.isEmpty()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 2 * 1024 * 1024) {
+      QMessageBox::warning(&dialog, dialog.windowTitle(),
+                           QString::fromUtf8("ファイルを開けないかサイズが大きすぎます。"));
+      return;
+    }
+    std::vector<EnglishEntry> incoming;
+    QString error;
+    if (!LoadEnglishExceptionFile(file.readAll(),
+                                  path.endsWith(QStringLiteral(".json"),
+                                                Qt::CaseInsensitive),
+                                  &incoming, &error)) {
+      QMessageBox::warning(&dialog, dialog.windowTitle(), error);
+      return;
+    }
+    const auto choice = QMessageBox::question(
+        &dialog, dialog.windowTitle(),
+        QString::fromUtf8("［はい］は入力列が同じ登録を更新し、その他を追加します。"
+                          "［いいえ］は全件置換します。"),
+        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+    if (choice == QMessageBox::Cancel) return;
+    std::vector<EnglishEntry> merged;
+    if (choice == QMessageBox::Yes) {
+      if (!ReadEnglishExceptionRows(table, &merged, &error)) {
+        QMessageBox::warning(&dialog, dialog.windowTitle(), error);
+        return;
+      }
+      for (const auto& entry : incoming) {
+        auto it = std::find_if(merged.begin(), merged.end(),
+            [&entry](const EnglishEntry& old) {
+              return old.input() == entry.input();
+            });
+        if (it != merged.end()) *it = entry;
+        else merged.push_back(entry);
+      }
+    } else {
+      merged = std::move(incoming);
+    }
+    if (merged.size() > 4096) {
+      QMessageBox::warning(&dialog, dialog.windowTitle(),
+                           QString::fromUtf8("登録数の上限は4096件です。"));
+      return;
+    }
+    {
+      QSignalBlocker blocker(table);
+      table->setRowCount(0);
+      for (const auto& entry : merged) AddEnglishExceptionRow(table, entry);
+    }
+    if (!search->text().isEmpty()) search->clear();
+    refresh_search();
+  });
+  QObject::connect(export_button, &QPushButton::clicked, &dialog,
+                   [&dialog, table]() {
+    std::vector<EnglishEntry> entries;
+    QString error;
+    if (!ReadEnglishExceptionRows(table, &entries, &error)) {
+      QMessageBox::warning(&dialog, dialog.windowTitle(), error);
+      return;
+    }
+    const QString path = QFileDialog::getSaveFileName(
+        &dialog, QString::fromUtf8("例外規則をエクスポート"),
+        QStringLiteral("english_exceptions.tsv"),
+        QStringLiteral("TSV (*.tsv);;JSON (*.json)"));
+    if (path.isEmpty()) return;
+    const bool json = path.endsWith(QStringLiteral(".json"),
+                                    Qt::CaseInsensitive);
+    QSaveFile file(path);
+    const QByteArray bytes = ExportEnglishExceptionFile(entries, json);
+    if (!file.open(QIODevice::WriteOnly) ||
+        file.write(bytes) != bytes.size() || !file.commit()) {
+      file.cancelWriting();
+      QMessageBox::warning(&dialog, dialog.windowTitle(),
+                           QString::fromUtf8("書き込みに失敗しました。"));
+    }
+  });
+  QObject::connect(confirm, &QDialogButtonBox::rejected,
+                   &dialog, &QDialog::reject);
+  QObject::connect(confirm, &QDialogButtonBox::accepted, &dialog,
+                   [this, table, auto_update, &fully_reset, &reset_presets,
+                    &dialog]() {
+    std::vector<EnglishEntry> entries;
+    QString error;
+    if (!ReadEnglishExceptionRows(table, &entries, &error)) {
+      QMessageBox::warning(&dialog, dialog.windowTitle(), error);
+      return;
+    }
+    std::map<std::string, EnglishEntry> originals;
+    for (const auto& old : english_input_exceptions_) {
+      if (!old.system_preset_id().empty()) {
+        originals[old.system_preset_id()] = old;
+      }
+    }
+    std::set<std::string> kept_ids;
+    for (auto& row : entries) {
+      const std::string id = row.system_preset_id();
+      if (id.empty()) continue;
+      const auto it = originals.find(id);
+      bool matches_catalog = false;
+      for (const auto& preset :
+           config::ConfigHandler::RecommendedEnglishInputExceptions()) {
+        if (preset.system_preset_id() != id) continue;
+        matches_catalog = SameEnglishRuleContent(row, preset);
+        break;
+      }
+      const bool matches_original =
+          it != originals.end() && SameEnglishRuleContent(row, it->second);
+      if (!matches_original && !matches_catalog) {
+        row.clear_system_preset_id();
+        continue;
+      }
+      kept_ids.insert(id);
+    }
+    std::set<std::string> suppressed(
+        base_config_.suppressed_english_preset_ids().begin(),
+        base_config_.suppressed_english_preset_ids().end());
+    if (fully_reset) suppressed.clear();
+    if (!fully_reset && !reset_presets) {
+      std::set<std::string> remaining_inputs;
+      for (const auto& row : entries) remaining_inputs.insert(row.input());
+      std::set<std::string> official_ids;
+      for (const auto& preset :
+           config::ConfigHandler::RecommendedEnglishInputExceptions()) {
+        official_ids.insert(preset.system_preset_id());
+      }
+      for (const auto& old : english_input_exceptions_) {
+        if (old.system_preset_id().empty() &&
+            remaining_inputs.count(old.input()) == 0 &&
+            official_ids.count(old.input()) != 0) {
+          suppressed.insert(old.input());
+        }
+      }
+    }
+    if (reset_presets) {
+      for (const auto& preset :
+           config::ConfigHandler::RecommendedEnglishInputExceptions()) {
+        suppressed.erase(preset.system_preset_id());
+      }
+    }
+    for (const auto& [id, old] : originals) {
+      if (kept_ids.find(id) == kept_ids.end() && !reset_presets &&
+          !fully_reset) {
+        suppressed.insert(id);
+      }
+    }
+    // Explicitly restored managed rows override old tombstones.
+    for (const auto& id : kept_ids) suppressed.erase(id);
+    base_config_.clear_suppressed_english_preset_ids();
+    for (const auto& id : suppressed) {
+      base_config_.add_suppressed_english_preset_ids(id);
+    }
+    base_config_.set_auto_update_english_presets(auto_update->isChecked());
+    if (fully_reset) enableEnglishExceptionsCheckBox->setChecked(true);
+    english_input_exceptions_ = std::move(entries);
+    dialog.accept();
+    EnableApplyButton();
+  });
+  refresh_search();
+  dialog.exec();
 }
 
 void ConfigDialog::EditRomanTable() {

@@ -51,6 +51,7 @@
 #include "base/clock.h"
 #include "base/util.h"
 #include "composer/composer.h"
+#include "composer/english_input_exceptions.h"
 #include "composer/key_event_util.h"
 #include "composer/table.h"
 #include "engine/engine_converter_interface.h"
@@ -355,6 +356,31 @@ bool HasExplicitPostalCodeToken(absl::string_view key) {
     }
   }
   return false;
+}
+
+// A CANDIDATE_ONLY English surface is an explicit choice, even if an
+// asynchronous Zenz reply or automatically reused Zenz feedback proposes it.
+// Unlike the former guard, this does not prevent Japanese live conversion.
+bool IsCandidateOnlyAutomaticEnglishValue(
+    const ImeContext& context, absl::string_view automatic_value) {
+  const config::Config& config = context.GetConfig();
+  const composer::Composer& composer = context.composer();
+  if (!config.enable_english_input_exceptions() ||
+      config.preedit_method() != config::Config::ROMAN ||
+      context.GetRequest().special_romanji_table() !=
+          commands::Request::DEFAULT_TABLE ||
+      composer.GetInputMode() != transliteration::HIRAGANA ||
+      composer.suppress_language_aware_raw_input() ||
+      composer.GetInputFieldType() == commands::Context::PASSWORD ||
+      composer.GetCursor() != composer.GetLength()) {
+    return false;
+  }
+  const auto* rule = composer::EnglishInputExceptions::Find(
+      config, composer.GetRawString());
+  return rule != nullptr &&
+         rule->behavior() ==
+             composer::EnglishInputExceptions::Entry::CANDIDATE_ONLY &&
+         rule->preferred() == automatic_value;
 }
 
 bool ShouldSkipLiveConversionForCompositionKey(
@@ -4515,6 +4541,9 @@ bool Session::MaybeStartLiveConversionInternal(
   ConversionPreferences live_preferences =
       context_->converter().conversion_preferences();
   live_preferences.prefer_zipcode_literal_top = true;
+  // Live presentation is not an explicit choice of a candidate-only spelling.
+  // Keep Japanese conversion active and select a native Japanese result.
+  live_preferences.prevent_candidate_only_english_auto_selection = true;
   // Use the same client context as ordinary conversion.  The compatibility
   // ConvertWithPreferences wrapper supplies an empty Context, which discards
   // preceding_text needed by the contextual particle reranker in live mode.
@@ -7072,6 +7101,10 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
     }
 
     const std::string adopted_feedback_value = adoption.value;
+    if (IsCandidateOnlyAutomaticEnglishValue(
+            *context_, adopted_feedback_value)) {
+      continue;
+    }
 
     // Adoption may safely repair a learned Zenz candidate back to the exact
     // normal Mozc surface. Such a result has no presentation value and must not
@@ -7999,6 +8032,14 @@ bool Session::ApplyZenzLiveCorrectionResult(
         command, "same_as_mozc_after_adoption");
   }
 
+  // Zenz may correct ordinary Japanese, but it must not turn a
+  // CANDIDATE_ONLY spelling into an automatic English commit.
+  if (IsCandidateOnlyAutomaticEnglishValue(*context_, zenz_value)) {
+    CancelPendingZenzLiveCorrection();
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, "candidate_only_english_requires_explicit_selection");
+  }
+
   const ZenzTextPrivacyDecision adopted_value_privacy =
       EvaluateZenzLiveValuePrivacy(zenz_value);
   if (!adopted_value_privacy.allow) {
@@ -8837,6 +8878,31 @@ bool Session::InsertCharacter(commands::Command* command) {
               .HasTrailingDisplayedAmbiguousRomanResult() &&
           context_->composer().GetQueryForPrediction() !=
               composer_after_insert_for_suggestion.GetQueryForPrediction()) {
+        should_hold_pending_roman_suggestion = false;
+      }
+    }
+
+    // When a registered CANDIDATE_ONLY token becomes exact, the previous
+    // Japanese suggestion is no longer the right list. Refresh *once* for the
+    // whole raw token. Ordinary pending-Roman HOLD remains unchanged, and the
+    // converter retains ownership of candidate IDs and selection state.
+    if (should_hold_pending_roman_suggestion &&
+        context_->GetConfig().enable_english_input_exceptions() &&
+        context_->GetConfig().preedit_method() == config::Config::ROMAN &&
+        composer_after_insert_for_suggestion.GetInputMode() ==
+            transliteration::HIRAGANA &&
+        composer_after_insert_for_suggestion.GetInputFieldType() !=
+            commands::Context::PASSWORD &&
+        !composer_after_insert_for_suggestion
+             .suppress_language_aware_raw_input() &&
+        composer_after_insert_for_suggestion.GetCursor() ==
+            composer_after_insert_for_suggestion.GetLength()) {
+      const auto* rule = composer::EnglishInputExceptions::Find(
+          context_->GetConfig(),
+          composer_after_insert_for_suggestion.GetRawString());
+      if (rule != nullptr &&
+          rule->behavior() ==
+              composer::EnglishInputExceptions::Entry::CANDIDATE_ONLY) {
         should_hold_pending_roman_suggestion = false;
       }
     }

@@ -461,6 +461,127 @@ TEST_F(LanguageAwareRewriterTest, ExplicitJapaneseReturnSuppressesRawRescue) {
       composer.CreateComposerData().suppress_language_aware_raw_input());
 }
 
+// Exercise the actual Composer -> LanguageAwareRewriter path. Previously
+// githubwot was added as a full raw-ASCII suggestion when the final 't' was
+// an unresolved Roman consonant after an explicitly entered English word.
+TEST_F(LanguageAwareRewriterTest,
+       PendingRomanAfterLiteralEnglishAndJapaneseSkipsRawRescue) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(false);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  config.set_enable_english_input_exceptions(true);
+  auto* rule = config.add_english_input_exceptions();
+  rule->set_input("github");
+  rule->set_preferred("GitHub");
+  rule->set_behavior(config::Config::EnglishInputException::AUTO_ASCII);
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+
+  for (const std::string raw : {"githubwot", "korehagithubwot"}) {
+    composer::Composer composer(table, client_request, config);
+    InsertASCIISequence(raw, &composer);
+    EXPECT_EQ(composer.GetRawString(), raw);
+    // AUTO_ASCII sets the display/output mode for the English word, which
+    // can remain HALF_ASCII even after Japanese input resumes.  The mutable
+    // Composer API reports 0 pending characters in that output mode.  The
+    // immutable ComposerData snapshot used by both rewriters instead checks
+    // the actual trailing Roman input in the current input mode.
+    const composer::ComposerData snapshot = composer.CreateComposerData();
+    const std::string preedit = composer.GetStringForPreedit();
+    ASSERT_EQ(snapshot.GetInputMode(), transliteration::HIRAGANA)
+        << "raw=" << raw << " preedit=" << preedit
+        << " mutable_pending=" << composer.GetPendingRomanInputLength()
+        << " output_mode=" << static_cast<int>(composer.GetOutputMode());
+    ASSERT_GT(snapshot.GetPendingRomanInputLength(), 0)
+        << "raw=" << raw << " preedit=" << preedit
+        << " mutable_pending=" << composer.GetPendingRomanInputLength()
+        << " output_mode=" << static_cast<int>(composer.GetOutputMode())
+        << " snapshot_input_mode=" << static_cast<int>(snapshot.GetInputMode());
+    EXPECT_NE(preedit.find("githubを"), std::string::npos)
+        << "raw=" << raw << " preedit=" << preedit;
+
+    Segments segments;
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetComposer(composer)
+            .SetConfig(config)
+            .SetRequest(client_request)
+            .SetRequestType(ConversionRequest::SUGGESTION)
+            .Build();
+    segments.add_segment()->set_key(request.key());
+    EXPECT_FALSE(rewriter.Rewrite(request, &segments))
+        << "raw=" << raw << " preedit=" << preedit
+        << " key=" << request.key();
+    EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 0)
+        << raw;
+
+    // Negative control: hold the exact same Composer state fixed, but turn
+    // off only this feature in the ConversionRequest.  LanguageAwareRewriter
+    // must then reproduce the original raw-key candidate.  Without this
+    // control, a test returning false could pass for unrelated reasons.
+    config::Config no_guard_config = config;
+    no_guard_config.set_enable_english_input_exceptions(false);
+    const ConversionRequest control_request =
+        ConversionRequestBuilder()
+            .SetComposer(composer)
+            .SetConfig(no_guard_config)
+            .SetRequest(client_request)
+            .SetRequestType(ConversionRequest::SUGGESTION)
+            .Build();
+    Segments control_segments;
+    control_segments.add_segment()->set_key(control_request.key());
+    ASSERT_TRUE(rewriter.Rewrite(control_request, &control_segments))
+        << "control source was not reproduced; raw=" << raw
+        << " preedit=" << preedit
+        << " query=" << composer.GetQueryForPrediction();
+    const Segment& control_segment = control_segments.conversion_segment(0);
+    ASSERT_GT(control_segment.candidates_size(), 0);
+    EXPECT_EQ(control_segment.candidate(0).value, raw)
+        << "raw=" << raw << " preedit=" << preedit;
+  }
+}
+
+TEST_F(LanguageAwareRewriterTest,
+       EnglishRawRescueStillWorksWithExceptionsEnabled) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_enable_english_input_exceptions(true);
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+
+  for (const std::string raw : {"python", "iPhone"}) {
+    composer::Composer composer(table, client_request, config);
+    InsertASCIISequence(raw, &composer);
+    EXPECT_EQ(composer.GetRawString(), raw);
+    Segments segments;
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetComposer(composer)
+            .SetConfig(config)
+            .SetRequest(client_request)
+            .SetRequestType(ConversionRequest::SUGGESTION)
+            .Build();
+    segments.add_segment()->set_key(request.key());
+    EXPECT_TRUE(rewriter.Rewrite(request, &segments)) << raw;
+    const Segment& segment = segments.conversion_segment(0);
+    ASSERT_GE(segment.candidates_size(), 1) << raw;
+    EXPECT_EQ(segment.candidate(0).value, raw);
+  }
+}
+
 TEST_F(LanguageAwareRewriterTest, NotRewriteFullWidthAsciiToHalfWidthAscii) {
   MockDictionary dictionary;
   LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
