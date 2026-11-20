@@ -39,7 +39,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **縦書きに対応した入力 UI（Windows / macOS）：** 候補・サジェスト・用例・ルビを縦書きに合わせて配置し、対応するキー設定では候補や文節の移動方向も調整します。
 - **変換状態インジケータ（Windows / macOS）：** 未確定文字の近くで「入力中・Mozc・Zenz処理中・Zenz適用済み」を表示し、配色・形状・位置を調整できます。
 - **幅広い外観カスタマイズ：** 候補・サジェスト・ルビの配色（ライト／ダーク／自動／カスタム）、サイズ、角丸、透明度、影を個別に設定。Windows ではフォント・文字の太さ・未確定文字の色や下線、IME インジケータも調整できます。
-- **柔軟なローマ字入力とキー設定：** ローマ字テーブルの編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
+- **柔軟なローマ字入力とキー設定：** プリセットの保存・管理、ローマ字テーブルの検索・編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
 - **日本語の変換品質と辞書の拡張：** 日常語彙・固有名詞・口語表現を補強し、文節分割や不自然な漢字化を抑制。日付・曜日の変換候補も拡張しています。
 - **ローカルファーストと OS 連携：** Zenz の推論はローカルで実行し、利用統計の送信機能を無効化。シークレット入力への配慮や、Windows Search などの入力欄での候補表示にも対応しています。
 
@@ -124,6 +124,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - 曖昧なローマ字規則でも途中表示できるオプションを追加
 - ローマ字テーブル編集画面に、そのオプション用のチェックボックス UI を追加
 - カスタムローマ字テーブルの 1 規則あたりの出力を UTF-8 で 1024 bytes 未満まで扱えるように拡張。入力・次入力の上限は従来どおり 300 bytes 未満
+- ローマ字テーブルにプリセット機能を追加。プリセットの新規保存・上書き・管理、規則の検索・行全体の枠線強調に対応
 - 句読点・記号を単打で確定できるオプションを追加
 - 単打確定の対象を設定画面のチェックボックスで選択可能
 - 句読点変換と句読点・記号の単打確定は排他的に動作
@@ -305,6 +306,16 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 
 のような規則がある場合、`ctnnaru` は `ctn + naru` として解釈され、`ことになる` になります。
 一方で、`ctnnr` や `ctnnc` のように長い規則として成立する入力は、従来どおりその規則が使われます。
+
+### ローマ字テーブルのプリセット・検索・管理
+
+ローマ字入力設定から、プリセットを選択できます。
+
+内蔵のプリセットを選択した場合、規則を変更せずに使用している間は Mozkey 更新時の同梱プリセット変更に追従します。**ユーザーが規則を編集した場合は、その内容を優先し、更新で上書きしません。** 個人用プリセットは名前を付けて保存でき、新規保存・上書き・名前変更・ファイルへの書き出し・削除が可能です。プリセット管理画面とローマ字テーブル編集画面でキャンセルした変更は保存されません。
+
+編集画面では、入力キー・出力を大文字小文字を区別せずに検索できます。「前へ」「次へ」および検索欄での Enter で一致行を移動し、現在の一致行を枠線で強調します。検索は規則を並べ替えたりフィルターで隠したりせず、**入力順序と挿入位置を維持**します。検索欄で Enter を押しても編集画面は閉じません。
+
+保存時には未完成の規則を行番号付きで警告し、保存を中止します。ファイル読み込み時も全行を検証してからテーブルを置き換えるため、形式に問題がある場合は編集中の規則を保持します。同じ入力キーに**異なる規則**がある場合、個人用プリセットの保存前に確認します。同一内容の重複は競合として警告しません。元のデータで規則の順序が意味を持つ可能性があるため、自動並べ替えは行いません。
 
 ### 長いカスタムローマ字テーブル出力
 
@@ -1021,7 +1032,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **Vertical-writing UI on Windows and macOS:** Candidate, suggestion, infolist, and ruby layouts adapt to vertical text; supported keymaps can follow the visual navigation direction.
 - **Conversion-status indicator (Windows / macOS):** Displays Reading, Mozc, Zenz processing, or Zenz applied near the composition, with adjustable position, shape, and colors. The new macOS indicator has not yet been verified on native macOS hardware.
 - **Extensive appearance customization:** Configure colors (light/dark/system/custom), dimensions, rounded corners, opacity, and shadows per window. Windows additionally supports font/weight, preedit colors and underlines, and IME-indicator styling.
-- **Customizable romaji and shortcuts:** Edit romaji rules, show intermediate output for ambiguous sequences, commit punctuation with one key, and assign ordered key commands with delays.
+- **Customizable romaji and shortcuts:** Save and manage romaji presets, search and edit romaji-table rules, display intermediate output for ambiguous rules, commit punctuation and symbols with a single key, and assign ordered key commands with delays.
 - **Improved Japanese conversion and dictionaries:** Enhances everyday expressions and names, reduces unwanted segmentation and kanji conversion, and adds date and weekday suggestions.
 - **Local-first operation and OS integration:** Runs Zenz inference locally, disables inherited usage-statistics reporting, supports privacy-aware input behavior, and improves candidate display in Windows Search and other immersive TSF hosts.
 
@@ -1200,6 +1211,7 @@ Main features added in this fork
 - Adds an option to display ambiguous romaji rules before the input is fully disambiguated
 - Adds a checkbox UI for that option to the romaji table editor
 - Allows a custom romaji-table rule to produce output shorter than 1024 UTF-8 bytes while keeping the existing input and pending limits below 300 bytes
+- Adds romaji-table presets with options to create, overwrite, and manage presets, search rules, and highlight the current matching row with a full-row outline
 - Adds an option to directly commit punctuations and symbols with a single key press
 - Allows choosing direct-commit punctuations and symbols from the config dialog
 - Makes punctuation conversion and punctuation/symbol direct commit mutually exclusive
@@ -1339,6 +1351,18 @@ For example, with rules such as:
 
 typing `ctnnaru` is interpreted as `ctn + naru`, resulting in `ことになる`,
 while valid longer rules such as `ctnnr` and `ctnnc` still work.
+
+### Romaji-table presets, search, and management
+
+You can select a preset from the romaji input settings.
+
+When you use a bundled preset without changing its rules, Mozkey follows updates to that preset in subsequent releases. **If you edit the rules, your changes take precedence and are not overwritten by updates.** You can save personal presets under custom names, and create, overwrite, rename, export, or delete them. Changes canceled in the preset manager or romaji-table editor are not saved.
+
+In the editor, you can search input keys and outputs case-insensitively. Use Previous, Next, or Enter while the search field has focus to navigate matching rows; the current match is outlined. Searching does not sort or hide rules, so **rule order and insertion positions are preserved**. Pressing Enter in the search field does not close the editor.
+
+Incomplete rules are reported with their row numbers, and saving is aborted. Imported files are fully validated before the table is replaced, so the current rules are preserved if the file is invalid. Before saving a personal preset, rules sharing the same input key but having **different definitions** trigger a confirmation. Identical duplicate rules do not trigger a conflict warning. Rules are not sorted automatically, because their original order may be significant.
+
+The sources and licenses of bundled presets are available under “Sources and Licenses” in the editor. Bundled data is stored in `src/gui/config_dialog/roman_table_presets/`. Simplified-AZIK and Shingetsu carry MIT license notices; the bundled Seoto materials include MIT and BSD-style license notices. See the `README.md` and license files in that directory for details.
 
 ### Long custom romaji-table outputs
 

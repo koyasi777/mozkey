@@ -958,6 +958,178 @@
 <context>
     <name>mozc::gui::ConfigDialog</name>
     <message>
+        <source>Edit...</source>
+        <translation>Edit...</translation>
+    </message>
+    <message>
+        <source>Standard</source>
+        <translation>Standard</translation>
+    </message>
+    <message>
+        <source>Standard Mozkey rules</source>
+        <translation>Standard Mozkey rules</translation>
+    </message>
+    <message>
+        <source>Custom rules: not updated automatically</source>
+        <translation>Custom rules: not updated automatically</translation>
+    </message>
+    <message>
+        <source>Personal preset: remains unchanged when Mozkey is updated</source>
+        <translation>Personal preset: remains unchanged when Mozkey is updated</translation>
+    </message>
+    <message>
+        <source>Bundled preset: follows Mozkey updates unless edited</source>
+        <translation>Bundled preset: follows Mozkey updates unless edited</translation>
+    </message>
+    <message>
+        <source>Current: %1 — %2</source>
+        <translation>Current: %1 — %2</translation>
+    </message>
+    <message>
+        <source>Edit rules...</source>
+        <translation>Edit rules...</translation>
+    </message>
+    <message>
+        <source>Add preset...</source>
+        <translation>Add preset...</translation>
+    </message>
+    <message>
+        <source>Manage...</source>
+        <translation>Manage...</translation>
+    </message>
+    <message>
+        <source>Licenses...</source>
+        <translation>Licenses...</translation>
+    </message>
+    <message>
+        <source>Choose from bundled layouts or save your own romaji rules.</source>
+        <translation>Choose from bundled layouts or save your own romaji rules.</translation>
+    </message>
+    <message>
+        <source>Replace your custom romaji rules?</source>
+        <translation>Replace your custom romaji rules?</translation>
+    </message>
+    <message>
+        <source>Preset is unavailable.</source>
+        <translation>Preset is unavailable.</translation>
+    </message>
+    <message>
+        <source>The file is empty, too large, or not valid UTF-8.</source>
+        <translation>The file is empty, too large, or not valid UTF-8.</translation>
+    </message>
+    <message>
+        <source>Invalid or duplicate romaji table entry on line %1.</source>
+        <translation>Invalid or duplicate romaji table entry on line %1.</translation>
+    </message>
+    <message>
+        <source>This table has duplicate input keys. Keep these rules as-is?</source>
+        <translation>This table has duplicate input keys. Keep these rules as-is?</translation>
+    </message>
+    <message>
+        <source>Too many romaji table entries.</source>
+        <translation>Too many romaji table entries.</translation>
+    </message>
+    <message>
+        <source>The romaji table has no usable entries.</source>
+        <translation>The romaji table has no usable entries.</translation>
+    </message>
+    <message>
+        <source>Preset name must be 1–64 characters.</source>
+        <translation>Preset name must be 1–64 characters.</translation>
+    </message>
+    <message>
+        <source>Too many personal presets.</source>
+        <translation>Too many personal presets.</translation>
+    </message>
+    <message>
+        <source>Preset name already exists.</source>
+        <translation>Preset name already exists.</translation>
+    </message>
+    <message>
+        <source>Personal preset storage limit exceeded.</source>
+        <translation>Personal preset storage limit exceeded.</translation>
+    </message>
+    <message>
+        <source>Import from file...</source>
+        <translation>Import from file...</translation>
+    </message>
+    <message>
+        <source>Save current rules as preset...</source>
+        <translation>Save current rules as preset...</translation>
+    </message>
+    <message>
+        <source>Import romaji table</source>
+        <translation>Import romaji table</translation>
+    </message>
+    <message>
+        <source>Romaji tables (*.txt *.tsv);;All files (*)</source>
+        <translation>Romaji tables (*.txt *.tsv);;All files (*)</translation>
+    </message>
+    <message>
+        <source>Cannot read romaji table file.</source>
+        <translation>Cannot read romaji table file.</translation>
+    </message>
+    <message>
+        <source>Select or edit a table first.</source>
+        <translation>Select or edit a table first.</translation>
+    </message>
+    <message>
+        <source>New preset</source>
+        <translation>New preset</translation>
+    </message>
+    <message>
+        <source>Preset name:</source>
+        <translation>Preset name:</translation>
+    </message>
+    <message>
+        <source>Personal presets</source>
+        <translation>Personal presets</translation>
+    </message>
+    <message>
+        <source>Choose preset:</source>
+        <translation>Choose preset:</translation>
+    </message>
+    <message>
+        <source>Rename...</source>
+        <translation>Rename...</translation>
+    </message>
+    <message>
+        <source>Replace saved rules with current rules...</source>
+        <translation>Replace saved rules with current rules...</translation>
+    </message>
+    <message>
+        <source>Export...</source>
+        <translation>Export...</translation>
+    </message>
+    <message>
+        <source>Delete...</source>
+        <translation>Delete...</translation>
+    </message>
+    <message>
+        <source>Rename preset</source>
+        <translation>Rename preset</translation>
+    </message>
+    <message>
+        <source>New name:</source>
+        <translation>New name:</translation>
+    </message>
+    <message>
+        <source>Replace the selected saved preset with the current rules?</source>
+        <translation>Replace the selected saved preset with the current rules?</translation>
+    </message>
+    <message>
+        <source>Export preset</source>
+        <translation>Export preset</translation>
+    </message>
+    <message>
+        <source>Could not export preset.</source>
+        <translation>Could not export preset.</translation>
+    </message>
+    <message>
+        <source>Delete this personal preset? Current rules will be retained.</source>
+        <translation>Delete this personal preset? Current rules will be retained.</translation>
+    </message>
+    <message>
         <location filename="config_dialog.cc" line="130"/>
         <source>Custom keymap</source>
         <translation></translation>
@@ -1740,6 +1912,386 @@ These assignments can match the same physical key input. Choose non-overlapping 
 <context>
     <name>mozc::gui::RomanTableEditorDialog</name>
     <message>
+        <source>Different rules share an input key. Save anyway?</source>
+        <translation>Different rules share an input key. Save anyway?</translation>
+    </message>
+    <message>
+        <source>Search:</source>
+        <translation>Search:</translation>
+    </message>
+    <message>
+        <source>Find an input key or output...</source>
+        <translation>Find an input key or output...</translation>
+    </message>
+    <message>
+        <source>Input / Output</source>
+        <translation>Input / Output</translation>
+    </message>
+    <message>
+        <source>Input only</source>
+        <translation>Input only</translation>
+    </message>
+    <message>
+        <source>Output only</source>
+        <translation>Output only</translation>
+    </message>
+    <message>
+        <source>Previous</source>
+        <translation>Previous</translation>
+    </message>
+    <message>
+        <source>Next</source>
+        <translation>Next</translation>
+    </message>
+    <message>
+        <source>Search does not reorder rules</source>
+        <translation>Search does not reorder rules</translation>
+    </message>
+    <message>
+        <source>No matches</source>
+        <translation>No matches</translation>
+    </message>
+    <message>
+        <source>%1 matches</source>
+        <translation>%1 matches</translation>
+    </message>
+    <message>
+        <source>Match %1 of %2</source>
+        <translation>Match %1 of %2</translation>
+    </message>
+    <message>
+        <source>Save as new preset...</source>
+        <translation>Save as new preset...</translation>
+    </message>
+    <message>
+        <source>Overwrite preset...</source>
+        <translation>Overwrite preset...</translation>
+    </message>
+    <message>
+        <source>Overwrite the selected personal preset with the rules currently displayed in the editor.</source>
+        <translation>Overwrite the selected personal preset with the rules currently displayed in the editor.</translation>
+    </message>
+    <message>
+        <source> (changes not saved)</source>
+        <translation> (changes not saved)</translation>
+    </message>
+    <message>
+        <source>Changes not saved to this preset. Save it here, or OK will use the edited rules as Custom without changing the saved preset.</source>
+        <translation>Changes not saved to this preset. Save it here, or OK will use the edited rules as Custom without changing the saved preset.</translation>
+    </message>
+    <message>
+        <source>Overwrite the personal preset '%1' with these rules?</source>
+        <translation>Overwrite the personal preset '%1' with these rules?</translation>
+    </message>
+    <message>
+        <source>Unsaved edits to the personal preset will be discarded. Switch input method?</source>
+        <translation>Unsaved edits to the personal preset will be discarded. Switch input method?</translation>
+    </message>
+    <message>
+        <source>Select a saved preset to rename, export or delete it. Built-in presets cannot be changed here.</source>
+        <translation>Select a saved preset to rename, export or delete it. Built-in presets cannot be changed here.</translation>
+    </message>
+    <message>
+        <source>Manage personal presets</source>
+        <translation>Manage personal presets</translation>
+    </message>
+    <message>
+        <source>Select a saved preset to rename, replace, export or delete it. Built-in presets cannot be changed here.</source>
+        <translation>Select a saved preset to rename, replace, export or delete it. Built-in presets cannot be changed here.</translation>
+    </message>
+    <message>
+        <source>Add preset from file...</source>
+        <translation>Add preset from file...</translation>
+    </message>
+    <message>
+        <source>Add preset from file</source>
+        <translation>Add preset from file</translation>
+    </message>
+    <message>
+        <source>Replace with current rules...</source>
+        <translation>Replace with current rules...</translation>
+    </message>
+    <message>
+        <source>Export preset...</source>
+        <translation>Export preset...</translation>
+    </message>
+    <message>
+        <source>Save changes</source>
+        <translation>Save changes</translation>
+    </message>
+    <message>
+        <source>Saved presets: %1 / %2</source>
+        <translation>Saved presets: %1 / %2</translation>
+    </message>
+    <message>
+        <source>%1 — %2 rules</source>
+        <translation>%1 — %2 rules</translation>
+    </message>
+    <message>
+        <source> (selected)</source>
+        <translation> (selected)</translation>
+    </message>
+    <message>
+        <source>Replace saved preset '%1' with the rules currently displayed in the editor?</source>
+        <translation>Replace saved preset '%1' with the rules currently displayed in the editor?</translation>
+    </message>
+    <message>
+        <source>Delete the saved preset '%1'? The current editor rules will not be deleted.</source>
+        <translation>Delete the saved preset '%1'? The current editor rules will not be deleted.</translation>
+    </message>
+    <message>
+        <source>Input method:</source>
+        <translation>Input method:</translation>
+    </message>
+    <message>
+        <source>Import file as preset...</source>
+        <translation>Import file as preset...</translation>
+    </message>
+    <message>
+        <source>Import to current table...</source>
+        <translation>Import to current table...</translation>
+    </message>
+    <message>
+        <source>Export current table...</source>
+        <translation>Export current table...</translation>
+    </message>
+    <message>
+        <source>Replace the current romaji rules?</source>
+        <translation>Replace the current romaji rules?</translation>
+    </message>
+    <message>
+        <source>Preset is unavailable.</source>
+        <translation>Preset is unavailable.</translation>
+    </message>
+    <message>
+        <source>Romaji table rules</source>
+        <translation>Romaji table rules</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Cancel</translation>
+    </message>
+    <message>
+        <source>Partial match</source>
+        <translation>Partial match</translation>
+    </message>
+    <message>
+        <source>Double-click a cell to edit its rule.</source>
+        <translation>Double-click a cell to edit its rule.</translation>
+    </message>
+    <message>
+        <source>Show a candidate before all input is completed.</source>
+        <translation>Show a candidate before all input is completed.</translation>
+    </message>
+    <message>
+        <source>Save as preset...</source>
+        <translation>Save as preset...</translation>
+    </message>
+    <message>
+        <source>Import preset...</source>
+        <translation>Import preset...</translation>
+    </message>
+    <message>
+        <source>Manage presets...</source>
+        <translation>Manage presets...</translation>
+    </message>
+    <message>
+        <source>Origins and licenses...</source>
+        <translation>Origins and licenses...</translation>
+    </message>
+    <message>
+        <source>Standard</source>
+        <translation>Standard</translation>
+    </message>
+    <message>
+        <source>Uses the Mozkey standard rules.</source>
+        <translation>Uses the Mozkey standard rules.</translation>
+    </message>
+    <message>
+        <source>Custom</source>
+        <translation>Custom</translation>
+    </message>
+    <message>
+        <source>Personal edits are kept; Mozkey updates do not replace them.</source>
+        <translation>Personal edits are kept; Mozkey updates do not replace them.</translation>
+    </message>
+    <message>
+        <source>Personal preset</source>
+        <translation>Personal preset</translation>
+    </message>
+    <message>
+        <source>Saved by you; unchanged by Mozkey updates.</source>
+        <translation>Saved by you; unchanged by Mozkey updates.</translation>
+    </message>
+    <message>
+        <source>Follows bundled updates until you customize the rules.</source>
+        <translation>Follows bundled updates until you customize the rules.</translation>
+    </message>
+    <message>
+        <source>Selected: %1</source>
+        <translation>Selected: %1</translation>
+    </message>
+    <message>
+        <source>Invalid preset table data.</source>
+        <translation>Invalid preset table data.</translation>
+    </message>
+    <message>
+        <source>Invalid preset rule on line %1.</source>
+        <translation>Invalid preset rule on line %1.</translation>
+    </message>
+    <message>
+        <source>Too many preset rules.</source>
+        <translation>Too many preset rules.</translation>
+    </message>
+    <message>
+        <source>Preset table has no rules.</source>
+        <translation>Preset table has no rules.</translation>
+    </message>
+    <message>
+        <source>Duplicate input keys found. Save anyway?</source>
+        <translation>Duplicate input keys found. Save anyway?</translation>
+    </message>
+    <message>
+        <source>Preset name must have 1 to 64 characters.</source>
+        <translation>Preset name must have 1 to 64 characters.</translation>
+    </message>
+    <message>
+        <source>Preset limit reached.</source>
+        <translation>Preset limit reached.</translation>
+    </message>
+    <message>
+        <source>Preset name already exists.</source>
+        <translation>Preset name already exists.</translation>
+    </message>
+    <message>
+        <source>Preset storage limit reached.</source>
+        <translation>Preset storage limit reached.</translation>
+    </message>
+    <message>
+        <source>Could not load preset.</source>
+        <translation>Could not load preset.</translation>
+    </message>
+    <message>
+        <source>Save as preset</source>
+        <translation>Save as preset</translation>
+    </message>
+    <message>
+        <source>Preset name:</source>
+        <translation>Preset name:</translation>
+    </message>
+    <message>
+        <source>Import preset file</source>
+        <translation>Import preset file</translation>
+    </message>
+    <message>
+        <source>Romaji tables (*.txt *.tsv);;All files (*)</source>
+        <translation>Romaji tables (*.txt *.tsv);;All files (*)</translation>
+    </message>
+    <message>
+        <source>Cannot read preset file.</source>
+        <translation>Cannot read preset file.</translation>
+    </message>
+    <message>
+        <source>Personal presets</source>
+        <translation>Personal presets</translation>
+    </message>
+    <message>
+        <source>Choose preset:</source>
+        <translation>Choose preset:</translation>
+    </message>
+    <message>
+        <source>Rename...</source>
+        <translation>Rename...</translation>
+    </message>
+    <message>
+        <source>Save current rules over preset...</source>
+        <translation>Save current rules over preset...</translation>
+    </message>
+    <message>
+        <source>Export...</source>
+        <translation>Export...</translation>
+    </message>
+    <message>
+        <source>Delete...</source>
+        <translation>Delete...</translation>
+    </message>
+    <message>
+        <source>Rename preset</source>
+        <translation>Rename preset</translation>
+    </message>
+    <message>
+        <source>New name:</source>
+        <translation>New name:</translation>
+    </message>
+    <message>
+        <source>Overwrite the selected personal preset?</source>
+        <translation>Overwrite the selected personal preset?</translation>
+    </message>
+    <message>
+        <source>Export preset</source>
+        <translation>Export preset</translation>
+    </message>
+    <message>
+        <source>Could not export preset.</source>
+        <translation>Could not export preset.</translation>
+    </message>
+    <message>
+        <source>Delete this personal preset?</source>
+        <translation>Delete this personal preset?</translation>
+    </message>
+    <message>
+        <source>Preset origins and licenses...</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Preset origins and licenses</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>These presets include their original notices. Changes to a selected preset follow Mozkey updates unless you edit the table.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Show details</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Hide details</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Presets</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Could not open romaji preset: %1</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Could not load romaji preset: %1</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Preset licenses...</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Could not open preset license.</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Preset licenses</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>The bundled romaji presets are distributed under the MIT License. Open Details to read the full notices.</source>
+        <translation></translation>
+    </message>
+    <message>
         <location filename="roman_table_editor.cc" line="36"/>
         <source>New entry</source>
         <translation></translation>
@@ -1822,5 +2374,30 @@ These assignments can match the same physical key input. Choose non-overlapping 
         <source>Do you want to overwrite the current roman table?</source>
         <translation></translation>
     </message>
-</context>
+
+    <message>
+      <source>Rule on row %1 must have an input and either an output or next input.</source>
+      <translation>Rule on row %1 must have an input and either an output or next input.</translation>
+    </message>
+    <message>
+      <source>Invalid roman table rule on line %1. The table was not changed.</source>
+      <translation>Invalid roman table rule on line %1. The table was not changed.</translation>
+    </message>
+    <message>
+      <source>Roman table has no valid rules. The table was not changed.</source>
+      <translation>Roman table has no valid rules. The table was not changed.</translation>
+    </message>
+    <message>
+      <source>Could not read roman table file.</source>
+      <translation>Could not read roman table file.</translation>
+    </message>
+    <message>
+      <source>Import file is too large.</source>
+      <translation>Import file is too large.</translation>
+    </message>
+    <message>
+      <source>Invalid roman table file encoding.</source>
+      <translation>Invalid roman table file encoding.</translation>
+    </message>
+  </context>
 </TS>

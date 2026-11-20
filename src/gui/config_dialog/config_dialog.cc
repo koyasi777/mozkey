@@ -31,6 +31,13 @@
 #include "gui/config_dialog/config_dialog.h"
 
 #include <QAbstractItemView>
+#include <QFile>
+#include <QInputDialog>
+#include <QMenu>
+#include <QSaveFile>
+#include <QSet>
+#include <QSignalBlocker>
+#include <QUuid>
 #include <QAbstractScrollArea>
 #include <QAbstractSpinBox>
 #include <QByteArray>
@@ -97,8 +104,10 @@
 #include "absl/log/log.h"
 #include "absl/strings/string_view.h"
 #include "base/config_file_stream.h"
+#include "base/hash.h"
 #include "client/client.h"
 #include "config/config_handler.h"
+#include "config/roman_table_presets.h"
 #include "gui/base/util.h"
 #include "gui/config_dialog/keymap_editor.h"
 #include "gui/config_dialog/roman_table_editor.h"
@@ -604,6 +613,11 @@ ConfigDialog::ConfigDialog()
                    SLOT(ResetToDefaults()));
   QObject::connect(editRomanTableButton, SIGNAL(clicked()), this,
                    SLOT(EditRomanTable()));
+  QObject::connect(romanTablePresetComboBox,
+                   QOverload<int>::of(&QComboBox::currentIndexChanged),
+                   this, &ConfigDialog::SelectRomanPreset);
+  editKeymapButton->setText(tr("Edit..."));
+  editRomanTableButton->setText(tr("Edit..."));
   QObject::connect(inputModeComboBox, SIGNAL(currentIndexChanged(int)), this,
                    SLOT(SelectInputModeSetting(int)));
   QObject::connect(dimPendingRomanInputCheckBox, SIGNAL(toggled(bool)),
@@ -6112,6 +6126,8 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
 
   custom_keymap_table_ = config.custom_keymap_table();
   custom_roman_table_ = config.custom_roman_table();
+  roman_table_preset_id_ = config.roman_table_preset_id();
+  RefreshRomanPresetUi();
 
   // tab2
   SET_COMBOBOX(historyLearningLevelComboBox, HistoryLearningLevel,
@@ -6516,6 +6532,13 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   config->clear_custom_roman_table();
   if (!custom_roman_table_.empty()) {
     config->set_custom_roman_table(custom_roman_table_);
+  }
+  config->clear_roman_table_preset_id();
+  config->clear_roman_table_preset_snapshot_hash();
+  if (!roman_table_preset_id_.empty() && !custom_roman_table_.empty()) {
+    config->set_roman_table_preset_id(roman_table_preset_id_);
+    config->set_roman_table_preset_snapshot_hash(
+        CityFingerprint(custom_roman_table_));
   }
 
   // tab2
@@ -7928,18 +7951,103 @@ void ConfigDialog::EditKeymap() {
   }
 }
 
+void ConfigDialog::RefreshRomanPresetUi() {
+  QSignalBlocker block(romanTablePresetComboBox);
+  romanTablePresetComboBox->clear();
+  romanTablePresetComboBox->addItem(tr("Standard"), QStringLiteral("default"));
+  romanTablePresetComboBox->addItem(QStringLiteral("Simplified-AZIK"),
+                                   QStringLiteral("simplified_azik"));
+  romanTablePresetComboBox->addItem(QString::fromUtf8("新月配列"),
+                                   QStringLiteral("shingetsu"));
+  romanTablePresetComboBox->addItem(QString::fromUtf8("せおと配列"),
+                                   QStringLiteral("seoto"));
+  romanTablePresetComboBox->addItem(QString::fromUtf8("せおと配列 Plus"),
+                                   QStringLiteral("seoto_plus"));
+  romanTablePresetComboBox->insertSeparator(romanTablePresetComboBox->count());
+  romanTablePresetComboBox->addItem(tr("Custom"), QStringLiteral("custom"));
+  if (base_config_.user_roman_table_presets_size() != 0) {
+    romanTablePresetComboBox->insertSeparator(romanTablePresetComboBox->count());
+  }
+  for (const auto &entry : base_config_.user_roman_table_presets()) {
+    romanTablePresetComboBox->addItem(QString::fromStdString(entry.name()),
+                                     QString::fromStdString("user:" + entry.id()));
+  }
+  const QString selected = roman_table_preset_id_.empty()
+      ? (custom_roman_table_.empty() ? QStringLiteral("default")
+                                     : QStringLiteral("custom"))
+      : QString::fromStdString(roman_table_preset_id_);
+  const int index = romanTablePresetComboBox->findData(selected);
+  romanTablePresetComboBox->setCurrentIndex(index >= 0 ? index :
+                            romanTablePresetComboBox->findData(QStringLiteral("custom")));
+
+}
+
+void ConfigDialog::SelectRomanPreset(int index) {
+  if (index < 0) return;
+  const QString selected = romanTablePresetComboBox->itemData(index).toString();
+  if (selected == QStringLiteral("custom") && !roman_table_preset_id_.empty()) {
+    roman_table_preset_id_.clear();  // Detach, retaining the current snapshot.
+  } else if (selected == QStringLiteral("default")) {
+    if (roman_table_preset_id_.empty() && custom_roman_table_.empty()) return;
+    if (roman_table_preset_id_.empty() && !custom_roman_table_.empty() &&
+        QMessageBox::Cancel == QMessageBox::question(
+            this, windowTitle(), tr("Replace your custom romaji rules?"),
+            QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel)) {
+      RefreshRomanPresetUi();
+      return;
+    }
+    roman_table_preset_id_.clear();
+    custom_roman_table_.clear();
+  } else if (selected != QStringLiteral("custom")) {
+    const std::string id = selected.toStdString();
+    if (roman_table_preset_id_ == id) return;
+    const absl::string_view next =
+        config::ResolveRomanTablePreset(base_config_, id);
+    if (next.empty()) {
+      QMessageBox::warning(this, windowTitle(), tr("Preset is unavailable."));
+      RefreshRomanPresetUi();
+      return;
+    }
+    if (roman_table_preset_id_.empty() && !custom_roman_table_.empty() &&
+        QMessageBox::Cancel == QMessageBox::question(
+            this, windowTitle(), tr("Replace your custom romaji rules?"),
+            QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel)) {
+      RefreshRomanPresetUi();
+      return;
+    }
+    roman_table_preset_id_ = id;
+    custom_roman_table_.assign(next.data(), next.size());
+  } else {
+    RefreshRomanPresetUi();
+    return;
+  }
+  RefreshRomanPresetUi();
+  EnableApplyButton();
+}
+
 void ConfigDialog::EditRomanTable() {
   std::string output;
-  if (gui::RomanTableEditorDialog::Show(this, custom_roman_table_, &output)) {
+  std::string preset_id;
+  // Personal preset edits are staged inside the modal editor.  Cancel leaves
+  // both the input rules and personal library completely unchanged.
+  config::Config staged_library = base_config_;
+  if (gui::RomanTableEditorDialog::Show(
+          this, custom_roman_table_, roman_table_preset_id_, &staged_library,
+          &output, &preset_id)) {
+    base_config_.mutable_user_roman_table_presets()->CopyFrom(
+        staged_library.user_roman_table_presets());
     custom_roman_table_ = output;
+    roman_table_preset_id_ = preset_id;
+    RefreshRomanPresetUi();
     EnableApplyButton();
   }
 }
 
 void ConfigDialog::SelectInputModeSetting(int index) {
   // Enable Roman-table-specific controls only for Roman input.
-  const bool roman_input = (index == 0);
+  const bool roman_input = (index == 0 || index == 2);
   editRomanTableButton->setEnabled(roman_input);
+  romanTablePresetComboBox->setEnabled(roman_input);
   dimPendingRomanInputCheckBox->setEnabled(roman_input);
 
   const bool dimness_enabled =
@@ -8089,7 +8197,11 @@ void ConfigDialog::ResetToDefaults() {
     // nice to have GET_DEFAULT_CONFIG command
     const bool was_suppressed = suppress_apply_button_update_;
     suppress_apply_button_update_ = true;
-    ConvertFromProto(config::ConfigHandler::GetProductDefaultConfig());
+    config::Config defaults = config::ConfigHandler::GetProductDefaultConfig();
+    for (const auto &item : base_config_.user_roman_table_presets()) {
+      *defaults.add_user_roman_table_presets() = item;
+    }
+    ConvertFromProto(defaults);
     UpdateDependentControls();
     suppress_apply_button_update_ = was_suppressed;
     EnableApplyButton();

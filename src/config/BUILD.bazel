@@ -37,6 +37,29 @@ load(
 package(default_visibility = ["//visibility:private"])
 
 mozc_cc_library(
+    name = "roman_table_presets",
+    srcs = ["roman_table_presets.cc"],
+    hdrs = ["roman_table_presets.h"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//base:hash",
+        "//protocol:config_cc_proto",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_test(
+    name = "roman_table_presets_test",
+    size = "small",
+    srcs = ["roman_table_presets_test.cc"],
+    deps = [
+        ":roman_table_presets",
+        "//base:hash",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "config_handler",
     srcs = ["config_handler.cc"],
     hdrs = ["config_handler.h"],
@@ -44,6 +67,7 @@ mozc_cc_library(
         "//:__subpackages__",
     ],
     deps = [
+        ":roman_table_presets",
         "//base:clock",
         "//base:config_file_stream",
         "//base:hash",

@@ -141,6 +141,24 @@ message Config {
   // custom roman table
   optional bytes custom_roman_table = 43;
 
+  // Stable ID of a bundled romaji table preset. Empty means a manually
+  // customized table or Mozc's default. The snapshot in custom_roman_table
+  // is retained for compatibility; ConfigHandler resolves this ID to the
+  // current bundled revision when loading settings.
+  optional string roman_table_preset_id = 1400 [default = ""];
+  // Stable fingerprint of the saved snapshot. Detect external user edits and
+  // fall back to custom mode rather than silently overwriting their table.
+  optional fixed64 roman_table_preset_snapshot_hash = 1401;
+
+  // User-created local romaji presets. Their identifiers are immutable; names
+  // and contents may change only through the owner's explicit operations.
+  message UserRomanTablePreset {
+    optional string id = 1;
+    optional string name = 2;
+    optional bytes table = 3;
+  }
+  repeated UserRomanTablePreset user_roman_table_presets = 1402;
+
   enum PunctuationMethod {
     TOUTEN_KUTEN = 0;
     COMMA_PERIOD = 1;
