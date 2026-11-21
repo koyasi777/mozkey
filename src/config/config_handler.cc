@@ -57,6 +57,7 @@
 #include "base/system_util.h"
 #include "base/thread.h"
 #include "base/version.h"
+#include "config/roman_table_presets.h"
 #include "base/vlog.h"
 #include "protocol/config.pb.h"
 
@@ -519,6 +520,9 @@ void NormalizeConfig(Config* config) {
   }
 
   ApplyMozkeyProductDefaults(config);
+
+  // Follows bundled preset revisions only while the saved snapshot is intact.
+  NormalizeRomanTablePreset(config);
 }
 
 class ConfigHandlerImpl final {

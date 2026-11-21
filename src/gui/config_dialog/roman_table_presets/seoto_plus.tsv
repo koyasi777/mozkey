@@ -1,0 +1,634 @@
+-	ー
+~	〜
+.	。
+,	、
+v/	・
+v.	…
+v,	‥
+vs	←
+vh	↑
+vt	→
+vm	↓
+vf	↗
+vc	↘
+vr	↙
+vz	↖
+vd	゙
+vb	゚
+v-	〜
+v[	『
+v]	』
+[	「
+]	」
+va	ゔぁ
+vi	ゔぃ
+vu	ゔ
+ve	ゔぇ
+vo	ゔぉ
+vya	ゔゃ
+vyi	ゔぃ
+vyu	ゔゅ
+vye	ゔぇ
+vyo	ゔょ
+q	よ
+kq	きょ
+cq	きょ
+gq	ぎょ
+sq	しょ
+zq	じょ
+tq	ちょ
+dq	ぢょ
+nq	にょ
+hq	ひょ
+bq	びょ
+pq	ぴょ
+mq	みょ
+rq	りょ
+fq	ふょ
+vq	ゔょ
+zj	じゅ
+j	ゆ
+kj	きゅ
+cj	きゅ
+gj	ぎゅ
+sj	しゅ
+tj	ちゅ
+dj	ぢゅ
+nj	にゅ
+hj	ひゅ
+bj	びゅ
+pj	ぴゅ
+mj	みゅ
+rj	りゅ
+fj	ふゅ
+vj	ゔゅ
+x	や
+kx	きゃ
+cx	きゃ
+gx	ぎゃ
+sx	しゃ
+zx	じゃ
+tx	ちゃ
+dx	ぢゃ
+nx	にゃ
+hx	ひゃ
+bx	びゃ
+px	ぴゃ
+mx	みゃ
+rx	りゃ
+fx	ふゃ
+vx	ゔゃ
+sr	する		DisplayAmbiguousResult
+rs	それ		DisplayAmbiguousResult
+rsdh	それでは		DisplayAmbiguousResult
+rsg	それが
+rsh	それは		DisplayAmbiguousResult
+rshi	それひ		DisplayAmbiguousResult
+rshu	それふ		DisplayAmbiguousResult
+rshe	それへ		DisplayAmbiguousResult
+rsho	それほ		DisplayAmbiguousResult
+rszr	それぞれ		DisplayAmbiguousResult
+slt	されて		DisplayAmbiguousResult
+srl	すると		DisplayAmbiguousResult
+slr	される		DisplayAmbiguousResult
+ss	させ		DisplayAmbiguousResult
+ssr	させる		DisplayAmbiguousResult
+ssrr	させられ		DisplayAmbiguousResult
+ssrrr	させられる		DisplayAmbiguousResult
+srb	すれば		DisplayAmbiguousResult
+srbc	するべき		DisplayAmbiguousResult
+st	して		DisplayAmbiguousResult
+stms	してます		DisplayAmbiguousResult
+stmst	してました		DisplayAmbiguousResult
+sl	した		DisplayAmbiguousResult
+str	そちら		DisplayAmbiguousResult
+stru	してる		DisplayAmbiguousResult
+stsm	してしま		DisplayAmbiguousResult
+stsmi	してしまい		DisplayAmbiguousResult
+stsmgt	してしまいがち		DisplayAmbiguousResult
+smgt	しまいがち		DisplayAmbiguousResult
+sst	そして		DisplayAmbiguousResult
+sstr	そしたら		DisplayAmbiguousResult
+sn	しな		DisplayAmbiguousResult
+sngr	しながら		DisplayAmbiguousResult
+sc	しか		DisplayAmbiguousResult
+scs	しかし
+scm	しかも
+sbc	すべき		DisplayAmbiguousResult
+sbcv	すべきか		DisplayAmbiguousResult
+sbt	すべて		DisplayAmbiguousResult
+sbrc	しばらく		DisplayAmbiguousResult
+sg	すぎ		DisplayAmbiguousResult
+ssg	しすぎ		DisplayAmbiguousResult
+sm	しま		DisplayAmbiguousResult
+sms	します		DisplayAmbiguousResult
+smsm	そもそも		DisplayAmbiguousResult
+smsc	しますか		DisplayAmbiguousResult
+smscd	しますけど		DisplayAmbiguousResult
+smsg	しますが		DisplayAmbiguousResult
+smsn	しません		DisplayAmbiguousResult
+smsna	しますな		DisplayAmbiguousResult
+smsne	しますね		DisplayAmbiguousResult
+smsnne	しませんね		DisplayAmbiguousResult
+smsnd	しますので		DisplayAmbiguousResult
+smsnnd	しませんので		DisplayAmbiguousResult
+smsng	しませんが		DisplayAmbiguousResult
+smst	しました		DisplayAmbiguousResult
+smstc	しましたか		DisplayAmbiguousResult
+smsto	しますと		DisplayAmbiguousResult
+smstr	しましたら		DisplayAmbiguousResult
+smstrb	しましたらば		DisplayAmbiguousResult
+smstg	しましたが		DisplayAmbiguousResult
+ms	ます		DisplayAmbiguousResult
+msn	ません		DisplayAmbiguousResult
+msne	ますね		DisplayAmbiguousResult
+msna	ますな		DisplayAmbiguousResult
+msnne	ませんね		DisplayAmbiguousResult
+msnd	ますので		DisplayAmbiguousResult
+msnnd	ませんので		DisplayAmbiguousResult
+msng	ませんが		DisplayAmbiguousResult
+msg	ますが		DisplayAmbiguousResult
+msc	ますか		DisplayAmbiguousResult
+mscd	ますけど		DisplayAmbiguousResult
+msm	もしも
+mst	ました		DisplayAmbiguousResult
+msto	ますと		DisplayAmbiguousResult
+mstr	ましたら		DisplayAmbiguousResult
+mstrb	ましたらば		DisplayAmbiguousResult
+mstg	ましたが		DisplayAmbiguousResult
+mmst	みました		DisplayAmbiguousResult
+mmsto	みますと		DisplayAmbiguousResult
+mmstr	みましたら		DisplayAmbiguousResult
+mmstrb	みましたらば		DisplayAmbiguousResult
+mmstg	みましたが		DisplayAmbiguousResult
+mscst	もしかして		DisplayAmbiguousResult
+mscstr	もしかしたら		DisplayAmbiguousResult
+mtrn	もちろん
+cs	こそ		DisplayAmbiguousResult
+ct	こと		DisplayAmbiguousResult
+ctr	こちら		DisplayAmbiguousResult
+ctnr	ことなら		DisplayAmbiguousResult
+ctnrb	ことならば		DisplayAmbiguousResult
+ctnnrb	ことにならば		DisplayAmbiguousResult
+ctnnr	ことになる		DisplayAmbiguousResult
+ctnnrnr	ことになるなら		DisplayAmbiguousResult
+ctnnc	ことなのか		DisplayAmbiguousResult
+ctnncm	ことなのかも		DisplayAmbiguousResult
+ctnncmsr	ことなのかもしれ		DisplayAmbiguousResult
+ctnnrms	ことになります		DisplayAmbiguousResult
+ctnnrmsn	ことになりません		DisplayAmbiguousResult
+ctnnrmsnd	ことになりませんので		DisplayAmbiguousResult
+ctnnrmsg	ことになりますが		DisplayAmbiguousResult
+ctnnrmsc	ことになりますか		DisplayAmbiguousResult
+ctnnrmscd	ことになりますけど		DisplayAmbiguousResult
+ctnnrmst	ことになりました		DisplayAmbiguousResult
+ctnnrmsto	ことになりますと		DisplayAmbiguousResult
+ctnnrmstr	ことになりましたら		DisplayAmbiguousResult
+ctnnrmstrb	ことになりましたらば		DisplayAmbiguousResult
+ctnnrmstg	ことになりましたが		DisplayAmbiguousResult
+ctnhnrms	ことにはなります		DisplayAmbiguousResult
+ctnhnrmsn	ことにはなりません		DisplayAmbiguousResult
+ctnhnrmsnd	ことにはなりませんので		DisplayAmbiguousResult
+ctnhnrmsg	ことにはなりますが		DisplayAmbiguousResult
+ctnhnrmsc	ことにはなりますか		DisplayAmbiguousResult
+ctnhnrmscd	ことにはなりますけど		DisplayAmbiguousResult
+ctnhnrmst	ことにはなりました		DisplayAmbiguousResult
+ctnhnrmstg	ことにはなりましたが		DisplayAmbiguousResult
+cc	ここ		DisplayAmbiguousResult
+cr	から		DisplayAmbiguousResult
+rc	これ		DisplayAmbiguousResult
+rcr	これら		DisplayAmbiguousResult
+rcg	これが		DisplayAmbiguousResult
+rch	これは		DisplayAmbiguousResult
+cm	かも		DisplayAmbiguousResult
+cmsrn	かもしれない
+cn	かな		DisplayAmbiguousResult
+cnr	かなり		DisplayAmbiguousResult
+cnrz	かならず		DisplayAmbiguousResult
+cd	けど		DisplayAmbiguousResult
+cdm	けども
+nm	のも
+nstm	にしても
+nh	のは		DisplayAmbiguousResult
+ns	には		DisplayAmbiguousResult
+nt	にて		DisplayAmbiguousResult
+nd	ので		DisplayAmbiguousResult
+ndh	のでは		DisplayAmbiguousResult
+nds	のです		DisplayAmbiguousResult
+ndsq	のですよ		DisplayAmbiguousResult
+ndsqu	のでしょう		DisplayAmbiguousResult
+nsd	のです		DisplayAmbiguousResult
+ndsa	のでさ		DisplayAmbiguousResult
+ndsi	のでし		DisplayAmbiguousResult
+ndsu	のです		DisplayAmbiguousResult
+ndse	のでせ		DisplayAmbiguousResult
+ndso	のでそ		DisplayAmbiguousResult
+ndsn	のですね		DisplayAmbiguousResult
+nsdn	のですね		DisplayAmbiguousResult
+ndsg	のですが
+nsdg	のですが
+ng	のが		DisplayAmbiguousResult
+ndg	のだが		DisplayAmbiguousResult
+nndg	なのだが
+nn	なの		DisplayAmbiguousResult
+nni	なのに		DisplayAmbiguousResult
+nnh	なのは
+nnd	なので		DisplayAmbiguousResult
+nna	なのだ		DisplayAmbiguousResult
+nnag	なのだが		DisplayAmbiguousResult
+nng	なのが
+nnc	なのか		DisplayAmbiguousResult
+nncm	なのかも		DisplayAmbiguousResult
+nncmsr	なのかもしれ
+rn	なる		DisplayAmbiguousResult
+nr	なら		DisplayAmbiguousResult
+nrt	ならば		DisplayAmbiguousResult
+nrms	なります		DisplayAmbiguousResult
+nrmsg	なりますが		DisplayAmbiguousResult
+nrmsc	なりますか		DisplayAmbiguousResult
+nrmscd	なりますけど		DisplayAmbiguousResult
+nrmsn	なりません		DisplayAmbiguousResult
+nrmsna	なりますな		DisplayAmbiguousResult
+nrmsnd	なりますので		DisplayAmbiguousResult
+nrmst	なりました		DisplayAmbiguousResult
+nrmstg	なりましたが		DisplayAmbiguousResult
+nrmsto	なりますと		DisplayAmbiguousResult
+nrmstr	なりましたら		DisplayAmbiguousResult
+nrmstrb	なりましたらば		DisplayAmbiguousResult
+nnrms	になります		DisplayAmbiguousResult
+nnrmsc	になりますか		DisplayAmbiguousResult
+nnrmscd	になりますけど		DisplayAmbiguousResult
+nnrmst	になりました		DisplayAmbiguousResult
+nnrmsto	になりますと		DisplayAmbiguousResult
+nrhd	なるほど
+nrb	ならば
+nb	ねば
+nc	なか		DisplayAmbiguousResult
+nct	のこと		DisplayAmbiguousResult
+nz	なぜ		DisplayAmbiguousResult
+nznr	なぜなら		DisplayAmbiguousResult
+nznrb	なぜならば		DisplayAmbiguousResult
+nzc	なぜか		DisplayAmbiguousResult
+ngr	ながら
+ntcmst	につきまして
+rr	られ		DisplayAmbiguousResult
+rrr	られる		DisplayAmbiguousResult
+rb	れば
+rt	れて
+md	まで
+mz	まず		DisplayAmbiguousResult
+mzh	まずは		DisplayAmbiguousResult
+mt	また		DisplayAmbiguousResult
+mth	または		DisplayAmbiguousResult
+mn	もの
+mrd	まるで
+ds	です		DisplayAmbiguousResult
+sd	です		DisplayAmbiguousResult
+dst	でした		DisplayAmbiguousResult
+sdt	でした		DisplayAmbiguousResult
+dsto	ですと		DisplayAmbiguousResult
+sdto	ですと		DisplayAmbiguousResult
+dstg	でしたが
+sdtg	でしたが
+dsn	ですね		DisplayAmbiguousResult
+sdn	ですね		DisplayAmbiguousResult
+dsna	ですな		DisplayAmbiguousResult
+sdna	ですな		DisplayAmbiguousResult
+dsno	ですの		DisplayAmbiguousResult
+sdno	ですの		DisplayAmbiguousResult
+dsnd	ですので		DisplayAmbiguousResult
+sdnd	ですので		DisplayAmbiguousResult
+dsc	ですか		DisplayAmbiguousResult
+sdc	ですか		DisplayAmbiguousResult
+dscr	ですから		DisplayAmbiguousResult
+sdcr	ですから		DisplayAmbiguousResult
+dscd	ですけど		DisplayAmbiguousResult
+sdcd	ですけど		DisplayAmbiguousResult
+dscdm	ですけども		DisplayAmbiguousResult
+sdcdm	ですけども		DisplayAmbiguousResult
+dscn	ですかね		DisplayAmbiguousResult
+sdcn	ですかね		DisplayAmbiguousResult
+dsg	ですが
+sdg	ですが
+dm	でも
+dc	だけ		DisplayAmbiguousResult
+dcv	だけど		DisplayAmbiguousResult
+dcr	だから
+dn	では		DisplayAmbiguousResult
+dh	では		DisplayAmbiguousResult
+dnnc	ではなく
+dt	だと
+dg	だが
+gt	がち
+tr	たら
+tsc	たしか		DisplayAmbiguousResult
+tscn	たしかに
+tsf	とした		DisplayAmbiguousResult
+tst	として		DisplayAmbiguousResult
+tsth	としては		DisplayAmbiguousResult
+tstm	としても		DisplayAmbiguousResult
+tsr	とする		DisplayAmbiguousResult
+tsrt	とすると
+tsrnr	とするなら		DisplayAmbiguousResult
+tsrnrb	とするならば
+tsrb	とすれば
+tnrb	となれば
+tn	との		DisplayAmbiguousResult
+tnct	とのこと		DisplayAmbiguousResult
+tnmn	ちなみに		DisplayAmbiguousResult
+tm	ため		DisplayAmbiguousResult
+tmr	つまり		DisplayAmbiguousResult
+tmrtcr	つまるところ
+th	とは		DisplayAmbiguousResult
+ts	ては		DisplayAmbiguousResult
+tc	てき		DisplayAmbiguousResult
+tcrg	ところが		DisplayAmbiguousResult
+tcr	ところ		DisplayAmbiguousResult
+ttm	とても		DisplayAmbiguousResult
+tcmst	つきまして		DisplayAmbiguousResult
+td	ただ		DisplayAmbiguousResult
+tds	ただし		DisplayAmbiguousResult
+tb	たび
+ht	ひと
+hz	はず		DisplayAmbiguousResult
+bt	びと
+bb	べば		DisplayAmbiguousResult
+bc	べき		DisplayAmbiguousResult
+zr	ざる
+wts	わたし		DisplayAmbiguousResult
+wc	わけ		DisplayAmbiguousResult
+wcdh	わけでは		DisplayAmbiguousResult
+wz	わざ		DisplayAmbiguousResult
+wzt	わざと		DisplayAmbiguousResult
+wztrs	わざとらし		DisplayAmbiguousResult
+wztrsi	わざとらしい		DisplayAmbiguousResult
+wztrsc	わざとらしく		DisplayAmbiguousResult
+wzwz	わざわざ		DisplayAmbiguousResult
+gg	が		DisplayAmbiguousResult
+hh	は		DisplayAmbiguousResult
+mm	まま		DisplayAmbiguousResult
+vv	っ	v
+ll	っ	l
+kk	っ	k
+zz	っ	z
+dd	っ	d
+ff	っ	f
+pp	っ	p
+yy	っ	y
+ww	っ	w
+www	w	ww
+kya	きゃ
+kyi	きぃ
+kyu	きゅ
+kye	きぇ
+kyo	きょ
+gya	ぎゃ
+gyi	ぎぃ
+gyu	ぎゅ
+gye	ぎぇ
+gyo	ぎょ
+sya	しゃ
+syi	しぃ
+syu	しゅ
+sye	しぇ
+syo	しょ
+sha	しゃ
+shi	し
+shu	しゅ
+she	しぇ
+sho	しょ
+zya	じゃ
+zyi	じぃ
+zyu	じゅ
+zye	じぇ
+zyo	じょ
+tya	ちゃ
+tyi	ちぃ
+tyu	ちゅ
+tye	ちぇ
+tyo	ちょ
+cha	ちゃ
+chi	ち
+chu	ちゅ
+che	ちぇ
+cho	ちょ
+cya	きゃ
+cyi	きぃ
+cyu	きゅ
+cye	きぇ
+cyo	きょ
+dya	ぢゃ
+dyi	ぢぃ
+dyu	ぢゅ
+dye	ぢぇ
+dyo	ぢょ
+tsa	つぁ
+tsi	つぃ
+tse	つぇ
+tso	つぉ
+tha	てゃ
+thi	てぃ
+t'i	てぃ
+thu	てゅ
+the	てぇ
+tho	てょ
+t'yu	てゅ
+t'j	てゅ
+dha	でゃ
+dhi	でぃ
+d'i	でぃ
+dhu	でゅ
+dhe	でぇ
+dho	でょ
+d'yu	でゅ
+d'j	でゅ
+twa	とぁ
+twi	とぃ
+twu	とぅ
+twe	とぇ
+two	とぉ
+t'u	とぅ
+dwa	どぁ
+dwi	どぃ
+dwu	どぅ
+dwe	どぇ
+dwo	どぉ
+d'u	どぅ
+nya	にゃ
+nyi	にぃ
+nyu	にゅ
+nye	にぇ
+nyo	にょ
+hya	ひゃ
+hyi	ひぃ
+hyu	ひゅ
+hye	ひぇ
+hyo	ひょ
+bya	びゃ
+byi	びぃ
+byu	びゅ
+bye	びぇ
+byo	びょ
+pya	ぴゃ
+pyi	ぴぃ
+pyu	ぴゅ
+pye	ぴぇ
+pyo	ぴょ
+fa	ふぁ
+fi	ふぃ
+fe	ふぇ
+fo	ふぉ
+fya	ふゃ
+fyu	ふゅ
+fyo	ふょ
+hwa	ふぁ
+hwi	ふぃ
+hwe	ふぇ
+hwo	ふぉ
+hwyu	ふゅ
+hwj	ふゅ
+mya	みゃ
+myi	みぃ
+myu	みゅ
+mye	みぇ
+myo	みょ
+rya	りゃ
+ryi	りぃ
+ryu	りゅ
+rye	りぇ
+ryo	りょ
+n'	ん
+vn	ん
+a	あ
+i	い
+u	う
+wu	う
+e	え
+o	お
+la	ぁ
+li	ぃ
+lu	ぅ
+le	ぇ
+lo	ぉ
+lyi	ぃ
+lye	ぇ
+ye	いぇ
+ka	か
+ki	き
+ku	く
+ke	け
+ko	こ
+lka	ヵ
+lca	ヵ
+lke	ヶ
+lce	ヶ
+ga	が
+gi	ぎ
+gu	ぐ
+ge	げ
+go	ご
+sa	さ
+si	し
+su	す
+se	せ
+so	そ
+ca	か
+ci	き
+cu	く
+ce	け
+co	こ
+kwa	くぁ
+kwi	くぃ
+kwu	くぅ
+kwe	くぇ
+kwo	くぉ
+cwa	くぁ
+cwi	くぃ
+cwu	くぅ
+cwe	くぇ
+cwo	くぉ
+gwa	ぐぁ
+gwi	ぐぃ
+gwu	ぐぅ
+gwe	ぐぇ
+gwo	ぐぉ
+swa	すぁ
+swi	すぃ
+swu	すぅ
+swe	すぇ
+swo	すぉ
+zwa	ずぁ
+zwi	ずぃ
+zwu	ずぅ
+zwe	ずぇ
+zwo	ずぉ
+za	ざ
+zi	じ
+zu	ず
+ze	ぜ
+zo	ぞ
+ta	た
+ti	ち
+tu	つ
+tsu	つ
+te	て
+to	と
+da	だ
+di	ぢ
+du	づ
+de	で
+do	ど
+ltu	っ
+ltsu	っ
+na	な
+ni	に
+nu	ぬ
+ne	ね
+no	の
+ha	は
+hi	ひ
+hu	ふ
+fu	ふ
+he	へ
+ho	ほ
+ba	ば
+bi	び
+bu	ぶ
+be	べ
+bo	ぼ
+pa	ぱ
+pi	ぴ
+pu	ぷ
+pe	ぺ
+po	ぽ
+ma	ま
+mi	み
+mu	む
+me	め
+mo	も
+lya	ゃ
+lx	ゃ
+ya	や
+wyi	ゐ
+lyu	ゅ
+lj	ゅ
+yu	ゆ
+wye	ゑ
+lyo	ょ
+lq	ょ
+yo	よ
+ra	ら
+ri	り
+ru	る
+re	れ
+ro	ろ
+lwa	ゎ
+wa	わ
+wi	うぃ
+we	うぇ
+wo	を
+wha	うぁ
+whi	うぃ
+whu	う
+whe	うぇ
+who	うぉ
