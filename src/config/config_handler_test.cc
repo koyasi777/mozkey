@@ -150,6 +150,7 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.zenz_live_correction_right_context_length(), 6);
 
   EXPECT_EQ(config.history_learning_level(), Config::DEFAULT_HISTORY);
+  EXPECT_FALSE(config.preserve_learning_on_commit_undo());
   EXPECT_TRUE(config.use_history_suggest());
   EXPECT_TRUE(config.use_dictionary_suggest());
   EXPECT_FALSE(config.use_realtime_conversion());
@@ -164,6 +165,26 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.zenz_live_correction_underline_color(), 0xc4dc6c);
 #endif  // _WIN32
   EXPECT_EQ(config.suggestions_size(), 3);
+}
+
+TEST_F(ConfigHandlerTest, PreserveLearningOnCommitUndoRoundTrip) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "preserve_commit_learning.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+  ConfigHandler::Reload();
+
+  Config config = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(config.preserve_learning_on_commit_undo());
+  config.set_preserve_learning_on_commit_undo(true);
+  ConfigHandler::SetConfig(config);
+  EXPECT_TRUE(ConfigHandler::GetCopiedConfig()
+                  .preserve_learning_on_commit_undo());
+  config.set_preserve_learning_on_commit_undo(false);
+  ConfigHandler::SetConfig(config);
+  EXPECT_FALSE(ConfigHandler::GetCopiedConfig()
+                   .preserve_learning_on_commit_undo());
 }
 
 TEST_F(ConfigHandlerTest, SetConfig) {

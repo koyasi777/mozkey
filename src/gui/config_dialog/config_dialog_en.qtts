@@ -5,6 +5,16 @@
     <name>ConfigDialog</name>
     <message>
         <location filename="config_dialog.ui" line="0"/>
+        <source>Learning deletion after immediate cancellation of a committed conversion</source>
+        <translation>Learning deletion after immediate cancellation of a committed conversion</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>When Revert, Undo, or an equivalent cancellation occurs immediately after a conversion is confirmed, delete the Mozc and Zenz learning recorded by that confirmation. The standard Backspace key invokes Revert; custom key assignments are respected. CancelLastLearning always cancels the most recent reversible learning, regardless of this setting. Deleting text and restoring preedit are unaffected. On by default.</source>
+        <translation>When Revert, Undo, or an equivalent cancellation occurs immediately after a conversion is confirmed, delete the Mozc and Zenz learning recorded by that confirmation. The standard Backspace key invokes Revert; custom key assignments are respected. CancelLastLearning always cancels the most recent reversible learning, regardless of this setting. Deleting text and restoring preedit are unaffected. On by default.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
         <source>Zenz による絵文字変換を抑制する</source>
         <translation>Suppress emoji conversion by Zenz</translation>
     </message>

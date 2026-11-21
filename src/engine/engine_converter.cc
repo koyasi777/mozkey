@@ -1638,6 +1638,10 @@ void EngineConverter::CommitHead(size_t count,
 
 void EngineConverter::Revert() { converter_->RevertConversion(&segments_); }
 
+void EngineConverter::ConfirmLastCommitLearning() {
+  converter_->DiscardConversionRevertState(&segments_);
+}
+
 bool EngineConverter::DeleteCandidateFromHistory(std::optional<int> id) {
   if (id == std::nullopt) {
     if (!candidate_list_.focused()) {

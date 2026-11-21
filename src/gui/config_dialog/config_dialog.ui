@@ -441,14 +441,24 @@
             <property name="bottomMargin">
              <number>9</number>
             </property>
-            <item row="1" column="1">
+            <item row="2" column="1">
              <widget class="QPushButton" name="clearUserHistoryButton">
               <property name="text">
                <string>Clear personalization data</string>
               </property>
              </widget>
             </item>
-            <item row="2" column="0" colspan="2">
+            <item row="3" column="0" colspan="2">
+             <widget class="QCheckBox" name="deleteLearningOnCommitUndoCheckBox">
+              <property name="toolTip">
+               <string>When Revert, Undo, or an equivalent cancellation occurs immediately after a conversion is confirmed, delete the Mozc and Zenz learning recorded by that confirmation. The standard Backspace key invokes Revert; custom key assignments are respected. CancelLastLearning always cancels the most recent reversible learning, regardless of this setting. Deleting text and restoring preedit are unaffected. On by default.</string>
+              </property>
+              <property name="text">
+               <string>Learning deletion after immediate cancellation of a committed conversion</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="0" colspan="2">
              <widget class="QLabel" name="zenzLearningIndependenceNoticeLabel">
               <property name="text">
                <string>Configure and manage Zenz learning under [Advanced] -&gt; [Zenz Learning].</string>
@@ -458,7 +468,7 @@
               </property>
              </widget>
             </item>
-            <item row="3" column="0" colspan="2">
+            <item row="5" column="0" colspan="2">
              <widget class="QLabel" name="hiddenCandidateNoticeLabel">
               <property name="text">
                <string>Candidates hidden from the candidate or suggestion window are registered as suppression words in the &quot;非表示候補&quot; user dictionary. Delete the corresponding entry from the user dictionary to show it again.</string>
@@ -488,7 +498,7 @@
               </property>
              </widget>
             </item>
-            <item row="1" column="0">
+            <item row="2" column="0">
              <spacer name="horizontalSpacer_2">
               <property name="orientation">
                <enum>Qt::Orientation::Horizontal</enum>

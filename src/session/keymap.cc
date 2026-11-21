@@ -679,6 +679,8 @@ void KeyMapManager::InitCommandData() {
       PrecompositionState::LAUNCH_WORD_REGISTER_DIALOG);
 
   RegisterPrecompositionCommand("Revert", PrecompositionState::REVERT);
+  RegisterPrecompositionCommand("CancelLastLearning",
+                                PrecompositionState::CANCEL_LAST_LEARNING);
   RegisterPrecompositionCommand("Undo", PrecompositionState::UNDO);
   RegisterPrecompositionCommand("Reconvert", PrecompositionState::RECONVERT);
   RegisterPrecompositionCommand(

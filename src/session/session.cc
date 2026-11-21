@@ -1599,35 +1599,6 @@ bool IsPlainBackspaceKey(const commands::KeyEvent& key) {
          key.modifier_keys_size() == 0;
 }
 
-bool IsPendingZenzFeedbackDiscardKey(const commands::KeyEvent& key) {
-  if (!key.has_special_key()) {
-    return false;
-  }
-
-  switch (key.special_key()) {
-    case commands::KeyEvent::BACKSPACE:
-    case commands::KeyEvent::ESCAPE:
-      return true;
-    default:
-      return false;
-  }
-}
-
-bool IsPendingDirectCommitLearningDiscardKey(
-    const commands::KeyEvent& key) {
-  if (!key.has_special_key()) {
-    return false;
-  }
-
-  switch (key.special_key()) {
-    case commands::KeyEvent::BACKSPACE:
-    case commands::KeyEvent::ESCAPE:
-      return true;
-    default:
-      return false;
-  }
-}
-
 bool ShouldCommitLiveConversionBeforeShiftAsciiInput(
     const config::Config& config,
     const composer::Composer& composer,
@@ -2303,6 +2274,31 @@ bool Session::TestSendKey(commands::Command* command) {
 
   const commands::KeyEvent& key = command->input().key();
 
+  // TEST_SEND_KEY is a *probe* (notably on Windows TSF).  In particular,
+  // EchoBack(), EchoBackAndClearUndoContext(), Revert(), and DoNothing() can
+  // reset the converter or modify reversible learning.  Never call them here.
+  // Only the matching SEND_KEY is allowed to perform those operations.
+  const auto pass_through = [&]() {
+    command->mutable_output()->set_consumed(false);
+    OutputKey(command);
+    return true;
+  };
+  const auto consume = [&]() {
+    command->mutable_output()->set_consumed(true);
+    OutputMode(command);
+    // Preserve the existing TEST_SEND_KEY presentation contract (preedit and
+    // candidate window) without consuming converter output.  PopOutput() is
+    // intentionally avoided here: it clears converter result/command state.
+    // FillOutput() is const and only populates the response protobuf.
+    if (context_->state() == ImeContext::COMPOSITION ||
+        context_->state() == ImeContext::CONVERSION) {
+      context_->converter().FillOutput(context_->composer(),
+                                       command->mutable_output());
+      MaybeUpdateCandidateActionFooter(command->mutable_output());
+    }
+    return true;
+  };
+
   // To support indirect IME on/off by using KeyEvent::activated, use effective
   // state instead of directly using context_->state().
   const ImeContext::State state =
@@ -2315,9 +2311,9 @@ bool Session::TestSendKey(commands::Command* command) {
     keymap::DirectInputState::Commands key_command;
     if (!keymap->GetCommandDirect(key, &key_command) ||
         key_command == keymap::DirectInputState::NONE) {
-      return EchoBack(command);
+      return pass_through();
     }
-    return DoNothing(command);
+    return consume();
   }
 
   // Precomposition
@@ -2328,31 +2324,14 @@ bool Session::TestSendKey(commands::Command* command) {
     const bool result =
         is_suggestion ? keymap->GetCommandZeroQuerySuggestion(key, &key_command)
                       : keymap->GetCommandPrecomposition(key, &key_command);
-    if (!result || key_command == keymap::PrecompositionState::NONE) {
-      if (HasUndoContext() && IsCancelKeyForCompositionOrConversion(key)) {
-        return Revert(command);
-      }
-
-      if ((pending_direct_commit_learning_.pending ||
-           pending_zenz_feedback_.pending) &&
-          IsCancelKeyForCompositionOrConversion(key)) {
-        // A direct-commit punctuation/symbol or accepted Zenz result may have
-        // already sent text to the application without creating Mozc's undo
-        // context. A cancel-like key such as Ctrl+Z should still cancel all
-        // pending learning/feedback, while the key itself is echoed back so
-        // that the application can undo the visible text.
-        DiscardPendingDirectCommitLearning(
-            "precomposition_cancel_key_after_direct_commit_learning");
-        DiscardPendingZenzFeedback(
-            "precomposition_cancel_key_after_pending_zenz_feedback");
-        return EchoBackAndClearUndoContext(command);
-      }
-
-      // Clear undo context just in case. b/5529702.
-      // Note that the undo context will not be cleared in
-      // EchoBackAndClearUndoContext if the key event consists of modifier keys
-      // only.
-      return EchoBackAndClearUndoContext(command);
+    if (!result) {
+      // Whether the unbound key represents a cross-state Cancel fallback is
+      // irrelevant to this probe: every such action passes through.  The
+      // matching SendKey() alone decides whether to cancel pending learning.
+      return pass_through();
+    }
+    if (key_command == keymap::PrecompositionState::NONE) {
+      return pass_through();
     }
     // If the input_style is DIRECT_INPUT, KeyEvent is not consumed
     // and done echo back.  It works only when key_string is equal to
@@ -2360,7 +2339,7 @@ bool Session::TestSendKey(commands::Command* command) {
     // used for rather than numpad characters.
     if (key_command == keymap::PrecompositionState::INSERT_CHARACTER &&
         key.input_style() == commands::KeyEvent::DIRECT_INPUT) {
-      return EchoBack(command);
+      return pass_through();
     }
 
     // TODO(komatsu): This is a hack to work around the problem with
@@ -2368,46 +2347,51 @@ bool Session::TestSendKey(commands::Command* command) {
     switch (key_command) {
       case keymap::PrecompositionState::INSERT_SPACE:
         if (!IsFullWidthInsertSpace(command->input()) && IsPureSpaceKey(key)) {
-          return EchoBackAndClearUndoContext(command);
+          return pass_through();
         }
-        return DoNothing(command);
+        return consume();
       case keymap::PrecompositionState::RECONVERT_SELECTION_OR_INSERT_SPACE:
         // TestSendKey reserves Space so the TSF client can inspect selection.
         // SendKey then prepares an explicit Space fallback that the client
         // applies only when reconversion is unavailable.
-        return DoNothing(command);
+        return consume();
       case keymap::PrecompositionState::INSERT_ALTERNATE_SPACE:
         if (IsFullWidthInsertSpace(command->input()) && IsPureSpaceKey(key)) {
-          return EchoBackAndClearUndoContext(command);
+          return pass_through();
         }
-        return DoNothing(command);
+        return consume();
       case keymap::PrecompositionState::INSERT_HALF_SPACE:
         if (IsPureSpaceKey(key)) {
-          return EchoBackAndClearUndoContext(command);
+          return pass_through();
         }
-        return DoNothing(command);
+        return consume();
       case keymap::PrecompositionState::INSERT_FULL_SPACE:
-        return DoNothing(command);
+        return consume();
       default:
         // Do nothing.
         break;
     }
 
     if (key_command == keymap::PrecompositionState::REVERT) {
-      return Revert(command);
+      return pass_through();
+    }
+    // CancelLastLearning, like other bound commands, is merely reserved here.
+    // Its learning rollback is performed only by SendKey().
+    if (key_command == keymap::PrecompositionState::CANCEL_LAST_LEARNING) {
+      return consume();
     }
 
     // If undo context is empty, echoes back the key event so that it can be
     // handled by the application. b/5553298
     if (key_command == keymap::PrecompositionState::UNDO && !HasUndoContext()) {
-      return EchoBack(command);
+      return pass_through();
     }
 
-    return DoNothing(command);
+    return consume();
   }
 
   // Do nothing.
-  return DoNothing(command);
+  return consume();
 }
 
 bool Session::SendKey(commands::Command* command) {
@@ -2768,6 +2752,8 @@ bool Session::ExecutePrecompositionCommand(
       return ToggleAlphanumericMode(command);
     case keymap::PrecompositionState::REVERT:
       return Revert(command);
+    case keymap::PrecompositionState::CANCEL_LAST_LEARNING:
+      return CancelLastLearning(command);
     case keymap::PrecompositionState::UNDO:
       return RequestUndo(command);
     case keymap::PrecompositionState::IME_OFF:
@@ -2805,10 +2791,8 @@ bool Session::ExecutePrecompositionCommand(
       return PredictAndConvert(command);
 
     case keymap::PrecompositionState::NONE:
-      if (HasUndoContext() &&
-          IsCancelKeyForCompositionOrConversion(command->input().key())) {
-        return Revert(command);
-      }
+      // The caller already resolved an explicit precomposition binding.
+      // Do not reinterpret its physical key as a different state's Cancel.
       return EchoBackAndClearUndoContext(command);
     case keymap::PrecompositionState::RECONVERT:
       return RequestConvertReverse(command);
@@ -3665,25 +3649,13 @@ bool Session::EchoBackAndClearUndoContext(commands::Command* command) {
   //                We need to check it outside of this function.
   const commands::KeyEvent& key_event = command->input().key();
 
-  if (IsPendingDirectCommitLearningDiscardKey(key_event)) {
-    DiscardPendingDirectCommitLearning(
-        "echo_back_discard_key_after_direct_commit");
-  }
-
-  if (IsPendingZenzFeedbackDiscardKey(key_event)) {
-    DiscardPendingZenzFeedback("echo_back_discard_key");
-  } else if (!IsPureModifierKeyEvent(key_event) &&
-             !IsCancelKeyForCompositionOrConversion(key_event)) {
-    // A finalized kCompareFinalCommit may be waiting for one more normal
-    // action before it is persisted so that an immediate Undo/Backspace can
-    // still neutralize the observation.  A pass-through key such as the
-    // second Enter in a search box is that normal action.  Confirm before the
-    // key is echoed to the application; otherwise navigation can destroy the
-    // session while the comparison is still only in memory.
-    ConfirmPendingZenzFeedback();
-  }
-
+  // Learning cancellation is decided by the executed keymap command (Revert,
+  // Undo, or CancelLastLearning), not the physical Backspace/Escape key.
+  // Pass-through keys end the short reversible window. Cancel-like fallbacks
+  // are handled before reaching this method in SendKeyPrecompositionState().
   if (!IsPureModifierKeyEvent(key_event)) {
+    ConfirmPendingDirectCommitLearning("echo_back_after_direct_commit");
+    ConfirmPendingZenzFeedback();
     ClearUndoContext();
   }
 
@@ -3708,6 +3680,26 @@ bool Session::DoNothing(commands::Command* command) {
   return true;
 }
 
+bool Session::CancelLastLearning(commands::Command* command) {
+  if (context_->state() != ImeContext::PRECOMPOSITION) {
+    return DoNothing(command);
+  }
+
+  // Bypass the retention preference only for this explicit command.  Preserve
+  // the Undo snapshot so the user may still restore the text independently.
+  DiscardPendingDirectCommitLearning("explicit_cancel_last_learning", true);
+  DiscardPendingZenzFeedback("explicit_cancel_last_learning", true);
+  if (ShouldRevertConverterOnUndo()) {
+    context_->mutable_converter()->Revert();
+    // A subsequent text Undo must not revert the same learning a second time.
+    undo_contexts_.back().revert_converter_on_undo = false;
+  }
+
+  command->mutable_output()->set_consumed(true);
+  Output(command);
+  return true;
+}
+
 bool Session::Revert(commands::Command* command) {
   DiscardPendingDirectCommitLearning(
       "revert_after_direct_commit_learning");
@@ -3716,7 +3708,11 @@ bool Session::Revert(commands::Command* command) {
   ClearPendingRerankedPreeditCommitAfterConvertCancel();
 
   if (context_->state() == ImeContext::PRECOMPOSITION) {
-    context_->mutable_converter()->Revert();
+    if (context_->GetConfig().preserve_learning_on_commit_undo()) {
+      context_->mutable_converter()->ConfirmLastCommitLearning();
+    } else {
+      context_->mutable_converter()->Revert();
+    }
     return EchoBackAndClearUndoContext(command);
   }
 
@@ -3881,10 +3877,9 @@ bool Session::ConvertReverse(commands::Command* command) {
 }
 
 bool Session::RequestUndo(commands::Command* command) {
-  DiscardPendingDirectCommitLearning(
-      "undo_after_direct_commit_learning");
-  DiscardPendingZenzFeedback("undo_after_pending_feedback");
-
+  // This only requests a platform callback.  The platform may decline or be
+  // unable to delete committed text, so reversible learning is left intact
+  // until Undo() actually accepts the request.
   if (!(context_->state() &
         (ImeContext::PRECOMPOSITION | ImeContext::CONVERSION |
          ImeContext::COMPOSITION))) {
@@ -3908,12 +3903,6 @@ bool Session::RequestUndo(commands::Command* command) {
 }
 
 bool Session::Undo(commands::Command* command) {
-  DiscardPendingDirectCommitLearning(
-      "undo_command_after_direct_commit_learning");
-  DiscardPendingZenzFeedback("undo_command_after_pending_feedback");
-
-  ClearPendingRerankedPreeditCommitAfterConvertCancel();
-
   if (!(context_->state() &
         (ImeContext::PRECOMPOSITION | ImeContext::CONVERSION |
          ImeContext::COMPOSITION))) {
@@ -3923,14 +3912,17 @@ bool Session::Undo(commands::Command* command) {
 
   // Check the undo context
   if (!HasUndoContext()) {
-    return DoNothing(command);
-  }
-
-  // Roll back converter learning only for commit paths that actually used the
-  // converter. Pending-display Submit commits a visible string directly and
-  // therefore has no converter learning to revert.
-  if (ShouldRevertConverterOnUndo()) {
-    context_->mutable_converter()->Revert();
+    // Preserve the preedit/candidate presentation for a redundant Undo, but
+    // do not reset the converter or any reversible learning state.  Unlike
+    // DoNothing(), FillOutput() does not consume the converter's output.
+    OutputMode(command);
+    if (context_->state() == ImeContext::COMPOSITION ||
+        context_->state() == ImeContext::CONVERSION) {
+      context_->converter().FillOutput(context_->composer(),
+                                       command->mutable_output());
+      MaybeUpdateCandidateActionFooter(command->mutable_output());
+    }
+    return true;
   }
 
   size_t result_size = 0;
@@ -3939,10 +3931,32 @@ bool Session::Undo(commands::Command* command) {
     // Check the client's capability
     if (!(context_->client_capability().text_deletion() &
           commands::Capability::DELETE_PRECEDING_TEXT)) {
-      return DoNothing(command);
+      // DoNothing() may reset an active zero-query converter; do not touch
+      // reversible learning when the client cannot delete the committed text.
+      OutputMode(command);
+      return true;
     }
     result_size = Util::CharsLen(context_->output().result().value());
     cursor_offset = context_->output().result().cursor_offset();
+  }
+
+  // Validate before mutating any of the learning ledgers or undo snapshots.
+  // A failed Undo (e.g. DELETE_PRECEDING_TEXT not supported by the client)
+  // must not leave the committed text visible with its learning deleted.
+  DiscardPendingDirectCommitLearning(
+      "undo_command_after_direct_commit_learning");
+  DiscardPendingZenzFeedback("undo_command_after_pending_feedback");
+  ClearPendingRerankedPreeditCommitAfterConvertCancel();
+
+  // Roll back converter learning only for commit paths that actually used the
+  // converter. Pending-display Submit commits a visible string directly and
+  // therefore has no converter learning to revert.
+  if (ShouldRevertConverterOnUndo()) {
+    if (context_->GetConfig().preserve_learning_on_commit_undo()) {
+      context_->mutable_converter()->ConfirmLastCommitLearning();
+    } else {
+      context_->mutable_converter()->Revert();
+    }
   }
 
   PopUndoContext();
@@ -6539,8 +6553,20 @@ void Session::ConfirmPendingZenzFeedback() {
   pending_zenz_feedback_ = PendingZenzFeedback();
 }
 
-void Session::DiscardPendingZenzFeedback(absl::string_view reason) {
+void Session::DiscardPendingZenzFeedback(absl::string_view reason,
+                                         bool force_rollback) {
   if (!pending_zenz_feedback_.pending) {
+    return;
+  }
+
+  // Only an accepted Zenz commit or an actually observed final Mozc commit
+  // qualifies for retention.  An uncommitted Zenz proposal is not evidence.
+  if (!force_rollback &&
+      context_->GetConfig().preserve_learning_on_commit_undo() &&
+      (pending_zenz_feedback_.action ==
+           PendingZenzFeedback::Action::kAccepted ||
+       pending_zenz_feedback_.has_final_committed_value)) {
+    ConfirmPendingZenzFeedback();
     return;
   }
 
@@ -6640,6 +6666,14 @@ void Session::ConfirmPendingDirectCommitLearning(absl::string_view reason) {
     return;
   }
 
+  // The current converter may already have been Reset() by a direct commit.
+  // Finalize the saved commit's revert state without undoing its learning.
+  if (pending_direct_commit_learning_.revert_context != nullptr) {
+    pending_direct_commit_learning_.revert_context
+        ->mutable_converter()
+        ->ConfirmLastCommitLearning();
+  }
+
   ZenzDebugOutput(absl::StrCat(
       "[direct-commit-learning] confirm reason=", reason,
       " original_reason=", pending_direct_commit_learning_.reason,
@@ -6651,8 +6685,15 @@ void Session::ConfirmPendingDirectCommitLearning(absl::string_view reason) {
   pending_direct_commit_learning_ = PendingDirectCommitLearning();
 }
 
-void Session::DiscardPendingDirectCommitLearning(absl::string_view reason) {
+void Session::DiscardPendingDirectCommitLearning(absl::string_view reason,
+                                                 bool force_rollback) {
   if (!pending_direct_commit_learning_.pending) {
+    return;
+  }
+
+  if (!force_rollback &&
+      context_->GetConfig().preserve_learning_on_commit_undo()) {
+    ConfirmPendingDirectCommitLearning(reason);
     return;
   }
 
@@ -6679,11 +6720,9 @@ void Session::HandlePendingDirectCommitLearningForKeyEvent(
     return;
   }
 
-  if (IsPendingDirectCommitLearningDiscardKey(key)) {
-    DiscardPendingDirectCommitLearning("discard_key_after_direct_commit");
-    return;
-  }
-
+  // Called after command dispatch has selected InsertCharacter.  The raw key
+  // could be Backspace/Escape in a custom mapping: its physical identity must
+  // never turn an insertion action into a learning rollback.
   if (IsPureModifierKeyEvent(key)) {
     return;
   }
@@ -6699,7 +6738,7 @@ void Session::HandlePendingDirectCommitLearningForSessionCommand(
 
   switch (type) {
     case commands::SessionCommand::REVERT:
-    case commands::SessionCommand::UNDO:
+      // UNDO is handled by Undo() after validating text restoration support.
       DiscardPendingDirectCommitLearning(
           "session_command_discard_after_direct_commit");
       break;
@@ -6749,7 +6788,7 @@ void Session::HandlePendingZenzFeedbackForSessionCommand(
     commands::SessionCommand::CommandType type) {
   switch (type) {
     case commands::SessionCommand::REVERT:
-    case commands::SessionCommand::UNDO:
+      // UNDO is handled by Undo() after validating text restoration support.
       DiscardPendingZenzFeedback("session_command_discard");
       break;
     case commands::SessionCommand::RESET_CONTEXT:

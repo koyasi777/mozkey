@@ -5,6 +5,16 @@
     <name>ConfigDialog</name>
     <message>
         <location filename="config_dialog.ui" line="0"/>
+        <source>Learning deletion after immediate cancellation of a committed conversion</source>
+        <translation>変換確定直後の取り消しによる学習削除</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>When Revert, Undo, or an equivalent cancellation occurs immediately after a conversion is confirmed, delete the Mozc and Zenz learning recorded by that confirmation. The standard Backspace key invokes Revert; custom key assignments are respected. CancelLastLearning always cancels the most recent reversible learning, regardless of this setting. Deleting text and restoring preedit are unaffected. On by default.</source>
+        <translation>有効にすると、変換確定直後に Revert（標準キー設定では Backspace）や Undo などの取り消し操作を行った場合、その確定で記録した Mozc・Zenz の学習を削除します。カスタムキー設定では割り当てた操作に従います。「直前の学習だけを取り消す」はこの設定に関係なく、取り消し可能な直前の学習を削除します。文字の削除や未確定状態への復元動作は変わりません。初期値はオンです。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
         <source>Zenz による絵文字変換を抑制する</source>
         <translation>Zenz による絵文字変換を抑制する</translation>
     </message>

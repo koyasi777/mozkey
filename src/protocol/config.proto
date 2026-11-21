@@ -231,6 +231,11 @@ message Config {
   optional HistoryLearningLevel history_learning_level = 50
       [default = DEFAULT_HISTORY];
 
+  // Preserve already committed Mozc and Zenz learning when an immediate
+  // Backspace, Undo, or similar cancellation follows the commit.  Text deletion
+  // and preedit restoration are unaffected.  The existing behavior is default.
+  optional bool preserve_learning_on_commit_undo = 1064 [default = false];
+
   // The style of candidate selection shortcut.
   // Note that if the current Request has SpecialRomajiTable (== the keyevent
   // is from a virtual keyboard), shortcut is no-op.

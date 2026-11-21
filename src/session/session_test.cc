@@ -1502,6 +1502,144 @@ TEST_F(SessionTest, ZenzFeedbackComparisonIsDisabledByPrivateInput) {
   EXPECT_TRUE(session_peer.zenz_feedback_store_().ListEntries().empty());
 }
 
+TEST_F(SessionTest, ExplicitLearningCancelHonorsKeymapAndIgnoresRetention) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Shift Backspace\tCancelLastLearning\n");
+  config.set_preserve_learning_on_commit_undo(true);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(false);
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  constexpr absl::string_view kKey = "かれはてんきです";
+  constexpr absl::string_view kValue = "彼は天気です";
+  peer.SetPendingZenzFeedbackAccepted(kKey, "empty", kValue);
+  ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+  ASSERT_TRUE(peer.pending_zenz_feedback_()
+                  .feedback_acceptance_write_succeeded);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 1);
+
+  commands::Command command;
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  EXPECT_CALL(*converter, ResetConversion(_)).Times(0);
+  ASSERT_TRUE(TestSendKey("Ctrl Shift Backspace", &session, &command));
+  EXPECT_TRUE(peer.pending_zenz_feedback_().pending)
+      << "TestSendKey must never mutate learning";
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 1);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  ASSERT_TRUE(SendKey("Ctrl Shift Backspace", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_deletion_range());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 0);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .rejected_count, 0);
+  ASSERT_TRUE(SendKey("Ctrl Shift Backspace", &session, &command));
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback persistence is Windows/macOS only";
+#endif
+}
+
+TEST_F(SessionTest, StandardRevertPreservesZenzAcceptanceWhenEnabled) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(false);
+  config.set_preserve_learning_on_commit_undo(true);
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  constexpr absl::string_view kKey = "かれはてんきです";
+  constexpr absl::string_view kValue = "彼は天気です";
+  peer.SetPendingZenzFeedbackAccepted(kKey, "empty", kValue);
+  ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+  ASSERT_TRUE(peer.pending_zenz_feedback_()
+                  .feedback_acceptance_write_succeeded);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Backspace", &session, &command));
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback persistence is Windows/macOS only";
+#endif
+}
+
+TEST_F(SessionTest, CustomBackspaceCommandDoesNotUndoZenzLearning) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tBackspace\tIMEOff\n");
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(false);
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  constexpr absl::string_view kKey = "かれはてんきです";
+  constexpr absl::string_view kValue = "彼は天気です";
+  peer.SetPendingZenzFeedbackAccepted(kKey, "empty", kValue);
+  ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+  ASSERT_TRUE(peer.pending_zenz_feedback_()
+                  .feedback_acceptance_write_succeeded);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Backspace", &session, &command));
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 1);
+#else
+  GTEST_SKIP() << "Zenz feedback persistence is Windows/macOS only";
+#endif
+}
+
 TEST_F(SessionTest, PendingZenzFeedbackIsConfirmedByNextTextInput) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -12568,6 +12706,36 @@ TEST_F(SessionTest, PendingDirectCommitLearningIsNotCreatedForPrivateInput) {
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
 }
 
+TEST_F(SessionTest, CustomBackspaceCommandDoesNotUndoDirectCommit) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tBackspace\tIMEOff\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command committed;
+  committed.mutable_output()->mutable_result()->set_key("あめ");
+  committed.mutable_output()->mutable_result()->set_value("雨");
+  ASSERT_TRUE(peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed, "test_custom_backspace"));
+  ASSERT_TRUE(peer.pending_direct_commit_learning_().pending);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Backspace", &session, &command));
+  EXPECT_FALSE(peer.pending_direct_commit_learning_().pending);
+}
+
 TEST_F(SessionTest, PendingDirectCommitLearningIsConfirmedByNextTextInput) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -12599,7 +12767,98 @@ TEST_F(SessionTest, PendingDirectCommitLearningIsConfirmedByNextTextInput) {
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
 }
 
-TEST_F(SessionTest, PendingDirectCommitLearningIsDiscardedByBackspace) {
+TEST_F(SessionTest, StandardBackspaceRevertsPendingDirectCommitWhenOff) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_preserve_learning_on_commit_undo(false);
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command committed;
+  committed.mutable_output()->mutable_result()->set_key("あめ");
+  committed.mutable_output()->mutable_result()->set_value("雨");
+  ASSERT_TRUE(peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed, "test_standard_backspace_off"));
+  ASSERT_TRUE(peer.pending_direct_commit_learning_().pending);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(AtLeast(1));
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Backspace", &session, &command));
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(peer.pending_direct_commit_learning_().pending);
+}
+
+TEST_F(SessionTest, StandardBackspacePreservesPendingDirectCommitWhenOn) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::MSIME);
+  config.set_preserve_learning_on_commit_undo(true);
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command committed;
+  committed.mutable_output()->mutable_result()->set_key("あめ");
+  committed.mutable_output()->mutable_result()->set_value("雨");
+  ASSERT_TRUE(peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed, "test_standard_backspace_on"));
+  ASSERT_TRUE(peer.pending_direct_commit_learning_().pending);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Backspace", &session, &command));
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_FALSE(peer.pending_direct_commit_learning_().pending);
+}
+
+TEST_F(SessionTest, ExplicitLearningCancelRollsBackPendingDirectCommit) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer peer(session);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Shift Backspace\tCancelLastLearning\n");
+  config.set_preserve_learning_on_commit_undo(true);
+  session.SetConfig(config);
+  session.SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Command committed;
+  committed.mutable_output()->mutable_result()->set_key("あめ");
+  committed.mutable_output()->mutable_result()->set_value("雨");
+  ASSERT_TRUE(peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed, "test_explicit_learning_cancel"));
+  ASSERT_TRUE(peer.pending_direct_commit_learning_().pending);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(1);
+  commands::Command command;
+  ASSERT_TRUE(SendKey("Ctrl Shift Backspace", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_deletion_range());
+  EXPECT_FALSE(peer.pending_direct_commit_learning_().pending);
+}
+
+TEST_F(SessionTest, PendingDirectCommitLearningKeyEventBackspaceConfirmsInsertion) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -12619,12 +12878,14 @@ TEST_F(SessionTest, PendingDirectCommitLearningIsDiscardedByBackspace) {
   commands::KeyEvent key;
   key.set_special_key(commands::KeyEvent::BACKSPACE);
 
+  // The raw event is no longer a rollback request after it was dispatched
+  // as an insertion action.  Only the keymap-selected Revert cancels it.
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
   session_peer.HandlePendingDirectCommitLearningForKeyEvent(key);
-
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
 }
 
-TEST_F(SessionTest, PendingDirectCommitLearningIsDiscardedByEscape) {
+TEST_F(SessionTest, PendingDirectCommitLearningKeyEventEscapeConfirmsInsertion) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -12644,6 +12905,7 @@ TEST_F(SessionTest, PendingDirectCommitLearningIsDiscardedByEscape) {
   commands::KeyEvent key;
   key.set_special_key(commands::KeyEvent::ESCAPE);
 
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
   session_peer.HandlePendingDirectCommitLearningForKeyEvent(key);
 
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
@@ -15548,6 +15810,124 @@ TEST_F(SessionTest, RequestUndo) {
   EXPECT_TRUE(TryUndoAndAssertSuccess(&session));
 }
 
+TEST_F(SessionTest, FailedUndoDoesNotRevertLearningOrConsumeUndoContext) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  SetUndoContext(&session, converter.get());
+  SessionTestPeer peer(session);
+
+  const size_t undo_count = peer.undo_contexts_().size();
+  ASSERT_GT(undo_count, 0);
+  // The last commit has a result, but the client has not advertised support
+  // for deleting committed text.  Undo() must reject it without side effects.
+  ASSERT_TRUE(session.context().output().has_result());
+  ASSERT_EQ(session.context().client_capability().text_deletion() &
+                commands::Capability::DELETE_PRECEDING_TEXT, 0);
+
+  commands::Command committed;
+  committed.mutable_output()->mutable_result()->set_key("あめ");
+  committed.mutable_output()->mutable_result()->set_value("雨");
+  ASSERT_TRUE(peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed, "test_failed_undo"));
+  ASSERT_TRUE(peer.pending_direct_commit_learning_().pending);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  commands::Command command;
+  SetSendCommandCommand(commands::SessionCommand::UNDO, &command);
+  EXPECT_TRUE(session.SendCommand(&command));
+  EXPECT_FALSE(command.output().has_deletion_range());
+  EXPECT_EQ(peer.undo_contexts_().size(), undo_count);
+  EXPECT_TRUE(peer.pending_direct_commit_learning_().pending);
+}
+
+TEST_F(SessionTest, FailedUndoDoesNotCompensateZenzAcceptance) {
+#if defined(_WIN32) || defined(__APPLE__)
+  ScopedUserProfileForZenzFeedbackSessionTest profile;
+  ASSERT_TRUE(profile.ok());
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_zenz_feedback_recording(true);
+  config.set_use_zenz_mozc_history_learning(false);
+  session.SetConfig(config);
+  // SetConfig() intentionally clears previous Undo snapshots.  Establish the
+  // fixture *after* applying the test config so this test exercises the real
+  // unsupported-capability path, not the no-snapshot fallback.
+  SetUndoContext(&session, converter.get());
+  SessionTestPeer peer(session);
+  const size_t undo_count = peer.undo_contexts_().size();
+  ASSERT_GT(undo_count, 0);
+  constexpr absl::string_view kKey = "かれはてんきです";
+  constexpr absl::string_view kValue = "彼は天気です";
+  peer.SetPendingZenzFeedbackAccepted(kKey, "empty", kValue);
+  ASSERT_TRUE(peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 1);
+
+  // The client cannot delete the committed text; neither the callback nor
+  // its request may compensate the accepted observation.
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  commands::Command command;
+  EXPECT_TRUE(session.RequestUndo(&command));
+  EXPECT_TRUE(peer.pending_zenz_feedback_().pending);
+  SetSendCommandCommand(commands::SessionCommand::UNDO, &command);
+  EXPECT_TRUE(session.SendCommand(&command));
+  EXPECT_FALSE(command.output().has_deletion_range());
+  EXPECT_EQ(peer.undo_contexts_().size(), undo_count);
+  EXPECT_TRUE(peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 1);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  // A valid client acknowledgement can now roll back exactly once.
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  session.set_client_capability(capability);
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(1);
+  SetSendCommandCommand(commands::SessionCommand::UNDO, &command);
+  EXPECT_TRUE(session.SendCommand(&command));
+  EXPECT_TRUE(command.output().has_deletion_range());
+  EXPECT_FALSE(peer.pending_zenz_feedback_().pending);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .accepted_count, 0);
+  EXPECT_EQ(peer.zenz_feedback_store_().Decide(kKey, "empty", kValue)
+                .rejected_count, 0);
+#else
+  GTEST_SKIP() << "Zenz feedback persistence is Windows/macOS only";
+#endif
+}
+
+TEST_F(SessionTest, RequestUndoDoesNotRollbackBeforeClientAcknowledgement) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  SetUndoContext(&session, converter.get());
+  SessionTestPeer peer(session);
+
+  commands::Command committed;
+  committed.mutable_output()->mutable_result()->set_key("あめ");
+  committed.mutable_output()->mutable_result()->set_value("雨");
+  ASSERT_TRUE(peer.SetPendingDirectCommitLearningFromCommittedResult(
+      committed, "test_request_undo"));
+  ASSERT_TRUE(peer.pending_direct_commit_learning_().pending);
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  commands::Command command;
+  EXPECT_TRUE(session.RequestUndo(&command));
+  EXPECT_TRUE(command.output().consumed());
+  ASSERT_TRUE(command.output().has_callback());
+  EXPECT_EQ(command.output().callback().session_command().type(),
+            commands::SessionCommand::UNDO);
+  EXPECT_TRUE(peer.pending_direct_commit_learning_().pending);
+}
+
 TEST_F(SessionTest, UndoForSingleSegment) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -15705,11 +16085,18 @@ TEST_F(SessionTest, ClearUndoContextByKeyEventIssue5529702) {
   session.TestSendKey(&command);
   EXPECT_TRUE(command.output().consumed());
 
-  // Any other (test) send key event clears undo context.
+  // Probing a pass-through key must *not* clear undo context.
   TestSendKey("LEFT", &session, &command);
   EXPECT_FALSE(command.output().consumed());
+  SetSendKeyCommand("Ctrl Backspace", &command);
+  command.mutable_input()->mutable_config()->set_session_keymap(
+      config::Config::MSIME);
+  session.TestSendKey(&command);
+  EXPECT_TRUE(command.output().consumed());
 
-  // Undo context is just cleared. Ctrl+BS should not be consumed b/5553298.
+  // The actual pass-through key does clear the context (b/5529702).
+  SendKey("LEFT", &session, &command);
+  EXPECT_FALSE(command.output().consumed());
   SetSendKeyCommand("Ctrl Backspace", &command);
   command.mutable_input()->mutable_config()->set_session_keymap(
       config::Config::MSIME);
@@ -18323,7 +18710,8 @@ TEST_F(SessionTest, InsertSpaceWithCustomKeyBinding) {
   SetUndoContext(&session, converter.get());
   EXPECT_TRUE(TestSendKey("Space", &session, &command));
   EXPECT_FALSE(command.output().consumed());  // should not be consumed.
-  EXPECT_TRUE(TryUndoAndAssertDoNothing(&session));
+  // A probe must not invalidate the previously committed text's Undo context.
+  EXPECT_TRUE(TryUndoAndAssertSuccess(&session));
 
   SetUndoContext(&session, converter.get());
   EXPECT_TRUE(SendKey("Space", &session, &command));
@@ -20391,7 +20779,8 @@ TEST_F(SessionTest, InsertAlternateSpaceWithCustomKeyBinding) {
   SetUndoContext(&session, converter.get());
   EXPECT_TRUE(TestSendKey("Space", &session, &command));
   EXPECT_FALSE(command.output().consumed());  // should not be consumed.
-  EXPECT_TRUE(TryUndoAndAssertDoNothing(&session));
+  // A probe must not invalidate the previously committed text's Undo context.
+  EXPECT_TRUE(TryUndoAndAssertSuccess(&session));
 
   SetUndoContext(&session, converter.get());
   EXPECT_TRUE(SendKey("Space", &session, &command));
@@ -20438,7 +20827,8 @@ TEST_F(SessionTest, InsertSpaceHalfWidthWithCustomKeyBinding) {
   SetUndoContext(&session, converter.get());
   EXPECT_TRUE(TestSendKey("Space", &session, &command));
   EXPECT_FALSE(command.output().consumed());  // should not be consumed.
-  EXPECT_TRUE(TryUndoAndAssertDoNothing(&session));
+  // A probe must not invalidate the previously committed text's Undo context.
+  EXPECT_TRUE(TryUndoAndAssertSuccess(&session));
 
   SetUndoContext(&session, converter.get());
   EXPECT_TRUE(SendKey("Space", &session, &command));
@@ -22362,6 +22752,37 @@ TEST_F(SessionTest, IssueRevert) {
   EXPECT_FALSE(command.output().consumed());
 }
 
+TEST_F(SessionTest, TestSendKeyRevertDoesNotModifyConverterOrUndoContext) {
+  config::Config config;
+  config.set_session_keymap(config::Config::MSIME);
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  InitSessionToPrecomposition(&session);
+  SetUndoContext(&session, converter.get());
+  SessionTestPeer peer(session);
+  const size_t undo_count = peer.undo_contexts_().size();
+  ASSERT_GT(undo_count, 0);
+
+  // TEST_SEND_KEY must only report that the application's Backspace passes
+  // through; the actual Revert is performed once by SEND_KEY.
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  EXPECT_CALL(*converter, ResetConversion(_)).Times(0);
+  commands::Command command;
+  ASSERT_TRUE(TestSendKey("Backspace", &session, &command));
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_EQ(peer.undo_contexts_().size(), undo_count);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(1);
+  EXPECT_CALL(*converter, ResetConversion(_)).Times(1);
+  ASSERT_TRUE(SendKey("Backspace", &session, &command));
+  EXPECT_FALSE(command.output().consumed());
+}
+
 TEST_F(SessionTest, CancelKeyForCompositionOrConversionRevertsHistoryAfterCommit) {
   config::Config config;
   config.set_session_keymap(config::Config::MSIME);
@@ -22392,7 +22813,7 @@ TEST_F(SessionTest, CancelKeyForCompositionOrConversionRevertsHistoryAfterCommit
   EXPECT_FALSE(command.output().consumed());
 }
 
-TEST_F(SessionTest, TestSendKeyCancelKeyRevertsHistoryAfterCommit) {
+TEST_F(SessionTest, TestSendKeyCancelKeyIsReadOnlyUntilSendKey) {
   config::Config config;
   config.set_session_keymap(config::Config::MSIME);
 
@@ -22408,15 +22829,23 @@ TEST_F(SessionTest, TestSendKeyCancelKeyRevertsHistoryAfterCommit) {
   SetUndoContext(&session, converter.get());
   EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
 
-  // TestSendKey should follow the same cancel-key fallback as SendKey so that
-  // clients can observe that the key is echoed back after rolling back the
-  // just-learned history.
-  EXPECT_CALL(*converter, RevertConversion(_));
-  EXPECT_CALL(*converter, ResetConversion(_));
+  // TSF probes before it actually sends the key. The probe must not change
+  // converter learning or its reversible history.
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(0);
+  EXPECT_CALL(*converter, ResetConversion(_)).Times(0);
 
   commands::Command command;
   ASSERT_TRUE(SetSendKeyCommand("Ctrl z", &command));
   EXPECT_TRUE(session.TestSendKey(&command));
+  EXPECT_FALSE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, RevertConversion(_)).Times(1);
+  EXPECT_CALL(*converter, ResetConversion(_)).Times(1);
+  command.Clear();
+  ASSERT_TRUE(SetSendKeyCommand("Ctrl z", &command));
+  EXPECT_TRUE(session.SendKey(&command));
   EXPECT_FALSE(command.output().consumed());
 }
 
@@ -22451,7 +22880,7 @@ TEST_F(SessionTest, PendingDirectCommitLearningIsDiscardedByCancelKeyEchoBack) {
 }
 
 TEST_F(SessionTest,
-       TestSendKeyPendingDirectCommitLearningIsDiscardedByCancelKeyEchoBack) {
+       TestSendKeyPendingDirectCommitLearningIsPreservedUntilSendKey) {
   config::Config config;
   config.set_session_keymap(config::Config::MSIME);
 
@@ -22478,7 +22907,39 @@ TEST_F(SessionTest,
   EXPECT_TRUE(session.TestSendKey(&command));
 
   EXPECT_FALSE(command.output().consumed());
+  EXPECT_TRUE(session_peer.pending_direct_commit_learning_().pending);
+
+  command.Clear();
+  ASSERT_TRUE(SetSendKeyCommand("Ctrl z", &command));
+  EXPECT_TRUE(session.SendKey(&command));
   EXPECT_FALSE(session_peer.pending_direct_commit_learning_().pending);
+}
+
+TEST_F(SessionTest, TestSendKeyDoesNotResetActiveZeroQuerySuggestion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  commands::Request request;
+  commands::Command command;
+  SetupZeroQuerySuggestion(&session, &request, &command, converter.get());
+  ASSERT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  ASSERT_TRUE(session.context().converter().IsActive());
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Shift Backspace\tCancelLastLearning\n");
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  Mock::VerifyAndClearExpectations(converter.get());
+
+  EXPECT_CALL(*converter, ResetConversion(_)).Times(0);
+  command.Clear();
+  ASSERT_TRUE(TestSendKey("Ctrl Shift Backspace", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_TRUE(session.context().converter().IsActive());
 }
 
 TEST_F(SessionTest, PendingZenzFeedbackIsDiscardedByCancelKeyEchoBack) {
@@ -22509,7 +22970,7 @@ TEST_F(SessionTest, PendingZenzFeedbackIsDiscardedByCancelKeyEchoBack) {
 }
 
 TEST_F(SessionTest,
-       TestSendKeyPendingZenzFeedbackIsDiscardedByCancelKeyEchoBack) {
+       TestSendKeyPendingZenzFeedbackIsPreservedUntilSendKey) {
   config::Config config;
   config.set_session_keymap(config::Config::MSIME);
 
@@ -22533,6 +22994,11 @@ TEST_F(SessionTest,
   EXPECT_TRUE(session.TestSendKey(&command));
 
   EXPECT_FALSE(command.output().consumed());
+  EXPECT_TRUE(session_peer.pending_zenz_feedback_().pending);
+
+  command.Clear();
+  ASSERT_TRUE(SetSendKeyCommand("Ctrl z", &command));
+  EXPECT_TRUE(session.SendKey(&command));
   EXPECT_FALSE(session_peer.pending_zenz_feedback_().pending);
 }
 

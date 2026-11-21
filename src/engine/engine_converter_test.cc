@@ -3733,6 +3733,14 @@ TEST(EngineConverterRevertTest, Revert) {
   converter.Revert();
 }
 
+TEST(EngineConverterRevertTest, ConfirmLastCommitLearning) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter);
+  EXPECT_CALL(*mock_converter, DiscardConversionRevertState(_));
+  EXPECT_CALL(*mock_converter, RevertConversion(_)).Times(0);
+  converter.ConfirmLastCommitLearning();
+}
+
 TEST_F(EngineConverterTest, DeleteCandidateFromHistory) {
   auto mock_converter = std::make_shared<MockConverter>();
   EngineConverter converter(mock_converter, request_, config_);

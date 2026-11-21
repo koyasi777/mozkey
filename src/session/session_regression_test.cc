@@ -573,6 +573,76 @@ TEST_F(SessionRegressionTest, HistoryLearning) {
   }
 }
 
+TEST_F(SessionRegressionTest, ExplicitCancelLastLearningKeepsTextUndo) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(
+      "status\tkey\tcommand\n"
+      "Precomposition\tCtrl Shift Backspace\tCancelLastLearning\n");
+  config.set_preserve_learning_on_commit_undo(true);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  session_->SetConfig(config);
+  session_->SetKeyMapManager(
+      std::make_shared<keymap::KeyMapManager>(config));
+
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  session_->set_client_capability(capability);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  command.Clear();
+  ASSERT_TRUE(session_->Convert(&command));
+  const std::string initial_candidate = GetComposition(command);
+  command.Clear();
+  ASSERT_TRUE(session_->ConvertNext(&command));
+  const std::string chosen_candidate = GetComposition(command);
+  ASSERT_NE(initial_candidate, chosen_candidate);
+  command.Clear();
+  ASSERT_TRUE(session_->Commit(&command));
+  ASSERT_EQ(command.output().result().value(), chosen_candidate);
+
+  ASSERT_TRUE(SendKey("Ctrl Shift Backspace", &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_deletion_range());
+  EXPECT_FALSE(command.output().has_result());
+
+  // Cancel learning only; the text Undo snapshot remains intact.
+  command.Clear();
+  ASSERT_TRUE(session_->Undo(&command));
+  EXPECT_TRUE(command.output().has_deletion_range());
+  EXPECT_EQ(GetComposition(command), chosen_candidate);
+}
+
+// Retaining committed learning must not disable the ordinary text/preedit Undo.
+TEST_F(SessionRegressionTest, UndoWithLearningPreservation) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_preserve_learning_on_commit_undo(true);
+  config.set_use_live_conversion(false);
+  config.set_use_zenz_live_correction(false);
+  session_->SetConfig(config);
+
+  commands::Capability capability;
+  capability.set_text_deletion(commands::Capability::DELETE_PRECEDING_TEXT);
+  session_->set_client_capability(capability);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  command.Clear();
+  ASSERT_TRUE(session_->Convert(&command));
+  const std::string committed = GetComposition(command);
+  command.Clear();
+  ASSERT_TRUE(session_->Commit(&command));
+  ASSERT_EQ(command.output().result().value(), committed);
+  command.Clear();
+  ASSERT_TRUE(session_->Undo(&command));
+  EXPECT_EQ(GetComposition(command), committed);
+  EXPECT_TRUE(command.output().has_deletion_range());
+}
+
 TEST_F(SessionRegressionTest, Undo) {
   InitSessionToPrecomposition(session_.get());
 

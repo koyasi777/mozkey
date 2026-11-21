@@ -400,6 +400,10 @@ class EngineConverterInterface {
   // Revert the last "Commit" operation
   virtual void Revert() = 0;
 
+  // Keep learning from the last commit and consume its undo metadata only.
+  // Converters without reversible learning have nothing to finalize.
+  virtual void ConfirmLastCommitLearning() {}
+
   // Delete candidate from user input history.
   // Try to delete the current selected candidate if |id| is not specified.
   // Returns false if the candidate was not found or deletion failed.
