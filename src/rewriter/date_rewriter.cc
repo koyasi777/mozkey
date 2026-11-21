@@ -89,6 +89,7 @@ enum {
   MONTH,
   DATE,
   WEEKDAY,
+  CURRENT_WEEKDAY,
   CURRENT_TIME,
   DATE_AND_CURRENT_TIME,
 };
@@ -97,6 +98,7 @@ constexpr DateRewriter::DateData kDateData[] = {
     // Date rewrites.
     {"きょう", "今日", "今日の日付", 0, DATE},
     {"ほんじつ", "本日", "今日の日付", 0, DATE},
+    {"ひづけ", "日付", "今日の日付", 0, DATE},
     {"あした", "明日", "明日の日付", 1, DATE},
     {"あす", "明日", "明日の日付", 1, DATE},
     {"みょうにち", "明日", "明日の日付", 1, DATE},
@@ -109,6 +111,9 @@ constexpr DateRewriter::DateData kDateData[] = {
     {"あさって", "明後日", "明後日の日付", 2, DATE},
     {"みょうごにち", "明後日", "明後日の日付", 2, DATE},
     {"しあさって", "明明後日", "明明後日の日付", 3, DATE},
+
+    // Generic weekday lookup for the current calendar day.
+    {"ようび", "曜日", "今日の曜日", 0, CURRENT_WEEKDAY},
 
     // Weekday rewrites
     // Absl::Weekday starts from Monday, while std::tm.tm_wday starts from
@@ -922,15 +927,48 @@ std::vector<std::string> GetConversions(
   switch (data.type) {
     case DATE:
     case WEEKDAY: {
-      DateRewriter::ConvertDateWithYear(cm.year(), cm.month(), cm.day(),
-                                        &results);
+      // Keep each weekday variant next to its date representation.  The
+      // WEEKDAY path retains its compact, legacy candidates.
+      std::vector<std::string> date_formats =
+          DateRewriter::ConvertDateWithYear(cm.year(), cm.month(), cm.day());
+      const absl::string_view weekday =
+          date_util::GetShortWeekdayString(absl::GetWeekday(cm));
+      for (size_t i = 0; i < date_formats.size(); ++i) {
+        results.push_back(std::move(date_formats[i]));
+        if (data.type != DATE) {
+          continue;
+        }
+        if (i == 0) {
+          results.push_back(absl::StrFormat("%d/%02d/%02d(%s)", cm.year(),
+                                            cm.month(), cm.day(), weekday));
+          results.push_back(absl::StrFormat("%d月%d日（%s）", cm.month(),
+                                            cm.day(), weekday));
+        } else if (i == 2) {
+          results.push_back(absl::StrFormat("%d年%d月%d日（%s）", cm.year(),
+                                            cm.month(), cm.day(), weekday));
+        }
+      }
       std::vector<std::string> era;
       if (DateRewriter::AdToEra(cm.year(), cm.month(), &era) && !era.empty()) {
         results.push_back(
             absl::StrFormat("%s年%d月%d日", era[0], cm.month(), cm.day()));
+        if (data.type == DATE) {
+          results.push_back(absl::StrFormat("%s年%d月%d日（%s）", era[0],
+                                            cm.month(), cm.day(), weekday));
+        }
       }
-      results.push_back(absl::StrFormat(
-          "%s曜日", date_util::GetShortWeekdayString(absl::GetWeekday(cm))));
+      results.push_back(absl::StrFormat("%s曜日", weekday));
+      break;
+    }
+
+    case CURRENT_WEEKDAY: {
+      // Unlike an individual weekday name, "ようび" means the weekday of today,
+      // not the matching dates in the current/next/previous weeks.
+      const absl::string_view weekday =
+          date_util::GetShortWeekdayString(absl::GetWeekday(cm));
+      results.push_back(absl::StrFormat("%s曜日", weekday));
+      results.push_back(absl::StrFormat("(%s)", weekday));
+      results.push_back(absl::StrFormat("（%s）", weekday));
       break;
     }
 
@@ -972,6 +1010,17 @@ std::vector<std::string> GetConversions(
     }
   }
 
+  if (data.type == DATE) {
+    // Extra user formats may coincide with a standard date representation.
+    std::vector<std::string> unique_results;
+    unique_results.reserve(results.size());
+    for (std::string& result : results) {
+      if (absl::c_find(unique_results, result) == unique_results.end()) {
+        unique_results.push_back(std::move(result));
+      }
+    }
+    return unique_results;
+  }
   return results;
 }
 
@@ -1632,28 +1681,34 @@ bool AppendFullDateCandidates(
                                  kDateDescription, results);
   }
 
+  const absl::CivilDay civil_day(year, month, day);
+  const absl::string_view weekday_text =
+      date_util::GetShortWeekdayString(absl::GetWeekday(civil_day));
   if (include_month_day_candidates) {
     AppendDateCandidateIfMissing(absl::StrFormat("%d月%d日", month, day),
                                  kDateDescription, results);
+    AppendDateCandidateIfMissing(
+        absl::StrFormat("%d月%d日（%s）", month, day, weekday_text),
+        kDateDescription, results);
     AppendDateCandidateIfMissing(absl::StrFormat("%02d/%02d", month, day),
                                  kDateDescription, results);
   }
 
-  for (std::string candidate :
-       DateRewriter::ConvertDateWithYear(year, month, day)) {
-    AppendDateCandidateIfMissing(std::move(candidate), kDateDescription,
+  std::vector<std::string> date_formats =
+      DateRewriter::ConvertDateWithYear(year, month, day);
+  for (size_t i = 0; i < date_formats.size(); ++i) {
+    AppendDateCandidateIfMissing(std::move(date_formats[i]), kDateDescription,
                                  results);
+    if (i == 0) {
+      AppendDateCandidateIfMissing(
+          absl::StrFormat("%d/%02d/%02d(%s)", year, month, day, weekday_text),
+          kDateDescription, results);
+    } else if (i == 2) {
+      AppendDateCandidateIfMissing(
+          absl::StrFormat("%d年%d月%d日（%s）", year, month, day, weekday_text),
+          kDateDescription, results);
+    }
   }
-
-  const absl::CivilDay civil_day(year, month, day);
-  const absl::string_view weekday_text =
-      date_util::GetShortWeekdayString(absl::GetWeekday(civil_day));
-  AppendDateCandidateIfMissing(
-      absl::StrFormat("%d/%02d/%02d(%s)", year, month, day, weekday_text),
-      kDateDescription, results);
-  AppendDateCandidateIfMissing(
-      absl::StrFormat("%d年%d月%d日(%s)", year, month, day, weekday_text),
-      kDateDescription, results);
 
   std::vector<std::string> era;
   if (DateRewriter::AdToEra(year, month, &era) && !era.empty()) {
@@ -1661,7 +1716,7 @@ bool AppendFullDateCandidates(
         absl::StrFormat("%s年%d月%d日", era[0], month, day), kDateDescription,
         results);
     AppendDateCandidateIfMissing(
-        absl::StrFormat("%s年%d月%d日(%s)", era[0], month, day, weekday_text),
+        absl::StrFormat("%s年%d月%d日（%s）", era[0], month, day, weekday_text),
         kDateDescription, results);
   }
 

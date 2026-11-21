@@ -195,6 +195,8 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - 日付入力を強化し、`20260927` のような8桁数字や、`2026/9/27`、`2026-9-27`、`2026.9.27`、`9/27` などから日付候補を生成。全角入力にも対応し、存在しない日付は日付候補として展開しない
 - `きんよう` / `きんようび` などの曜日入力では、通常の「金曜」「金曜日」を優先したまま、今週・来週・先週の該当日を追加候補として提示
 - `ほんじつ` / `みょうにち` などの日付表現を補強し、`9/27` など明示的に入力された日付表記は候補順位でも尊重
+- `きょう` / `あす` / `きのう` / `あさって` などの相対日付変換に、曜日付きの候補を追加。`2026/11/22(日)`、`11月22日（日）`、`2026年11月22日（日）`、`令和8年11月22日（日）` などを、既存の日付表記と併せて選択可能
+- `ひづけ` から今日の日付候補（曜日付き含む）を、`ようび` から今日の曜日を `日曜日` / `(日)` / `（日）` の形式で変換可能。通常の「日付」「曜日」の候補は維持
 - llama.cpp ベースのローカル Zenz live correction pipeline を追加
 - Zenz 文脈処理を共通化し、通常 Mozc の `preceding_text` / `following_text` とは分離した `zenz_preceding_text` / `zenz_following_text` を使用
 - Zenz が必要とする preceding / following の長さを Server から Client へ通知し、Windows TSF / macOS IMK では要求された方向・長さだけ surrounding text を追加取得。右文脈は有効時に設定可能で、取得長の既定は 6 文字
@@ -290,6 +292,23 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 
 修正詳細
 ------
+
+### 日付・曜日の変換候補
+
+日付の相対表現（`きょう`、`あす`、`きのう`、`あさって` など）を変換すると、従来の日付表記に加えて曜日付き候補を選べます。`ひづけ` は「今日の日付」を調べるための別の読みとして扱い、`ようび` は今日の曜日を表示します。`日付` や `曜日` という通常の単語候補はそのまま残します。
+
+例えば、**2026年11月21日（土）**に変換した場合は次のとおりです。
+
+| 入力 | 追加される候補の例 |
+| --- | --- |
+| `きょう` / `ひづけ` | `2026/11/21(土)`、`11月21日（土）`、`2026年11月21日（土）`、`令和8年11月21日（土）` |
+| `あす` / `あした` | `2026/11/22(日)`、`11月22日（日）`、`2026年11月22日（日）`、`令和8年11月22日（日）` |
+| `きのう` | `2026/11/20(金)`、`11月20日（金）`、`2026年11月20日（金）` |
+| `ようび` | `土曜日`、`(土)`、`（土）` |
+
+日付の曜日表記は、スラッシュ区切りの数字表記では半角括弧（例：`2026/11/21(土)`）、日本語の年月日表記では全角括弧（例：`11月21日（土）`）を使用し、括弧の前にはスペースを入れません。ハイフン区切り（例：`2026-11-21`）は曜日なしの候補を維持します。
+
+8桁の日付入力（例：`20261121`）や区切り文字付き日付入力、曜日名の入力（例：`きんよう` / `きんようび`）も従来どおり使用できます。曜日名の入力では、今週・来週・先週の該当日を提示する既存の動作を維持しています。候補の実際の順位は辞書や変換履歴、既存の語彙候補によって変わることがあります。
 
 ### 曖昧なローマ字規則の途中表示
 
@@ -1308,6 +1327,8 @@ Main features added in this fork
 - Improves date input conversion for compact forms such as `20260927` and separated forms such as `2026/9/27`, `2026-9-27`, `2026.9.27`, and `9/27`; full-width input is also recognized, and invalid calendar dates are not expanded as date candidates
 - For weekday readings such as `きんよう` / `きんようび`, keeps the normal lexical candidates `金曜` / `金曜日` ahead of additional candidates for the matching date in this week, next week, and the previous week
 - Adds date expressions such as `ほんじつ` / `みょうにち` while preserving explicitly typed date forms such as `9/27` at the front of the candidate order
+- Adds weekday-annotated candidates for relative-date inputs such as `きょう`, `あす`, `きのう`, and `あさって`, including `2026/11/22(日)`, `11月22日（日）`, `2026年11月22日（日）`, and `令和8年11月22日（日）`
+- Lets `ひづけ` offer today's date variants and `ようび` offer today's weekday as `日曜日`, `(日)`, and `（日）`, while retaining the normal lexical candidates `日付` and `曜日`
 - Adds a local Zenz live correction pipeline based on llama.cpp
 - Uses dedicated `zenz_preceding_text` / `zenz_following_text` fields for Zenz context without changing the normal Mozc `preceding_text` / `following_text` semantics
 - Lets the Server request the required preceding / following lengths and lets Windows TSF / macOS IMK acquire only the requested directions and lengths; right-context acquisition is configurable and defaults to 6 characters when enabled
@@ -1360,6 +1381,21 @@ Main features added in this fork
 
 Examples
 --------
+
+### Date and weekday conversion
+
+Relative-date readings such as `きょう` (today), `あす` (tomorrow), and `きのう` (yesterday) offer weekday-annotated dates alongside the existing plain date formats. `ひづけ` provides today's date variants, while `ようび` offers the current weekday without replacing the usual lexical candidates `日付` and `曜日`.
+
+For example, on **Saturday, November 21, 2026**:
+
+| Input | Example candidates |
+| --- | --- |
+| `きょう` / `ひづけ` | `2026/11/21(土)`, `11月21日（土）`, `2026年11月21日（土）`, `令和8年11月21日（土）` |
+| `あす` / `あした` | `2026/11/22(日)`, `11月22日（日）`, `2026年11月22日（日）`, `令和8年11月22日（日）` |
+| `きのう` | `2026/11/20(金)`, `11月20日（金）`, `2026年11月20日（金）` |
+| `ようび` | `土曜日`, `(土)`, `（土）` |
+
+Numeric slash-separated dates use halfwidth parentheses without a space (for example, `2026/11/21(土)`); Japanese-style dates use fullwidth parentheses (for example, `11月21日（土）`). Hyphen-separated dates retain their plain form without a weekday. Existing compact or separated numeric date conversion and weekday-name lookups (this/next/previous week) are preserved. Actual candidate positions may vary with other dictionary entries and conversion history.
 
 ### Ambiguous romaji display
 
