@@ -30,12 +30,15 @@
 #include "base/container/serialized_string_array.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "base/bits.h"
 #include "testing/gunit.h"
 
 namespace mozc {
@@ -146,5 +149,111 @@ TEST(SerializedStringArrayTest, Iterator) {
   EXPECT_FALSE(std::binary_search(a.begin(), a.end(), "Japan"));
 }
 
+TEST(SerializedStringArrayTest, VerifyDataRejectsMalformedImages) {
+  // Missing array size (< 4 bytes).
+  EXPECT_FALSE(SerializedStringArray::VerifyData(""));
+  EXPECT_FALSE(SerializedStringArray::VerifyData("abc"));
+
+  // 32-bit header size wraparound: 4 + 8 * 0x20000000 wraps to 4 in uint32_t.
+  {
+    std::string overflow_header(16, '\0');
+    StoreUnaligned<uint32_t>(0x20000000u, overflow_header.begin());
+    EXPECT_FALSE(SerializedStringArray::VerifyData(overflow_header));
+  }
+
+  // 32-bit offset + length wraparound: 0xFFFFFFFF + 1 wraps to 0 in uint32_t.
+  {
+    std::string offset_len_overflow(16, '\0');
+    auto iter =
+        StoreUnaligned<uint32_t>(uint32_t{1}, offset_len_overflow.begin());
+    iter = StoreUnaligned<uint32_t>(0xFFFFFFFFu, iter);
+    StoreUnaligned<uint32_t>(uint32_t{1}, iter);
+    EXPECT_FALSE(SerializedStringArray::VerifyData(offset_len_overflow));
+  }
+
+  // String reaching exact end of buffer without room for terminating '\0'.
+  {
+    std::string missing_terminator_space(14, '\0');
+    auto iter =
+        StoreUnaligned<uint32_t>(uint32_t{1}, missing_terminator_space.begin());
+    iter = StoreUnaligned<uint32_t>(uint32_t{12}, iter);
+    iter = StoreUnaligned<uint32_t>(uint32_t{2}, iter);
+    missing_terminator_space[12] = 'a';
+    missing_terminator_space[13] = 'b';
+    EXPECT_FALSE(SerializedStringArray::VerifyData(missing_terminator_space));
+  }
+
+  // Empty string at exact end of buffer (offset = 12, len = 0 in 12-byte buf).
+  {
+    std::string zero_len_at_end(12, '\0');
+    auto iter = StoreUnaligned<uint32_t>(uint32_t{1}, zero_len_at_end.begin());
+    iter = StoreUnaligned<uint32_t>(uint32_t{12}, iter);
+    StoreUnaligned<uint32_t>(uint32_t{0}, iter);
+    EXPECT_FALSE(SerializedStringArray::VerifyData(zero_len_at_end));
+  }
+
+  // String not null-terminated at offset + len.
+  {
+    std::string non_null_terminated(kTestData);
+    non_null_terminated.back() = 'x';
+    EXPECT_FALSE(SerializedStringArray::VerifyData(non_null_terminated));
+  }
+
+  // Overlapping / non-monotonic string offset.
+  {
+    std::string overlapping_offset(kTestData);
+    // Overwrite string[1] offset (bytes 12..15) with string[0]'s offset (28).
+    StoreUnaligned<uint32_t>(uint32_t{28}, overlapping_offset.begin() + 12);
+    EXPECT_FALSE(SerializedStringArray::VerifyData(overlapping_offset));
+  }
+}
+
+TEST(SerializedStringArrayTest, OutOfBoundsAccessReturnsEmptyStringView) {
+  SerializedStringArray default_array;
+  EXPECT_EQ(default_array[-1], "");
+  EXPECT_EQ(default_array[0], "");
+  EXPECT_EQ(default_array[100], "");
+  EXPECT_EQ(*default_array.begin(), "");
+  EXPECT_EQ(default_array.begin()[5], "");
+
+  SerializedStringArray truncated_init;
+  EXPECT_FALSE(truncated_init.Init("abc"));
+  EXPECT_EQ(truncated_init.size(), 0);
+  EXPECT_EQ(truncated_init.begin(), truncated_init.end());
+  EXPECT_EQ(*truncated_init.begin(), "");
+  EXPECT_EQ(truncated_init[0], "");
+
+#ifdef NDEBUG
+  SerializedStringArray truncated_set;
+  truncated_set.Set("abc");
+  EXPECT_EQ(truncated_set.size(), 0);
+  EXPECT_EQ(truncated_set.begin(), truncated_set.end());
+  EXPECT_EQ(*truncated_set.begin(), "");
+  EXPECT_EQ(truncated_set[0], "");
+#endif  // NDEBUG
+
+  alignas(uint32_t) constexpr char kEmptyDataArray[] = "\x00\x00\x00\x00";
+  SerializedStringArray empty_array;
+  ASSERT_TRUE(empty_array.Init(absl::string_view(kEmptyDataArray, 4)));
+  EXPECT_EQ(empty_array[-1], "");
+  EXPECT_EQ(empty_array[0], "");
+  EXPECT_EQ(*empty_array.begin(), "");
+
+  SerializedStringArray array;
+  ASSERT_TRUE(array.Init(kTestData));
+  ASSERT_EQ(array.size(), 3);
+  EXPECT_EQ(array[-1], "");
+  EXPECT_EQ(array[3], "");
+  EXPECT_EQ(array[1000], "");
+  EXPECT_EQ(array[uint32_t{0x80000000u}], "");
+  EXPECT_EQ(array[std::numeric_limits<uint32_t>::max()], "");
+  if constexpr (sizeof(size_t) > sizeof(uint32_t)) {
+    EXPECT_EQ(array[static_cast<size_t>(uint64_t{1} << 32)], "");
+  }
+  EXPECT_EQ(array[std::numeric_limits<size_t>::max()], "");
+  EXPECT_EQ(*array.end(), "");
+  EXPECT_EQ(array.begin()[-1], "");
+  EXPECT_EQ(array.begin()[3], "");
+}
 }  // namespace
 }  // namespace mozc
