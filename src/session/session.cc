@@ -5347,6 +5347,12 @@ bool Session::IgnoreStaleDelayedLiveConversion(commands::Command* command) {
   // A stale delayed callback must not return an empty Output. In TSF, an empty
   // consumed Output may clear the visible composition even though the server-side
   // composer still has text.
+  // A manual conversion can move us out of COMPOSITION. A pending display
+  // must never overwrite its explicit conversion result.
+  if (live_conversion_pending_ &&
+      context_->state() != ImeContext::COMPOSITION) {
+    CancelPendingLiveConversion();
+  }
   if (live_conversion_pending_) {
     OutputPendingLiveConversion(command);
     AttachCachedLiveConversionSuggestionCandidateWindow(
@@ -10198,6 +10204,8 @@ bool Session::ConvertToTransliteration(
           context_->composer(), type)) {
     return false;
   }
+  // An explicit transliteration supersedes the delayed live-conversion view.
+  CancelPendingLiveConversion();
   SetSessionState(ImeContext::CONVERSION, context_.get());
   Output(command);
   return true;
@@ -10233,6 +10241,7 @@ bool Session::SwitchKanaType(commands::Command* command) {
   if (!context_->mutable_converter()->SwitchKanaType(context_->composer())) {
     return false;
   }
+  CancelPendingLiveConversion();
   SetSessionState(ImeContext::CONVERSION, context_.get());
   Output(command);
   return true;
@@ -10243,6 +10252,7 @@ bool Session::DisplayAsHiragana(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToHiragana(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    CancelPendingLiveConversion();
     context_->mutable_composer()->SetOutputMode(transliteration::HIRAGANA);
     OutputComposition(command);
     return true;
@@ -10254,6 +10264,7 @@ bool Session::DisplayAsFullKatakana(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToFullKatakana(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    CancelPendingLiveConversion();
     context_->mutable_composer()->SetOutputMode(transliteration::FULL_KATAKANA);
     OutputComposition(command);
     return true;
@@ -10265,6 +10276,7 @@ bool Session::DisplayAsHalfKatakana(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToHalfKatakana(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    CancelPendingLiveConversion();
     context_->mutable_composer()->SetOutputMode(transliteration::HALF_KATAKANA);
     OutputComposition(command);
     return true;
@@ -10276,6 +10288,7 @@ bool Session::TranslateFullASCII(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToFullASCII(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    CancelPendingLiveConversion();
     context_->mutable_composer()->SetOutputMode(
         transliteration::T13n::ToggleFullAsciiTypes(
             context_->composer().GetOutputMode()));
@@ -10289,6 +10302,7 @@ bool Session::TranslateHalfASCII(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToHalfASCII(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    CancelPendingLiveConversion();
     context_->mutable_composer()->SetOutputMode(
         transliteration::T13n::ToggleHalfAsciiTypes(
             context_->composer().GetOutputMode()));
@@ -10423,6 +10437,7 @@ bool Session::ConvertToHalfWidth(commands::Command* command) {
           context_->composer())) {
     return false;
   }
+  CancelPendingLiveConversion();
   SetSessionState(ImeContext::CONVERSION, context_.get());
   Output(command);
   return true;
@@ -10455,6 +10470,7 @@ bool Session::TranslateHalfWidth(commands::Command* command) {
       // transliteration::HALF_ASCII_something
       return TranslateHalfASCII(command);
     }
+    CancelPendingLiveConversion();
     OutputComposition(command);
     return true;
   }

@@ -233,6 +233,311 @@ TEST_F(SessionRegressionTest,
   }
 }
 
+// Issue #468: an explicit conversion must supersede an older live timer.
+TEST_F(SessionRegressionTest,
+       PendingLiveConversionCannotOverwriteExplicitTransliteration) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  const commands::SessionCommand old_callback =
+      command.output().callback().session_command();
+  ASSERT_EQ(old_callback.type(),
+            commands::SessionCommand::APPLY_LIVE_CONVERSION);
+
+  command.Clear();
+  ASSERT_TRUE(session_->ConvertToHalfASCII(&command));
+  const std::string explicit_preedit = GetComposition(command);
+  EXPECT_EQ(explicit_preedit, "kanji");
+  EXPECT_EQ(session_->context().state(), session::ImeContext::CONVERSION);
+
+  commands::Command delayed;
+  delayed.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *delayed.mutable_input()->mutable_command() = old_callback;
+  ASSERT_TRUE(session_->SendCommand(&delayed));
+  EXPECT_EQ(GetComposition(delayed), explicit_preedit);
+  EXPECT_FALSE(delayed.output().live_conversion_pending());
+
+  command.Clear();
+  ASSERT_TRUE(session_->Commit(&command));
+  ASSERT_TRUE(command.output().has_result());
+  EXPECT_EQ(command.output().result().value(), explicit_preedit);
+}
+
+// macOS's default F10 uses DisplayAsHalfAlphanumeric (TranslateHalfASCII),
+// which keeps the session in COMPOSITION rather than invoking a converter.
+TEST_F(SessionRegressionTest,
+       PendingLiveConversionCannotOverwriteExplicitDisplay) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  const commands::SessionCommand old_callback =
+      command.output().callback().session_command();
+  ASSERT_EQ(old_callback.type(),
+            commands::SessionCommand::APPLY_LIVE_CONVERSION);
+
+  command.Clear();
+  ASSERT_TRUE(session_->TranslateHalfASCII(&command));
+  const std::string explicit_preedit = GetComposition(command);
+  EXPECT_EQ(explicit_preedit, "kanji");
+  EXPECT_EQ(session_->context().state(), session::ImeContext::COMPOSITION);
+
+  commands::Command delayed;
+  delayed.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *delayed.mutable_input()->mutable_command() = old_callback;
+  ASSERT_TRUE(session_->SendCommand(&delayed));
+  EXPECT_EQ(GetComposition(delayed), explicit_preedit);
+  EXPECT_FALSE(delayed.output().live_conversion_pending());
+
+  command.Clear();
+  ASSERT_TRUE(session_->Commit(&command));
+  ASSERT_TRUE(command.output().has_result());
+  EXPECT_EQ(command.output().result().value(), explicit_preedit);
+}
+
+// Issue #468 follow-up: cover every explicit transliteration/format command
+// that can supersede an outstanding delayed live-conversion callback.
+TEST_F(SessionRegressionTest, PendingLiveConversionManualOverrideMatrix) {
+  using Action = bool (session::Session::*)(commands::Command*);
+  struct TestCase {
+    const char* name;
+    Action action;
+  };
+  const TestCase test_cases[] = {
+      {"ConvertToHiragana", &session::Session::ConvertToHiragana},
+      {"ConvertToFullKatakana", &session::Session::ConvertToFullKatakana},
+      {"ConvertToHalfKatakana", &session::Session::ConvertToHalfKatakana},
+      {"ConvertToFullASCII", &session::Session::ConvertToFullASCII},
+      {"ConvertToHalfASCII", &session::Session::ConvertToHalfASCII},
+      {"ConvertToHalfWidth", &session::Session::ConvertToHalfWidth},
+      {"SwitchKanaType", &session::Session::SwitchKanaType},
+      {"DisplayAsHiragana", &session::Session::DisplayAsHiragana},
+      {"DisplayAsFullKatakana", &session::Session::DisplayAsFullKatakana},
+      {"DisplayAsHalfKatakana", &session::Session::DisplayAsHalfKatakana},
+      {"TranslateFullASCII", &session::Session::TranslateFullASCII},
+      {"TranslateHalfASCII", &session::Session::TranslateHalfASCII},
+      {"TranslateHalfWidth", &session::Session::TranslateHalfWidth},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    SCOPED_TRACE(test_case.name);
+    ResetSession();
+    InitSessionToPrecomposition(session_.get());
+    config::Config config = config::ConfigHandler::GetCopiedConfig();
+    config.set_use_live_conversion(true);
+    config.set_live_conversion_delay_msec(228);
+    session_->SetConfig(config);
+
+    commands::Command command;
+    InsertCharacterChars("kanji", &command);
+    ASSERT_TRUE(command.output().has_callback());
+    ASSERT_TRUE(command.output().callback().has_session_command());
+    const commands::SessionCommand old_callback =
+        command.output().callback().session_command();
+    ASSERT_EQ(old_callback.type(),
+              commands::SessionCommand::APPLY_LIVE_CONVERSION);
+
+    command.Clear();
+    ASSERT_TRUE((session_.get()->*test_case.action)(&command));
+    ASSERT_TRUE(command.output().has_preedit());
+    const std::string explicit_preedit = GetComposition(command);
+    ASSERT_FALSE(explicit_preedit.empty());
+
+    // Replaying a queued timer must not restore pending presentation or
+    // silently change what the user explicitly selected.
+    for (int i = 0; i < 2; ++i) {
+      commands::Command stale;
+      stale.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+      *stale.mutable_input()->mutable_command() = old_callback;
+      ASSERT_TRUE(session_->SendCommand(&stale));
+      EXPECT_EQ(GetComposition(stale), explicit_preedit);
+      EXPECT_FALSE(stale.output().live_conversion_pending());
+    }
+
+    command.Clear();
+    ASSERT_TRUE(session_->Commit(&command));
+    ASSERT_TRUE(command.output().has_result());
+    EXPECT_EQ(command.output().result().value(), explicit_preedit);
+  }
+}
+
+// An older callback is allowed to re-output a newer pending presentation.
+// Its generation must not cancel or materialize that newer pending request.
+TEST_F(SessionRegressionTest,
+       PendingLiveConversionNewerRequestSurvivesOldTimer) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  const commands::SessionCommand old_callback =
+      command.output().callback().session_command();
+  ASSERT_EQ(old_callback.type(),
+            commands::SessionCommand::APPLY_LIVE_CONVERSION);
+
+  InsertCharacterChars("a", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  const commands::SessionCommand new_callback =
+      command.output().callback().session_command();
+  ASSERT_EQ(new_callback.type(),
+            commands::SessionCommand::APPLY_LIVE_CONVERSION);
+  ASSERT_NE(old_callback.live_conversion_generation(),
+            new_callback.live_conversion_generation());
+  const std::string latest_preedit = GetComposition(command);
+
+  commands::Command stale;
+  stale.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *stale.mutable_input()->mutable_command() = old_callback;
+  ASSERT_TRUE(session_->SendCommand(&stale));
+  EXPECT_EQ(GetComposition(stale), latest_preedit);
+  EXPECT_TRUE(stale.output().live_conversion_pending());
+
+  // The current generation can still be applied after the old timer.
+  commands::Command current;
+  current.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *current.mutable_input()->mutable_command() = new_callback;
+  ASSERT_TRUE(session_->SendCommand(&current));
+  EXPECT_FALSE(current.output().live_conversion_pending());
+  EXPECT_TRUE(current.output().has_preedit());
+}
+
+// Issue #468: ordinary typing after an explicit conversion must commit the
+// selected value, rather than the pre-conversion live display.
+TEST_F(SessionRegressionTest,
+       PendingLiveConversionContinuedTypingAfterExplicitTransliteration) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  const commands::SessionCommand stale_callback =
+      command.output().callback().session_command();
+
+  command.Clear();
+  ASSERT_TRUE(session_->ConvertToHalfASCII(&command));
+  ASSERT_EQ(GetComposition(command), "kanji");
+  ASSERT_EQ(session_->context().state(), session::ImeContext::CONVERSION);
+
+  InsertCharacterChars("a", &command);
+  ASSERT_TRUE(command.output().has_result());
+  EXPECT_EQ(command.output().result().value(), "kanji");
+  ASSERT_TRUE(command.output().has_preedit());
+  const std::string continued_preedit = GetComposition(command);
+
+  commands::Command stale;
+  stale.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *stale.mutable_input()->mutable_command() = stale_callback;
+  ASSERT_TRUE(session_->SendCommand(&stale));
+  EXPECT_EQ(GetComposition(stale), continued_preedit);
+}
+
+// macOS's DisplayAsHalfAlphanumeric path stays in COMPOSITION. Continued
+// typing must preserve the explicitly selected ASCII preedit.
+TEST_F(SessionRegressionTest,
+       PendingLiveConversionContinuedTypingAfterExplicitDisplay) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  const commands::SessionCommand stale_callback =
+      command.output().callback().session_command();
+
+  command.Clear();
+  ASSERT_TRUE(session_->TranslateHalfASCII(&command));
+  const std::string manual_preedit = GetComposition(command);
+  ASSERT_EQ(manual_preedit, "kanji");
+  ASSERT_EQ(session_->context().state(), session::ImeContext::COMPOSITION);
+
+  InsertCharacterChars("a", &command);
+  ASSERT_TRUE(command.output().has_preedit());
+  const std::string continued_preedit = GetComposition(command);
+  EXPECT_EQ(continued_preedit.rfind(manual_preedit, 0), 0u);
+
+  commands::Command stale;
+  stale.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *stale.mutable_input()->mutable_command() = stale_callback;
+  ASSERT_TRUE(session_->SendCommand(&stale));
+  EXPECT_EQ(GetComposition(stale), continued_preedit);
+}
+
+// A materialized live-conversion prefix is intentionally held across typing.
+// An explicit DisplayAs* selection, however, must take precedence over that
+// earlier prefix when the user continues typing without committing.
+TEST_F(SessionRegressionTest,
+       PendingLiveConversionOldStablePrefixCannotOverrideManualDisplay) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  const commands::SessionCommand first_callback =
+      command.output().callback().session_command();
+
+  commands::Command materialized;
+  materialized.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *materialized.mutable_input()->mutable_command() = first_callback;
+  ASSERT_TRUE(session_->SendCommand(&materialized));
+  ASSERT_TRUE(materialized.output().live_conversion());
+  ASSERT_FALSE(materialized.output().live_conversion_pending());
+  ASSERT_TRUE(materialized.output().has_preedit());
+
+  InsertCharacterChars("a", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  const commands::SessionCommand pending_callback =
+      command.output().callback().session_command();
+  ASSERT_EQ(pending_callback.type(),
+            commands::SessionCommand::APPLY_LIVE_CONVERSION);
+
+  command.Clear();
+  ASSERT_TRUE(session_->TranslateHalfASCII(&command));
+  const std::string selected_preedit = GetComposition(command);
+  ASSERT_EQ(selected_preedit, "kanjia");
+  ASSERT_EQ(session_->context().state(), session::ImeContext::COMPOSITION);
+
+  InsertCharacterChars("b", &command);
+  ASSERT_TRUE(command.output().has_preedit());
+  const std::string continued_preedit = GetComposition(command);
+  EXPECT_EQ(continued_preedit.rfind(selected_preedit, 0), 0u)
+      << "Old live-conversion prefix replaced an explicit ASCII display";
+
+  commands::Command stale;
+  stale.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *stale.mutable_input()->mutable_command() = pending_callback;
+  ASSERT_TRUE(session_->SendCommand(&stale));
+  EXPECT_EQ(GetComposition(stale), continued_preedit);
+}
+
 TEST_F(SessionRegressionTest, HistoryLearning) {
   InitSessionToPrecomposition(session_.get());
   commands::Command command;
