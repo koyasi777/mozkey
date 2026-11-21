@@ -158,11 +158,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                     ValueAndDescAre("今日", ""),
                     ValueAndDescAre("2011/04/18", kDesc),
                     ValueAndDescAre("2011/04/18(月)", kDesc),
+                    ValueAndDescAre("2011/04/18（月）", kDesc),
+                    ValueAndDescAre("4月18日(月)", kDesc),
                     ValueAndDescAre("4月18日（月）", kDesc),
                     ValueAndDescAre("2011-04-18", kDesc),
                     ValueAndDescAre("2011年4月18日", kDesc),
+                    ValueAndDescAre("2011年4月18日(月)", kDesc),
                     ValueAndDescAre("2011年4月18日（月）", kDesc),
                     ValueAndDescAre("平成23年4月18日", kDesc),
+                    ValueAndDescAre("平成23年4月18日(月)", kDesc),
                     ValueAndDescAre("平成23年4月18日（月）", kDesc),
                     ValueAndDescAre("月曜日", kDesc),
                 }));
@@ -177,11 +181,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                     ValueAndDescAre("本日", ""),
                     ValueAndDescAre("2011/04/18", kDesc),
                     ValueAndDescAre("2011/04/18(月)", kDesc),
+                    ValueAndDescAre("2011/04/18（月）", kDesc),
+                    ValueAndDescAre("4月18日(月)", kDesc),
                     ValueAndDescAre("4月18日（月）", kDesc),
                     ValueAndDescAre("2011-04-18", kDesc),
                     ValueAndDescAre("2011年4月18日", kDesc),
+                    ValueAndDescAre("2011年4月18日(月)", kDesc),
                     ValueAndDescAre("2011年4月18日（月）", kDesc),
                     ValueAndDescAre("平成23年4月18日", kDesc),
+                    ValueAndDescAre("平成23年4月18日(月)", kDesc),
                     ValueAndDescAre("平成23年4月18日（月）", kDesc),
                     ValueAndDescAre("月曜日", kDesc),
                 }));
@@ -196,11 +204,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                     ValueAndDescAre("明日", ""),
                     ValueAndDescAre("2011/04/19", kDesc),
                     ValueAndDescAre("2011/04/19(火)", kDesc),
+                    ValueAndDescAre("2011/04/19（火）", kDesc),
+                    ValueAndDescAre("4月19日(火)", kDesc),
                     ValueAndDescAre("4月19日（火）", kDesc),
                     ValueAndDescAre("2011-04-19", kDesc),
                     ValueAndDescAre("2011年4月19日", kDesc),
+                    ValueAndDescAre("2011年4月19日(火)", kDesc),
                     ValueAndDescAre("2011年4月19日（火）", kDesc),
                     ValueAndDescAre("平成23年4月19日", kDesc),
+                    ValueAndDescAre("平成23年4月19日(火)", kDesc),
                     ValueAndDescAre("平成23年4月19日（火）", kDesc),
                     ValueAndDescAre("火曜日", kDesc),
                 }));
@@ -215,11 +227,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                     ValueAndDescAre("明日", ""),
                     ValueAndDescAre("2011/04/19", kDesc),
                     ValueAndDescAre("2011/04/19(火)", kDesc),
+                    ValueAndDescAre("2011/04/19（火）", kDesc),
+                    ValueAndDescAre("4月19日(火)", kDesc),
                     ValueAndDescAre("4月19日（火）", kDesc),
                     ValueAndDescAre("2011-04-19", kDesc),
                     ValueAndDescAre("2011年4月19日", kDesc),
+                    ValueAndDescAre("2011年4月19日(火)", kDesc),
                     ValueAndDescAre("2011年4月19日（火）", kDesc),
                     ValueAndDescAre("平成23年4月19日", kDesc),
+                    ValueAndDescAre("平成23年4月19日(火)", kDesc),
                     ValueAndDescAre("平成23年4月19日（火）", kDesc),
                     ValueAndDescAre("火曜日", kDesc),
                 }));
@@ -234,11 +250,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                     ValueAndDescAre("昨日", ""),
                     ValueAndDescAre("2011/04/17", kDesc),
                     ValueAndDescAre("2011/04/17(日)", kDesc),
+                    ValueAndDescAre("2011/04/17（日）", kDesc),
+                    ValueAndDescAre("4月17日(日)", kDesc),
                     ValueAndDescAre("4月17日（日）", kDesc),
                     ValueAndDescAre("2011-04-17", kDesc),
                     ValueAndDescAre("2011年4月17日", kDesc),
+                    ValueAndDescAre("2011年4月17日(日)", kDesc),
                     ValueAndDescAre("2011年4月17日（日）", kDesc),
                     ValueAndDescAre("平成23年4月17日", kDesc),
+                    ValueAndDescAre("平成23年4月17日(日)", kDesc),
                     ValueAndDescAre("平成23年4月17日（日）", kDesc),
                     ValueAndDescAre("日曜日", kDesc),
                 }));
@@ -253,11 +273,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                     ValueAndDescAre("明後日", ""),
                     ValueAndDescAre("2011/04/20", kDesc),
                     ValueAndDescAre("2011/04/20(水)", kDesc),
+                    ValueAndDescAre("2011/04/20（水）", kDesc),
+                    ValueAndDescAre("4月20日(水)", kDesc),
                     ValueAndDescAre("4月20日（水）", kDesc),
                     ValueAndDescAre("2011-04-20", kDesc),
                     ValueAndDescAre("2011年4月20日", kDesc),
+                    ValueAndDescAre("2011年4月20日(水)", kDesc),
                     ValueAndDescAre("2011年4月20日（水）", kDesc),
                     ValueAndDescAre("平成23年4月20日", kDesc),
+                    ValueAndDescAre("平成23年4月20日(水)", kDesc),
                     ValueAndDescAre("平成23年4月20日（水）", kDesc),
                     ValueAndDescAre("水曜日", kDesc),
                 }));
@@ -322,11 +346,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                     // The candidates generated by the date rewriter.
                     ValueAndDescAre("2011/04/18", kDesc),
                     ValueAndDescAre("2011/04/18(月)", kDesc),
+                    ValueAndDescAre("2011/04/18（月）", kDesc),
+                    ValueAndDescAre("4月18日(月)", kDesc),
                     ValueAndDescAre("4月18日（月）", kDesc),
                     ValueAndDescAre("2011-04-18", kDesc),
                     ValueAndDescAre("2011年4月18日", kDesc),
+                    ValueAndDescAre("2011年4月18日(月)", kDesc),
                     ValueAndDescAre("2011年4月18日（月）", kDesc),
                     ValueAndDescAre("平成23年4月18日", kDesc),
+                    ValueAndDescAre("平成23年4月18日(月)", kDesc),
                     ValueAndDescAre("平成23年4月18日（月）", kDesc),
                     ValueAndDescAre("月曜日", kDesc),
                 }));
@@ -349,11 +377,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                     // The candidates generated by the date rewriter.
                     ValueAndDescAre("2011/04/18", kDesc),
                     ValueAndDescAre("2011/04/18(月)", kDesc),
+                    ValueAndDescAre("2011/04/18（月）", kDesc),
+                    ValueAndDescAre("4月18日(月)", kDesc),
                     ValueAndDescAre("4月18日（月）", kDesc),
                     ValueAndDescAre("2011-04-18", kDesc),
                     ValueAndDescAre("2011年4月18日", kDesc),
+                    ValueAndDescAre("2011年4月18日(月)", kDesc),
                     ValueAndDescAre("2011年4月18日（月）", kDesc),
                     ValueAndDescAre("平成23年4月18日", kDesc),
+                    ValueAndDescAre("平成23年4月18日(月)", kDesc),
                     ValueAndDescAre("平成23年4月18日（月）", kDesc),
                     ValueAndDescAre("月曜日", kDesc),
                     ValueAndDescAre("Candidate2", ""),
@@ -371,11 +403,15 @@ TEST_F(DateRewriterTest, DateRewriteTest) {
                   ValueAndDescAre("日付", ""),
                   ValueAndDescAre("2011/04/18", kDateDesc),
                   ValueAndDescAre("2011/04/18(月)", kDateDesc),
+                  ValueAndDescAre("2011/04/18（月）", kDateDesc),
+                  ValueAndDescAre("4月18日(月)", kDateDesc),
                   ValueAndDescAre("4月18日（月）", kDateDesc),
                   ValueAndDescAre("2011-04-18", kDateDesc),
                   ValueAndDescAre("2011年4月18日", kDateDesc),
+                  ValueAndDescAre("2011年4月18日(月)", kDateDesc),
                   ValueAndDescAre("2011年4月18日（月）", kDateDesc),
                   ValueAndDescAre("平成23年4月18日", kDateDesc),
+                  ValueAndDescAre("平成23年4月18日(月)", kDateDesc),
                   ValueAndDescAre("平成23年4月18日（月）", kDateDesc),
                   ValueAndDescAre("月曜日", kDateDesc),
               }));
@@ -417,11 +453,15 @@ TEST_F(DateRewriterTest, RelativeDateWeekdayCrossesYearBoundary) {
                   ValueAndDescAre("明日", ""),
                   ValueAndDescAre("2027/01/01", kDesc),
                   ValueAndDescAre("2027/01/01(金)", kDesc),
+                  ValueAndDescAre("2027/01/01（金）", kDesc),
+                  ValueAndDescAre("1月1日(金)", kDesc),
                   ValueAndDescAre("1月1日（金）", kDesc),
                   ValueAndDescAre("2027-01-01", kDesc),
                   ValueAndDescAre("2027年1月1日", kDesc),
+                  ValueAndDescAre("2027年1月1日(金)", kDesc),
                   ValueAndDescAre("2027年1月1日（金）", kDesc),
                   ValueAndDescAre("令和9年1月1日", kDesc),
+                  ValueAndDescAre("令和9年1月1日(金)", kDesc),
                   ValueAndDescAre("令和9年1月1日（金）", kDesc),
                   ValueAndDescAre("金曜日", kDesc),
               }));
@@ -438,7 +478,10 @@ TEST_F(DateRewriterTest, RelativeDateWeekdayHandlesLeapDay) {
   InitSegment("あす", "明日", &segments);
   ASSERT_TRUE(rewriter.Rewrite(request, &segments));
   EXPECT_TRUE(HasCandidate(segments.segment(0), "2024/02/29(木)"));
+  EXPECT_TRUE(HasCandidate(segments.segment(0), "2024/02/29（木）"));
+  EXPECT_TRUE(HasCandidate(segments.segment(0), "2月29日(木)"));
   EXPECT_TRUE(HasCandidate(segments.segment(0), "2月29日（木）"));
+  EXPECT_TRUE(HasCandidate(segments.segment(0), "2024年2月29日(木)"));
   EXPECT_TRUE(HasCandidate(segments.segment(0), "2024年2月29日（木）"));
   Clock::SetClockForUnitTest(nullptr);
 }
@@ -1268,10 +1311,13 @@ TEST_F(DateRewriterTest, CompactEightDigitDateRewrite) {
                   ValueAndDescAre("20260908", ""),
                   ValueAndDescAre("2026/09/08", "日付"),
                   ValueAndDescAre("2026/09/08(火)", "日付"),
+                  ValueAndDescAre("2026/09/08（火）", "日付"),
                   ValueAndDescAre("2026-09-08", "日付"),
                   ValueAndDescAre("2026年9月8日", "日付"),
+                  ValueAndDescAre("2026年9月8日(火)", "日付"),
                   ValueAndDescAre("2026年9月8日（火）", "日付"),
                   ValueAndDescAre("令和8年9月8日", "日付"),
+                  ValueAndDescAre("令和8年9月8日(火)", "日付"),
                   ValueAndDescAre("令和8年9月8日（火）", "日付"),
               }));
 
@@ -1312,9 +1358,10 @@ TEST_F(DateRewriterTest, SeparatedDateRewriteAndRawInputPreservation) {
     const Segment& segment = segments.segment(0);
     EXPECT_EQ(segment.candidate(0).value, std::string(input)) << input;
     EXPECT_EQ(segment.candidate(1).value, "9月8日") << input;
-    EXPECT_EQ(segment.candidate(2).value, "9月8日（火）") << input;
+    EXPECT_EQ(segment.candidate(2).value, "9月8日(火)") << input;
+    EXPECT_EQ(segment.candidate(3).value, "9月8日（火）") << input;
     if (input != "09/08") {
-      EXPECT_EQ(segment.candidate(3).value, "09/08") << input;
+      EXPECT_EQ(segment.candidate(4).value, "09/08") << input;
     }
   }
 
@@ -1330,8 +1377,9 @@ TEST_F(DateRewriterTest, SeparatedDateRewriteAndRawInputPreservation) {
     EXPECT_EQ(segments.segment(0).candidate(0).value, kInput);
     EXPECT_EQ(segments.segment(0).candidate(1).value, "2026/09/08");
     EXPECT_EQ(segments.segment(0).candidate(2).value, "2026/09/08(火)");
-    EXPECT_EQ(segments.segment(0).candidate(3).value, "2026-09-08");
-    EXPECT_EQ(segments.segment(0).candidate(4).value, "2026年9月8日");
+    EXPECT_EQ(segments.segment(0).candidate(3).value, "2026/09/08（火）");
+    EXPECT_EQ(segments.segment(0).candidate(4).value, "2026-09-08");
+    EXPECT_EQ(segments.segment(0).candidate(5).value, "2026年9月8日");
   }
 
   for (const absl::string_view input :
@@ -1355,14 +1403,16 @@ TEST_F(DateRewriterTest, SeparatedDateRewriteAndRawInputPreservation) {
   ASSERT_TRUE(rewriter.Rewrite(raw_request, &segments));
   EXPECT_EQ(segments.segment(0).candidate(0).value, "9/8");
   EXPECT_EQ(segments.segment(0).candidate(1).value, "9月8日");
-  EXPECT_EQ(segments.segment(0).candidate(2).value, "9月8日（火）");
+  EXPECT_EQ(segments.segment(0).candidate(2).value, "9月8日(火)");
+  EXPECT_EQ(segments.segment(0).candidate(3).value, "9月8日（火）");
 
   // Do not duplicate an exact literal candidate already produced by converter.
   InitSegment("9・8", "9/8", &segments);
   ASSERT_TRUE(rewriter.Rewrite(raw_request, &segments));
   EXPECT_EQ(segments.segment(0).candidate(0).value, "9/8");
   EXPECT_EQ(segments.segment(0).candidate(1).value, "9月8日");
-  EXPECT_EQ(segments.segment(0).candidate(2).value, "9月8日（火）");
+  EXPECT_EQ(segments.segment(0).candidate(2).value, "9月8日(火)");
+  EXPECT_EQ(segments.segment(0).candidate(3).value, "9月8日（火）");
   int literal_count = 0;
   for (size_t i = 0; i < segments.segment(0).candidates_size(); ++i) {
     if (segments.segment(0).candidate(i).value == "9/8") {
@@ -1593,11 +1643,15 @@ TEST_F(DateRewriterTest, ExtraDateFormatTest) {
                   ValueAndDescAre("2011_04_18", kDesc),  // Custom format
                   ValueAndDescAre("2011/04/18", kDesc),
                   ValueAndDescAre("2011/04/18(月)", kDesc),
+                  ValueAndDescAre("2011/04/18（月）", kDesc),
+                  ValueAndDescAre("4月18日(月)", kDesc),
                   ValueAndDescAre("4月18日（月）", kDesc),
                   ValueAndDescAre("2011-04-18", kDesc),
                   ValueAndDescAre("2011年4月18日", kDesc),
+                  ValueAndDescAre("2011年4月18日(月)", kDesc),
                   ValueAndDescAre("2011年4月18日（月）", kDesc),
                   ValueAndDescAre("平成23年4月18日", kDesc),
+                  ValueAndDescAre("平成23年4月18日(月)", kDesc),
                   ValueAndDescAre("平成23年4月18日（月）", kDesc),
                   ValueAndDescAre("月曜日", kDesc),
               }));
@@ -1636,11 +1690,15 @@ TEST_F(DateRewriterTest, ExtraDateFormatTest2) {
                   ValueAndDescAre("2011_04_18_00_00", kDesc),  // Custom format
                   ValueAndDescAre("2011/04/18", kDesc),
                   ValueAndDescAre("2011/04/18(月)", kDesc),
+                  ValueAndDescAre("2011/04/18（月）", kDesc),
+                  ValueAndDescAre("4月18日(月)", kDesc),
                   ValueAndDescAre("4月18日（月）", kDesc),
                   ValueAndDescAre("2011-04-18", kDesc),
                   ValueAndDescAre("2011年4月18日", kDesc),
+                  ValueAndDescAre("2011年4月18日(月)", kDesc),
                   ValueAndDescAre("2011年4月18日（月）", kDesc),
                   ValueAndDescAre("平成23年4月18日", kDesc),
+                  ValueAndDescAre("平成23年4月18日(月)", kDesc),
                   ValueAndDescAre("平成23年4月18日（月）", kDesc),
                   ValueAndDescAre("月曜日", kDesc),
               }));

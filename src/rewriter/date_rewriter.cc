@@ -941,9 +941,15 @@ std::vector<std::string> GetConversions(
         if (i == 0) {
           results.push_back(absl::StrFormat("%d/%02d/%02d(%s)", cm.year(),
                                             cm.month(), cm.day(), weekday));
+          results.push_back(absl::StrFormat("%d/%02d/%02d（%s）", cm.year(),
+                                            cm.month(), cm.day(), weekday));
+          results.push_back(absl::StrFormat("%d月%d日(%s)", cm.month(),
+                                            cm.day(), weekday));
           results.push_back(absl::StrFormat("%d月%d日（%s）", cm.month(),
                                             cm.day(), weekday));
         } else if (i == 2) {
+          results.push_back(absl::StrFormat("%d年%d月%d日(%s)", cm.year(),
+                                            cm.month(), cm.day(), weekday));
           results.push_back(absl::StrFormat("%d年%d月%d日（%s）", cm.year(),
                                             cm.month(), cm.day(), weekday));
         }
@@ -953,6 +959,8 @@ std::vector<std::string> GetConversions(
         results.push_back(
             absl::StrFormat("%s年%d月%d日", era[0], cm.month(), cm.day()));
         if (data.type == DATE) {
+          results.push_back(absl::StrFormat("%s年%d月%d日(%s)", era[0],
+                                            cm.month(), cm.day(), weekday));
           results.push_back(absl::StrFormat("%s年%d月%d日（%s）", era[0],
                                             cm.month(), cm.day(), weekday));
         }
@@ -1688,6 +1696,9 @@ bool AppendFullDateCandidates(
     AppendDateCandidateIfMissing(absl::StrFormat("%d月%d日", month, day),
                                  kDateDescription, results);
     AppendDateCandidateIfMissing(
+        absl::StrFormat("%d月%d日(%s)", month, day, weekday_text),
+        kDateDescription, results);
+    AppendDateCandidateIfMissing(
         absl::StrFormat("%d月%d日（%s）", month, day, weekday_text),
         kDateDescription, results);
     AppendDateCandidateIfMissing(absl::StrFormat("%02d/%02d", month, day),
@@ -1703,7 +1714,13 @@ bool AppendFullDateCandidates(
       AppendDateCandidateIfMissing(
           absl::StrFormat("%d/%02d/%02d(%s)", year, month, day, weekday_text),
           kDateDescription, results);
+      AppendDateCandidateIfMissing(
+          absl::StrFormat("%d/%02d/%02d（%s）", year, month, day, weekday_text),
+          kDateDescription, results);
     } else if (i == 2) {
+      AppendDateCandidateIfMissing(
+          absl::StrFormat("%d年%d月%d日(%s)", year, month, day, weekday_text),
+          kDateDescription, results);
       AppendDateCandidateIfMissing(
           absl::StrFormat("%d年%d月%d日（%s）", year, month, day, weekday_text),
           kDateDescription, results);
@@ -1715,6 +1732,9 @@ bool AppendFullDateCandidates(
     AppendDateCandidateIfMissing(
         absl::StrFormat("%s年%d月%d日", era[0], month, day), kDateDescription,
         results);
+    AppendDateCandidateIfMissing(
+        absl::StrFormat("%s年%d月%d日(%s)", era[0], month, day, weekday_text),
+        kDateDescription, results);
     AppendDateCandidateIfMissing(
         absl::StrFormat("%s年%d月%d日（%s）", era[0], month, day, weekday_text),
         kDateDescription, results);

@@ -195,7 +195,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - 日付入力を強化し、`20260927` のような8桁数字や、`2026/9/27`、`2026-9-27`、`2026.9.27`、`9/27` などから日付候補を生成。全角入力にも対応し、存在しない日付は日付候補として展開しない
 - `きんよう` / `きんようび` などの曜日入力では、通常の「金曜」「金曜日」を優先したまま、今週・来週・先週の該当日を追加候補として提示
 - `ほんじつ` / `みょうにち` などの日付表現を補強し、`9/27` など明示的に入力された日付表記は候補順位でも尊重
-- `きょう` / `あす` / `きのう` / `あさって` などの相対日付変換に、曜日付きの候補を追加。`2026/11/22(日)`、`11月22日（日）`、`2026年11月22日（日）`、`令和8年11月22日（日）` などを、既存の日付表記と併せて選択可能
+- `きょう` / `あす` / `きのう` / `あさって` などの相対日付変換に、曜日付きの候補を追加。`2026/11/22(日)` / `2026/11/22（日）`、`11月22日(日)` / `11月22日（日）`、`2026年11月22日(日)` / `2026年11月22日（日）` など、半角・全角括弧の両方を選択可能。8桁数字や区切り記号からの日付変換でも従来の半角括弧候補を維持
 - `ひづけ` から今日の日付候補（曜日付き含む）を、`ようび` から今日の曜日を `日曜日` / `(日)` / `（日）` の形式で変換可能。通常の「日付」「曜日」の候補は維持
 - llama.cpp ベースのローカル Zenz live correction pipeline を追加
 - Zenz 文脈処理を共通化し、通常 Mozc の `preceding_text` / `following_text` とは分離した `zenz_preceding_text` / `zenz_following_text` を使用
@@ -1327,7 +1327,7 @@ Main features added in this fork
 - Improves date input conversion for compact forms such as `20260927` and separated forms such as `2026/9/27`, `2026-9-27`, `2026.9.27`, and `9/27`; full-width input is also recognized, and invalid calendar dates are not expanded as date candidates
 - For weekday readings such as `きんよう` / `きんようび`, keeps the normal lexical candidates `金曜` / `金曜日` ahead of additional candidates for the matching date in this week, next week, and the previous week
 - Adds date expressions such as `ほんじつ` / `みょうにち` while preserving explicitly typed date forms such as `9/27` at the front of the candidate order
-- Adds weekday-annotated candidates for relative-date inputs such as `きょう`, `あす`, `きのう`, and `あさって`, including `2026/11/22(日)`, `11月22日（日）`, `2026年11月22日（日）`, and `令和8年11月22日（日）`
+- Adds weekday-annotated candidates for relative-date inputs such as `きょう`, `あす`, `きのう`, and `あさって`, offering both ASCII `(...)` and fullwidth `（...）` parentheses for date/weekday combinations. Previously available ASCII-parenthesized candidates for eight-digit and separated-date input remain selectable
 - Lets `ひづけ` offer today's date variants and `ようび` offer today's weekday as `日曜日`, `(日)`, and `（日）`, while retaining the normal lexical candidates `日付` and `曜日`
 - Adds a local Zenz live correction pipeline based on llama.cpp
 - Uses dedicated `zenz_preceding_text` / `zenz_following_text` fields for Zenz context without changing the normal Mozc `preceding_text` / `following_text` semantics
