@@ -238,6 +238,27 @@ TEST_F(KeyMapTest, AddCommandSequence) {
   EXPECT_EQ(sequence[2], "Commit");
 }
 
+TEST_F(KeyMapTest, ExplicitCancelLastLearningIsPrecompositionOnly) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer peer(manager);
+  EXPECT_TRUE(peer.AddCommand("Precomposition", "Ctrl Shift Backspace",
+                              "CancelLastLearning"));
+  EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Shift Backspace",
+                               "CancelLastLearning"));
+  EXPECT_FALSE(peer.AddCommand("Conversion", "Ctrl Shift Backspace",
+                               "CancelLastLearning"));
+
+  commands::KeyEvent key;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Shift Backspace", &key));
+  PrecompositionState::Commands action;
+  ASSERT_TRUE(manager.GetCommandPrecomposition(key, &action));
+  EXPECT_EQ(action, PrecompositionState::CANCEL_LAST_LEARNING);
+  CommandSequence sequence;
+  ASSERT_TRUE(manager.GetCommandSequencePrecomposition(key, &sequence));
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence.front(), "CancelLastLearning");
+}
+
 TEST_F(KeyMapTest, ZenzManualCommandAndDelayGrammar) {
   KeyMapManager manager;
   KeyMapManagerTestPeer peer(manager);

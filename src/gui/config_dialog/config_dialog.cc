@@ -6147,6 +6147,10 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   // tab2
   SET_COMBOBOX(historyLearningLevelComboBox, HistoryLearningLevel,
                history_learning_level);
+  // Invert only the UI. The persisted field and its default remain unchanged,
+  // so existing user choices retain their semantics without a migration.
+  deleteLearningOnCommitUndoCheckBox->setChecked(
+      !config.preserve_learning_on_commit_undo());
   SET_CHECKBOX(singleKanjiConversionCheckBox, use_single_kanji_conversion);
   SET_CHECKBOX(symbolConversionCheckBox, use_symbol_conversion);
   SET_CHECKBOX(emoticonConversionCheckBox, use_emoticon_conversion);
@@ -6565,6 +6569,9 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   // tab2
   GET_COMBOBOX(historyLearningLevelComboBox, HistoryLearningLevel,
                history_learning_level);
+  // Keep the original protocol field; the checkbox expresses deletion.
+  config->set_preserve_learning_on_commit_undo(
+      !deleteLearningOnCommitUndoCheckBox->isChecked());
   GET_CHECKBOX(singleKanjiConversionCheckBox, use_single_kanji_conversion);
   GET_CHECKBOX(symbolConversionCheckBox, use_symbol_conversion);
   GET_CHECKBOX(emoticonConversionCheckBox, use_emoticon_conversion);

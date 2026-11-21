@@ -86,6 +86,7 @@ struct PrecompositionState {
     LAUNCH_DICTIONARY_TOOL,
     LAUNCH_WORD_REGISTER_DIALOG,
     REVERT,  // revert last operation (preedit still remains)
+    CANCEL_LAST_LEARNING,  // Explicitly roll back learning; do not edit text.
     UNDO,    // undo last operation (preedit is restored)
     RECONVERT,
     RECONVERT_SELECTION_OR_INSERT_SPACE,
