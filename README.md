@@ -226,7 +226,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - フィードバック学習データ管理画面から、選択した Zenz 補正を明示的に手動ブロック可能。手動ブロックは B の自動利用設定が OFF でも Zenz 補正の採用判定に有効。解除するには該当エントリを削除し、必要なら再学習する
 - Zenz 補正表示中の `Ctrl+Delete` からも手動ブロックを実行可能。同じ読み全体・文脈クラス・補正文字列の組に対する永続的な `hard_reject` として保存し、同時に通常 Mozc 変換へ戻る。通常却下の統計記録は二重に行わず、通常候補の学習履歴や「非表示候補」の辞書項目も削除しない
 - B が ON の場合は Zenz feedback を通常変換候補の ranking に利用。1 文節の通常変換では保存済み feedback を score 化し、既存候補の cost を調整するか synthetic candidate を自然な位置へ追加。accepted は順位を上げ、通常操作由来の rejected は候補を除外せず順位を下げる
-- 文節境界を壊さないため、複数文節に分かれた通常変換では Zenz feedback による通常候補 ranking を行わない
+- 複数文節の通常変換でも、読み全体が一致する保存済み Zenz feedback を既存のちょうど1文節へ安全に対応付けられる場合、その文節の候補を補完・順位調整する。文節の分割・結合・境界変更は行わず、曖昧な対応や保護属性付き候補への変更は避ける
 - 複数文節に分かれるライブ変換では、全文補正の学習を保つため、accepted Zenz feedback を session-level live correction fast path として再利用
 - sensitive-like context で得られた feedback は、通常文脈の候補 ranking / reuse には使わない
 - Mozc 変換履歴への追加学習（C）が ON で通常の履歴学習・プライバシー条件を満たす場合、明示的に確定した Zenz 補正を commit 点で Mozc の user history に即時学習する。A の記録設定とは独立。学習後は in-process の可逆履歴ハンドルを保持し、確定直後に `Revert` / `Undo` が実行された場合は学習削除設定に従って保持または取り消す。`CancelLastLearning` は設定にかかわらず取り消しを要求する
@@ -542,7 +542,7 @@ A が ON の場合でも、Zenz 補正を表示しただけでは記録しませ
 
 シークレットモード中は例外で、Zenz 推論は通常どおり利用できますが、Zenz feedback personalization の読み取り・書き込みを停止します。保存済み feedback による candidate ranking、複数文節 live correction の fast path、auto-block を含む feedback decision は適用せず、新しい feedback record も保存しません。シークレットモードを解除すると、削除せず保持していた既存 feedback を再び利用します。
 
-明示的確定後は、その accepted に対する短い取り消し可能期間を session 内に保持します。この期間に、現在のキー設定で `Revert` が実行された場合や、実行可能な `Undo` が成立した場合、**辞書タブの「変換確定直後の取り消しによる学習削除」が ON なら**、実際に追記に成功した accepted だけ `accepted_rollback` で補償します。設定が OFF の場合は学習を保持します。学習だけを取り消す `CancelLastLearning` はこの設定に依存しません。採用記録の追記が失敗したときは補償レコードも追記しないため、以前の正常な採用履歴を誤って減算しません。`accepted_rollback` は rejected feedback ではないため、通常却下回数や auto-block の negative evidence を増やしません。`IMEOff` / `MakeSureIMEOff` は取り消しではなく確定後のモード変更として扱い、accepted を保持したまま取り消し可能期間を閉じます。表示中の Zenz 補正から Space や候補移動などの通常変換操作へ移った場合は別で、その Zenz 結果を rejected feedback として扱います。ただし Space などの通常操作由来の rejected feedback は、候補を永久に抑止する hard reject ではなく、以後の candidate ranking で順位を下げるための negative signal として扱います。
+明示的確定後は、その accepted に対する短い取り消し可能期間を session 内に保持します。この期間に、現在のキー設定で `Revert` が実行された場合や、実行可能な `Undo` が成立した場合、**辞書タブの「変換確定直後の取り消しによる学習削除」が ON なら**、実際に追記に成功した accepted だけ `accepted_rollback` で補償します。設定が OFF の場合は学習を保持します。学習だけを取り消す `CancelLastLearning` はこの設定に依存しません。採用記録の追記が失敗したときは補償レコードも追記しないため、以前の正常な採用履歴を誤って減算しません。`accepted_rollback` は rejected feedback ではないため、通常却下回数や auto-block の negative evidence を増やしません。`IMEOff` / `MakeSureIMEOff` は取り消しではなく確定後のモード変更として扱い、accepted を保持したまま取り消し可能期間を閉じます。表示中の Zenz 補正から Space や候補移動などの通常変換操作へ移った時点では rejected feedback を即時確定せず、最終的に確定された値と比較して accepted / rejected を判定します。ただし Space などの通常操作由来の rejected feedback は、候補を永久に抑止する hard reject ではなく、以後の candidate ranking で順位を下げるための negative signal として扱います。
 
 Zenz feedback の自動ブロックは、通常却下回数だけではなく拒否割合も使って判定します。同じ full-sequence feedback entry について、`通常却下回数 >= 最低拒否回数` かつ `通常却下回数 / (採用回数 + 通常却下回数) >= 最低拒否割合` の両方を満たした場合にだけブロックします。既定値は最低拒否回数 1 回、最低拒否割合 50% で、境界値も含むため `accepted=1 / rejected=1` の 50% はブロック対象です。明示的な hard reject はこの割合計算とは別の絶対ブロックとして扱います。
 
@@ -554,9 +554,9 @@ Zenz feedback TSV は、完全な読み key、完全な補正 value、粗い非�
 
 Zenz feedback の再利用方法は、単文節と複数文節で異なります。
 
-単文節の通常変換では、Zenz feedback は rewriter chain 内の ranked candidate reuse として再利用されます。保存済み feedback は accepted / rejected reason を score 化し、既存候補があれば score に応じて cost を調整します。候補にない場合は synthetic candidate として候補集合へ追加できますが、無条件に先頭へ挿入するのではなく、feedback-adjusted cost に基づく自然な位置へ挿入します。通常操作由来の rejected feedback は候補を削除する命令ではなく順位を下げる signal として扱い、明示的な hard reject reason だけを強い抑止として扱います。その後に UserSegmentHistoryRewriter が走るため、明示的なユーザー選択履歴が最終順位を決めます。
+単文節の通常変換では、Zenz feedback は rewriter chain 内の ranked candidate reuse として再利用されます。保存済み feedback は accepted / rejected reason を score 化し、既存候補があれば score に応じて cost を調整します。候補にない場合は synthetic candidate として候補集合へ追加できますが、無条件に先頭へ挿入するのではなく、feedback-adjusted cost に基づく自然な位置へ挿入します。通常操作由来の rejected feedback は候補を削除する命令ではなく順位を下げる signal として扱い、明示的な hard reject reason だけを強い抑止として扱います。実際の rewriter chain では UserSegmentHistoryRewriter が先に走り、その後に ZenzFeedbackCandidateRewriter が feedback による候補の補完・順位調整を行います。
 
-複数文節に分かれるライブ変換では、converter の文節境界を feedback ranking で壊さないため、rewriter chain では通常変換候補を書き換えません。その代わり、session-level の live correction fast path として再利用します。これにより、`かれはてんてきです` → `彼は天敵です` のような全文補正の学習も再利用できます。
+複数文節の通常変換でも、保存済み feedback の読み全体が現在の変換要求と一致し、Mozc が決めた **2～8文節のうちちょうど1文節だけ**の表記差として一意に説明できる場合は、その文節の既存候補の順位調整または候補追加を行います。たとえば `もうすこしわかりやすくおしえてください` の `もう少しわかり易く | 教えて | ください` に対して、`もう少しわかりやすく | 教えて | ください` の第1文節候補を補完できます。文節の分割・結合・境界変更はせず、複数文節にまたがる変更、曖昧な対応、保護属性付き候補への変更は行いません。再利用設定 B が OFF、厳密な読み保持が ON、プライバシー条件に該当する場合などは、この rewriter での自動補完は実行しません。feedback は引き続き全文の読み・表記単位で保存されるため、末尾を省略した別の読みへ自動的に一般化するものではありません。従来の session-level live correction fast path は、この候補補完とは別経路として維持します。
 
 `sensitive_like` context で得られた feedback は、通常文脈への候補 ranking / reuse には使いません。
 
@@ -1350,13 +1350,13 @@ Main features added in this fork
 - Stops reusing a Zenz feedback entry as a preferred candidate or live-correction fast path when ordinary rejected observations outnumber accepted observations for the same full reading, context class, and correction value. This is a neutral reject-count-dominant state, not a hard block, so it does not delete ordinary Mozc candidates or prevent newly produced Zenz corrections by itself.
 - When feedback recording (A) is ON, does not persist a correction merely because it was displayed; acceptance is recorded on an explicit commit, including the next ordinary text key following manual Zenz correction. Continuing to type during automatic live correction does not by itself record acceptance. A failed append is not treated as a successful observation for Undo compensation
 - In the short post-commit reversible window, a keymap-resolved Revert or supported Undo compensates only successfully written `accepted` observations when the Dictionary-tab learning-deletion preference is ON. When OFF, learning is preserved; `CancelLastLearning` overrides the preference to cancel reversible learning only. Failed writes are not compensated, preventing subtraction from earlier valid records. Mozc-history revert uses a separate handle. IMEOff / MakeSureIMEOff confirm rather than cancel the commit
-- Treats a visible Zenz correction as rejected feedback when the user moves to normal conversion operations such as Space or candidate movement. Ordinary rejected feedback from these operations is used as a negative ranking signal rather than as a hard command to suppress the candidate
+- Defers feedback judgment when moving from a visible Zenz correction to normal conversion operations such as Space or candidate movement, then determines acceptance or rejection from the final committed value. Ordinary rejected feedback from these operations is used as a negative ranking signal rather than as a hard command to suppress the candidate
 - When Space restores Mozc from a visible Zenz correction, a manual correction originating from ordinary conversion returns to ordinary conversion and the next text key commits the Mozc result; a correction originating from automatic live conversion can instead continue the same uncommitted reading
 - Adds a feedback-learning data management UI to the config dialog. Users can search, import, export, delete entries, and clear the feedback TSV. Deleting this feedback does **not** delete separately learned Mozc conversion history from C
 - Allows explicitly blocking selected Zenz corrections from the feedback management UI. Manual hard rejects continue to apply even when automatic feedback reuse (B) is OFF; unblocking requires deleting the corresponding entry
 - Allows manually blocking a currently visible Zenz correction with `Ctrl+Delete`, persisting a `hard_reject` for the full reading, context class, and corrected value, then restoring the underlying Mozc result without double-counting an ordinary rejection or deleting regular Mozc candidate history.
 - When automatic reuse (B) is ON, ranks normal single-segment candidates using stored feedback and may insert synthetic candidates at feedback-adjusted positions. Accepted observations raise ranking; ordinary rejections lower it without deleting the candidate
-- Does not apply Zenz feedback ranking to multi-segment normal conversions, to avoid collapsing phrase boundaries
+- For multi-segment normal conversion, conditionally reuses full-reading Zenz feedback within exactly one verifiably changed existing Mozc segment; it never merges, splits, or changes native segment boundaries
 - Reuses accepted Zenz feedback via the session-level live-correction fast path for multi-segment live conversion to preserve learned full-phrase corrections
 - Does not reuse feedback obtained from `sensitive_like` context for ordinary-context candidate ranking
 - When Mozc-history learning (C) is ON and privacy/history conditions allow it, learns explicitly committed Zenz corrections into Mozc user history independently of feedback recording (A), retaining an in-process revert handle for an immediate keymap-resolved Revert, supported Undo, or explicit `CancelLastLearning`; automatic cancellation follows the Dictionary-tab preference
@@ -1862,15 +1862,23 @@ in the candidate list, its cost is adjusted by that score. If it does not exist,
 a synthetic candidate can be inserted at a natural feedback-adjusted cost
 position instead of being forced to the top. Ordinary rejected feedback lowers
 the candidate's ranking without deleting it; only explicit hard-reject reasons
-act as strong suppression. ZenzFeedbackCandidateRewriter runs before
-UserSegmentHistoryRewriter, so explicit user selection history can still make
-the final ranking decision.
+act as strong suppression. UserSegmentHistoryRewriter runs before
+ZenzFeedbackCandidateRewriter in the rewriter chain, so feedback-based
+augmentation follows user-segment-history rewriting.
 
-For multi-segment live conversion, the rewriter-chain feedback ranking does
-not rewrite normal conversion candidates, because phrase boundaries are owned by
-the converter and should not be collapsed. Instead, accepted feedback can still be replayed via
-the session-level live-correction fast path. This preserves learned full-phrase
-corrections such as `かれはてんてきです` -> `彼は天敵です`.
+For multi-segment normal conversion, full-reading feedback can also augment
+an existing Mozc segment when the current request reading matches and the
+correction is uniquely attributable to **exactly one** of 2–8 native segments.
+It may adjust an existing candidate or add a synthetic candidate inside that
+segment, without splitting, merging, or moving segment boundaries. For example,
+`もう少しわかり易く | 教えて | ください` can gain the alternative
+`もう少しわかりやすく` in its first segment. Cross-segment or ambiguous
+changes and protected candidates are excluded. This automatic reuse does not
+run when feedback reuse (B) is disabled, strict reading preservation is enabled,
+or privacy gates disallow it. The feedback store still records complete
+readings and surfaces, so omitting a suffix does not automatically reuse the
+full-reading entry. The existing session-level live-correction fast path remains
+separate.
 
 Feedback learned in a `sensitive_like` context is not reused for ordinary-context candidate ranking.
 
