@@ -25,10 +25,10 @@
   },
   "nico_pixiv": {
     "repository": "Niccori250k/dic-nico-intersection-pixiv",
-    "revision": "4d0d8d219d0b9abf34745016e398e762182fce61",
+    "revision": "4f0e88462bf4e864cd94ced5cab3242d21c503c0",
     "path": "public/dic-nico-intersection-pixiv-google.txt",
-    "sha256": "E16990B24D75FCCAC9CF2B0B4382E59988E735BC9FA634626078DC500E0B8BC4",
-    "bytes": 7659574
+    "sha256": "E4787127735E78768B111DFD8E64C15D1EAA7C91B89ABA450A023D15689B83B9",
+    "bytes": 7683617
   },
   "personal_names": {
     "repository": "utuhiro78/mozcdic-ut-personal-names",
