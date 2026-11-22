@@ -152,7 +152,10 @@ mozc_cc_library(
 mozc_cc_library(
     name = "pin_callback_token",
     hdrs = ["pin_callback_token.h"],
-    visibility = ["//renderer:__pkg__", "//win32/tip:__pkg__"],
+    visibility = [
+        "//renderer:__pkg__",
+        "//win32/tip:__pkg__",
+    ],
 )
 
 mozc_cc_test(

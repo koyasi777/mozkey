@@ -428,7 +428,10 @@ mozc_cc_library(
     name = "pinned_candidate_store",
     srcs = ["pinned_candidate_store.cc"],
     hdrs = ["pinned_candidate_store.h"],
-    visibility = ["//session:__pkg__", "//engine:__pkg__"],
+    visibility = [
+        "//engine:__pkg__",
+        "//session:__pkg__",
+    ],
     deps = [
         "//base:file_util",
         "//base:system_util",
