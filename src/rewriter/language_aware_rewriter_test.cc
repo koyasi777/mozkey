@@ -548,6 +548,50 @@ TEST_F(LanguageAwareRewriterTest,
   }
 }
 
+// A shifted acronym followed by normal Roman input is not an English
+// dictionary token. Keep the full raw rescue despite the feature being ON.
+TEST_F(LanguageAwareRewriterTest,
+       ShiftedAsciiPendingRomanRetainsRawRescueWithEnglishExceptions) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  config.set_auto_switch_composition_mode(false);
+  config.set_enable_english_input_exceptions(true);
+  auto* rule = config.add_english_input_exceptions();
+  rule->set_input("github");
+  rule->set_preferred("GitHub");
+  rule->set_behavior(config::Config::EnglishInputException::AUTO_ASCII);
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  InsertASCIISequence("AIdev", &composer);
+  EXPECT_EQ(composer.GetRawString(), "AIdev");
+  EXPECT_EQ(composer.GetInputMode(), transliteration::HIRAGANA);
+  const auto snapshot = composer.CreateComposerData();
+  EXPECT_GT(snapshot.GetPendingRomanInputLength(), 0u);
+  EXPECT_NE(composer.GetStringForPreedit(), "AIdev");
+
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetComposer(composer)
+          .SetConfig(config)
+          .SetRequest(client_request)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+  Segments segments;
+  segments.add_segment()->set_key(request.key());
+  ASSERT_TRUE(rewriter.Rewrite(request, &segments));
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_GT(segment.candidates_size(), 0);
+  EXPECT_EQ(segment.candidate(0).value, "AIdev");
+}
+
 TEST_F(LanguageAwareRewriterTest,
        EnglishRawRescueStillWorksWithExceptionsEnabled) {
   MockDictionary dictionary;
