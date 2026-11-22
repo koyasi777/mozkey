@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <string>
 #include <vector>
@@ -26,8 +27,8 @@ constexpr size_t kMinKeyChars = 2;
 constexpr size_t kMaxKeyChars = 128;
 constexpr size_t kMaxValueChars = 128;
 constexpr size_t kMaxValueBytes = 512;
-// A deliberately narrow experiment: do not resegment, merge, or split native
-// conversion segments. Only one already-existing Mozc segment may change.
+// Never resegment, merge, or split converter-owned native segments.
+// A full-reading correction may change multiple verified segments.
 constexpr size_t kMaxProjectionSegments = 8;
 // Do not mutate immutable or nonstandard candidates while applying a
 // segment-local projection. This applies to existing lower-ranked candidates
@@ -171,58 +172,157 @@ std::string BuildTopConversionValue(const Segments& segments) {
   return value;
 }
 
-// Project a full-reading correction onto exactly one existing Mozc segment.
-// Everything to the left and right must match the original candidate surfaces
-// byte for byte. Because each boundary separates complete valid UTF-8 values,
-// the replacement also falls on codepoint boundaries. Ambiguous or
-// cross-segment corrections are refused; Zenz supplies no boundary metadata.
-int FindSingleChangedSegment(const Segments& segments,
-                             absl::string_view original_full_value,
-                             absl::string_view corrected_full_value,
-                             std::string* projected_value) {
-  if (projected_value == nullptr || corrected_full_value.empty() ||
+// Find a unique segment-by-segment projection of one full-reading Zenz surface.
+// Each native segment can retain its top value, use an existing full-key
+// candidate, or receive a synthetic value. We never guess the boundary between
+// TWO adjacent synthetic values: at least one side must be fixed by a native
+// top value or an explicitly listed full-key candidate.
+//
+// The bounded DP counts possible projections, saturating at two. No projection
+// is used when more than one splitting could explain the Zenz surface, even if
+// the output text looks correct. UTF-8 validity is checked by the caller;
+// candidate boundaries must still lie on UTF-8 codepoint boundaries.
+bool FindUniqueSegmentProjection(const Segments& segments,
+                                 absl::string_view corrected_full_value,
+                                 std::vector<std::string>* projected_values) {
+  if (projected_values == nullptr || corrected_full_value.empty() ||
       segments.conversion_segments_size() < 2 ||
       segments.conversion_segments_size() > kMaxProjectionSegments) {
-    return -1;
+    return false;
   }
-  projected_value->clear();
-  int match_index = -1;
-  size_t left_bytes = 0;
-  for (size_t i = 0; i < segments.conversion_segments_size(); ++i) {
-    const Segment& segment = segments.conversion_segment(i);
-    if (segment.key().empty() || segment.candidates_size() == 0) {
-      return -1;
+  projected_values->clear();
+
+  const size_t segment_count = segments.conversion_segments_size();
+  const size_t value_bytes = corrected_full_value.size();
+  for (const Segment& segment : segments.conversion_segments()) {
+    if (segment.key().empty() || segment.candidates_size() == 0 ||
+        segment.candidate(0).value.empty()) {
+      return false;
     }
-    const absl::string_view previous = segment.candidate(0).value;
-    if (previous.empty() || left_bytes + previous.size() >
-                                original_full_value.size()) {
-      return -1;
+  }
+
+  const auto is_boundary = [&](size_t pos) {
+    return pos == value_bytes ||
+           (static_cast<unsigned char>(corrected_full_value[pos]) & 0xc0) !=
+               0x80;
+  };
+
+  struct ProjectionState {
+    int count = -1;  // 0, 1, 2 (2 also represents more than two)
+    size_t next_offset = 0;
+    bool next_was_synthetic = false;
+  };
+  std::vector<ProjectionState> states((segment_count + 1) *
+                                      (value_bytes + 1) * 2);
+  const auto state_at = [&](size_t index, size_t offset,
+                            bool previous_was_synthetic) -> ProjectionState& {
+    return states[(index * (value_bytes + 1) + offset) * 2 +
+                  (previous_was_synthetic ? 1 : 0)];
+  };
+
+  std::function<int(size_t, size_t, bool)> count_projections;
+  count_projections = [&](size_t index, size_t offset,
+                          bool previous_was_synthetic) -> int {
+    ProjectionState& state =
+        state_at(index, offset, previous_was_synthetic);
+    if (state.count >= 0) {
+      return state.count;
     }
-    const size_t right_bytes = original_full_value.size() -
-                               left_bytes - previous.size();
-    if (corrected_full_value.size() >= left_bytes + right_bytes &&
-        corrected_full_value.substr(0, left_bytes) ==
-            original_full_value.substr(0, left_bytes) &&
-        corrected_full_value.substr(corrected_full_value.size() - right_bytes) ==
-            original_full_value.substr(original_full_value.size() - right_bytes)) {
-      const absl::string_view replacement = corrected_full_value.substr(
-          left_bytes, corrected_full_value.size() - left_bytes - right_bytes);
-      if (!replacement.empty() && replacement != previous &&
-          Util::IsValidUtf8(replacement) &&
-          !ContainsUnsafeTextChar(replacement)) {
-        // Do not choose arbitrarily when multiple native segments can
-        // explain the same full-phrase correction.
-        if (match_index >= 0) {
-          projected_value->clear();
-          return -1;
+    if (index == segment_count) {
+      state.count = offset == value_bytes ? 1 : 0;
+      return state.count;
+    }
+    state.count = 0;
+    const Segment& segment = segments.conversion_segment(index);
+    const absl::string_view original = segment.candidate(0).value;
+
+    const auto add_path = [&](size_t end, bool is_synthetic,
+                              int suffix_count) {
+      if (suffix_count == 0) {
+        return;
+      }
+      if (state.count == 0 && suffix_count == 1) {
+        state.next_offset = end;
+        state.next_was_synthetic = is_synthetic;
+      }
+      state.count = std::min(2, state.count + suffix_count);
+    };
+
+    // The original top value is the most reliable boundary anchor.
+    if (offset + original.size() <= value_bytes &&
+        corrected_full_value.substr(offset, original.size()) == original) {
+      const size_t end = offset + original.size();
+      add_path(end, false, count_projections(index + 1, end, false));
+    }
+
+    // Existing candidates may also anchor a boundary, but only if they consume
+    // precisely this native segment's reading. Do not count duplicate surfaces
+    // as distinct projections.
+    for (size_t pos = 1; pos < segment.candidates_size() && state.count < 2;
+         ++pos) {
+      const converter::Candidate& candidate = segment.candidate(pos);
+      if (candidate.key != segment.key() || candidate.value.empty() ||
+          candidate.value == original ||
+          FindCandidateByValue(segment, candidate.value) !=
+              static_cast<int>(pos) ||
+          offset + candidate.value.size() > value_bytes ||
+          corrected_full_value.substr(offset, candidate.value.size()) !=
+              candidate.value) {
+        continue;
+      }
+      const size_t end = offset + candidate.value.size();
+      if (!is_boundary(end)) {
+        continue;
+      }
+      add_path(end, false, count_projections(index + 1, end, false));
+    }
+
+    // Synthetic values cannot follow another synthetic value, because Zenz
+    // does not provide an internal boundary to distinguish those alternatives.
+    if (!previous_was_synthetic && state.count < 2) {
+      for (size_t end = offset + 1; end <= value_bytes; ++end) {
+        if (!is_boundary(end)) {
+          continue;
         }
-        match_index = static_cast<int>(i);
-        *projected_value = std::string(replacement);
+        const int suffix_count = count_projections(index + 1, end, true);
+        if (suffix_count == 0) {
+          continue;
+        }
+        const absl::string_view replacement =
+            corrected_full_value.substr(offset, end - offset);
+        if (replacement == original ||
+            FindCandidateByValue(segment, replacement) >= 0) {
+          continue;
+        }
+        add_path(end, true, suffix_count);
+        if (state.count == 2) {
+          break;
+        }
       }
     }
-    left_bytes += previous.size();
+    return state.count;
+  };
+
+  // A unique projection is required; no arbitrary best alignment is chosen.
+  if (count_projections(0, 0, false) != 1) {
+    return false;
   }
-  return left_bytes == original_full_value.size() ? match_index : -1;
+
+  size_t offset = 0;
+  bool previous_was_synthetic = false;
+  for (size_t index = 0; index < segment_count; ++index) {
+    const ProjectionState& state =
+        state_at(index, offset, previous_was_synthetic);
+    if (state.count != 1 || state.next_offset <= offset) {
+      projected_values->clear();
+      return false;
+    }
+    projected_values->emplace_back(corrected_full_value.substr(
+        offset, state.next_offset - offset));
+    offset = state.next_offset;
+    previous_was_synthetic = state.next_was_synthetic;
+  }
+  return offset == value_bytes;
 }
 
 bool HasEmptyConversionSegment(const Segments& segments) {
@@ -397,41 +497,80 @@ bool ZenzFeedbackCandidateRewriter::Rewrite(
       continue;
     }
 
-    // On multi-segment conversion, only use a full-reading correction when
-    // precisely one existing native segment can reproduce it. Never collapse
-    // or infer boundaries, and never inject the full phrase into one segment.
-    std::string projected_value;
     if (multi_segment) {
-      const int changed_segment = FindSingleChangedSegment(
-          *segments, original_top_value, zenz_value, &projected_value);
-      if (changed_segment < 0) {
+      std::vector<std::string> projected_values;
+      if (!FindUniqueSegmentProjection(*segments, zenz_value,
+                                       &projected_values)) {
         continue;
       }
-      segment = segments->mutable_conversion_segment(changed_segment);
-      if (segment == nullptr || segment->candidates_size() == 0) {
+
+      // Validate EVERY changed segment before touching any candidate. One
+      // protected candidate must prevent a partial projection of this phrase.
+      bool safe_projection = true;
+      size_t changed_count = 0;
+      for (size_t i = 0; i < segment_count; ++i) {
+        const Segment& target = segments->conversion_segment(i);
+        if (projected_values[i] == target.candidate(0).value) {
+          continue;
+        }
+        ++changed_count;
+        const int existing_pos =
+            FindCandidateByValue(target, projected_values[i]);
+        if ((target.candidate(0).attributes &
+             kProtectedProjectionAttributes) != 0 ||
+            (existing_pos > 0 &&
+             (target.candidate(existing_pos).attributes &
+              kProtectedProjectionAttributes) != 0)) {
+          safe_projection = false;
+          break;
+        }
+      }
+      if (!safe_projection || changed_count == 0) {
         continue;
       }
-      if ((segment->candidate(0).attributes &
-           kProtectedProjectionAttributes) != 0) {
-        continue;
+
+      for (size_t i = 0; i < segment_count; ++i) {
+        Segment* target = segments->mutable_conversion_segment(i);
+        const std::string& projected_value = projected_values[i];
+        if (projected_value == target->candidate(0).value) {
+          continue;
+        }
+        const int existing_pos = FindCandidateByValue(*target, projected_value);
+        if (existing_pos > 0) {
+          converter::Candidate* existing_candidate =
+              target->mutable_candidate(existing_pos);
+          ApplyFeedbackCost(feedback_candidate, existing_candidate);
+          const int insert_pos = FindMovePosition(
+              *target, existing_pos, existing_candidate->cost);
+          target->move_candidate(existing_pos, insert_pos);
+          MarkFeedbackCandidate(target, insert_pos);
+        } else {
+          const converter::Candidate base_candidate = target->candidate(0);
+          converter::Candidate synthetic_candidate;
+          FillSyntheticCandidate(base_candidate, target->key(),
+                                 projected_value, &synthetic_candidate);
+          ApplyFeedbackCost(feedback_candidate, &synthetic_candidate);
+          const int insert_pos = FindSyntheticInsertPosition(
+              *target, synthetic_candidate.cost);
+          converter::Candidate* candidate =
+              target->insert_candidate(insert_pos);
+          if (candidate == nullptr) {
+            return false;
+          }
+          *candidate = synthetic_candidate;
+          MarkFeedbackCandidate(target, insert_pos);
+        }
       }
-    } else {
-      projected_value = zenz_value;
+      return true;
     }
 
-    const int existing_pos = FindCandidateByValue(*segment, projected_value);
+    // Preserve the pre-existing single-segment behavior unchanged.
+    const int existing_pos = FindCandidateByValue(*segment, zenz_value);
     if (existing_pos == 0) {
       continue;
     }
 
     if (existing_pos > 0) {
-      // The top candidate may be modifiable while a lower-ranked candidate
-      // is not. Do not alter its cost, attributes, or position in that case.
-      if (multi_segment &&
-          (segment->candidate(existing_pos).attributes &
-           kProtectedProjectionAttributes) != 0) {
-        continue;
-      }
       converter::Candidate* existing_candidate =
           segment->mutable_candidate(existing_pos);
       ApplyFeedbackCost(feedback_candidate, existing_candidate);
@@ -444,7 +583,7 @@ bool ZenzFeedbackCandidateRewriter::Rewrite(
 
     const converter::Candidate base_candidate = segment->candidate(0);
     converter::Candidate synthetic_candidate;
-    FillSyntheticCandidate(base_candidate, segment->key(), projected_value,
+    FillSyntheticCandidate(base_candidate, full_key, zenz_value,
                            &synthetic_candidate);
     ApplyFeedbackCost(feedback_candidate, &synthetic_candidate);
 
