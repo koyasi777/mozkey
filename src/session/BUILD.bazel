@@ -235,6 +235,7 @@ mozc_cc_library(
         "//composer:table",
         "//converter:converter_interface",
         "//engine:engine_converter_interface",
+        "//engine:pinned_candidate_store",
         "//engine:engine_interface",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",

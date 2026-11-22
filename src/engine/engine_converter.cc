@@ -61,6 +61,7 @@
 #include "engine/contextual_candidate_reranker.h"
 #include "engine/engine_converter_interface.h"
 #include "engine/engine_output.h"
+#include "engine/pinned_candidate_store.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
@@ -360,6 +361,25 @@ bool EngineConverter::Convert(const composer::Composer& composer,
   if (preferences.prefer_zipcode_literal_top &&
       conversion_request.options().use_zip_code_conversion) {
     PreferStandalonePostalLiteral(composer, &segments_);
+  }
+
+  // Explicit user pin has higher priority than history, contextual reranking,
+  // and the normal one-segment ranking. Do not alter partial phrases or Zenz.
+  if (!effective_config->incognito_mode() &&
+      segments_.conversion_segments_size() == 1) {
+    Segment* segment = segments_.mutable_conversion_segment(0);
+    const auto pinned = PinnedCandidateStore::Instance().Lookup(segment->key());
+    if (pinned.has_value()) {
+      for (size_t i = 0; i < segment->candidates_size(); ++i) {
+        const converter::Candidate& candidate = segment->candidate(i);
+        if (candidate.key == segment->key() && candidate.value == *pinned &&
+            !(candidate.attributes & converter::Attribute::COMMAND_CANDIDATE) &&
+            candidate.effective_converted_segment_count() == 1) {
+          segment->move_candidate(i, 0);
+          break;
+        }
+      }
+    }
   }
 
 #if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
@@ -2000,6 +2020,56 @@ void EngineConverter::FillPreedit(const composer::Composer& composer,
   output::FillPreedit(composer, preedit);
 }
 
+bool EngineConverter::CanPinCandidate(int candidate_id,
+                                      absl::string_view reading,
+                                      absl::string_view value) const {
+  // This predicate is shared by the renderer annotation and the Session
+  // write guard. Do not persist an entry the converter cannot promote.
+  if (!CheckState(CONVERSION) ||
+      request_type_ != ConversionRequest::CONVERSION ||
+      config_->incognito_mode() ||
+      segments_.conversion_segments_size() != 1 || segment_index_ != 0 ||
+      !candidate_list_visible_ || candidate_id < 0) {
+    return false;
+  }
+  const Segment& segment = segments_.conversion_segment(0);
+  if (segment.key() != reading || !segment.is_valid_index(candidate_id)) {
+    return false;
+  }
+  const converter::Candidate& candidate = segment.candidate(candidate_id);
+  if (candidate.key != reading || candidate.value != value ||
+      (candidate.attributes & converter::Attribute::COMMAND_CANDIDATE) ||
+      candidate.effective_converted_segment_count() != 1) {
+    return false;
+  }
+  // A valid segment ID need not be present in the currently displayed list
+  // (e.g. de-duplicated or not yet appended candidates).
+  for (size_t i = 0; i < candidate_list_.size(); ++i) {
+    const Candidate& visible = candidate_list_.candidate(i);
+    if (!visible.HasSubcandidateList() && visible.id() == candidate_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool EngineConverter::PromotePinnedCandidate(int candidate_id,
+                                             absl::string_view reading,
+                                             absl::string_view value) {
+  // Preserve the exact candidate identity: two entries may have the same
+  // surface with different attributes. Never fall back to a value-only match.
+  if (!CanPinCandidate(candidate_id, reading, value)) return false;
+  Segment* segment = segments_.mutable_conversion_segment(0);
+  if (candidate_id != 0) segment->move_candidate(candidate_id, 0);
+  // Recreate integer IDs and highlight the newly pinned top row. No second
+  // converter invocation, history update, or Zenz inference is necessary.
+  UpdateCandidateList();
+  if (!candidate_list_.MoveToId(0)) return false;
+  UpdateSelectedCandidateIndex();
+  ResetResult();
+  return true;
+}
+
 bool EngineConverter::GetConversionSegmentKeys(
     std::vector<std::string>* segment_keys) const {
   if (segment_keys == nullptr) {
@@ -2524,6 +2594,18 @@ void EngineConverter::FillCandidateWindow(
   const Segment& segment = segments_.conversion_segment(segment_index_);
   output::FillCandidateWindow(segment, candidate_list_, position,
                               candidate_window);
+  // The renderer owns only presentation. The server annotates which visible
+  // candidate matches the persisted pin for the exact single-segment reading.
+  if (CheckState(CONVERSION) && request_type_ == ConversionRequest::CONVERSION &&
+      segments_.conversion_segments_size() == 1 && !config_->incognito_mode()) {
+    candidate_window->set_pin_reading(std::string(segment.key()));
+    const auto pinned = PinnedCandidateStore::Instance().Lookup(segment.key());
+    for (auto& c : *candidate_window->mutable_candidate()) {
+      if (!c.has_id()) continue;
+      c.set_pin_eligible(CanPinCandidate(c.id(), segment.key(), c.value()));
+      if (pinned.has_value()) c.set_pinned(c.value() == *pinned);
+    }
+  }
 
   // Shortcut keys
   if (CheckState(PREDICTION | CONVERSION)) {

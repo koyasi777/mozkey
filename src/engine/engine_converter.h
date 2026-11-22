@@ -239,6 +239,10 @@ class EngineConverter : public EngineConverterInterface {
                      const std::vector<std::string>& segment_keys) override;
   bool GetConversionSegmentKeys(
       std::vector<std::string>* segment_keys) const override;
+  bool CanPinCandidate(int candidate_id, absl::string_view reading,
+                       absl::string_view value) const override;
+  bool PromotePinnedCandidate(int candidate_id, absl::string_view reading,
+                              absl::string_view value) override;
   bool GetSelectedProperNounSpans(
       std::vector<converter::ProperNounSpan>* spans) const override;
 

@@ -36,6 +36,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **Zenz 補正結果の採用条件：** 厳密な読み保持と、Zenz が絵文字を意図せず追加・変更・削除することを抑制する設定を用意。自動ライブ補正と手動補正の両方に適用できます。
 - **選べる Zenz の表示タイミング：** 通常のライブ変換結果を先に表示する動作に加え、Zenz の応答を一定時間待ってから表示する方式も選択できます。
 - **学習と候補のコントロール：** Zenz の採用・却下フィードバック、保存済み結果の再利用、Mozc 変換履歴への学習を個別に設定。表示中の Zenz 補正は `Ctrl+Delete` で明示的にブロックでき、学習データの管理、通常候補の履歴削除・非表示、確定直後の取り消しにも対応します。
+- **候補を先頭に固定（Windows / macOS）：** 通常変換の候補を右クリックし、「先頭に固定」でその読みの第1候補へ昇格できます。固定状態は再起動後も保持され、「固」マークと「固定を解除」から管理できます。
 - **縦書きに対応した入力 UI（Windows / macOS）：** 候補・サジェスト・用例・ルビを縦書きに合わせて配置し、対応するキー設定では候補や文節の移動方向も調整します。
 - **変換状態インジケータ（Windows / macOS）：** 未確定文字の近くで「入力中・Mozc・Zenz処理中・Zenz適用済み」を表示し、配色・形状・位置を調整できます。
 - **幅広い外観カスタマイズ：** 候補・サジェスト・ルビの配色（ライト／ダーク／自動／カスタム）、サイズ、角丸、透明度、影を個別に設定。Windows ではフォント・文字の太さ・未確定文字の色や下線、IME インジケータも調整できます。
@@ -122,6 +123,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 主な追加機能
 ---------------------------
 
+- Windows / macOS の通常変換候補を右クリックして「先頭に固定」または「固定を解除」。固定した候補を即座に第1候補へ移動し、「固」マークを表示。読みごとの固定内容をローカルに保存し、再起動後も維持
 - 曖昧なローマ字規則でも途中表示できるオプションを追加
 - ローマ字テーブル編集画面に、そのオプション用のチェックボックス UI を追加
 - カスタムローマ字テーブルの 1 規則あたりの出力を UTF-8 で 1024 bytes 未満まで扱えるように拡張。入力・次入力の上限は従来どおり 300 bytes 未満
@@ -772,6 +774,18 @@ ZenzConversion + Ctrl Delete -> BlockVisibleZenzCorrection
 
 **CUSTOM キー設定：** `Conversion + Ctrl Delete -> DeleteSelectedCandidate` が既定どおり1行あり、`ZenzConversion` / `LiveConversion` に `Delete` を含む独自のキー割り当てがない場合だけ、専用の `ZenzConversion + Ctrl Delete` 行を自動追加します。既存の左右 Ctrl 指定などを上書きしないため、これらの条件に当てはまらない CUSTOM 設定では、必要に応じてキー設定エディタから `BlockVisibleZenzCorrection` を手動割り当てしてください。`RevertZenzToMozc` と同様に、このコマンドは**単独で**指定する必要があります。
 
+### 候補を先頭に固定（Windows / macOS）
+
+通常変換中の候補を右クリックし、**「先頭に固定」**を選ぶと、その読みの第1候補として優先できます。固定した候補はその場で先頭へ移動し、候補の補助表示に **「固」** が付きます。固定済みの候補では右クリックメニューが **「固定を解除」** に切り替わります。解除直後はマークを更新し、通常の候補順位には次回の変換から戻ります。
+
+固定は**読みと候補の表記の組**で保存します。同じ読みで別の候補を固定した場合は、その読みの固定先を置き換えます。保存先は Mozkey のユーザープロファイル内の `pinned_candidates.tsv` で、変換履歴やユーザー辞書とは別に管理します。固定・解除は通常の学習履歴を直接書き換えません。
+
+**対象と制約：** 1 文節の通常変換で、現在の候補一覧に表示されている有効な通常候補が対象です。複数文節、予測・サジェスト、文字種変換などのメタ候補、コマンド候補、ライブ変換中や Zenz 補正結果の表示中は、新たな固定の対象外です。固定先の候補がその読みの候補一覧に存在しない場合、固定情報だけから候補を生成しません。シークレットモードやパスワード入力中の固定操作も受け付けません。
+
+候補のID・読み・表記・現在の変換状態を保存前に検証して、古くなった候補IDや対象外候補による誤登録を防ぎます。保存ファイルが不正な場合は既存データを不用意に上書きせず、協調する Mozkey プロセス間の更新にはOSのファイルロックを使用します。ただし、古いMozkey版や外部エディターなど、同じロックを使わない書き込みとの競合は防げません。
+
+この機能は Mozc の通常変換候補の順位を調整するもので、Zenz が独立生成した表記を強制的に置き換えるものではありません。また、ピン留め自体は任意の候補を辞書に新規登録する機能ではありません。
+
 ### 候補の履歴削除・非表示
 
 Zenz 補正結果が表示されていない通常変換中、または予測候補の表示中に `DeleteSelectedCandidate` を実行すると、選択中の候補を履歴から削除するか、候補一覧から非表示にできます。標準キー設定では Prediction / Conversion の `Ctrl+Delete` にこの操作を割り当てています。**Zenz 補正表示中の `Ctrl+Delete` は上記の手動ブロック操作になり、通常候補の履歴削除・非表示とは区別されます。**
@@ -1073,6 +1087,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **Zenz correction acceptance criteria:** Optional strict reading preservation and default-on protection against Zenz adding, replacing, or removing emoji. These checks apply to both automatic live correction and explicit manual correction.
 - **Optional deferred presentation:** Choose whether to display Mozc live conversion immediately or briefly wait for Zenz before showing a result.
 - **Controllable learning and candidates:** Configure Zenz accept/reject recording, feedback reuse, and Mozc-history learning independently; use `Ctrl+Delete` to explicitly block a visible Zenz correction, manage feedback, hide ordinary candidates, and undo recent commits.
+- **Pin conversion candidates to the top (Windows / macOS):** Right-click an ordinary conversion candidate and choose `先頭に固定` (Pin to top). The pinned candidate takes the first position and remains pinned across restarts; the `固` marker and `固定を解除` (Unpin) command make it easy to manage.
 - **Vertical-writing UI on Windows and macOS:** Candidate, suggestion, infolist, and ruby layouts adapt to vertical text; supported keymaps can follow the visual navigation direction.
 - **Conversion-status indicator (Windows / macOS):** Displays Reading, Mozc, Zenz processing, or Zenz applied near the composition, with adjustable position, shape, and colors. The new macOS indicator has not yet been verified on native macOS hardware.
 - **Extensive appearance customization:** Configure colors (light/dark/system/custom), dimensions, rounded corners, opacity, and shadows per window. Windows additionally supports font/weight, preedit colors and underlines, and IME-indicator styling.
@@ -1253,6 +1268,7 @@ Main branches
 Main features added in this fork
 --------------------------------
 
+- Adds candidate pinning on Windows / macOS: right-click an ordinary conversion candidate to pin or unpin it, promote it immediately to the first position, show a `固` marker, and persist the preference per reading across restarts
 - Adds an option to display ambiguous romaji rules before the input is fully disambiguated
 - Adds a checkbox UI for that option to the romaji table editor
 - Allows a custom romaji-table rule to produce output shorter than 1024 UTF-8 bytes while keeping the existing input and pending limits below 300 bytes
@@ -2110,6 +2126,18 @@ The block applies to a **full reading, coarse context class, and correction valu
 **Privacy and write failures:** No new persistent hard rejection is written in Secret/Incognito mode, TSF `IS_PRIVATE` input, password fields, or other protected contexts. If the feedback store cannot be written, the visible correction still reverts to ordinary Mozc conversion, but no durable block is created; the current UI does not report whether saving succeeded.
 
 **CUSTOM keymaps:** Mozkey adds the dedicated Zenz `Ctrl Delete` rule automatically only if there is exactly one `Conversion + Ctrl Delete -> DeleteSelectedCandidate` row and no existing `Delete`-containing assignment in `ZenzConversion` or `LiveConversion`. Otherwise, existing custom bindings are preserved; assign `BlockVisibleZenzCorrection` explicitly in the keymap editor if desired. Like `RevertZenzToMozc`, it must be configured as a **standalone command**, not inside a multi-command sequence.
+
+### Pin a conversion candidate to the top (Windows / macOS)
+
+Right-click a candidate during ordinary conversion and select **`先頭に固定` (Pin to top)** to prioritize it as the first candidate for that reading. The candidate moves to the first position immediately and displays a **`固`** marker in the candidate's auxiliary area. For a pinned candidate, the menu changes to **`固定を解除` (Unpin)**. Unpinning updates the marker immediately; the ordinary ranking is restored on the next conversion.
+
+The pin is stored as a **reading and candidate surface** pair. Pinning a different candidate for the same reading replaces that reading's previous pin. The data is persisted separately from conversion history and user dictionaries in `pinned_candidates.tsv` under Mozkey's user profile. Pinning or unpinning does not directly rewrite normal conversion-learning history.
+
+**Eligibility and limits:** Only valid ordinary candidates currently displayed in a **single-segment ordinary conversion** can be pinned. Multi-segment conversions, prediction and suggestion lists, meta candidates (including character-type conversions), command candidates, and visible live-conversion or Zenz-correction results are not eligible for new pins. A saved pin does not create a candidate when its surface is absent from the available candidates for that reading. Pinning is also blocked in Secret/Incognito mode and password input.
+
+Before saving, Mozkey validates the candidate ID, reading, surface, and current conversion state to avoid persisting a stale selection or an ineligible candidate. If the storage file is malformed or cannot be read safely, Mozkey refuses to overwrite the existing data. Cooperating Mozkey processes synchronize updates using OS file locks; writes by older versions or external tools that do not honor those locks are outside this protection.
+
+This feature adjusts the ordering of ordinary Mozc conversion candidates. It does not forcibly replace independently generated Zenz output, and it does not register new dictionary entries.
 
 ### Delete candidate history / hide candidate
 

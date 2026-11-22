@@ -46,6 +46,7 @@
 #include "client/client_interface.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
+#include "renderer/pin_callback_token.h"
 #include "win32/base/conversion_mode_util.h"
 #include "win32/base/deleter.h"
 #include "win32/base/input_state.h"
@@ -927,8 +928,63 @@ bool TipEditSession::OnOpenCloseChangedAsync(TipTextService* text_service) {
 bool TipEditSession::OnRendererCallbackAsync(TipTextService* text_service,
                                              ITfContext* context, WPARAM wparam,
                                              LPARAM lparam) {
-  const CommandType type = static_cast<CommandType>(wparam);
+  // The low byte holds the command type for both legacy callbacks and the
+  // fingerprint-bearing pin callbacks. WPARAM/LPARAM are 32-bit in x86 TIPs.
+  const CommandType type = static_cast<CommandType>(
+      static_cast<uint32_t>(wparam) & 0xFFU);
   switch (type) {
+    case SessionCommand::PIN_CANDIDATE:
+    case SessionCommand::UNPIN_CANDIDATE: {
+      const TipPrivateContext* private_context =
+          text_service->GetPrivateContext(context);
+      if (private_context == nullptr) {
+        return false;
+      }
+      // Never use an ID alone to identify a pin. The renderer's 56-bit
+      // fingerprint must match one unique candidate in this text context's
+      // latest visible conversion snapshot. Then Session independently
+      // validates the exact reading, ID, value and current conversion state.
+      const Output& snapshot = private_context->last_output();
+      if (!snapshot.has_candidate_window()) {
+        return false;
+      }
+      const CandidateWindow& window = snapshot.candidate_window();
+      if (window.category() != commands::CONVERSION ||
+          !window.has_pin_reading() || window.pin_reading().empty()) {
+        return false;
+      }
+      const renderer::PinCallbackMessage payload = {
+          static_cast<uint32_t>(wparam),
+          static_cast<uint32_t>(lparam),
+      };
+      const Candidate* matched = nullptr;
+      for (const auto& candidate : window.candidate()) {
+        if (!candidate.has_id() || candidate.value().empty() ||
+            candidate.pinned() !=
+                (type == SessionCommand::UNPIN_CANDIDATE)) {
+          continue;
+        }
+        if (!renderer::MatchesPinCallback(
+                payload, static_cast<uint32_t>(type), candidate.id(),
+                window.pin_reading(), candidate.value())) {
+          continue;
+        }
+        if (matched != nullptr) {
+          // Ambiguous identity; do not pin an arbitrary candidate.
+          return false;
+        }
+        matched = &candidate;
+      }
+      if (matched == nullptr) {
+        return false;
+      }
+      SessionCommand action;
+      action.set_type(type);
+      action.set_id(matched->id());
+      action.set_pin_reading(window.pin_reading());
+      action.set_text(matched->value());
+      return OnSessionCommandAsync(text_service, context, action);
+    }
     case SessionCommand::HIGHLIGHT_CANDIDATE:
     case SessionCommand::SELECT_CANDIDATE:
     case SessionCommand::SUBMIT_CANDIDATE: {

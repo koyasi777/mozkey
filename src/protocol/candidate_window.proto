@@ -235,6 +235,10 @@ message CandidateWindow {
     optional int32 id = 9;  // Unique number specifing the candidate.
     optional Annotation annotation = 7;
     optional int32 information_id = 10;
+    optional bool pinned = 11 [default = false];
+    // Server-verified eligibility; renderers must not offer PIN for meta,
+    // command, or non-promotable candidates. Pinned legacy entries may UNPIN.
+    optional bool pin_eligible = 12 [default = false];
   }
   // The position on the composition in character counted by Util::CharsLen.
   // The number represents the left edge of the candidate window.  For example,
@@ -277,4 +281,6 @@ message CandidateWindow {
 
   // The number of candidates per page.
   optional uint32 page_size = 18 [default = 9];
+  // Full reading for the normal, single-segment candidate context menu.
+  optional string pin_reading = 19;
 }

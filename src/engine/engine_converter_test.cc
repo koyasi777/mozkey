@@ -774,6 +774,101 @@ TEST_F(EngineConverterTest, Convert) {
   EXPECT_FALSE(IsCandidateListVisible(converter));
 }
 
+TEST_F(EngineConverterTest, PromotePinnedCandidateWithoutReconversion) {
+  request_->set_is_a11y_talkback_enabled(true);
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  composer_->SetPreeditTextForTestOnly("こうしょう");
+  Segments segments;
+  segments.InitForConvert("こうしょう");
+  Segment* segment = segments.mutable_conversion_segment(0);
+  for (const char* text : {"交渉", "考証", "高尚"}) {
+    converter::Candidate* candidate = segment->add_candidate();
+    candidate->key = "こうしょう";
+    candidate->content_key = candidate->key;
+    candidate->value = text;
+    candidate->content_value = candidate->value;
+  }
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  ASSERT_TRUE(converter.Convert(*composer_));
+  ASSERT_TRUE(IsCandidateListVisible(converter));
+  EXPECT_FALSE(converter.CanPinCandidate(1, "こうじょう", "考証"));
+  EXPECT_FALSE(converter.CanPinCandidate(1, "こうしょう", "存在しない候補"));
+  EXPECT_FALSE(converter.CanPinCandidate(-1, "こうしょう", "考証"));
+  EXPECT_FALSE(converter.CanPinCandidate(99, "こうしょう", "考証"));
+  EXPECT_TRUE(converter.CanPinCandidate(1, "こうしょう", "考証"));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(1, "こうじょう", "考証"));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(1, "こうしょう", "存在しない候補"));
+  EXPECT_EQ(GetSegments(converter).conversion_segment(0).candidate(0).value,
+            "交渉");
+
+  ASSERT_TRUE(converter.PromotePinnedCandidate(1, "こうしょう", "考証"));
+  EXPECT_EQ(GetSegments(converter).conversion_segment(0).candidate(0).value,
+            "考証");
+  EXPECT_EQ(GetCandidateList(converter).focused_id(), 0);
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  ASSERT_TRUE(output.has_candidate_window());
+  ASSERT_GT(output.candidate_window().candidate_size(), 0);
+  EXPECT_EQ(output.candidate_window().candidate(0).value(), "考証");
+
+  config_->set_incognito_mode(true);
+  EXPECT_FALSE(converter.CanPinCandidate(1, "こうしょう", "交渉"));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(1, "こうしょう", "交渉"));
+}
+
+TEST_F(EngineConverterTest, PinEligibilityRejectsMetaAndCommandCandidates) {
+  request_->set_is_a11y_talkback_enabled(true);
+  config_->set_use_cascading_window(false);
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  composer_->SetPreeditTextForTestOnly("こうしょう");
+  Segments segments;
+  segments.InitForConvert("こうしょう");
+  Segment* segment = segments.mutable_conversion_segment(0);
+  for (const char* value : {"交渉", "考証", "設定変更"}) {
+    converter::Candidate* candidate = segment->add_candidate();
+    candidate->key = "こうしょう";
+    candidate->content_key = candidate->key;
+    candidate->value = value;
+    candidate->content_value = candidate->value;
+  }
+  segment->mutable_candidate(2)->attributes |=
+      converter::Attribute::COMMAND_CANDIDATE;
+  FillT13Ns(&segments, composer_.get());
+  const std::string meta_value = segment->meta_candidate(0).value;
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  ASSERT_TRUE(converter.Convert(*composer_));
+  ASSERT_TRUE(IsCandidateListVisible(converter));
+  EXPECT_TRUE(converter.CanPinCandidate(0, "こうしょう", "交渉"));
+  EXPECT_TRUE(converter.CanPinCandidate(1, "こうしょう", "考証"));
+  EXPECT_FALSE(converter.CanPinCandidate(2, "こうしょう", "設定変更"));
+  EXPECT_FALSE(converter.CanPinCandidate(-1, "こうしょう", meta_value));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(2, "こうしょう", "設定変更"));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(-1, "こうしょう", meta_value));
+
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  ASSERT_TRUE(output.has_candidate_window());
+  bool saw_regular = false;
+  bool saw_command = false;
+  for (const auto& item : output.candidate_window().candidate()) {
+    if (item.value() == "考証") {
+      EXPECT_TRUE(item.pin_eligible());
+      saw_regular = true;
+    }
+    if (item.value() == "設定変更") {
+      EXPECT_FALSE(item.pin_eligible());
+      saw_command = true;
+    }
+    if (item.id() < 0) EXPECT_FALSE(item.pin_eligible());
+  }
+  EXPECT_TRUE(saw_regular);
+  EXPECT_TRUE(saw_command);
+}
+
 TEST_F(EngineConverterTest, ExplicitZipcodeLiteralPriority) {
   for (const char* key : {"1000001", "100-0001"}) {
     for (const bool prefer_literal : {false, true}) {
