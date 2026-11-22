@@ -226,7 +226,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - フィードバック学習データ管理画面から、選択した Zenz 補正を明示的に手動ブロック可能。手動ブロックは B の自動利用設定が OFF でも Zenz 補正の採用判定に有効。解除するには該当エントリを削除し、必要なら再学習する
 - Zenz 補正表示中の `Ctrl+Delete` からも手動ブロックを実行可能。同じ読み全体・文脈クラス・補正文字列の組に対する永続的な `hard_reject` として保存し、同時に通常 Mozc 変換へ戻る。通常却下の統計記録は二重に行わず、通常候補の学習履歴や「非表示候補」の辞書項目も削除しない
 - B が ON の場合は Zenz feedback を通常変換候補の ranking に利用。1 文節の通常変換では保存済み feedback を score 化し、既存候補の cost を調整するか synthetic candidate を自然な位置へ追加。accepted は順位を上げ、通常操作由来の rejected は候補を除外せず順位を下げる
-- 複数文節の通常変換でも、読み全体が一致する保存済み Zenz feedback を既存のちょうど1文節へ安全に対応付けられる場合、その文節の候補を補完・順位調整する。文節の分割・結合・境界変更は行わず、曖昧な対応や保護属性付き候補への変更は避ける
+- 複数文節（2～8文節）の通常変換でも、読み全体が一致する保存済み Zenz feedback の補正全文を、既存の Mozc 文節へ一意に対応付けられる場合は、離れた複数文節を含む変更箇所の候補をまとめて補完・順位調整する。文節境界は変えず、境界を特定できない隣接する新規候補、曖昧な分割、保護属性付き候補への変更は避ける
 - 複数文節に分かれるライブ変換では、全文補正の学習を保つため、accepted Zenz feedback を session-level live correction fast path として再利用
 - sensitive-like context で得られた feedback は、通常文脈の候補 ranking / reuse には使わない
 - Mozc 変換履歴への追加学習（C）が ON で通常の履歴学習・プライバシー条件を満たす場合、明示的に確定した Zenz 補正を commit 点で Mozc の user history に即時学習する。A の記録設定とは独立。学習後は in-process の可逆履歴ハンドルを保持し、確定直後に `Revert` / `Undo` が実行された場合は学習削除設定に従って保持または取り消す。`CancelLastLearning` は設定にかかわらず取り消しを要求する
@@ -556,7 +556,7 @@ Zenz feedback の再利用方法は、単文節と複数文節で異なります
 
 単文節の通常変換では、Zenz feedback は rewriter chain 内の ranked candidate reuse として再利用されます。保存済み feedback は accepted / rejected reason を score 化し、既存候補があれば score に応じて cost を調整します。候補にない場合は synthetic candidate として候補集合へ追加できますが、無条件に先頭へ挿入するのではなく、feedback-adjusted cost に基づく自然な位置へ挿入します。通常操作由来の rejected feedback は候補を削除する命令ではなく順位を下げる signal として扱い、明示的な hard reject reason だけを強い抑止として扱います。実際の rewriter chain では UserSegmentHistoryRewriter が先に走り、その後に ZenzFeedbackCandidateRewriter が feedback による候補の補完・順位調整を行います。
 
-複数文節の通常変換でも、保存済み feedback の読み全体が現在の変換要求と一致し、Mozc が決めた **2～8文節のうちちょうど1文節だけ**の表記差として一意に説明できる場合は、その文節の既存候補の順位調整または候補追加を行います。たとえば `もうすこしわかりやすくおしえてください` の `もう少しわかり易く | 教えて | ください` に対して、`もう少しわかりやすく | 教えて | ください` の第1文節候補を補完できます。文節の分割・結合・境界変更はせず、複数文節にまたがる変更、曖昧な対応、保護属性付き候補への変更は行いません。再利用設定 B が OFF、厳密な読み保持が ON、プライバシー条件に該当する場合などは、この rewriter での自動補完は実行しません。feedback は引き続き全文の読み・表記単位で保存されるため、末尾を省略した別の読みへ自動的に一般化するものではありません。従来の session-level live correction fast path は、この候補補完とは別経路として維持します。
+複数文節の通常変換でも、保存済み feedback の読み全体が現在の変換要求と一致し、補正全文を Mozc が決めた **2～8文節へ一意に対応付けられる場合**は、変更が必要な文節の既存候補を順位調整するか、新しい候補を追加します。現在の各文節の先頭候補や、その文節の読み全体に対応する既存候補を境界の手掛かりにします。たとえば `もうすこしわかりやすくおしえてください` の `もう少しわかり易く | 教えて | 下さい` に対して、`もう少しわかりやすく | 教えて | ください` の第1・第3文節を同時に補完できます。文節の分割・結合・境界変更はしません。隣り合う新規候補同士の境界を推測しなければならない場合、対応付けが複数通り成立する場合、あるいは変更対象に保護属性付き候補がある場合は、**その補正全文に対する複数文節補完を見送ります**。再利用設定 B が OFF、厳密な読み保持が ON、プライバシー条件に該当する場合なども、この rewriter での自動補完は行いません。feedback は引き続き全文の読み・表記単位で保存されるため、末尾を省略した別の読みへ自動的に一般化するものではありません。従来の session-level live correction fast path は別経路として維持します。また、この B の補完と異なり、Mozc 変換履歴への追加学習（C）では、検証できた文節境界が履歴に学習される場合があります。
 
 `sensitive_like` context で得られた feedback は、通常文脈への候補 ranking / reuse には使いません。
 
@@ -1356,7 +1356,7 @@ Main features added in this fork
 - Allows explicitly blocking selected Zenz corrections from the feedback management UI. Manual hard rejects continue to apply even when automatic feedback reuse (B) is OFF; unblocking requires deleting the corresponding entry
 - Allows manually blocking a currently visible Zenz correction with `Ctrl+Delete`, persisting a `hard_reject` for the full reading, context class, and corrected value, then restoring the underlying Mozc result without double-counting an ordinary rejection or deleting regular Mozc candidate history.
 - When automatic reuse (B) is ON, ranks normal single-segment candidates using stored feedback and may insert synthetic candidates at feedback-adjusted positions. Accepted observations raise ranking; ordinary rejections lower it without deleting the candidate
-- For multi-segment normal conversion, conditionally reuses full-reading Zenz feedback within exactly one verifiably changed existing Mozc segment; it never merges, splits, or changes native segment boundaries
+- For multi-segment normal conversion (2–8 segments), conditionally projects full-reading Zenz feedback onto a unique alignment of existing Mozc segments, allowing multiple separated segments to be augmented together. It preserves native boundaries and rejects ambiguous alignments, unsupported adjacent synthetic replacements, and protected candidate changes
 - Reuses accepted Zenz feedback via the session-level live-correction fast path for multi-segment live conversion to preserve learned full-phrase corrections
 - Does not reuse feedback obtained from `sensitive_like` context for ordinary-context candidate ranking
 - When Mozc-history learning (C) is ON and privacy/history conditions allow it, learns explicitly committed Zenz corrections into Mozc user history independently of feedback recording (A), retaining an in-process revert handle for an immediate keymap-resolved Revert, supported Undo, or explicit `CancelLastLearning`; automatic cancellation follows the Dictionary-tab preference
@@ -1866,19 +1866,24 @@ act as strong suppression. UserSegmentHistoryRewriter runs before
 ZenzFeedbackCandidateRewriter in the rewriter chain, so feedback-based
 augmentation follows user-segment-history rewriting.
 
-For multi-segment normal conversion, full-reading feedback can also augment
-an existing Mozc segment when the current request reading matches and the
-correction is uniquely attributable to **exactly one** of 2–8 native segments.
-It may adjust an existing candidate or add a synthetic candidate inside that
-segment, without splitting, merging, or moving segment boundaries. For example,
-`もう少しわかり易く | 教えて | ください` can gain the alternative
-`もう少しわかりやすく` in its first segment. Cross-segment or ambiguous
-changes and protected candidates are excluded. This automatic reuse does not
-run when feedback reuse (B) is disabled, strict reading preservation is enabled,
-or privacy gates disallow it. The feedback store still records complete
-readings and surfaces, so omitting a suffix does not automatically reuse the
-full-reading entry. The existing session-level live-correction fast path remains
-separate.
+For multi-segment normal conversion, stored feedback applies only if the
+complete request reading matches and the corrected full surface has a **unique
+alignment across the existing 2–8 Mozc segments**. The current top candidate
+or an existing candidate with the segment's complete reading can anchor each
+boundary; an additional candidate may be synthesized where appropriate. For
+example, `もう少しわかり易く | 教えて | 下さい` can be augmented to
+`もう少しわかりやすく | 教えて | ください`, correcting the first and third
+segments together without changing their boundaries. The rewriter never
+splits, joins, or resizes segments. It rejects alignments that need a guessed
+boundary between adjacent synthetic-only replacements, multiple valid splits,
+or a protected candidate in any segment that would change; in such cases, it
+skips the whole multi-segment projection. This automatic reuse is disabled
+when feedback reuse (B) is OFF, strict reading preservation is ON, or privacy
+gates disallow it. Feedback remains scoped to the complete reading and surface,
+so an omitted suffix does not automatically inherit a full-reading entry.
+The session-level live-correction fast path remains separate. Unlike this
+boundary-preserving B path, Mozc-history learning (C) can persist verified
+segment-boundary changes.
 
 Feedback learned in a `sensitive_like` context is not reused for ordinary-context candidate ranking.
 
