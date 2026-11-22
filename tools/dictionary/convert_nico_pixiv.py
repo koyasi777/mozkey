@@ -273,19 +273,17 @@ def classify_entry(entry: UserEntry) -> str:
     return "proper_noun"
 
 
-def find_noun_general_id(id_def: pathlib.Path) -> int:
+def find_pos_id(id_def: pathlib.Path, pos_name: str) -> int:
+    # Use the exact POS name, rather than a substring match, to prevent
+    # selecting a related but different connection attribute.
     with id_def.open("r", encoding="utf-8", errors="replace") as f:
         for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
                 continue
 
-            # Typical format starts with numeric id and then POS name.
-            if "名詞,一般" not in line:
-                continue
-
-            parts = line.split()
-            if not parts:
+            parts = stripped.split(maxsplit=1)
+            if len(parts) != 2 or parts[1] != pos_name:
                 continue
 
             try:
@@ -293,7 +291,7 @@ def find_noun_general_id(id_def: pathlib.Path) -> int:
             except ValueError:
                 continue
 
-    raise RuntimeError(f"failed to find 名詞,一般 id in {id_def}")
+    raise RuntimeError(f"failed to find POS {pos_name} in {id_def}")
 
 
 def parse_system_line(line: str) -> SystemEntry | None:
@@ -458,6 +456,7 @@ def convert(
     output_path: pathlib.Path,
     existing_paths: list[pathlib.Path],
     noun_general_id: int,
+    proper_noun_id: int,
     base_cost: int,
 ) -> int:
     existing = load_existing_signatures(existing_paths)
@@ -514,10 +513,16 @@ def convert(
             for modifier in decision.modifiers:
                 stats[f"modifier_{modifier}"] += 1
 
+            # The source uses Google user-dictionary POS labels.  Only
+            # 固有名詞 maps directly to Mozc's generic proper-noun POS.
+            # アルファベット (and unrecognized labels) retain the previous
+            # noun-general fallback; no unverified POS mapping is inferred.
+            pos_id = proper_noun_id if user_entry.pos == "固有名詞" else noun_general_id
+            stats["emitted_proper_noun" if pos_id == proper_noun_id else "emitted_general_noun"] += 1
             system_entry = SystemEntry(
                 key=user_entry.key,
-                lid=noun_general_id,
-                rid=noun_general_id,
+                lid=pos_id,
+                rid=pos_id,
                 cost=decision.cost,
                 value=user_entry.value,
             )
@@ -551,8 +556,11 @@ def convert(
         print(f"  {key}: {stats[key]}")
 
     print("")
-    print("Cost:")
+    print("POS:")
     print(f"  noun_general_id: {noun_general_id}")
+    print(f"  proper_noun_id:  {proper_noun_id}")
+    print("")
+    print("Cost:")
     print(f"  base_cost:       {base_cost}")
     print("")
     print("Tier policy:")
@@ -624,13 +632,15 @@ def main() -> int:
     if not args.no_base_dictionary:
         existing_paths.extend(load_base_dictionary_paths(root))
 
-    noun_general_id = find_noun_general_id(args.id_def)
+    noun_general_id = find_pos_id(args.id_def, "名詞,一般,*,*,*,*,*")
+    proper_noun_id = find_pos_id(args.id_def, "名詞,固有名詞,一般,*,*,*,*")
 
     return convert(
         input_path=args.input,
         output_path=args.output,
         existing_paths=existing_paths,
         noun_general_id=noun_general_id,
+        proper_noun_id=proper_noun_id,
         base_cost=args.base_cost,
     )
 

@@ -213,6 +213,8 @@ The generated delta is compared against the generated daily dictionary and the b
 
 The nico/pixiv converter applies a tiered cost policy. Compact modern compounds such as `ママ活` are intentionally stronger than general long-tail proper nouns, while phrase-like or punctuation-heavy entries are kept weaker.
 
+The upstream `固有名詞` label is emitted as Mozc `名詞,固有名詞,一般` (the exact POS ID is resolved from `id.def`). The upstream `アルファベット` label has no direct system-dictionary POS mapping in this workflow and retains the previous `名詞,一般` fallback. Unknown labels also retain the existing fallback. Cost, rejection, and key/value deduplication policies are unchanged. Note that generic proper-noun POS can affect Zenz's proper-noun protection; evaluate conversion and Zenz behavior before shipping the regenerated dictionary.
+
 Entries whose values end with decorative symbols such as `☆`, `★`, `♡`, `♪`, or `※` are rejected because they tend to be noisy candidate forms in daily conversion.
 
 ### Download source dictionary
