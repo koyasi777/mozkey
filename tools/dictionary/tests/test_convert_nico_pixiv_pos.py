@@ -72,6 +72,37 @@ class NicoPixivPosTests(unittest.TestCase):
                 self.assertIsNotNone(original)
                 self.assertEqual(int(cost), cost_for(original, 10800).cost)
 
+    def test_observed_prediction_regression_pos_exception(self):
+        # A single observed collision is excluded; other proper nouns stay
+        # protected, including other entries with the same reading.
+        samples = [
+            ("おなかすいた", "おなかすいた", "固有名詞", 1851),
+            ("おなかすいた", "おなかすいた作品", "固有名詞", 1920),
+            ("あめふる", "雨降る", "固有名詞", 1920),
+            ("かなめ", "かなめ", "固有名詞", 1920),
+            ("あるふぁ", "Alpha", "アルファベット", 1851),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            directory = pathlib.Path(directory)
+            src = directory / "source.txt"
+            dst = directory / "output.txt"
+            src.write_text(
+                "".join(f"{key}\t{value}\t{pos}\tnico-pixiv\n"
+                        for key, value, pos, _ in samples),
+                encoding="utf-8",
+            )
+            self.assertEqual(convert(src, dst, [], 1851, 1920, 10800), 0)
+            lines = [line.split("\t") for line in dst.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(lines), len(samples))
+            for source, actual in zip(samples, lines):
+                key, value, pos, expected_id = source
+                out_key, lid, rid, cost, out_value = actual
+                self.assertEqual((out_key, out_value), (key, value))
+                self.assertEqual((int(lid), int(rid)), (expected_id, expected_id))
+                original = parse_user_dict_line(f"{key}\t{value}\t{pos}\tnico-pixiv")
+                self.assertIsNotNone(original)
+                self.assertEqual(int(cost), cost_for(original, 10800).cost)
+
     def test_duplicate_and_rejection_rules_still_apply(self):
         with tempfile.TemporaryDirectory() as directory:
             directory = pathlib.Path(directory)

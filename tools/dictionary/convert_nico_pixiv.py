@@ -134,6 +134,13 @@ TRAILING_DECORATIVE_SYMBOLS = set(
 )
 
 
+# Retain the source's broad proper-noun mapping for Zenz protection, except
+# for a measured prediction regression: おなかすいた -> お腹吹田.
+NICO_PIXIV_GENERAL_NOUN_EXCEPTIONS = frozenset({
+    ("おなかすいた", "おなかすいた"),
+})
+
+
 def repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parents[2]
 
@@ -517,7 +524,12 @@ def convert(
             # 固有名詞 maps directly to Mozc's generic proper-noun POS.
             # アルファベット (and unrecognized labels) retain the previous
             # noun-general fallback; no unverified POS mapping is inferred.
-            pos_id = proper_noun_id if user_entry.pos == "固有名詞" else noun_general_id
+            pos_id = (
+                proper_noun_id
+                if user_entry.pos == "固有名詞"
+                and signature not in NICO_PIXIV_GENERAL_NOUN_EXCEPTIONS
+                else noun_general_id
+            )
             stats["emitted_proper_noun" if pos_id == proper_noun_id else "emitted_general_noun"] += 1
             system_entry = SystemEntry(
                 key=user_entry.key,

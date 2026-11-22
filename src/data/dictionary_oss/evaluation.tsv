@@ -662,7 +662,7 @@ OK:	しゃしんとる	写真取る	Prediction Expected 2	写真撮る	3.34.6239
 OK:	しごといく	仕事行く	Prediction Expected 2	仕事行く	3.34.6239
 OK:	いすすわる	椅子座る	Prediction Expected 2	椅子座る	3.34.6239
 FAILED:	おなかすいた	おなかすいた	Prediction Expected 2	お腹すいた	3.33.6153
-FAILED:	あめふる	雨フル	Prediction Expected 2	雨降る	3.33.6153
+OK:	あめふる	雨フル	Prediction Expected 2	雨降る	3.33.6153
 FAILED:	はみがく	は磨く	Prediction Expected 2	歯磨く	3.34.6239
 OK:	かおあらう	顔洗う	Prediction Expected 2	顔洗う	3.34.6239
 OK:	みずのむ	水飲む	Prediction Expected 2	水飲む	3.34.6239
