@@ -1,5 +1,6 @@
 #include "rewriter/zenz_feedback_candidate_rewriter.h"
 
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -171,14 +172,13 @@ TEST(ZenzFeedbackCandidateRewriterTest,
 }
 
 TEST(ZenzFeedbackCandidateRewriterTest,
-     DoesNotRewriteMultiSegmentConversionEvenWhenFullKeyHasAcceptedFeedback) {
+     ReusesSingleChangedSegmentWithoutCollapsingNativeBoundaries) {
   ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
   ASSERT_TRUE(profile.ok());
 
   session::ZenzFeedbackStore store;
-  // Feedback learned for the full key must not collapse Mozc's phrase
-  // boundaries.  Phrase boundaries are owned by the converter, not by this
-  // feedback rewriter.
+  // Full-key feedback may only change one segment candidate, never
+  // collapse the converter-owned phrase boundaries.
   store.RecordAccepted("かれはてんてきです", "japanese_only", "彼は天敵です");
 
   Segments segments;
@@ -193,13 +193,19 @@ TEST(ZenzFeedbackCandidateRewriterTest,
 
   ZenzFeedbackCandidateRewriter rewriter;
   EXPECT_EQ(rewriter.capability(request), RewriterInterface::CONVERSION);
-  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  EXPECT_TRUE(rewriter.Rewrite(request, &segments));
 
   ASSERT_EQ(segments.conversion_segments_size(), 2);
   EXPECT_EQ(segments.conversion_segment(0).key(), "かれは");
+  EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 1);
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "彼は");
-  EXPECT_EQ(segments.conversion_segment(1).key(), "てんてきです");
-  EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "点滴です");
+  const Segment& changed = segments.conversion_segment(1);
+  EXPECT_EQ(changed.key(), "てんてきです");
+  ASSERT_EQ(changed.candidates_size(), 2);
+  EXPECT_EQ(changed.candidate(0).value, "点滴です");
+  EXPECT_EQ(changed.candidate(1).key, "てんてきです");
+  EXPECT_EQ(changed.candidate(1).value, "天敵です");
+  EXPECT_TRUE(changed.candidate(1).attributes & converter::Attribute::RERANKED);
 }
 
 TEST(ZenzFeedbackCandidateRewriterTest,
@@ -916,6 +922,198 @@ TEST(ZenzFeedbackCandidateRewriterTest,
     found_emoji |= segment.candidate(i).value == "🎉";
   }
   EXPECT_TRUE(found_emoji);
+}
+
+// Phase 2 experiment: feedback for a complete reading can be projected onto
+// precisely one native segment without changing the surrounding boundaries.
+TEST(ZenzFeedbackCandidateRewriterTest,
+     ReusesKanaOrthographyWithinActualThreeMozcSegments) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  const std::string reading = "もうすこしわかりやすくおしえてください";
+  const std::string accepted = "もう少しわかりやすく教えてください";
+  ASSERT_TRUE(store.RecordAccepted(reading, "japanese_only", accepted));
+
+  // Matches the native Mozc segment structure observed on the user's PC:
+  // もう少しわかり易く | 教えて | ください
+  // The correction changes the surface of segment 0, not the boundaries.
+  Segments segments;
+  AddSegment("もうすこしわかりやすく", "もう少しわかり易く", &segments);
+  AddSegment("おしえて", "教えて", &segments);
+  AddSegment("ください", "ください", &segments);
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  const ConversionRequest request =
+      CreateZenzFeedbackConversionRequest(true, reading);
+  ASSERT_TRUE(rewriter.Rewrite(request, &segments));
+  ASSERT_EQ(segments.conversion_segments_size(), 3);
+  const Segment& changed = segments.conversion_segment(0);
+  EXPECT_EQ(changed.key(), "もうすこしわかりやすく");
+  ASSERT_EQ(changed.candidates_size(), 2);
+  EXPECT_EQ(changed.candidate(0).value, "もう少しわかり易く");
+  EXPECT_EQ(changed.candidate(1).key, "もうすこしわかりやすく");
+  EXPECT_EQ(changed.candidate(1).value, "もう少しわかりやすく");
+  EXPECT_TRUE(changed.candidate(1).attributes & converter::Attribute::RERANKED);
+  EXPECT_EQ(segments.conversion_segment(1).key(), "おしえて");
+  EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "教えて");
+  EXPECT_EQ(segments.conversion_segment(2).key(), "ください");
+  EXPECT_EQ(segments.conversion_segment(2).candidate(0).value, "ください");
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotProjectFeedbackChangingTwoNativeSegments) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  ASSERT_TRUE(store.RecordAccepted("かれはてんてきです", "japanese_only",
+                                   "彼が天敵です"));
+
+  Segments segments;
+  AddSegment("かれは", "彼は", &segments);
+  AddSegment("てんてきです", "点滴です", &segments);
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  ASSERT_EQ(segments.conversion_segments_size(), 2);
+  EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 1);
+  EXPECT_EQ(segments.conversion_segment(1).candidates_size(), 1);
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     ReusesExistingLocalCandidateWithoutDuplicatingIt) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  ASSERT_TRUE(store.RecordAccepted("かれはてんてきです", "japanese_only",
+                                   "彼は天敵です"));
+
+  Segments segments;
+  AddSegment("かれは", "彼は", &segments);
+  AddSegment("てんてきです", "点滴です", &segments);
+  Segment* second = segments.mutable_conversion_segment(1);
+  converter::Candidate* existing = second->add_candidate();
+  *existing = second->candidate(0);
+  existing->value = "天敵です";
+  existing->content_value = "天敵です";
+  existing->cost = 1600;
+  existing->wcost = 1600;
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+  EXPECT_EQ(segments.conversion_segments_size(), 2);
+  EXPECT_EQ(segments.conversion_segment(1).candidates_size(), 2);
+  EXPECT_EQ(segments.conversion_segment(1).candidate(1).value, "天敵です");
+  EXPECT_TRUE(segments.conversion_segment(1).candidate(1).attributes &
+              converter::Attribute::RERANKED);
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotProjectWhenRequestReadingDiffersFromSegmentKeys) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  ASSERT_TRUE(store.RecordAccepted("かれはてんてきです", "japanese_only",
+                                   "彼は天敵です"));
+  Segments segments;
+  AddSegment("かれは", "彼は", &segments);
+  AddSegment("てんてき", "点滴", &segments);
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  EXPECT_EQ(segments.conversion_segment(1).candidates_size(), 1);
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotProjectIntoNativeNoModificationCandidate) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  ASSERT_TRUE(store.RecordAccepted("かれはてんてきです", "japanese_only",
+                                   "彼は天敵です"));
+  Segments segments;
+  AddSegment("かれは", "彼は", &segments);
+  AddSegment("てんてきです", "点滴です", &segments);
+  segments.mutable_conversion_segment(1)->mutable_candidate(0)->attributes |=
+      converter::Attribute::NO_MODIFICATION;
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  EXPECT_EQ(segments.conversion_segment(1).candidates_size(), 1);
+}
+
+// In a multi-segment projection, a protected non-top candidate must not be
+// rescored or moved, even when its surface matches the accepted Zenz value.
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotModifyProtectedLowerRankedLocalCandidate) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+  session::ZenzFeedbackStore store;
+  ASSERT_TRUE(store.RecordAccepted("かれはてんてきです", "japanese_only",
+                                   "彼は天敵です"));
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  ZenzFeedbackCandidateRewriter rewriter;
+
+  const uint32_t protected_flags[] = {
+      converter::Attribute::NO_MODIFICATION,
+      converter::Attribute::DISABLE_RESCORING,
+      converter::Attribute::PARTIALLY_KEY_CONSUMED,
+      converter::Attribute::NO_HISTORY_LEARNING,
+      converter::Attribute::USER_DICTIONARY,
+  };
+  for (const uint32_t flag : protected_flags) {
+    Segments segments;
+    AddSegment("かれは", "彼は", &segments);
+    AddSegment("てんてきです", "点滴です", &segments);
+    Segment* second = segments.mutable_conversion_segment(1);
+    converter::Candidate* existing = second->add_candidate();
+    *existing = second->candidate(0);
+    existing->value = "天敵です";
+    existing->content_value = "天敵です";
+    existing->attributes = flag;
+    existing->cost = 1600;
+    existing->wcost = 1600;
+
+    EXPECT_FALSE(rewriter.Rewrite(request, &segments)) << "flag=" << flag;
+    ASSERT_EQ(segments.conversion_segments_size(), 2);
+    ASSERT_EQ(segments.conversion_segment(1).candidates_size(), 2);
+    EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "点滴です");
+    const converter::Candidate& protected_candidate =
+        segments.conversion_segment(1).candidate(1);
+    EXPECT_EQ(protected_candidate.value, "天敵です");
+    EXPECT_EQ(protected_candidate.attributes, flag);
+    EXPECT_EQ(protected_candidate.cost, 1600);
+    EXPECT_EQ(protected_candidate.wcost, 1600);
+  }
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
+     DoesNotProjectHardRejectedMultiSegmentFeedback) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+
+  session::ZenzFeedbackStore store;
+  ASSERT_TRUE(store.RecordAccepted("かれはてんてきです", "japanese_only",
+                                   "彼は天敵です"));
+  store.RecordRejected("かれはてんてきです", "japanese_only",
+                       "彼は天敵です", "hard_reject");
+  Segments segments;
+  AddSegment("かれは", "彼は", &segments);
+  AddSegment("てんてきです", "点滴です", &segments);
+
+  ZenzFeedbackCandidateRewriter rewriter;
+  const ConversionRequest request = CreateZenzFeedbackConversionRequest();
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  EXPECT_EQ(segments.conversion_segment(1).candidates_size(), 1);
 }
 
 #else  // defined(_WIN32)
