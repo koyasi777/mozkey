@@ -287,7 +287,7 @@
         {"xml", "XML", false},
         {"yagni", "YAGNI", false},
         {"yaml", "YAML", false},
-        {"youtube", "YouTube", false},
+        {"youtube", "YouTube", true},
         {"zed", "Zed", false},
         {"zenz", "Zenz", false},
         {"zmk", "ZMK", false},
