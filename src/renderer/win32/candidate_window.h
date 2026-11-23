@@ -56,6 +56,11 @@ namespace mozc {
 namespace renderer {
 namespace win32 {
 
+class PinPopupWindow;
+// Dedicated messages to the candidate window. Never activate the IME UI.
+inline constexpr UINT kPinPopupSelectedMessage = WM_APP + 0x542;
+inline constexpr UINT kPinPopupDismissMessage = WM_APP + 0x543;
+
 // As Discussed in b/2317702, UI windows are disabled by default because it is
 // hard for a user to find out what caused the problem than finding that the
 // operations seems to be disabled on the UI window when
@@ -84,6 +89,9 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   MESSAGE_HANDLER(WM_MOUSEACTIVATE, OnMouseActivate)
   MESSAGE_HANDLER(WM_LBUTTONDOWN, OnLButtonDown)
   MESSAGE_HANDLER(WM_LBUTTONUP, OnLButtonUp)
+  MESSAGE_HANDLER(WM_RBUTTONUP, OnRButtonUp)
+  MESSAGE_HANDLER(kPinPopupSelectedMessage, OnPinPopupSelectMessage)
+  MESSAGE_HANDLER(kPinPopupDismissMessage, OnPinPopupDismissMessage)
   MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
   MESSAGE_HANDLER(WM_SETTINGCHANGE, OnSettingChange)
   MESSAGE_HANDLER(WM_SHOWWINDOW, OnShowWindow)
@@ -104,6 +112,10 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   }
   void OnLButtonDown(UINT nFlags, CPoint point);
   void OnLButtonUp(UINT nFlags, CPoint point);
+  void OnRButtonUp(CPoint point);
+  void DismissPinPopup();
+  void OnPinPopupSelected(HWND popup);
+  void OnPinPopupDismissed(HWND popup);
   void OnMouseMove(UINT nFlags, CPoint point);
   void OnPaint(HDC dc);
   void OnPrintClient(HDC dc, UINT uFlags);
@@ -243,6 +255,19 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
                 CPoint(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)));
     return 0;
   }
+  inline LRESULT OnRButtonUp(UINT msg_id, WPARAM wparam, LPARAM lparam,
+                             BOOL& handled) {
+    OnRButtonUp(CPoint(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)));
+    return 0;
+  }
+  inline LRESULT OnPinPopupSelectMessage(UINT, WPARAM, LPARAM lparam, BOOL&) {
+    OnPinPopupSelected(reinterpret_cast<HWND>(lparam));
+    return 0;
+  }
+  inline LRESULT OnPinPopupDismissMessage(UINT, WPARAM, LPARAM lparam, BOOL&) {
+    OnPinPopupDismissed(reinterpret_cast<HWND>(lparam));
+    return 0;
+  }
   inline LRESULT OnMouseMove(UINT msg_id, WPARAM wparam, LPARAM lparam,
                              BOOL& handled) {
     OnMouseMove(static_cast<UINT>(wparam),
@@ -270,6 +295,15 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
     OnPrintClient(reinterpret_cast<HDC>(wparam), static_cast<UINT>(lparam));
     return 0;
   }
+
+  struct PinMenuSelection {
+    int32_t id = 0;
+    std::string reading;
+    std::string value;
+    bool pinned = false;
+  };
+  std::optional<PinMenuSelection> pin_menu_selection_;
+  std::unique_ptr<PinPopupWindow> pin_popup_window_;
 
   std::unique_ptr<commands::CandidateWindow> candidate_window_;
   wil::unique_hbitmap footer_logo_;

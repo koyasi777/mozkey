@@ -850,6 +850,7 @@ mozc_cc_library(
         "//config:config_handler",
         "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
+        "//renderer:pin_callback_token",
         "//win32/base:conversion_mode_util",
         "//win32/base:deleter",
         "//win32/base:input_state",

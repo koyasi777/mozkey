@@ -236,6 +236,7 @@ mozc_cc_library(
         "//converter:converter_interface",
         "//engine:engine_converter_interface",
         "//engine:engine_interface",
+        "//engine:pinned_candidate_store",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
         "//transliteration",

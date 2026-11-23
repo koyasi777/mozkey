@@ -380,6 +380,27 @@ class EngineConverterInterface {
     return false;
   }
 
+  // Check the exact visible regular candidate before persisting a pin. IDs
+  // are ephemeral and may also refer to meta or command candidates.
+  virtual bool CanPinCandidate(int candidate_id, absl::string_view reading,
+                               absl::string_view value) const {
+    (void)candidate_id;
+    (void)reading;
+    (void)value;
+    return false;
+  }
+
+  // Reorder the verified candidate without re-running conversion or Zenz.
+  // Lightweight engines may keep the default no-op behavior.
+  virtual bool PromotePinnedCandidate(int candidate_id,
+                                      absl::string_view reading,
+                                      absl::string_view value) {
+    (void)candidate_id;
+    (void)reading;
+    (void)value;
+    return false;
+  }
+
   // Retrieves proper-noun lexical spans of the currently selected normal
   // Mozc conversion, with absolute UTF-8 byte offsets in the full reading
   // and selected surface.  False means no trustworthy snapshot is available.

@@ -56,6 +56,7 @@
 #include "composer/table.h"
 #include "engine/engine_converter_interface.h"
 #include "engine/engine_interface.h"
+#include "engine/pinned_candidate_store.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "session/ime_context.h"
@@ -2164,6 +2165,12 @@ bool Session::SendCommand(commands::Command* command) {
     case commands::SessionCommand::HIGHLIGHT_CANDIDATE:
       result = HighlightCandidate(command);
       break;
+    case commands::SessionCommand::PIN_CANDIDATE:
+      result = UpdatePinnedCandidate(command, true);
+      break;
+    case commands::SessionCommand::UNPIN_CANDIDATE:
+      result = UpdatePinnedCandidate(command, false);
+      break;
     case commands::SessionCommand::GET_STATUS:
       result = GetStatus(command);
       break;
@@ -4077,6 +4084,79 @@ bool Session::SelectCandidateInternal(commands::Command* command) {
   command->mutable_output()->set_consumed(true);
   SetSessionState(ImeContext::CONVERSION, context_.get());
 
+  return true;
+}
+
+bool Session::UpdatePinnedCandidate(commands::Command* command, bool pin) {
+  const commands::SessionCommand& action = command->input().command();
+  if (context_->state() != ImeContext::CONVERSION ||
+      !context_->converter().CheckState(EngineConverterInterface::CONVERSION) ||
+      !action.has_id() || !action.has_text() || action.text().empty() ||
+      !action.has_pin_reading() || context_->GetConfig().incognito_mode() ||
+      context_->composer().GetInputFieldType() == commands::Context::PASSWORD ||
+      live_conversion_pending_ || live_conversion_active_) {
+    LOG(WARNING) << "[mozkey-pin] rejected: unsupported session state";
+    return DoNothing(command);
+  }
+
+  // Do not infer the reading from a candidate ID. IDs are transient and
+  // detached Zenz suggestions can reuse the same integer in another context.
+  std::vector<std::string> keys;
+  if (!context_->converter().GetConversionSegmentKeys(&keys) ||
+      keys.size() != 1 || keys[0].empty() ||
+      keys[0] != action.pin_reading()) {
+    LOG(WARNING) << "[mozkey-pin] rejected: reading or segmentation mismatch";
+    return DoNothing(command);
+  }
+
+  commands::Output snapshot;
+  context_->converter().FillOutput(context_->composer(), &snapshot);
+  if (!snapshot.has_candidate_window() ||
+      snapshot.candidate_window().category() != commands::CONVERSION) {
+    LOG(WARNING) << "[mozkey-pin] rejected: no visible conversion list";
+    return DoNothing(command);
+  }
+
+  bool matches_visible_candidate = false;
+  for (const auto& candidate : snapshot.candidate_window().candidate()) {
+    if (candidate.has_id() && candidate.id() == action.id() &&
+        candidate.value() == action.text()) {
+      matches_visible_candidate = true;
+      break;
+    }
+  }
+  if (!matches_visible_candidate) {
+    LOG(WARNING) << "[mozkey-pin] rejected: stale candidate identity";
+    return DoNothing(command);
+  }
+
+  // The renderer's identity match alone cannot distinguish normal, meta,
+  // command, or multi-segment candidates. Reject ineligible pins BEFORE any
+  // persistent write; leave a previous valid pin for this reading intact.
+  if (pin && !context_->converter().CanPinCandidate(
+                 action.id(), keys[0], action.text())) {
+    LOG(WARNING) << "[mozkey-pin] rejected: candidate is not promotable";
+    return DoNothing(command);
+  }
+
+  engine::PinnedCandidateStore& store =
+      engine::PinnedCandidateStore::Instance();
+  const bool saved = pin ? store.Pin(keys[0], action.text())
+                         : store.Unpin(keys[0], action.text());
+  if (!saved) {
+    LOG(WARNING) << "[mozkey-pin] rejected: store write or conditional unpin failed";
+    return DoNothing(command);
+  }
+  // A successful pin should be visible immediately. Move the in-memory
+  // candidate to the top without issuing a new conversion (or changing the
+  // user's stored history). On unpin, clear its marker now and let the next
+  // conversion compute ordinary ranking again.
+  if (pin && !context_->mutable_converter()->PromotePinnedCandidate(
+                 action.id(), keys[0], action.text())) {
+    LOG(WARNING) << "[mozkey-pin] persisted but in-place promotion unavailable";
+  }
+  command->mutable_output()->set_consumed(true);
+  Output(command);
   return true;
 }
 

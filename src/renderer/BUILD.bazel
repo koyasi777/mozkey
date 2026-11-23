@@ -150,6 +150,25 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "pin_callback_token",
+    hdrs = ["pin_callback_token.h"],
+    visibility = [
+        "//renderer:__pkg__",
+        "//win32/tip:__pkg__",
+    ],
+)
+
+mozc_cc_test(
+    name = "pin_callback_token_test",
+    size = "small",
+    srcs = ["pin_callback_token_test.cc"],
+    deps = [
+        ":pin_callback_token",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
     name = "renderer_server",
     srcs = ["renderer_server.cc"],
     hdrs = ["renderer_server.h"],
@@ -157,6 +176,7 @@ mozc_cc_library(
     tags = ["nowin"],
     visibility = ["//renderer:__subpackages__"],
     deps = [
+        ":pin_callback_token",
         ":renderer_interface",
         ":renderer_style_config",
         "//base:const",

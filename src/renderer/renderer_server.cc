@@ -50,6 +50,7 @@
 #include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_interface.h"
+#include "renderer/pin_callback_token.h"
 #include "renderer/renderer_style_config.h"
 
 #ifdef _WIN32
@@ -97,10 +98,18 @@ class RendererServerSendCommand : public client::SendCommandInterface {
   bool SendCommand(const mozc::commands::SessionCommand& command,
                    mozc::commands::Output* output) override {
 #ifdef _WIN32
+    const bool is_pin_command =
+        command.type() == commands::SessionCommand::PIN_CANDIDATE ||
+        command.type() == commands::SessionCommand::UNPIN_CANDIDATE;
     if ((command.type() != commands::SessionCommand::SELECT_CANDIDATE) &&
         (command.type() != commands::SessionCommand::HIGHLIGHT_CANDIDATE) &&
-        (command.type() != commands::SessionCommand::SUBMIT_CANDIDATE)) {
-      // Unsupported command.
+        (command.type() != commands::SessionCommand::SUBMIT_CANDIDATE) &&
+        !is_pin_command) {
+      return false;
+    }
+    if (is_pin_command &&
+        (!command.has_id() || !command.has_text() || command.text().empty() ||
+         !command.has_pin_reading() || command.pin_reading().empty())) {
       return false;
     }
 
@@ -114,9 +123,21 @@ class RendererServerSendCommand : public client::SendCommandInterface {
       LOG(ERROR) << "RegisterWindowMessage failed: " << ::GetLastError();
       return false;
     }
-    WPARAM type = static_cast<WPARAM>(command.type());
-    LPARAM id = static_cast<LPARAM>(command.id());
-    ::PostMessage(target, mozc_msg, type, id);
+    WPARAM wparam = static_cast<WPARAM>(command.type());
+    LPARAM lparam = static_cast<LPARAM>(command.id());
+    if (is_pin_command) {
+      // Windows messages transport only integers. The TSF recipient will
+      // reconstruct user text from its last visible candidate snapshot and
+      // accept it only when the snapshot fingerprint matches this callback.
+      const PinCallbackMessage packed = PackPinCallback(
+          static_cast<uint32_t>(command.type()), command.id(),
+          command.pin_reading(), command.text());
+      wparam = static_cast<WPARAM>(packed.wparam);
+      lparam = static_cast<LPARAM>(packed.lparam);
+    }
+    if (!::PostMessageW(target, mozc_msg, wparam, lparam)) {
+      return false;
+    }
 #endif  // _WIN32
 
     // TODO(all): implementation for Mac/Linux

@@ -688,6 +688,9 @@ class Session {
   // it requires the argument id.
   bool SelectCandidate(mozc::commands::Command* command);
 
+  // Validate a visible conversion candidate before persisting a user pin.
+  bool UpdatePinnedCandidate(mozc::commands::Command* command, bool pin);
+
   // Calls EngineConverter::ConmmitHeadToFocusedSegments()
   // and deletes characters from the composer.
   void CommitHeadToFocusedSegmentsInternal(const commands::Context& context);
