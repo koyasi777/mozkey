@@ -1456,6 +1456,22 @@ TEST_F(ConfigHandlerTest, EnglishPresetsDefaultOnAndCatalogIsConservative) {
             defaults.english_input_exceptions_size());
 }
 
+TEST_F(ConfigHandlerTest, YouTubePresetUsesAutomaticAsciiMode) {
+  const Config defaults = ConfigHandler::GetProductDefaultConfig();
+  int youtube_count = 0;
+  for (const auto& entry : defaults.english_input_exceptions()) {
+    if (entry.input() != "youtube") {
+      continue;
+    }
+    ++youtube_count;
+    EXPECT_EQ(entry.preferred(), "YouTube");
+    EXPECT_TRUE(entry.enabled());
+    EXPECT_EQ(entry.system_preset_id(), "youtube");
+    EXPECT_EQ(entry.behavior(), Config::EnglishInputException::AUTO_ASCII);
+  }
+  EXPECT_EQ(youtube_count, 1);
+}
+
 TEST_F(ConfigHandlerTest, EnglishPresetsRespectCustomEditsAndTombstones) {
   TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
   const std::string file =
