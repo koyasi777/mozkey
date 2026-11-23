@@ -39,6 +39,7 @@
 #include "base/japanese_util.h"
 #include "base/util.h"
 #include "composer/composer.h"
+#include "composer/english_input_exceptions.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/segments.h"
@@ -110,29 +111,47 @@ int LanguageAwareRewriter::capability(const ConversionRequest& request) const {
 }
 
 namespace {
-// A literal ASCII word followed by Japanese text indicates an intentional
-// mixed-script composition, not a mistaken attempt to type an English word.
-// Require at least two ASCII letters; full-width Roman pending input (as in
-// "python" -> "ｐｙてょｎ") is NOT a literal ASCII word.
-bool HasLiteralLatinWordFollowedByJapanese(absl::string_view preedit) {
+// Only an explicitly registered AUTO_ASCII token followed by Japanese input
+// identifies a mixed-script composition whose full raw keystrokes should not
+// appear in passive suggestions (e.g. "githubwot" -> "githubをt").
+// A shifted ASCII prefix is not sufficient evidence: "AIdev" -> "AIでv"
+// must retain its original raw-ASCII rescue candidate.
+bool HasRegisteredEnglishWordFollowedByJapanese(
+    const composer::ComposerData& composer, const config::Config& config) {
+  const std::string preedit = composer.GetStringForPreedit();
+  size_t latin_start = 0;
   size_t latin_letters = 0;
+  size_t char_offset = 0;
   for (size_t i = 0; i < preedit.size();) {
     const unsigned char byte = static_cast<unsigned char>(preedit[i]);
     if ((byte >= 'a' && byte <= 'z') ||
         (byte >= 'A' && byte <= 'Z')) {
+      if (latin_letters == 0) latin_start = i;
       ++latin_letters;
+      ++char_offset;
       ++i;
       continue;
     }
     size_t char_bytes = 0;
     const Util::ScriptType script =
-        Util::GetFirstScriptType(preedit.substr(i), &char_bytes);
+        Util::GetFirstScriptType(absl::string_view(preedit).substr(i),
+                                 &char_bytes);
     if (latin_letters >= 2 &&
         (script == Util::HIRAGANA || script == Util::KATAKANA ||
          script == Util::KANJI)) {
-      return true;
+      const std::string word = preedit.substr(latin_start, latin_letters);
+      const auto* rule =
+          composer::EnglishInputExceptions::Find(config, word);
+      if (rule != nullptr &&
+          rule->behavior() ==
+              config::Config::EnglishInputException::AUTO_ASCII &&
+          composer.GetRawSubString(char_offset - latin_letters,
+                                   latin_letters) == word) {
+        return true;
+      }
     }
     latin_letters = 0;
+    ++char_offset;
     i += char_bytes == 0 ? 1 : char_bytes;
   }
   return false;
@@ -273,8 +292,8 @@ bool LanguageAwareRewriter::FillRawText(const ConversionRequest& request,
         composer.GetInputFieldType() != commands::Context::PASSWORD &&
         composer.GetCursor() == composer.GetLength() &&
         composer.GetPendingRomanInputLength() != 0 &&
-        HasLiteralLatinWordFollowedByJapanese(
-            composer.GetStringForPreedit())) {
+        HasRegisteredEnglishWordFollowedByJapanese(
+            composer, request.config())) {
       return false;
     }
   }
