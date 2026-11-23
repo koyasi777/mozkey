@@ -132,6 +132,12 @@ bool PinnedCandidateStore::LoadLocked() {
   }
   if (!exists.ok()) return false;
 
+  // FileExists() also succeeds for directories on POSIX. A directory must
+  // not be passed into GetContents(), which expects a regular file stream.
+  // Fail closed on unexpected directory-status errors as well.
+  const absl::Status directory = FileUtil::DirectoryExists(path_);
+  if (directory.ok() || !absl::IsNotFound(directory)) return false;
+
   const auto file = FileUtil::GetContents(path_);
   if (!file.ok() || file->size() > kMaxFileBytes) return false;
 
