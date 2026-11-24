@@ -177,13 +177,13 @@ mozc_cc_library(
     name = "posix_server",
     srcs = ["posix_server.cc"],
     hdrs = ["posix_server.h"],
-    # Only the session-side transport integration test needs this dependency.
-    visibility = ["//session:__pkg__"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "@platforms//os:macos": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
+    # Only the session-side transport integration test needs this dependency.
+    visibility = ["//session:__pkg__"],
     deps = [
         "//zenz:unix_socket_path",
         "//zenz:wire_protocol",
