@@ -8,9 +8,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
-#include <thread>
+#include <fstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <arpa/inet.h>
@@ -83,6 +84,13 @@ bool ParseOptions(int argc, char** argv, Options* options) {
       }
     } else if (argument == "--api-key") {
       if (!take_value(&options->api_key)) return false;
+    } else if (argument == "--api-key-file") {
+      std::string key_path;
+      if (!take_value(&key_path)) return false;
+      std::ifstream key_stream(key_path);
+      if (!key_stream || !std::getline(key_stream, options->api_key)) {
+        return false;
+      }
     } else if (argument == "--cache-ram") {
       if (i + 1 >= argc || std::string_view(argv[++i]) != "0") return false;
       options->cache_ram_zero = true;

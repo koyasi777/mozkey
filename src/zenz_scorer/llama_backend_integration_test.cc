@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <poll.h>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -384,6 +385,91 @@ TEST(LlamaBackendIntegrationTest, ForwardsUnixSocketRequestToLlamaHttp) {
   }
 
   llama.Join();
+  EXPECT_TRUE(llama.ok());
+  Cleanup(directory);
+}
+
+// The scorer serves requests serially. Once the Unix caller has gone away,
+// the outstanding HTTP wait must release the scorer without requiring the
+// configured completion timeout. This does not promise llama-server itself
+// stops generating after its client HTTP connection closes.
+TEST(LlamaBackendIntegrationTest, UnixDisconnectAbortsHttpWait) {
+  std::atomic<bool> http_received{false};
+  FakeLlamaServer llama;
+  ASSERT_TRUE(llama.Start([&](int fd, const std::string&) {
+    http_received.store(true);
+    pollfd descriptor = {};
+    descriptor.fd = fd;
+    descriptor.events = POLLIN;
+    // Bounded watchdog: this test must terminate even on an unfixed scorer.
+    const int result = ::poll(&descriptor, 1, 1800);
+    if (result <= 0) {
+      return false;
+    }
+    char byte = 0;
+    return ::recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT) == 0;
+  }));
+
+  const std::string directory = MakeTestDirectory();
+  Cleanup(directory);
+  const std::string socket_path = directory + "/scorer.sock";
+  LlamaBackendOptions options;
+  options.port = llama.port();
+  options.api_key = "test-key";
+  options.n_predict = 32;
+
+  bool server_ok = false;
+  std::atomic<bool> server_done{false};
+  bool HTTP_arrived = false;
+  bool finished_early = false;
+  bool wrote = false;
+  {
+    PosixZenzScorerServer scorer(socket_path,
+                                 CreateLlamaHttpBackend(std::move(options)));
+    std::string error;
+    ASSERT_TRUE(scorer.Start(&error)) << error;
+    std::thread server([&] {
+      server_ok = scorer.ServeOne(2000, &error);
+      server_done.store(true);
+    });
+
+    const int fd = ConnectUnixSocket(socket_path);
+    if (fd >= 0) {
+      constexpr char kPrompt[] = "abandoned-request";
+      ZenzWireRequestHeader header = {};
+      header.magic = kZenzWireMagic;
+      header.version = kZenzWireVersion;
+      header.kind = kZenzWireKindRequest;
+      header.generation = 37;
+      header.timeout_msec = 5000;
+      header.max_output_chars = 32;
+      header.prompt_size = sizeof(kPrompt) - 1;
+      wrote = WriteAll(fd, &header, sizeof(header)) &&
+              WriteAll(fd, kPrompt, sizeof(kPrompt) - 1);
+      const auto start_limit = std::chrono::steady_clock::now() +
+                               std::chrono::milliseconds(1200);
+      while (!http_received.load() &&
+             std::chrono::steady_clock::now() < start_limit) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+      HTTP_arrived = http_received.load();
+      ::close(fd);
+
+      const auto release_limit = std::chrono::steady_clock::now() +
+                                 std::chrono::milliseconds(1200);
+      while (!server_done.load() &&
+             std::chrono::steady_clock::now() < release_limit) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+      finished_early = server_done.load();
+    }
+    server.join();
+  }
+  llama.Join();
+  EXPECT_TRUE(wrote);
+  EXPECT_TRUE(HTTP_arrived);
+  EXPECT_TRUE(finished_early);
+  EXPECT_TRUE(server_ok);
   EXPECT_TRUE(llama.ok());
   Cleanup(directory);
 }

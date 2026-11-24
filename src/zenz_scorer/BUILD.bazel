@@ -23,14 +23,22 @@ mozc_cc_library(
     name = "llama_http_client",
     srcs = ["llama_http_client.cc"],
     hdrs = ["llama_http_client.h"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
 )
 
 mozc_cc_test(
     name = "llama_http_client_test",
     size = "small",
     srcs = ["llama_http_client_test.cc"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":llama_http_client",
         "//testing:gunit_main",
@@ -44,7 +52,11 @@ mozc_cc_library(
         "llama_server_guard_protocol.h",
         "llama_server_process.h",
     ],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [":llama_http_client"],
 )
 
@@ -54,14 +66,22 @@ mozc_cc_binary(
         "llama_server_guard.cc",
         "llama_server_guard_protocol.h",
     ],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//mac/installer/zenz_runtime:__pkg__"],
 )
 
 mozc_cc_binary(
     name = "llama_server_process_test_helper",
     srcs = ["llama_server_process_test_helper.cc"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
 )
 
 mozc_cc_test(
@@ -72,7 +92,11 @@ mozc_cc_test(
         ":llama_server_process_test_helper",
         ":mozc_zenz_guard",
     ],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":llama_server_process",
         "//testing:gunit_main",
@@ -83,7 +107,11 @@ mozc_cc_library(
     name = "llama_backend",
     srcs = ["llama_backend.cc"],
     hdrs = ["llama_backend.h"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":llama_http_client",
         ":posix_server",
@@ -95,7 +123,11 @@ mozc_cc_test(
     name = "llama_backend_integration_test",
     size = "small",
     srcs = ["llama_backend_integration_test.cc"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":llama_backend",
         ":posix_server",
@@ -108,7 +140,11 @@ mozc_cc_library(
     name = "posix_runtime",
     srcs = ["posix_runtime.cc"],
     hdrs = ["posix_runtime.h"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":llama_backend",
         ":llama_server_process",
@@ -125,7 +161,11 @@ mozc_cc_test(
         ":llama_server_process_test_helper",
         ":mozc_zenz_guard",
     ],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":posix_runtime",
         "//testing:gunit_main",
@@ -137,7 +177,13 @@ mozc_cc_library(
     name = "posix_server",
     srcs = ["posix_server.cc"],
     hdrs = ["posix_server.h"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    # Only the session-side transport integration test needs this dependency.
+    visibility = ["//session:__pkg__"],
     deps = [
         "//zenz:unix_socket_path",
         "//zenz:wire_protocol",
@@ -148,7 +194,11 @@ mozc_cc_test(
     name = "posix_server_test",
     size = "small",
     srcs = ["posix_server_test.cc"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":posix_server",
         "//testing:gunit_main",
@@ -156,9 +206,27 @@ mozc_cc_test(
     ],
 )
 
+mozc_cc_library(
+    name = "linux_inference_threads",
+    hdrs = ["linux_inference_threads.h"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+mozc_cc_test(
+    name = "linux_inference_threads_test",
+    size = "small",
+    srcs = ["linux_inference_threads_test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":linux_inference_threads",
+        "//testing:gunit_main",
+    ],
+)
+
 mozc_cc_binary(
     name = "mozc_zenz_scorer",
     srcs = select({
+        "@platforms//os:linux": ["main_posix.cc"],
         "@platforms//os:macos": ["main_posix.cc"],
         "@platforms//os:windows": [
             "main.cc",
@@ -176,12 +244,18 @@ mozc_cc_binary(
         "//conditions:default": [],
     }),
     target_compatible_with = select({
+        "@platforms//os:linux": [],
         "@platforms//os:macos": [],
         "@platforms//os:windows": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     visibility = ["//visibility:public"],
     deps = ["//zenz:wire_protocol"] + select({
+        "@platforms//os:linux": [
+            ":linux_inference_threads",
+            ":posix_runtime",
+            "//zenz:unix_socket_path",
+        ],
         "@platforms//os:macos": [
             ":posix_runtime",
             "//zenz:unix_socket_path",
@@ -207,4 +281,13 @@ mozc_cc_binary(
         "//zenz:unix_socket_path",
         "//zenz:wire_protocol",
     ],
+)
+
+# Linux-specific scorer launcher.  The launcher sets PR_SET_PDEATHSIG before
+# execve() of the sibling scorer.  Packaging and auto-launch are separate gates.
+mozc_cc_binary(
+    name = "mozc_zenz_launcher",
+    srcs = ["linux_scorer_launcher.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//unix:__pkg__"],
 )

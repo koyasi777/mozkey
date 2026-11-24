@@ -55,6 +55,12 @@ void ZenzLiveCorrector::Submit(ZenzLiveRequest request) {
 
   {
     std::lock_guard<std::mutex> lock(mu_);
+    ++request_epoch_;
+    // Wake a superseded in-flight Convert(). There is only one worker;
+    // ResetCancel() is performed when that worker dequeues the next request.
+    if (client_) {
+      client_->RequestCancel();
+    }
     latest_request_ = std::move(request);
     latest_result_.reset();
   }
@@ -63,6 +69,10 @@ void ZenzLiveCorrector::Submit(ZenzLiveRequest request) {
 
 void ZenzLiveCorrector::CancelPending() {
   std::lock_guard<std::mutex> lock(mu_);
+  ++request_epoch_;
+  if (client_) {
+    client_->RequestCancel();
+  }
   latest_request_.reset();
   latest_result_.reset();
 }
@@ -86,6 +96,7 @@ std::optional<ZenzLiveResponse> ZenzLiveCorrector::TakeResult(
 void ZenzLiveCorrector::WorkerLoop() {
   while (true) {
     std::optional<ZenzLiveRequest> request;
+    uint64_t request_epoch = 0;
 
     {
       std::unique_lock<std::mutex> lock(mu_);
@@ -97,6 +108,12 @@ void ZenzLiveCorrector::WorkerLoop() {
         return;
       }
 
+      request_epoch = request_epoch_;
+      // Serialize ResetCancel() with Submit()/CancelPending() under mu_;
+      // otherwise a new request could clear an in-flight cancellation.
+      if (client_) {
+        client_->ResetCancel();
+      }
       request = std::move(latest_request_);
       latest_request_.reset();
     }
@@ -119,9 +136,10 @@ void ZenzLiveCorrector::WorkerLoop() {
     {
       std::lock_guard<std::mutex> lock(mu_);
 
-      // If a newer request is already queued, this result is still stored;
-      // Session will drop it by generation. Keeping it is useful for debugging.
-      if (!stop_) {
+      // A cancellation or superseding submission must invalidate the result
+      // even when an in-flight Convert() eventually returns. Generation alone
+      // is insufficient here because a client may reuse it in a later submit.
+      if (!stop_ && request_epoch == request_epoch_) {
         latest_result_ = std::move(response);
       }
     }

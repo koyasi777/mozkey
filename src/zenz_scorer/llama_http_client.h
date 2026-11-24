@@ -20,6 +20,9 @@ struct LlamaHttpCompletionRequest {
   uint32_t timeout_msec = 0;
   uint32_t max_output_chars = 0;
   std::string prompt;
+  // Optional peer socket watched for closure; owned by the scorer caller.
+  // The file descriptor is not closed by the HTTP client.
+  int cancellation_fd = -1;
 };
 
 struct LlamaHttpCompletionResponse {

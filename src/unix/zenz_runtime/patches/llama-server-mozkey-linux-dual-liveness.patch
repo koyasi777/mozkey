@@ -1,0 +1,18 @@
+diff --git a/tools/server/main.cpp b/tools/server/main.cpp
+--- a/tools/server/main.cpp
++++ b/tools/server/main.cpp
+@@ -1,4 +1,4 @@
+-// Mozkey's guarded macOS runtime: the worker monitors two independent
+-// liveness pipes inherited only when the guard opts in.  Unmodified llama-server
+-// launches and other platforms never activate this extension.
+-#if defined(__APPLE__)
++// Mozkey's guarded macOS/Linux runtime: the worker monitors two independent
++// liveness pipes inherited only when the guard opts in. Unmodified llama-server
++// launches and unsupported platforms never activate this extension.
++#if defined(__APPLE__) || (defined(__linux__) && !defined(__ANDROID__))
+@@ -57 +57 @@
+-#endif  // __APPLE__
++#endif  // macOS or desktop Linux
+@@ -62 +62 @@
+-#if defined(__APPLE__)
++#if defined(__APPLE__) || (defined(__linux__) && !defined(__ANDROID__))

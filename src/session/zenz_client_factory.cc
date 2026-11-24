@@ -22,6 +22,15 @@
 #endif  // TARGET_OS_OSX
 #endif  // __APPLE__
 
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <utility>
+
+#include "absl/time/time.h"
+#include "base/file_util.h"
+#include "base/system_util.h"
+#include "session/zenz_linux_scorer_launch_manager.h"
+#endif  // __linux__ && !__ANDROID__
+
 #include "session/zenz_live_corrector.h"
 #include "session/zenz_named_pipe_client.h"
 #include "session/zenz_unix_socket_client.h"
@@ -97,12 +106,65 @@ bool LaunchMacZenzScorer() {
 
 #endif  // __APPLE__ && TARGET_OS_OSX
 
+#if defined(__linux__) && !defined(__ANDROID__)
+
+constexpr char kLinuxZenzRuntimeDirectory[] = "ZenzRuntime";
+constexpr char kLinuxScorerLauncher[] = "mozc_zenz_launcher";
+
+// Both the product factory and the isolated test seam use the identical
+// transport/launcher callback. The sole production difference is that its
+// manager is process-shared, rather than scoped to an isolated test client.
+std::unique_ptr<ZenzClient> MakeLinuxZenzClient(
+    std::string socket_path,
+    std::shared_ptr<ZenzLinuxScorerLaunchManager> manager) {
+  return std::make_unique<ZenzUnixSocketClient>(
+      std::move(socket_path),
+      [manager = std::move(manager)](
+          const ZenzUnixSocketClient::CancelCheck& is_cancelled) {
+        return manager->RequestLaunch(is_cancelled);
+      },
+      absl::Seconds(15));
+}
+
+#endif  // __linux__ && !__ANDROID__
+
 }  // namespace
+
+#if defined(__linux__) && !defined(__ANDROID__)
+namespace internal {
+
+std::unique_ptr<ZenzClient> CreateLinuxZenzClientForTest(
+    std::string socket_path, std::string launcher_path) {
+  // This seam is used only by explicit, private-runtime tests. Production
+  // CreateZenzClient never reads a user-supplied executable override.
+  return MakeLinuxZenzClient(
+      std::move(socket_path),
+      std::make_shared<ZenzLinuxScorerLaunchManager>(
+          std::move(launcher_path)));
+}
+
+}  // namespace internal
+#endif  // __linux__ && !__ANDROID__
 
 std::unique_ptr<ZenzClient> CreateZenzClient() {
 #if defined(__APPLE__) && TARGET_OS_OSX
   return std::make_unique<ZenzUnixSocketClient>(
       ::mozc::zenz::GetZenzUnixSocketPath(), &LaunchMacZenzScorer);
+#elif defined(__linux__) && !defined(__ANDROID__)
+  const std::string socket_path = ::mozc::zenz::GetZenzUnixSocketPath();
+  if (socket_path.empty()) {
+    // Invalid XDG_RUNTIME_DIR: fail closed without constructing a manager.
+    return std::make_unique<ZenzUnixSocketClient>(socket_path);
+  }
+  // This fixed product path comes from config.bzl (currently /usr/lib/mozkey).
+  // It cannot be overridden by XDG_RUNTIME_DIR or arbitrary environment vars.
+  // An absent ZenzRuntime fails closed inside the manager, without spawning.
+  static const std::shared_ptr<ZenzLinuxScorerLaunchManager> manager =
+      std::make_shared<ZenzLinuxScorerLaunchManager>(FileUtil::JoinPath({
+          SystemUtil::GetServerDirectory(), kLinuxZenzRuntimeDirectory,
+          kLinuxScorerLauncher,
+      }));
+  return MakeLinuxZenzClient(socket_path, manager);
 #else
   return std::make_unique<ZenzNamedPipeClient>();
 #endif  // __APPLE__ && TARGET_OS_OSX

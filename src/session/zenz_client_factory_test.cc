@@ -21,6 +21,9 @@
 
 #include "session/zenz_live_corrector.h"
 #include "testing/gunit.h"
+#if defined(__linux__) && !defined(__ANDROID__)
+#include "zenz/zenz_unix_socket_path.h"
+#endif
 
 namespace mozc {
 namespace session {
@@ -32,6 +35,10 @@ TEST(ZenzClientFactoryTest, CreatesCurrentPlatformClient) {
 
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX)
   EXPECT_TRUE(client->IsAvailable());
+#elif defined(__linux__) && !defined(__ANDROID__)
+  // IsAvailable checks endpoint path validity, not scorer readiness.
+  EXPECT_EQ(client->IsAvailable(),
+            !::mozc::zenz::GetZenzUnixSocketPath().empty());
 #else
   EXPECT_FALSE(client->IsAvailable());
 #endif

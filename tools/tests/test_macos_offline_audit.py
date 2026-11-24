@@ -92,6 +92,36 @@ class SourceGateTest(unittest.TestCase):
             violations, _ = source_gate.check_source(root)
             self.assertTrue(any("entrypoint contract missing" in v for v in violations))
 
+    def test_linux_scorer_entrypoint_contract(self):
+        valid = """mozc_cc_binary(
+    name = "mozc_zenz_scorer",
+    srcs = select({
+        "@platforms//os:linux": ["main_posix.cc"],
+        "@platforms//os:macos": ["main_posix.cc"],
+        "@platforms//os:windows": ["main.cc", "header.h"],
+    }),
+)
+"""
+        self.assertIsNotNone(
+            source_gate.ENTRYPOINT_CONTRACT.search(valid)
+        )
+
+        wrong_linux = valid.replace(
+            '"@platforms//os:linux": ["main_posix.cc"]',
+            '"@platforms//os:linux": ["main.cc"]',
+        )
+        self.assertIsNone(
+            source_gate.ENTRYPOINT_CONTRACT.search(wrong_linux)
+        )
+
+        wrong_macos = valid.replace(
+            '"@platforms//os:macos": ["main_posix.cc"]',
+            '"@platforms//os:macos": ["main.cc"]',
+        )
+        self.assertIsNone(
+            source_gate.ENTRYPOINT_CONTRACT.search(wrong_macos)
+        )
+
     def test_contract_breaks_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

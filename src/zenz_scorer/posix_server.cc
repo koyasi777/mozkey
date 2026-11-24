@@ -63,6 +63,14 @@ bool SetCloseOnExec(int fd) {
   return flags >= 0 && ::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0;
 }
 
+bool SetNonBlockingAndCloseOnExec(int fd) {
+  if (!SetCloseOnExec(fd)) {
+    return false;
+  }
+  const int flags = ::fcntl(fd, F_GETFL, 0);
+  return flags >= 0 && ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+}
+
 bool DisableSigPipe(int fd) {
 #if defined(SO_NOSIGPIPE)
   const int enabled = 1;
@@ -373,6 +381,20 @@ bool PosixZenzScorerServer::Start(std::string* error) {
     Reset();
     return false;
   }
+  // Snapshot the filesystem identity of the socket we just bound.  A
+  // different socket may later occupy this pathname; Reset() must not unlink
+  // that replacement.  This is an accidental-replacement guard, not a
+  // security boundary against other processes running under the same UID.
+  struct stat bound_socket = {};
+  if (::lstat(socket_path_.c_str(), &bound_socket) != 0 ||
+      !S_ISSOCK(bound_socket.st_mode) ||
+      bound_socket.st_uid != ::geteuid()) {
+    *error = "socket_post_bind_invalid";
+    Reset();
+    return false;
+  }
+  socket_device_ = bound_socket.st_dev;
+  socket_inode_ = bound_socket.st_ino;
   owns_socket_path_ = true;
 
   if (::chmod(socket_path_.c_str(), 0600) != 0) {
@@ -422,7 +444,10 @@ bool PosixZenzScorerServer::ServeOne(int timeout_msec,
     *error = ErrnoTag("socket_accept_failed");
     return false;
   }
-  if (!SetCloseOnExec(client_fd) || !DisableSigPipe(client_fd)) {
+  // poll() deadlines are not enforceable with a blocking send() on an
+  // accepted stream socket when the peer stops reading a large response.
+  if (!SetNonBlockingAndCloseOnExec(client_fd) ||
+      !DisableSigPipe(client_fd)) {
     *error = ErrnoTag("client_configure_failed");
     ::close(client_fd);
     return false;
@@ -484,6 +509,9 @@ bool PosixZenzScorerServer::HandleClient(int client_fd,
     return true;
   }
 
+  // The synchronous backend can monitor peer closure while it waits for
+  // llama-server. A disconnected client must not occupy the serial scorer.
+  request.peer_fd = client_fd;
   PosixZenzResponse response =
       backend_ ? backend_(request)
                : ErrorResponse("backend_unavailable");
@@ -516,9 +544,19 @@ void PosixZenzScorerServer::Reset() {
     listen_fd_ = -1;
   }
   if (owns_socket_path_) {
-    std::string ignored;
-    RemoveOwnedSocket(socket_path_, true, &ignored);
+    struct stat current_socket = {};
+    if (::lstat(socket_path_.c_str(), &current_socket) == 0 &&
+        S_ISSOCK(current_socket.st_mode) &&
+        current_socket.st_uid == ::geteuid() &&
+        current_socket.st_dev == socket_device_ &&
+        current_socket.st_ino == socket_inode_) {
+      // The lstat/unlink pair is not atomic.  Same-UID adversarial races are
+      // outside this guard's guarantee and require a separate threat model.
+      ::unlink(socket_path_.c_str());
+    }
     owns_socket_path_ = false;
+    socket_device_ = 0;
+    socket_inode_ = 0;
   }
   if (lock_fd_ >= 0) {
     ::flock(lock_fd_, LOCK_UN);
