@@ -206,6 +206,23 @@ mozc_cc_test(
     ],
 )
 
+mozc_cc_library(
+    name = "linux_inference_threads",
+    hdrs = ["linux_inference_threads.h"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+mozc_cc_test(
+    name = "linux_inference_threads_test",
+    size = "small",
+    srcs = ["linux_inference_threads_test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":linux_inference_threads",
+        "//testing:gunit_main",
+    ],
+)
+
 mozc_cc_binary(
     name = "mozc_zenz_scorer",
     srcs = select({
@@ -235,6 +252,7 @@ mozc_cc_binary(
     visibility = ["//visibility:public"],
     deps = ["//zenz:wire_protocol"] + select({
         "@platforms//os:linux": [
+            ":linux_inference_threads",
             ":posix_runtime",
             "//zenz:unix_socket_path",
         ],

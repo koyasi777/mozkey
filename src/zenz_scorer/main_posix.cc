@@ -18,6 +18,10 @@
 #include "zenz/zenz_unix_socket_path.h"
 #include "zenz_scorer/posix_runtime.h"
 
+#if defined(__linux__) && !defined(__ANDROID__)
+#include "zenz_scorer/linux_inference_threads.h"
+#endif
+
 namespace {
 
 constexpr int kDefaultContextSize = 256;
@@ -95,7 +99,12 @@ mozc::zenz_scorer::PosixScorerRuntimeOptions LoadRuntimeOptions(
   options.llama_server.model_path =
       JoinPath(JoinPath(executable_directory, "models"), kModelFileName);
   options.llama_server.context_size = kDefaultContextSize;
+#if defined(__linux__) && !defined(__ANDROID__)
+  options.llama_server.threads =
+      mozc::zenz_scorer::GetLinuxInferenceThreads(kDefaultThreads);
+#else
   options.llama_server.threads = kDefaultThreads;
+#endif
   // Mozkey uses one local scorer client. Retaining historical prompt states in
   // llama-server's global RAM cache causes memory growth during continuous IME
   // use. Request-level cache_prompt remains enabled for current-prefix reuse.
