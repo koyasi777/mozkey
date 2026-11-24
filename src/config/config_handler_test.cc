@@ -82,6 +82,7 @@ constexpr uint32_t kExpectedMozkeyDirectCommitKey =
 
 void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_use_live_conversion(true);
+  config->set_show_live_conversion_ruby_window(true);
   config->set_show_candidate_window_on_initial_conversion(true);
   config->set_use_direct_commit(true);
   config->set_direct_commit_key(kExpectedMozkeyDirectCommitKey);
@@ -96,7 +97,7 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_zenz_feedback_min_key_length(7);
   config->set_use_zenz_auto_block_rejected_correction(true);
   config->set_use_zenz_live_correction_right_context(true);
-  config->set_use_realtime_conversion(true);
+  config->set_use_realtime_conversion(false);
 #ifdef _WIN32
   config->set_dim_pending_roman_input(false);
   config->set_pending_roman_dimness_percent(85);
@@ -105,13 +106,22 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_use_custom_preedit_target_underline_color(true);
   config->set_preedit_target_underline_color(0xc1a5ab);
 #endif  // _WIN32
+  // English preset values are product defaults resolved by normalization.
+  // Use the same source of truth when checking SetConfig() round-tripping.
+  const Config english_defaults = ConfigHandler::GetProductDefaultConfig();
+  config->set_enable_english_input_exceptions(
+      english_defaults.enable_english_input_exceptions());
+  config->set_auto_update_english_presets(
+      english_defaults.auto_update_english_presets());
+  config->mutable_english_input_exceptions()->CopyFrom(
+      english_defaults.english_input_exceptions());
 }
 
 void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_TRUE(config.use_live_conversion());
   EXPECT_EQ(config.live_conversion_delay_msec(), 228);
   EXPECT_EQ(config.live_conversion_min_key_length(), 2);
-  EXPECT_FALSE(config.show_live_conversion_ruby_window());
+  EXPECT_TRUE(config.show_live_conversion_ruby_window());
   EXPECT_TRUE(config.show_candidate_window_on_initial_conversion());
 
   EXPECT_TRUE(config.use_direct_commit());
@@ -140,9 +150,10 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.zenz_live_correction_right_context_length(), 6);
 
   EXPECT_EQ(config.history_learning_level(), Config::DEFAULT_HISTORY);
+  EXPECT_FALSE(config.preserve_learning_on_commit_undo());
   EXPECT_TRUE(config.use_history_suggest());
   EXPECT_TRUE(config.use_dictionary_suggest());
-  EXPECT_TRUE(config.use_realtime_conversion());
+  EXPECT_FALSE(config.use_realtime_conversion());
 #ifdef _WIN32
   EXPECT_FALSE(config.dim_pending_roman_input());
   EXPECT_EQ(config.pending_roman_dimness_percent(), 85);
@@ -154,6 +165,26 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.zenz_live_correction_underline_color(), 0xc4dc6c);
 #endif  // _WIN32
   EXPECT_EQ(config.suggestions_size(), 3);
+}
+
+TEST_F(ConfigHandlerTest, PreserveLearningOnCommitUndoRoundTrip) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "preserve_commit_learning.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+  ConfigHandler::Reload();
+
+  Config config = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(config.preserve_learning_on_commit_undo());
+  config.set_preserve_learning_on_commit_undo(true);
+  ConfigHandler::SetConfig(config);
+  EXPECT_TRUE(ConfigHandler::GetCopiedConfig()
+                  .preserve_learning_on_commit_undo());
+  config.set_preserve_learning_on_commit_undo(false);
+  ConfigHandler::SetConfig(config);
+  EXPECT_FALSE(ConfigHandler::GetCopiedConfig()
+                   .preserve_learning_on_commit_undo());
 }
 
 TEST_F(ConfigHandlerTest, SetConfig) {
@@ -793,7 +824,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
 
   Config input;
   input.set_use_live_conversion(false);
-  input.set_show_live_conversion_ruby_window(true);
+  input.set_show_live_conversion_ruby_window(false);
   input.set_show_candidate_window_on_initial_conversion(false);
   input.set_use_direct_commit(false);
   input.set_direct_commit_key(0);
@@ -808,7 +839,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   input.set_zenz_feedback_min_key_length(4);
   input.set_use_zenz_auto_block_rejected_correction(false);
   input.set_use_zenz_live_correction_right_context(false);
-  input.set_use_realtime_conversion(false);
+  input.set_use_realtime_conversion(true);
 #ifdef _WIN32
   // Use values opposite to the product defaults so this test proves that
   // presence, not value equality, protects explicit user choices.
@@ -824,7 +855,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   const Config output = ConfigHandler::GetCopiedConfig();
 
   EXPECT_FALSE(output.use_live_conversion());
-  EXPECT_TRUE(output.show_live_conversion_ruby_window());
+  EXPECT_FALSE(output.show_live_conversion_ruby_window());
   EXPECT_FALSE(output.show_candidate_window_on_initial_conversion());
   EXPECT_FALSE(output.use_direct_commit());
   EXPECT_EQ(output.direct_commit_key(), 0);
@@ -839,7 +870,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_EQ(output.zenz_feedback_min_key_length(), 4);
   EXPECT_FALSE(output.use_zenz_auto_block_rejected_correction());
   EXPECT_FALSE(output.use_zenz_live_correction_right_context());
-  EXPECT_FALSE(output.use_realtime_conversion());
+  EXPECT_TRUE(output.use_realtime_conversion());
 #ifdef _WIN32
   EXPECT_TRUE(output.dim_pending_roman_input());
   EXPECT_EQ(output.pending_roman_dimness_percent(), 40);
@@ -1160,6 +1191,7 @@ TEST_F(ConfigHandlerTest, GetDefaultConfig) {
 #endif  // __APPLE__ || OS_CHROMEOS
 
   EXPECT_FALSE(output.has_use_live_conversion());
+  EXPECT_FALSE(output.has_show_live_conversion_ruby_window());
   EXPECT_FALSE(output.has_show_candidate_window_on_initial_conversion());
   EXPECT_FALSE(output.has_use_direct_commit());
   EXPECT_FALSE(output.has_direct_commit_key());
@@ -1347,6 +1379,164 @@ TEST_F(ConfigHandlerTest, GetSharedConfig) {
 
   auto config4 = ConfigHandler::GetSharedConfig();
   EXPECT_EQ(config3, config4);
+}
+
+// Missing is not an explicit user choice: old profiles enable the feature on
+// upgrade. A saved false remains false; neither normalization nor reload may
+// rewrite the original config file merely to resolve this default.
+TEST_F(ConfigHandlerTest, EnglishFeatureUpgradeDefaultAndExplicitChoices) {
+  for (const int state : {-1, 0, 1}) {
+    TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+    const std::string file = FileUtil::JoinPath(
+        temp_dir.path(), "english_feature_upgrade.db");
+    Config legacy;
+    if (state >= 0) {
+      legacy.set_enable_english_input_exceptions(state == 1);
+    }
+    const std::string serialized = legacy.SerializeAsString();
+    {
+      std::ofstream ofs(file, std::ios::binary | std::ios::trunc);
+      ASSERT_TRUE(ofs);
+      ofs.write(serialized.data(), serialized.size());
+      ASSERT_TRUE(ofs);
+    }
+    ConfigHandler::SetConfigFileNameForTesting(file);
+    const Config loaded = ConfigHandler::GetCopiedConfig();
+    EXPECT_EQ(loaded.enable_english_input_exceptions(), state != 0);
+    EXPECT_TRUE(loaded.has_enable_english_input_exceptions());
+    ConfigHandler::Reload();
+    EXPECT_EQ(ConfigHandler::GetCopiedConfig()
+                  .enable_english_input_exceptions(), state != 0);
+    std::ifstream ifs(file, std::ios::binary);
+    ASSERT_TRUE(ifs);
+    Config persisted;
+    ASSERT_TRUE(persisted.ParseFromIstream(&ifs));
+    EXPECT_EQ(persisted.has_enable_english_input_exceptions(), state >= 0);
+    if (state >= 0) {
+      EXPECT_EQ(persisted.enable_english_input_exceptions(), state == 1);
+    }
+  }
+}
+
+TEST_F(ConfigHandlerTest, EnglishPresetsDefaultOnAndCatalogIsConservative) {
+  const Config defaults = ConfigHandler::GetProductDefaultConfig();
+  EXPECT_TRUE(defaults.enable_english_input_exceptions());
+  EXPECT_TRUE(defaults.auto_update_english_presets());
+  const auto& catalog = ConfigHandler::RecommendedEnglishInputExceptions();
+  ASSERT_FALSE(catalog.empty());
+  ASSERT_EQ(defaults.english_input_exceptions_size(), catalog.size());
+  absl::flat_hash_set<std::string> ids;
+  int automatic = 0;
+  int candidate_only = 0;
+  for (const auto& row : defaults.english_input_exceptions()) {
+    ASSERT_TRUE(ids.insert(row.system_preset_id()).second);
+    EXPECT_EQ(row.input(), row.system_preset_id());
+    EXPECT_TRUE(row.enabled());
+    EXPECT_GE(row.input().size(), 2);
+    EXPECT_LE(row.input().size(), 64);
+    EXPECT_FALSE(row.preferred().empty());
+    EXPECT_LE(row.preferred().size(), 128);
+    for (const unsigned char c : row.input()) {
+      EXPECT_GE(c, 'a');
+      EXPECT_LE(c, 'z');
+    }
+    for (const unsigned char c : row.preferred()) {
+      EXPECT_GE(c, 0x21);
+      EXPECT_LE(c, 0x7e);
+    }
+    if (row.behavior() == Config::EnglishInputException::AUTO_ASCII) {
+      ++automatic;
+    } else {
+      EXPECT_EQ(row.behavior(),
+                Config::EnglishInputException::CANDIDATE_ONLY);
+      ++candidate_only;
+    }
+  }
+  EXPECT_EQ(automatic + candidate_only,
+            defaults.english_input_exceptions_size());
+}
+
+TEST_F(ConfigHandlerTest, YouTubePresetUsesAutomaticAsciiMode) {
+  const Config defaults = ConfigHandler::GetProductDefaultConfig();
+  int youtube_count = 0;
+  for (const auto& entry : defaults.english_input_exceptions()) {
+    if (entry.input() != "youtube") {
+      continue;
+    }
+    ++youtube_count;
+    EXPECT_EQ(entry.preferred(), "YouTube");
+    EXPECT_TRUE(entry.enabled());
+    EXPECT_EQ(entry.system_preset_id(), "youtube");
+    EXPECT_EQ(entry.behavior(), Config::EnglishInputException::AUTO_ASCII);
+  }
+  EXPECT_EQ(youtube_count, 1);
+}
+
+TEST_F(ConfigHandlerTest, EnglishPresetsRespectCustomEditsAndTombstones) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string file =
+      FileUtil::JoinPath(temp_dir.path(), "english_presets_custom.db");
+  ConfigHandler::SetConfigFileNameForTesting(file);
+  Config config = ConfigHandler::GetProductDefaultConfig();
+  ASSERT_GT(config.english_input_exceptions_size(), 0);
+  const std::string key = config.english_input_exceptions(0).input();
+  auto* row = config.mutable_english_input_exceptions(0);
+  row->set_preferred("CustomPreferred");
+  row->clear_system_preset_id();
+  config.add_suppressed_english_preset_ids(key);
+  const int expected_count = config.english_input_exceptions_size();
+  ConfigHandler::SetConfig(config);
+  const Config first = ConfigHandler::GetCopiedConfig();
+  ASSERT_EQ(first.english_input_exceptions_size(), expected_count);
+  bool found = false;
+  for (const auto& entry : first.english_input_exceptions()) {
+    if (entry.input() == key) {
+      EXPECT_EQ(entry.preferred(), "CustomPreferred");
+      EXPECT_TRUE(entry.system_preset_id().empty());
+      found = true;
+    }
+  }
+  EXPECT_TRUE(found);
+  ConfigHandler::Reload();
+  const Config restored = ConfigHandler::GetCopiedConfig();
+  EXPECT_EQ(restored.english_input_exceptions_size(), expected_count);
+  bool still_custom = false;
+  for (const auto& entry : restored.english_input_exceptions()) {
+    if (entry.input() == key && entry.preferred() == "CustomPreferred" &&
+        entry.system_preset_id().empty()) {
+      still_custom = true;
+    }
+  }
+  EXPECT_TRUE(still_custom);
+}
+
+TEST_F(ConfigHandlerTest, EnglishPresetDeletionAndAutoUpdateOff) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string file =
+      FileUtil::JoinPath(temp_dir.path(), "english_presets_delete.db");
+  ConfigHandler::SetConfigFileNameForTesting(file);
+  Config config = ConfigHandler::GetProductDefaultConfig();
+  const int baseline = config.english_input_exceptions_size();
+  ASSERT_GT(baseline, 0);
+  const std::string removed = config.english_input_exceptions(0).input();
+  config.mutable_english_input_exceptions()->DeleteSubrange(0, 1);
+  config.add_suppressed_english_preset_ids(removed);
+  ConfigHandler::SetConfig(config);
+  ConfigHandler::Reload();
+  Config restored = ConfigHandler::GetCopiedConfig();
+  EXPECT_EQ(restored.english_input_exceptions_size(), baseline - 1);
+  for (const auto& row : restored.english_input_exceptions()) {
+    EXPECT_NE(row.input(), removed);
+  }
+  restored.set_auto_update_english_presets(false);
+  restored.clear_english_input_exceptions();
+  ConfigHandler::SetConfig(restored);
+  EXPECT_EQ(ConfigHandler::GetCopiedConfig().english_input_exceptions_size(), 0);
+  restored = ConfigHandler::GetCopiedConfig();
+  restored.set_auto_update_english_presets(true);
+  ConfigHandler::SetConfig(restored);
+  EXPECT_EQ(ConfigHandler::GetCopiedConfig().english_input_exceptions_size(),
+            baseline - 1);
 }
 
 }  // namespace

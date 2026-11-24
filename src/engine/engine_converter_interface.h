@@ -73,6 +73,10 @@ struct ConversionPreferences {
   // Keep a postal-code numeric literal TOP1 during live conversion, as well
   // as explicit conversion in live mode; leave the ZIP dictionary enabled.
   bool prefer_zipcode_literal_top = false;
+
+  // Live conversion must not select an exact CANDIDATE_ONLY English spelling.
+  // Ordinary explicit conversion and suggestion do not set this option.
+  bool prevent_candidate_only_english_auto_selection = false;
 };
 
 // Class handling ConverterInterface with a session state.  This class
@@ -376,6 +380,27 @@ class EngineConverterInterface {
     return false;
   }
 
+  // Check the exact visible regular candidate before persisting a pin. IDs
+  // are ephemeral and may also refer to meta or command candidates.
+  virtual bool CanPinCandidate(int candidate_id, absl::string_view reading,
+                               absl::string_view value) const {
+    (void)candidate_id;
+    (void)reading;
+    (void)value;
+    return false;
+  }
+
+  // Reorder the verified candidate without re-running conversion or Zenz.
+  // Lightweight engines may keep the default no-op behavior.
+  virtual bool PromotePinnedCandidate(int candidate_id,
+                                      absl::string_view reading,
+                                      absl::string_view value) {
+    (void)candidate_id;
+    (void)reading;
+    (void)value;
+    return false;
+  }
+
   // Retrieves proper-noun lexical spans of the currently selected normal
   // Mozc conversion, with absolute UTF-8 byte offsets in the full reading
   // and selected surface.  False means no trustworthy snapshot is available.
@@ -395,6 +420,10 @@ class EngineConverterInterface {
 
   // Revert the last "Commit" operation
   virtual void Revert() = 0;
+
+  // Keep learning from the last commit and consume its undo metadata only.
+  // Converters without reversible learning have nothing to finalize.
+  virtual void ConfirmLastCommitLearning() {}
 
   // Delete candidate from user input history.
   // Try to delete the current selected candidate if |id| is not specified.

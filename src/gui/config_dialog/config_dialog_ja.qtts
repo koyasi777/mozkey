@@ -5,6 +5,16 @@
     <name>ConfigDialog</name>
     <message>
         <location filename="config_dialog.ui" line="0"/>
+        <source>Learning deletion after immediate cancellation of a committed conversion</source>
+        <translation>変換確定直後の取り消しによる学習削除</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>When Revert, Undo, or an equivalent cancellation occurs immediately after a conversion is confirmed, delete the Mozc and Zenz learning recorded by that confirmation. The standard Backspace key invokes Revert; custom key assignments are respected. CancelLastLearning always cancels the most recent reversible learning, regardless of this setting. Deleting text and restoring preedit are unaffected. On by default.</source>
+        <translation>有効にすると、変換確定直後に Revert（標準キー設定では Backspace）や Undo などの取り消し操作を行った場合、その確定で記録した Mozc・Zenz の学習を削除します。カスタムキー設定では割り当てた操作に従います。「直前の学習だけを取り消す」はこの設定に関係なく、取り消し可能な直前の学習を削除します。文字の削除や未確定状態への復元動作は変わりません。初期値はオンです。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
         <source>Zenz による絵文字変換を抑制する</source>
         <translation>Zenz による絵文字変換を抑制する</translation>
     </message>
@@ -958,6 +968,178 @@
 <context>
     <name>mozc::gui::ConfigDialog</name>
     <message>
+        <source>Edit...</source>
+        <translation>編集…</translation>
+    </message>
+    <message>
+        <source>Standard</source>
+        <translation>標準</translation>
+    </message>
+    <message>
+        <source>Standard Mozkey rules</source>
+        <translation>Mozkey標準の入力規則</translation>
+    </message>
+    <message>
+        <source>Custom rules: not updated automatically</source>
+        <translation>カスタム規則：自動更新なし</translation>
+    </message>
+    <message>
+        <source>Personal preset: remains unchanged when Mozkey is updated</source>
+        <translation>個人プリセット：Mozkey更新時も維持</translation>
+    </message>
+    <message>
+        <source>Bundled preset: follows Mozkey updates unless edited</source>
+        <translation>内蔵プリセット：編集するまでMozkeyの更新に追従</translation>
+    </message>
+    <message>
+        <source>Current: %1 — %2</source>
+        <translation>現在：%1 — %2</translation>
+    </message>
+    <message>
+        <source>Edit rules...</source>
+        <translation>規則を編集…</translation>
+    </message>
+    <message>
+        <source>Add preset...</source>
+        <translation>プリセットを追加…</translation>
+    </message>
+    <message>
+        <source>Manage...</source>
+        <translation>管理…</translation>
+    </message>
+    <message>
+        <source>Licenses...</source>
+        <translation>出典とライセンス…</translation>
+    </message>
+    <message>
+        <source>Choose from bundled layouts or save your own romaji rules.</source>
+        <translation>内蔵配列を選ぶことも、独自のローマ字テーブルを登録することもできます。</translation>
+    </message>
+    <message>
+        <source>Replace your custom romaji rules?</source>
+        <translation>現在のカスタム規則を置き換えますか？</translation>
+    </message>
+    <message>
+        <source>Preset is unavailable.</source>
+        <translation>プリセットが見つかりません。</translation>
+    </message>
+    <message>
+        <source>The file is empty, too large, or not valid UTF-8.</source>
+        <translation>ファイルが空か、サイズ超過、またはUTF-8として不正です。</translation>
+    </message>
+    <message>
+        <source>Invalid or duplicate romaji table entry on line %1.</source>
+        <translation>%1行目に不正なローマ字入力規則があります。</translation>
+    </message>
+    <message>
+        <source>This table has duplicate input keys. Keep these rules as-is?</source>
+        <translation>入力キーが重複しています。このままの規則で登録しますか？</translation>
+    </message>
+    <message>
+        <source>Too many romaji table entries.</source>
+        <translation>ローマ字テーブルの規則数が多すぎます。</translation>
+    </message>
+    <message>
+        <source>The romaji table has no usable entries.</source>
+        <translation>使用可能な入力規則がありません。</translation>
+    </message>
+    <message>
+        <source>Preset name must be 1–64 characters.</source>
+        <translation>プリセット名は1～64文字で入力してください。</translation>
+    </message>
+    <message>
+        <source>Too many personal presets.</source>
+        <translation>個人プリセットの登録数が上限を超えています。</translation>
+    </message>
+    <message>
+        <source>Preset name already exists.</source>
+        <translation>同じ名前のプリセットが存在します。</translation>
+    </message>
+    <message>
+        <source>Personal preset storage limit exceeded.</source>
+        <translation>個人プリセットの保存容量が上限を超えました。</translation>
+    </message>
+    <message>
+        <source>Import from file...</source>
+        <translation>ファイルから追加…</translation>
+    </message>
+    <message>
+        <source>Save current rules as preset...</source>
+        <translation>現在の規則から追加…</translation>
+    </message>
+    <message>
+        <source>Import romaji table</source>
+        <translation>ローマ字テーブルを読み込む</translation>
+    </message>
+    <message>
+        <source>Romaji tables (*.txt *.tsv);;All files (*)</source>
+        <translation>ローマ字テーブル (*.txt *.tsv);;すべてのファイル (*)</translation>
+    </message>
+    <message>
+        <source>Cannot read romaji table file.</source>
+        <translation>ローマ字テーブルを読み込めません。</translation>
+    </message>
+    <message>
+        <source>Select or edit a table first.</source>
+        <translation>先にローマ字テーブルを選択または編集してください。</translation>
+    </message>
+    <message>
+        <source>New preset</source>
+        <translation>新しいプリセット</translation>
+    </message>
+    <message>
+        <source>Preset name:</source>
+        <translation>プリセット名：</translation>
+    </message>
+    <message>
+        <source>Personal presets</source>
+        <translation>個人プリセット</translation>
+    </message>
+    <message>
+        <source>Choose preset:</source>
+        <translation>対象プリセット：</translation>
+    </message>
+    <message>
+        <source>Rename...</source>
+        <translation>名前を変更…</translation>
+    </message>
+    <message>
+        <source>Replace saved rules with current rules...</source>
+        <translation>保存した規則を現在の内容で更新…</translation>
+    </message>
+    <message>
+        <source>Export...</source>
+        <translation>エクスポート…</translation>
+    </message>
+    <message>
+        <source>Delete...</source>
+        <translation>削除…</translation>
+    </message>
+    <message>
+        <source>Rename preset</source>
+        <translation>プリセット名の変更</translation>
+    </message>
+    <message>
+        <source>New name:</source>
+        <translation>新しい名前：</translation>
+    </message>
+    <message>
+        <source>Replace the selected saved preset with the current rules?</source>
+        <translation>選択した保存済みプリセットを現在の規則で置き換えますか？</translation>
+    </message>
+    <message>
+        <source>Export preset</source>
+        <translation>プリセットを書き出す</translation>
+    </message>
+    <message>
+        <source>Could not export preset.</source>
+        <translation>プリセットを書き出せません。</translation>
+    </message>
+    <message>
+        <source>Delete this personal preset? Current rules will be retained.</source>
+        <translation>この個人プリセットを削除しますか？現在の入力規則は維持されます。</translation>
+    </message>
+    <message>
         <location filename="config_dialog.cc" line="133"/>
         <source>Kotoeri</source>
         <translation>ことえり</translation>
@@ -1816,6 +1998,386 @@ These assignments can match the same physical key input. Choose non-overlapping 
 <context>
     <name>mozc::gui::RomanTableEditorDialog</name>
     <message>
+        <source>Different rules share an input key. Save anyway?</source>
+        <translation>同じ入力キーに異なる規則があります。このまま保存しますか？</translation>
+    </message>
+    <message>
+        <source>Search:</source>
+        <translation>検索：</translation>
+    </message>
+    <message>
+        <source>Find an input key or output...</source>
+        <translation>入力キーまたは出力を検索…</translation>
+    </message>
+    <message>
+        <source>Input / Output</source>
+        <translation>入力・出力</translation>
+    </message>
+    <message>
+        <source>Input only</source>
+        <translation>入力のみ</translation>
+    </message>
+    <message>
+        <source>Output only</source>
+        <translation>出力のみ</translation>
+    </message>
+    <message>
+        <source>Previous</source>
+        <translation>前へ</translation>
+    </message>
+    <message>
+        <source>Next</source>
+        <translation>次へ</translation>
+    </message>
+    <message>
+        <source>Search does not reorder rules</source>
+        <translation>検索では規則の順序を変更しません</translation>
+    </message>
+    <message>
+        <source>No matches</source>
+        <translation>該当なし</translation>
+    </message>
+    <message>
+        <source>%1 matches</source>
+        <translation>%1件一致</translation>
+    </message>
+    <message>
+        <source>Match %1 of %2</source>
+        <translation>%2件中%1件目</translation>
+    </message>
+    <message>
+        <source>Save as new preset...</source>
+        <translation>名前を付けて新規保存…</translation>
+    </message>
+    <message>
+        <source>Overwrite preset...</source>
+        <translation>上書き保存…</translation>
+    </message>
+    <message>
+        <source>Overwrite the selected personal preset with the rules currently displayed in the editor.</source>
+        <translation>現在選択しているユーザープリセットを、編集中の規則で上書きします。</translation>
+    </message>
+    <message>
+        <source> (changes not saved)</source>
+        <translation>（変更は未保存）</translation>
+    </message>
+    <message>
+        <source>Changes not saved to this preset. Save it here, or OK will use the edited rules as Custom without changing the saved preset.</source>
+        <translation>変更は未保存です。上書き保存しなければ［OK］で規則はカスタムとして適用され、登録済みプリセットは変更されません。</translation>
+    </message>
+    <message>
+        <source>Overwrite the personal preset '%1' with these rules?</source>
+        <translation>「%1」を現在の規則で上書き保存しますか？</translation>
+    </message>
+    <message>
+        <source>Unsaved edits to the personal preset will be discarded. Switch input method?</source>
+        <translation>このユーザープリセットへの未保存の変更は破棄されます。入力方式を切り替えますか？</translation>
+    </message>
+    <message>
+        <source>Select a saved preset to rename, export or delete it. Built-in presets cannot be changed here.</source>
+        <translation>登録済みプリセットを選んで名前変更・書き出し・削除できます。内蔵プリセットは変更できません。</translation>
+    </message>
+    <message>
+        <source>Manage personal presets</source>
+        <translation>ユーザープリセットの管理</translation>
+    </message>
+    <message>
+        <source>Select a saved preset to rename, replace, export or delete it. Built-in presets cannot be changed here.</source>
+        <translation>保存したプリセットを選択して操作します。内蔵プリセットはここでは変更できません。</translation>
+    </message>
+    <message>
+        <source>Add preset from file...</source>
+        <translation>ファイルから新規登録…</translation>
+    </message>
+    <message>
+        <source>Add preset from file</source>
+        <translation>ファイルから新規登録</translation>
+    </message>
+    <message>
+        <source>Replace with current rules...</source>
+        <translation>現在の規則で上書き…</translation>
+    </message>
+    <message>
+        <source>Export preset...</source>
+        <translation>選択したプリセットを書き出し…</translation>
+    </message>
+    <message>
+        <source>Save changes</source>
+        <translation>変更を保存</translation>
+    </message>
+    <message>
+        <source>Saved presets: %1 / %2</source>
+        <translation>登録済み：%1 / %2</translation>
+    </message>
+    <message>
+        <source>%1 — %2 rules</source>
+        <translation>%1 — %2規則</translation>
+    </message>
+    <message>
+        <source> (selected)</source>
+        <translation>（使用中）</translation>
+    </message>
+    <message>
+        <source>Replace saved preset '%1' with the rules currently displayed in the editor?</source>
+        <translation>保存済みの「%1」を編集画面の現在の規則で上書きしますか？</translation>
+    </message>
+    <message>
+        <source>Delete the saved preset '%1'? The current editor rules will not be deleted.</source>
+        <translation>保存済みの「%1」を削除しますか？現在編集中の規則は削除しません。</translation>
+    </message>
+    <message>
+        <source>Input method:</source>
+        <translation>入力方式：</translation>
+    </message>
+    <message>
+        <source>Import file as preset...</source>
+        <translation>ファイルをプリセットとして登録…</translation>
+    </message>
+    <message>
+        <source>Import to current table...</source>
+        <translation>現在のテーブルへインポート…</translation>
+    </message>
+    <message>
+        <source>Export current table...</source>
+        <translation>現在のテーブルをエクスポート…</translation>
+    </message>
+    <message>
+        <source>Replace the current romaji rules?</source>
+        <translation>現在のローマ字規則を置き換えますか？</translation>
+    </message>
+    <message>
+        <source>Preset is unavailable.</source>
+        <translation>プリセットを読み込めません。</translation>
+    </message>
+    <message>
+        <source>Romaji table rules</source>
+        <translation>ローマ字テーブルの規則</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>キャンセル</translation>
+    </message>
+    <message>
+        <source>Partial match</source>
+        <translation>途中一致表示</translation>
+    </message>
+    <message>
+        <source>Double-click a cell to edit its rule.</source>
+        <translation>セルをダブルクリックして入力規則を編集します。</translation>
+    </message>
+    <message>
+        <source>Show a candidate before all input is completed.</source>
+        <translation>入力が完了する前でも候補を表示します。</translation>
+    </message>
+    <message>
+        <source>Save as preset...</source>
+        <translation>名前を付けて保存…</translation>
+    </message>
+    <message>
+        <source>Import preset...</source>
+        <translation>ファイルから追加…</translation>
+    </message>
+    <message>
+        <source>Manage presets...</source>
+        <translation>プリセットを管理…</translation>
+    </message>
+    <message>
+        <source>Origins and licenses...</source>
+        <translation>出典とライセンス…</translation>
+    </message>
+    <message>
+        <source>Standard</source>
+        <translation>標準</translation>
+    </message>
+    <message>
+        <source>Uses the Mozkey standard rules.</source>
+        <translation>Mozkey標準の規則を使用しています。</translation>
+    </message>
+    <message>
+        <source>Custom</source>
+        <translation>カスタム</translation>
+    </message>
+    <message>
+        <source>Personal edits are kept; Mozkey updates do not replace them.</source>
+        <translation>独自編集した規則は保持され、Mozkey更新時にも置き換わりません。</translation>
+    </message>
+    <message>
+        <source>Personal preset</source>
+        <translation>ユーザープリセット</translation>
+    </message>
+    <message>
+        <source>Saved by you; unchanged by Mozkey updates.</source>
+        <translation>ユーザー保存版：Mozkey更新時も規則を維持します。</translation>
+    </message>
+    <message>
+        <source>Follows bundled updates until you customize the rules.</source>
+        <translation>内蔵プリセット：規則を編集するまではMozkey更新に追従します。</translation>
+    </message>
+    <message>
+        <source>Selected: %1</source>
+        <translation>現在の方式：%1</translation>
+    </message>
+    <message>
+        <source>Invalid preset table data.</source>
+        <translation>規則データが空、サイズ超過、またはUTF-8として不正です。</translation>
+    </message>
+    <message>
+        <source>Invalid preset rule on line %1.</source>
+        <translation>%1行目の入力規則が不正です。</translation>
+    </message>
+    <message>
+        <source>Too many preset rules.</source>
+        <translation>入力規則が多すぎます。</translation>
+    </message>
+    <message>
+        <source>Preset table has no rules.</source>
+        <translation>入力規則がありません。</translation>
+    </message>
+    <message>
+        <source>Duplicate input keys found. Save anyway?</source>
+        <translation>入力キーが重複しています。このまま保存しますか？</translation>
+    </message>
+    <message>
+        <source>Preset name must have 1 to 64 characters.</source>
+        <translation>プリセット名は1～64文字で入力してください。</translation>
+    </message>
+    <message>
+        <source>Preset limit reached.</source>
+        <translation>プリセットの登録上限に達しています。</translation>
+    </message>
+    <message>
+        <source>Preset name already exists.</source>
+        <translation>同名のプリセットが既にあります。</translation>
+    </message>
+    <message>
+        <source>Preset storage limit reached.</source>
+        <translation>プリセットの保存容量上限に達しています。</translation>
+    </message>
+    <message>
+        <source>Could not load preset.</source>
+        <translation>プリセットを読み込めませんでした。</translation>
+    </message>
+    <message>
+        <source>Save as preset</source>
+        <translation>プリセットとして保存</translation>
+    </message>
+    <message>
+        <source>Preset name:</source>
+        <translation>プリセット名：</translation>
+    </message>
+    <message>
+        <source>Import preset file</source>
+        <translation>プリセットファイルを読み込む</translation>
+    </message>
+    <message>
+        <source>Romaji tables (*.txt *.tsv);;All files (*)</source>
+        <translation>ローマ字テーブル (*.txt *.tsv);;すべてのファイル (*)</translation>
+    </message>
+    <message>
+        <source>Cannot read preset file.</source>
+        <translation>プリセットファイルを読み込めません。</translation>
+    </message>
+    <message>
+        <source>Personal presets</source>
+        <translation>ユーザープリセット</translation>
+    </message>
+    <message>
+        <source>Choose preset:</source>
+        <translation>対象のプリセット：</translation>
+    </message>
+    <message>
+        <source>Rename...</source>
+        <translation>名前を変更…</translation>
+    </message>
+    <message>
+        <source>Save current rules over preset...</source>
+        <translation>現在の規則で上書き…</translation>
+    </message>
+    <message>
+        <source>Export...</source>
+        <translation>エクスポート…</translation>
+    </message>
+    <message>
+        <source>Delete...</source>
+        <translation>削除…</translation>
+    </message>
+    <message>
+        <source>Rename preset</source>
+        <translation>プリセット名の変更</translation>
+    </message>
+    <message>
+        <source>New name:</source>
+        <translation>新しい名前：</translation>
+    </message>
+    <message>
+        <source>Overwrite the selected personal preset?</source>
+        <translation>選択したプリセットを上書きしますか？</translation>
+    </message>
+    <message>
+        <source>Export preset</source>
+        <translation>プリセットを書き出す</translation>
+    </message>
+    <message>
+        <source>Could not export preset.</source>
+        <translation>書き出しに失敗しました。</translation>
+    </message>
+    <message>
+        <source>Delete this personal preset?</source>
+        <translation>この個人プリセットを削除しますか？</translation>
+    </message>
+    <message>
+        <source>Preset origins and licenses...</source>
+        <translation>プリセットの出典とライセンス…</translation>
+    </message>
+    <message>
+        <source>Preset origins and licenses</source>
+        <translation>プリセットの出典とライセンス</translation>
+    </message>
+    <message>
+        <source>These presets include their original notices. Changes to a selected preset follow Mozkey updates unless you edit the table.</source>
+        <translation>各プリセットの出典とライセンスを確認できます。プリセットを編集しない限り、Mozkeyの更新に合わせて定義も更新されます。</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>閉じる</translation>
+    </message>
+    <message>
+        <source>Show details</source>
+        <translation>詳細を表示</translation>
+    </message>
+    <message>
+        <source>Hide details</source>
+        <translation>詳細を隠す</translation>
+    </message>
+    <message>
+        <source>Presets</source>
+        <translation>プリセット</translation>
+    </message>
+    <message>
+        <source>Could not open romaji preset: %1</source>
+        <translation>ローマ字プリセットを開けませんでした: %1</translation>
+    </message>
+    <message>
+        <source>Could not load romaji preset: %1</source>
+        <translation>ローマ字プリセットを読み込めませんでした: %1</translation>
+    </message>
+    <message>
+        <source>Preset licenses...</source>
+        <translation>プリセットのライセンス情報...</translation>
+    </message>
+    <message>
+        <source>Could not open preset license.</source>
+        <translation>プリセットのライセンス情報を開けませんでした。</translation>
+    </message>
+    <message>
+        <source>Preset licenses</source>
+        <translation>プリセットのライセンス</translation>
+    </message>
+    <message>
+        <source>The bundled romaji presets are distributed under the MIT License. Open Details to read the full notices.</source>
+        <translation>同梱するローマ字プリセットはMITライセンスで配布されています。「詳細を表示」から各ライセンスの全文を確認できます。</translation>
+    </message>
+    <message>
         <location filename="roman_table_editor.cc" line="36"/>
         <source>New entry</source>
         <translation>新しいエントリー</translation>
@@ -1898,5 +2460,30 @@ These assignments can match the same physical key input. Choose non-overlapping 
         <source>Do you want to overwrite the current roman table?</source>
         <translation>現在のローマ字テーブルを上書きしますか？</translation>
     </message>
-</context>
+
+    <message>
+      <source>Rule on row %1 must have an input and either an output or next input.</source>
+      <translation>規則の%1行目が未完成です。入力キーと、出力または次の入力を指定してください。</translation>
+    </message>
+    <message>
+      <source>Invalid roman table rule on line %1. The table was not changed.</source>
+      <translation>%1行目の規則が不正です。現在のテーブルは変更していません。</translation>
+    </message>
+    <message>
+      <source>Roman table has no valid rules. The table was not changed.</source>
+      <translation>有効な規則がありません。現在のテーブルは変更していません。</translation>
+    </message>
+    <message>
+      <source>Could not read roman table file.</source>
+      <translation>ローマ字テーブルファイルを読み取れませんでした。</translation>
+    </message>
+    <message>
+      <source>Import file is too large.</source>
+      <translation>インポートするファイルが大きすぎます。</translation>
+    </message>
+    <message>
+      <source>Invalid roman table file encoding.</source>
+      <translation>ローマ字テーブルの文字コードが不正です。</translation>
+    </message>
+  </context>
 </TS>

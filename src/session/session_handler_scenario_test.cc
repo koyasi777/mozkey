@@ -72,6 +72,8 @@ void SetLegacyInputDefaultsForScenarioTest() {
   config.set_use_zenz_live_correction(false);
   config.set_use_zenz_feedback_learning(false);
   config.set_use_realtime_conversion(true);
+  // Legacy golden scenarios should not auto-switch on new English presets.
+  config.set_enable_english_input_exceptions(false);
 
   config::ConfigHandler::SetConfig(config);
 }

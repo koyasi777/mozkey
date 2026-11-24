@@ -254,6 +254,10 @@ std::wstring GetDisplayStringByColumn(
 
   switch (column_type) {
     case COLUMN_SHORTCUT:
+      // A durable user pin uses the existing shortcut/auxiliary column.
+      // No extra column or row height is introduced. Candidate selection
+      // shortcut bindings themselves are unchanged.
+      if (candidate.pinned()) return L"固";
       if (candidate.has_annotation()) {
         const commands::Annotation& annotation = candidate.annotation();
         if (annotation.has_shortcut()) {
@@ -322,6 +326,218 @@ void FillSolidRect(HDC dc, const RECT* rect, COLORREF color) {
 // ------------------------------------------------------------------------
 // CandidateWindow
 // ------------------------------------------------------------------------
+
+// An IME cannot take foreground focus from the application receiving text.
+// TrackPopupMenuEx on a NOACTIVATE candidate surface can leave a detached,
+// unresponsive menu. This popup is a nonactivating owned window with an
+// ordinary message loop; its owner verifies the selected candidate again.
+class PinPopupWindow final
+    : public ATL::CWindowImpl<
+          PinPopupWindow, ATL::CWindow,
+          ATL::CWinTraits<WS_POPUP,
+                          WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST>> {
+ public:
+  DECLARE_WND_CLASS_EX(L"MozkeyPinPopupWindow", CS_DBLCLKS, COLOR_MENU)
+
+  BEGIN_MSG_MAP(PinPopupWindow)
+  MESSAGE_HANDLER(WM_MOUSEACTIVATE, OnMouseActivate)
+  MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
+  MESSAGE_HANDLER(WM_MOUSELEAVE, OnMouseLeave)
+  MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBackground)
+  MESSAGE_HANDLER(WM_LBUTTONUP, OnLButtonUp)
+  MESSAGE_HANDLER(WM_PAINT, OnPaint)
+  MESSAGE_HANDLER(WM_TIMER, OnTimer)
+  END_MSG_MAP()
+
+  ~PinPopupWindow() {
+    if (m_hWnd != nullptr && ::IsWindow(m_hWnd)) {
+      DestroyWindow();
+    }
+  }
+
+  bool Open(HWND owner, const POINT& at, std::wstring label) {
+    owner_ = owner;
+    label_ = std::move(label);
+    if (owner == nullptr || !::IsWindow(owner)) return false;
+
+    dpi_ = ::GetDpiForWindow(owner);
+    if (dpi_ == 0) dpi_ = 96;
+    const auto dip = [this](int v) { return ::MulDiv(v, dpi_, 96); };
+    int width = dip(158);
+    const int height = dip(38);
+
+    if (HDC dc = ::GetDC(nullptr)) {
+      HFONT font = ::CreateFontW(-dip(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
+                                FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+      HGDIOBJ old_font = ::SelectObject(
+          dc, font != nullptr ? static_cast<HGDIOBJ>(font)
+                              : ::GetStockObject(DEFAULT_GUI_FONT));
+      SIZE text_size = {};
+      if (::GetTextExtentPoint32W(dc, label_.c_str(),
+                                  static_cast<int>(label_.size()),
+                                  &text_size)) {
+        width = std::max(width, static_cast<int>(text_size.cx) + dip(64));
+      }
+      ::SelectObject(dc, old_font);
+      if (font != nullptr) ::DeleteObject(font);
+      ::ReleaseDC(nullptr, dc);
+    }
+
+    int left = at.x;
+    int top = at.y;
+    MONITORINFO monitor = {.cbSize = sizeof(MONITORINFO)};
+    if (::GetMonitorInfoW(::MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST),
+                          &monitor)) {
+      const RECT& area = monitor.rcWork;
+      left = std::clamp(left, static_cast<int>(area.left),
+                        std::max(static_cast<int>(area.left),
+                                 static_cast<int>(area.right) - width));
+      top = std::clamp(top, static_cast<int>(area.top),
+                       std::max(static_cast<int>(area.top),
+                                static_cast<int>(area.bottom) - height));
+    }
+    RECT rect = {left, top, left + width, top + height};
+    if (Create(owner, rect, nullptr, WS_POPUP,
+               WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST) == nullptr) {
+      return false;
+    }
+    HRGN rounded = ::CreateRoundRectRgn(0, 0, width + 1, height + 1,
+                                       dip(12), dip(12));
+    if (rounded != nullptr && !::SetWindowRgn(m_hWnd, rounded, FALSE)) {
+      ::DeleteObject(rounded);
+    }
+    ::SetTimer(m_hWnd, 1, 60, nullptr);
+    ::ShowWindow(m_hWnd, SW_SHOWNOACTIVATE);
+    ::UpdateWindow(m_hWnd);
+    return true;
+  }
+
+ private:
+  int Dip(int v) const { return ::MulDiv(v, dpi_, 96); }
+
+  LRESULT OnMouseActivate(UINT, WPARAM, LPARAM, BOOL&) {
+    return MA_NOACTIVATE;
+  }
+
+  LRESULT OnMouseMove(UINT, WPARAM, LPARAM, BOOL&) {
+    if (!hovered_) {
+      hovered_ = true;
+      ::InvalidateRect(m_hWnd, nullptr, FALSE);
+    }
+    TRACKMOUSEEVENT track = {sizeof(track), TME_LEAVE, m_hWnd, 0};
+    ::TrackMouseEvent(&track);
+    return 0;
+  }
+
+  LRESULT OnMouseLeave(UINT, WPARAM, LPARAM, BOOL&) {
+    hovered_ = false;
+    ::InvalidateRect(m_hWnd, nullptr, FALSE);
+    return 0;
+  }
+
+  LRESULT OnEraseBackground(UINT, WPARAM, LPARAM, BOOL&) { return 1; }
+
+  LRESULT OnLButtonUp(UINT, WPARAM, LPARAM lp, BOOL&) {
+    const POINT point = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+    RECT rect = {};
+    if (::GetClientRect(m_hWnd, &rect) && ::PtInRect(&rect, point)) {
+      ::PostMessageW(owner_, kPinPopupSelectedMessage, 0,
+                     reinterpret_cast<LPARAM>(m_hWnd));
+    }
+    return 0;
+  }
+
+  LRESULT OnPaint(UINT, WPARAM, LPARAM, BOOL&) {
+    PAINTSTRUCT paint = {};
+    const HDC dc = ::BeginPaint(m_hWnd, &paint);
+    if (dc == nullptr) return 0;
+    RECT rect = {};
+    ::GetClientRect(m_hWnd, &rect);
+    const COLORREF base = ::GetSysColor(COLOR_WINDOW);
+    const COLORREF selection = ::GetSysColor(COLOR_HIGHLIGHT);
+    // A 9% tint is legible without looking like a selected candidate row.
+    const auto mix = [](BYTE a, BYTE b) -> BYTE {
+      return static_cast<BYTE>((91 * static_cast<int>(a) +
+                                9 * static_cast<int>(b)) / 100);
+    };
+    const COLORREF fill = hovered_
+        ? RGB(mix(GetRValue(base), GetRValue(selection)),
+              mix(GetGValue(base), GetGValue(selection)),
+              mix(GetBValue(base), GetBValue(selection)))
+        : base;
+    HBRUSH background = ::CreateSolidBrush(fill);
+    HPEN border = ::CreatePen(PS_SOLID, 1, ::GetSysColor(COLOR_3DSHADOW));
+    HGDIOBJ old_brush = ::SelectObject(dc, background);
+    HGDIOBJ old_pen = ::SelectObject(dc, border);
+    ::RoundRect(dc, 0, 0, rect.right, rect.bottom, Dip(12), Dip(12));
+    ::SelectObject(dc, old_brush);
+    ::SelectObject(dc, old_pen);
+    ::DeleteObject(background);
+    ::DeleteObject(border);
+
+    const COLORREF text_color = ::GetSysColor(COLOR_WINDOWTEXT);
+    HPEN icon_pen = ::CreatePen(PS_SOLID, std::max(1, Dip(1)), text_color);
+    HGDIOBJ previous_pen = ::SelectObject(dc, icon_pen);
+    const int x = Dip(20);
+    const int y = (rect.bottom - rect.top) / 2;
+    // Draw a compact, monochrome pushpin icon; never depend on emoji fonts.
+    ::MoveToEx(dc, x - Dip(5), y - Dip(7), nullptr);
+    ::LineTo(dc, x + Dip(5), y - Dip(7));
+    ::MoveToEx(dc, x - Dip(3), y - Dip(7), nullptr);
+    ::LineTo(dc, x - Dip(3), y - Dip(1));
+    ::LineTo(dc, x + Dip(3), y - Dip(1));
+    ::LineTo(dc, x + Dip(3), y - Dip(7));
+    ::MoveToEx(dc, x - Dip(6), y + Dip(1), nullptr);
+    ::LineTo(dc, x + Dip(6), y + Dip(1));
+    ::MoveToEx(dc, x, y + Dip(1), nullptr);
+    ::LineTo(dc, x, y + Dip(9));
+    ::SelectObject(dc, previous_pen);
+    ::DeleteObject(icon_pen);
+
+    HFONT font = ::CreateFontW(-Dip(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
+                              FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                              DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+    HGDIOBJ old_font = ::SelectObject(
+        dc, font != nullptr ? static_cast<HGDIOBJ>(font)
+                            : ::GetStockObject(DEFAULT_GUI_FONT));
+    ::SetBkMode(dc, TRANSPARENT);
+    ::SetTextColor(dc, text_color);
+    RECT label_rect = {Dip(40), 0, rect.right - Dip(12), rect.bottom};
+    ::DrawTextW(dc, label_.c_str(), static_cast<int>(label_.size()),
+                &label_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE |
+                                 DT_END_ELLIPSIS | DT_NOPREFIX);
+    ::SelectObject(dc, old_font);
+    if (font != nullptr) ::DeleteObject(font);
+    ::EndPaint(m_hWnd, &paint);
+    return 0;
+  }
+
+  LRESULT OnTimer(UINT, WPARAM, LPARAM, BOOL&) {
+    if (::GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
+      ::PostMessageW(owner_, kPinPopupDismissMessage, 0,
+                     reinterpret_cast<LPARAM>(m_hWnd));
+      return 0;
+    }
+    if (::GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
+      RECT bounds = {};
+      POINT cursor = {};
+      if (::GetWindowRect(m_hWnd, &bounds) && ::GetCursorPos(&cursor) &&
+          !::PtInRect(&bounds, cursor)) {
+        ::PostMessageW(owner_, kPinPopupDismissMessage, 0,
+                       reinterpret_cast<LPARAM>(m_hWnd));
+      }
+    }
+    return 0;
+  }
+
+  HWND owner_ = nullptr;
+  std::wstring label_;
+  UINT dpi_ = 96;
+  bool hovered_ = false;
+};
 
 CandidateWindow::CandidateWindow()
     : candidate_window_(std::make_unique<commands::CandidateWindow>()),
@@ -405,6 +621,7 @@ void CandidateWindow::EnableOrDisableWindowForWorkaround() {
 }
 
 void CandidateWindow::OnDestroy() {
+  DismissPinPopup();
   ClearBitmapCache();
   shadow_window_.Destroy();
   // Standalone mozc_renderer.exe uses window destruction to terminate its
@@ -669,6 +886,7 @@ void CandidateWindow::HandleMouseEvent(UINT nFlags, const CPoint& point,
 }
 
 void CandidateWindow::OnLButtonDown(UINT nFlags, CPoint point) {
+  DismissPinPopup();
   // Suggestion is a sub-mode of COMPOSITION with no focused candidate.
   // HIGHLIGHT_CANDIDATE calls Session::SelectCandidateInternal(), which
   // switches the session to CONVERSION.  With the in-process renderer that
@@ -706,6 +924,99 @@ void CandidateWindow::OnLButtonUp(UINT nFlags, CPoint point) {
   }
 
   HandleMouseEvent(nFlags, point, true);
+}
+
+void CandidateWindow::DismissPinPopup() {
+  pin_popup_window_.reset();
+  pin_menu_selection_.reset();
+}
+
+void CandidateWindow::OnPinPopupDismissed(HWND popup) {
+  if (pin_popup_window_ != nullptr &&
+      popup == pin_popup_window_->m_hWnd) {
+    DismissPinPopup();
+  }
+}
+
+void CandidateWindow::OnPinPopupSelected(HWND popup) {
+  if (pin_popup_window_ == nullptr ||
+      popup != pin_popup_window_->m_hWnd ||
+      !pin_menu_selection_.has_value()) {
+    return;
+  }
+  const PinMenuSelection selection = *pin_menu_selection_;
+  DismissPinPopup();
+
+  // Reject delayed clicks after renderer updates or candidate-ID reuse.
+  if (send_command_interface_ == nullptr ||
+      candidate_window_->category() != commands::CONVERSION ||
+      candidate_window_->pin_reading() != selection.reading) {
+    return;
+  }
+  bool visible = false;
+  for (const auto& candidate : candidate_window_->candidate()) {
+    if (candidate.has_id() && candidate.id() == selection.id &&
+        candidate.value() == selection.value &&
+        candidate.pinned() == selection.pinned &&
+        (selection.pinned || candidate.pin_eligible())) {
+      visible = true;
+      break;
+    }
+  }
+  if (!visible) return;
+
+  commands::SessionCommand command;
+  command.set_type(selection.pinned
+                       ? commands::SessionCommand::UNPIN_CANDIDATE
+                       : commands::SessionCommand::PIN_CANDIDATE);
+  command.set_id(selection.id);
+  command.set_text(selection.value);
+  command.set_pin_reading(selection.reading);
+  commands::Output output;
+  const bool success = send_command_interface_->SendCommand(command, &output);
+  // This bridge queues a Windows message; the Output is not a synchronous
+  // acknowledgement from Session. Only transport rejection is known here.
+  if (!success) {
+    LOG(WARNING) << "[mozkey-pin] renderer callback rejected the command";
+  }
+}
+
+void CandidateWindow::OnRButtonUp(CPoint point) {
+  // Close an older popup before accepting another click.
+  DismissPinPopup();
+  if (send_command_interface_ == nullptr ||
+      candidate_window_->category() != commands::CONVERSION ||
+      candidate_window_->pin_reading().empty()) {
+    return;
+  }
+
+  for (size_t i = 0; i < candidate_window_->candidate_size(); ++i) {
+    const auto& candidate = candidate_window_->candidate(i);
+    if (!candidate.has_id() || candidate.value().empty() ||
+        (!candidate.pinned() && !candidate.pin_eligible()) ||
+        !ToCRect(GetCandidateRect(i)).PtInRect(point)) {
+      continue;
+    }
+
+    const PinMenuSelection selection = {
+        .id = candidate.id(),
+        .reading = candidate_window_->pin_reading(),
+        .value = candidate.value(),
+        .pinned = candidate.pinned(),
+    };
+    CPoint screen_point = point;
+    ClientToScreen(&screen_point);
+    auto menu = std::make_unique<PinPopupWindow>();
+    const POINT screen = {screen_point.x, screen_point.y};
+    if (!menu->Open(m_hWnd, screen, selection.pinned
+                                       ? L"固定を解除"
+                                       : L"先頭に固定")) {
+      return;
+    }
+    pin_menu_selection_ = selection;
+    pin_popup_window_ = std::move(menu);
+    return;
+  }
 }
 
 void CandidateWindow::OnMouseMove(UINT nFlags, CPoint point) {
@@ -869,11 +1180,13 @@ void CandidateWindow::DoPaint(HDC dc, bool draw_frame) {
 
 void CandidateWindow::OnShowWindow(BOOL shown, UINT /*status*/) {
   if (!shown) {
+    DismissPinPopup();
     shadow_window_.Hide();
   }
 }
 
 void CandidateWindow::HideWithEffects() {
+  DismissPinPopup();
   shadow_window_.Hide();
   if (m_hWnd != nullptr && ::IsWindow(m_hWnd)) {
     ShowWindow(SW_HIDE);
@@ -910,6 +1223,7 @@ void CandidateWindow::UpdateLayout(
 void CandidateWindow::UpdateLayout(
     const commands::CandidateWindow& candidates,
     LayoutMode requested_layout_mode) {
+  DismissPinPopup();
   ClearBitmapCache();
 
   if (suggestion_mouse_gesture_active_ &&

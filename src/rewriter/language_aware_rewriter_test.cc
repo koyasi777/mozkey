@@ -298,6 +298,334 @@ TEST_F(LanguageAwareRewriterTest, LanguageAwareInput) {
   }
 }
 
+TEST_F(LanguageAwareRewriterTest, KnownJapanesePrefixOutranksRawLatin) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+
+  // The standard candidate is more useful than raw "mouGoogle".
+  Segments japanese_segments;
+  PushFrontCandidate("もうGoogle", japanese_segments.add_segment());
+  std::string composition;
+  EXPECT_CALL(dictionary, HasKey(StrEq("もう"))).WillOnce(Return(true));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "mouGoogle", false,
+                                            &composition, &japanese_segments));
+  EXPECT_EQ(composition, "もうGoogle");
+  ASSERT_EQ(japanese_segments.conversion_segment(0).candidates_size(), 2);
+  EXPECT_EQ(japanese_segments.conversion_segment(0).candidate(0).value,
+            "もうGoogle");
+  EXPECT_EQ(japanese_segments.conversion_segment(0).candidate(1).value,
+            "mouGoogle");
+  Mock::VerifyAndClearExpectations(&dictionary);
+
+  // An unknown-name prefix must not demote raw "azooKey".
+  Segments name_segments;
+  PushFrontCandidate("あぞおKey", name_segments.add_segment());
+  EXPECT_CALL(dictionary, HasKey(StrEq("あぞお"))).WillOnce(Return(false));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "azooKey", false,
+                                            &composition, &name_segments));
+  EXPECT_EQ(composition, "あぞおKey");
+  EXPECT_EQ(name_segments.conversion_segment(0).candidate(0).value,
+            "azooKey");
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+// Short Roman prefixes are ambiguous even if their kana readings appear in
+// the dictionary.  In mixed-case product names, raw ASCII must remain first.
+TEST_F(LanguageAwareRewriterTest, ShortRomanPrefixKeepsAsciiRescueFirst) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+
+  struct TestCase {
+    const char* raw;
+    const char* preedit;
+  };
+  constexpr TestCase kCases[] = {
+      {"iPhone", "いPhone"},
+      {"iPad", "いPad"},
+      {"aGoogle", "あGoogle"},
+  };
+
+  // A one-character Japanese prefix cannot prove Japanese-word intent;
+  // do not even ask the dictionary to promote these preedits.
+  EXPECT_CALL(dictionary, HasKey(::testing::_)).Times(0);
+  for (const TestCase& test : kCases) {
+    Segments segments;
+    std::string composition;
+    EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, test.raw, false,
+                                              &composition, &segments))
+        << test.raw;
+    EXPECT_EQ(composition, test.preedit) << test.raw;
+    ASSERT_EQ(segments.conversion_segments_size(), 1);
+    const Segment& segment = segments.conversion_segment(0);
+    ASSERT_EQ(segment.candidates_size(), 1) << test.raw;
+    EXPECT_EQ(segment.candidate(0).value, test.raw);
+  }
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+TEST_F(LanguageAwareRewriterTest, KnownJapanesePrefixWithNoNativeCandidate) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  Segments segments;
+  std::string composition;
+  EXPECT_CALL(dictionary, HasKey(StrEq("もう"))).WillOnce(Return(true));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "mouGoogle", false,
+                                            &composition, &segments));
+  EXPECT_EQ(composition, "もうGoogle");
+  ASSERT_EQ(segments.conversion_segments_size(), 1);
+  const Segment& segment = segments.conversion_segment(0);
+  // The native predictor returned no candidates. Both safe, selectable
+  // values must now be supplied by the language-aware rewriter itself.
+  ASSERT_EQ(segment.candidates_size(), 2);
+  EXPECT_EQ(segment.candidate(0).value, "もうGoogle");
+  EXPECT_EQ(segment.candidate(1).value, "mouGoogle");
+  EXPECT_EQ(segment.candidate(0).content_value, "もうGoogle");
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+TEST_F(LanguageAwareRewriterTest,
+       KnownJapanesePrefixWithUnrelatedNativeCandidate) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  Segments segments;
+  PushFrontCandidate("もうグーグル", segments.add_segment());
+  std::string composition;
+  EXPECT_CALL(dictionary, HasKey(StrEq("もう"))).WillOnce(Return(true));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "mouGoogle", false,
+                                            &composition, &segments));
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_EQ(segment.candidates_size(), 3);
+  EXPECT_EQ(segment.candidate(0).value, "もうGoogle");
+  EXPECT_EQ(segment.candidate(1).value, "mouGoogle");
+  EXPECT_EQ(segment.candidate(2).value, "もうグーグル");
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+TEST_F(LanguageAwareRewriterTest,
+       ExistingMixedCandidateIsPromotedNotDuplicated) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  PushFrontCandidate("もうGoogle", segment);
+  PushFrontCandidate("もうグーグル", segment);
+  std::string composition;
+  EXPECT_CALL(dictionary, HasKey(StrEq("もう"))).WillOnce(Return(true));
+  EXPECT_TRUE(RewriteWithLanguageAwareInput(&rewriter, "mouGoogle", false,
+                                            &composition, &segments));
+  ASSERT_EQ(segment->candidates_size(), 3);
+  EXPECT_EQ(segment->candidate(0).value, "もうGoogle");
+  EXPECT_EQ(segment->candidate(1).value, "mouGoogle");
+  EXPECT_EQ(segment->candidate(2).value, "もうグーグル");
+  Mock::VerifyAndClearExpectations(&dictionary);
+}
+
+TEST_F(LanguageAwareRewriterTest, ExplicitJapaneseReturnSuppressesRawRescue) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  auto table = std::make_shared<composer::Table>();
+  table->InitializeWithRequestAndConfig(client_request, config);
+  composer::Composer composer(table, client_request, config);
+  InsertASCIISequence("AI", &composer);
+  ASSERT_EQ(composer.GetInputMode(), transliteration::HALF_ASCII);
+  composer.SuppressLanguageAwareRawInput();
+  composer.SetInputMode(transliteration::HIRAGANA);
+  InsertASCIISequence("de", &composer);
+  EXPECT_EQ(composer.GetRawString(), "AIde");
+  EXPECT_TRUE(
+      composer.CreateComposerData().suppress_language_aware_raw_input());
+
+  Segments segments;
+  segments.add_segment()->set_key(composer.GetQueryForPrediction());
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetComposer(composer)
+          .SetRequest(client_request)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+  EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 0);
+  composer.Reset();
+  EXPECT_FALSE(
+      composer.CreateComposerData().suppress_language_aware_raw_input());
+}
+
+// Exercise the actual Composer -> LanguageAwareRewriter path. Previously
+// githubwot was added as a full raw-ASCII suggestion when the final 't' was
+// an unresolved Roman consonant after an explicitly entered English word.
+TEST_F(LanguageAwareRewriterTest,
+       PendingRomanAfterLiteralEnglishAndJapaneseSkipsRawRescue) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(false);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  config.set_enable_english_input_exceptions(true);
+  auto* rule = config.add_english_input_exceptions();
+  rule->set_input("github");
+  rule->set_preferred("GitHub");
+  rule->set_behavior(config::Config::EnglishInputException::AUTO_ASCII);
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+
+  for (const std::string raw : {"githubwot", "korehagithubwot"}) {
+    composer::Composer composer(table, client_request, config);
+    InsertASCIISequence(raw, &composer);
+    EXPECT_EQ(composer.GetRawString(), raw);
+    // AUTO_ASCII sets the display/output mode for the English word, which
+    // can remain HALF_ASCII even after Japanese input resumes.  The mutable
+    // Composer API reports 0 pending characters in that output mode.  The
+    // immutable ComposerData snapshot used by both rewriters instead checks
+    // the actual trailing Roman input in the current input mode.
+    const composer::ComposerData snapshot = composer.CreateComposerData();
+    const std::string preedit = composer.GetStringForPreedit();
+    ASSERT_EQ(snapshot.GetInputMode(), transliteration::HIRAGANA)
+        << "raw=" << raw << " preedit=" << preedit
+        << " mutable_pending=" << composer.GetPendingRomanInputLength()
+        << " output_mode=" << static_cast<int>(composer.GetOutputMode());
+    ASSERT_GT(snapshot.GetPendingRomanInputLength(), 0)
+        << "raw=" << raw << " preedit=" << preedit
+        << " mutable_pending=" << composer.GetPendingRomanInputLength()
+        << " output_mode=" << static_cast<int>(composer.GetOutputMode())
+        << " snapshot_input_mode=" << static_cast<int>(snapshot.GetInputMode());
+    EXPECT_NE(preedit.find("githubを"), std::string::npos)
+        << "raw=" << raw << " preedit=" << preedit;
+
+    Segments segments;
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetComposer(composer)
+            .SetConfig(config)
+            .SetRequest(client_request)
+            .SetRequestType(ConversionRequest::SUGGESTION)
+            .Build();
+    segments.add_segment()->set_key(request.key());
+    EXPECT_FALSE(rewriter.Rewrite(request, &segments))
+        << "raw=" << raw << " preedit=" << preedit
+        << " key=" << request.key();
+    EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 0)
+        << raw;
+
+    // Negative control: hold the exact same Composer state fixed, but turn
+    // off only this feature in the ConversionRequest.  LanguageAwareRewriter
+    // must then reproduce the original raw-key candidate.  Without this
+    // control, a test returning false could pass for unrelated reasons.
+    config::Config no_guard_config = config;
+    no_guard_config.set_enable_english_input_exceptions(false);
+    const ConversionRequest control_request =
+        ConversionRequestBuilder()
+            .SetComposer(composer)
+            .SetConfig(no_guard_config)
+            .SetRequest(client_request)
+            .SetRequestType(ConversionRequest::SUGGESTION)
+            .Build();
+    Segments control_segments;
+    control_segments.add_segment()->set_key(control_request.key());
+    ASSERT_TRUE(rewriter.Rewrite(control_request, &control_segments))
+        << "control source was not reproduced; raw=" << raw
+        << " preedit=" << preedit
+        << " query=" << composer.GetQueryForPrediction();
+    const Segment& control_segment = control_segments.conversion_segment(0);
+    ASSERT_GT(control_segment.candidates_size(), 0);
+    EXPECT_EQ(control_segment.candidate(0).value, raw)
+        << "raw=" << raw << " preedit=" << preedit;
+  }
+}
+
+// A shifted acronym followed by normal Roman input is not an English
+// dictionary token. Keep the full raw rescue despite the feature being ON.
+TEST_F(LanguageAwareRewriterTest,
+       ShiftedAsciiPendingRomanRetainsRawRescueWithEnglishExceptions) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  config.set_auto_switch_composition_mode(false);
+  config.set_enable_english_input_exceptions(true);
+  auto* rule = config.add_english_input_exceptions();
+  rule->set_input("github");
+  rule->set_preferred("GitHub");
+  rule->set_behavior(config::Config::EnglishInputException::AUTO_ASCII);
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  InsertASCIISequence("AIdev", &composer);
+  EXPECT_EQ(composer.GetRawString(), "AIdev");
+  EXPECT_EQ(composer.GetInputMode(), transliteration::HIRAGANA);
+  const auto snapshot = composer.CreateComposerData();
+  EXPECT_GT(snapshot.GetPendingRomanInputLength(), 0u);
+  EXPECT_NE(composer.GetStringForPreedit(), "AIdev");
+
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetComposer(composer)
+          .SetConfig(config)
+          .SetRequest(client_request)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+  Segments segments;
+  segments.add_segment()->set_key(request.key());
+  ASSERT_TRUE(rewriter.Rewrite(request, &segments));
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_GT(segment.candidates_size(), 0);
+  EXPECT_EQ(segment.candidate(0).value, "AIdev");
+}
+
+TEST_F(LanguageAwareRewriterTest,
+       EnglishRawRescueStillWorksWithExceptionsEnabled) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_enable_english_input_exceptions(true);
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+
+  for (const std::string raw : {"python", "iPhone"}) {
+    composer::Composer composer(table, client_request, config);
+    InsertASCIISequence(raw, &composer);
+    EXPECT_EQ(composer.GetRawString(), raw);
+    Segments segments;
+    const ConversionRequest request =
+        ConversionRequestBuilder()
+            .SetComposer(composer)
+            .SetConfig(config)
+            .SetRequest(client_request)
+            .SetRequestType(ConversionRequest::SUGGESTION)
+            .Build();
+    segments.add_segment()->set_key(request.key());
+    EXPECT_TRUE(rewriter.Rewrite(request, &segments)) << raw;
+    const Segment& segment = segments.conversion_segment(0);
+    ASSERT_GE(segment.candidates_size(), 1) << raw;
+    EXPECT_EQ(segment.candidate(0).value, raw);
+  }
+}
+
 TEST_F(LanguageAwareRewriterTest, NotRewriteFullWidthAsciiToHalfWidthAscii) {
   MockDictionary dictionary;
   LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),

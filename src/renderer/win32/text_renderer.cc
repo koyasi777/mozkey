@@ -498,6 +498,9 @@ class GdiTextRenderer : public TextRenderer {
   }
   void RenderTextVerticalWrapped(HDC, std::wstring_view, const Rect&,
                                  FONT_TYPE) const override {}
+  void RenderTextVerticalWrappedViewport(HDC, std::wstring_view,
+                                         const Rect&, int,
+                                         FONT_TYPE) const override {}
   void RenderTextList(HDC dc,
                       const absl::Span<const TextRenderingInfo> display_list,
                       FONT_TYPE font_type) const override {
@@ -694,6 +697,27 @@ class DirectWriteTextRenderer : public TextRenderer {
         render_info_[font_type].vertical_wrapped_format.get());
   }
 
+  void RenderTextVerticalWrappedViewport(
+      HDC dc, const std::wstring_view text, const Rect& viewport,
+      int full_layout_width, FONT_TYPE font_type) const override {
+    if (viewport.IsRectEmpty() || full_layout_width <= 0) {
+      return;
+    }
+    if (full_layout_width <= viewport.Width()) {
+      RenderTextVerticalWrapped(dc, text, viewport, font_type);
+      return;
+    }
+    // DWRITE_FLOW_DIRECTION_RIGHT_TO_LEFT: the initial column is near the
+    // right edge of the full layout, and later columns reach its left edge.
+    // Keep the layout's LEFT edge on-screen to expose the newest columns.
+    // BindDC and clipping use viewport, never the oversized layout rectangle.
+    const Rect layout_rect(viewport.Left(), viewport.Top(),
+                           full_layout_width, viewport.Height());
+    RenderTextVerticalWithFormat(
+        dc, text, layout_rect, font_type,
+        render_info_[font_type].vertical_wrapped_format.get(), &viewport);
+  }
+
   void RenderTextList(HDC dc,
                       const absl::Span<const TextRenderingInfo> display_list,
                       FONT_TYPE font_type) const override {
@@ -720,8 +744,10 @@ class DirectWriteTextRenderer : public TextRenderer {
 
   void RenderTextVerticalWithFormat(HDC dc, const std::wstring_view text,
                                     const Rect& rect, FONT_TYPE font_type,
-                                    IDWriteTextFormat* format) const {
-    if (text.empty() || rect.IsRectEmpty() || format == nullptr) {
+                                    IDWriteTextFormat* format,
+                                    const Rect* viewport = nullptr) const {
+    if (text.empty() || rect.IsRectEmpty() || format == nullptr ||
+        (viewport != nullptr && viewport->IsRectEmpty())) {
       return;
     }
     constexpr size_t kMaxTrial = 3;
@@ -731,8 +757,8 @@ class DirectWriteTextRenderer : public TextRenderer {
       if (dc_render_target_ == nullptr) {
         return;
       }
-      const HRESULT hr =
-          RenderTextVerticalImpl(dc, text, rect, font_type, format);
+      const HRESULT hr = RenderTextVerticalImpl(
+          dc, text, rect, font_type, format, viewport);
       if (hr == D2DERR_RECREATE_TARGET && trial < kMaxTrial) {
         dc_render_target_.reset();
         ++trial;
@@ -744,13 +770,15 @@ class DirectWriteTextRenderer : public TextRenderer {
 
   HRESULT RenderTextVerticalImpl(HDC dc, const std::wstring_view text,
                                  const Rect& rect, FONT_TYPE font_type,
-                                 IDWriteTextFormat* format) const {
+                                 IDWriteTextFormat* format,
+                                 const Rect* viewport) const {
     if (format == nullptr) {
       return E_FAIL;
     }
 
-    CRect total_rect(0, 0, std::max(1, rect.Right()),
-                     std::max(1, rect.Bottom()));
+    const Rect& physical_rect = viewport != nullptr ? *viewport : rect;
+    CRect total_rect(0, 0, std::max(1, physical_rect.Right()),
+                     std::max(1, physical_rect.Bottom()));
     HRESULT hr = dc_render_target_->BindDC(dc, &total_rect);
     if (FAILED(hr)) {
       return hr;
@@ -776,10 +804,21 @@ class DirectWriteTextRenderer : public TextRenderer {
         D2D1_DRAW_TEXT_OPTIONS_NONE | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
     dc_render_target_->BeginDraw();
     dc_render_target_->SetTransform(D2D1::Matrix3x2F::Identity());
+    if (viewport != nullptr) {
+      dc_render_target_->PushAxisAlignedClip(
+          D2D1::RectF(static_cast<FLOAT>(viewport->Left()),
+                      static_cast<FLOAT>(viewport->Top()),
+                      static_cast<FLOAT>(viewport->Right()),
+                      static_cast<FLOAT>(viewport->Bottom())),
+          D2D1_ANTIALIAS_MODE_ALIASED);
+    }
     dc_render_target_->DrawTextLayout(
         D2D1::Point2F(static_cast<FLOAT>(rect.Left()),
                       static_cast<FLOAT>(rect.Top())),
         layout.get(), brush.get(), option);
+    if (viewport != nullptr) {
+      dc_render_target_->PopAxisAlignedClip();
+    }
     return dc_render_target_->EndDraw();
   }
 

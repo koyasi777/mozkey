@@ -238,6 +238,27 @@ TEST_F(KeyMapTest, AddCommandSequence) {
   EXPECT_EQ(sequence[2], "Commit");
 }
 
+TEST_F(KeyMapTest, ExplicitCancelLastLearningIsPrecompositionOnly) {
+  KeyMapManager manager;
+  KeyMapManagerTestPeer peer(manager);
+  EXPECT_TRUE(peer.AddCommand("Precomposition", "Ctrl Shift Backspace",
+                              "CancelLastLearning"));
+  EXPECT_FALSE(peer.AddCommand("Composition", "Ctrl Shift Backspace",
+                               "CancelLastLearning"));
+  EXPECT_FALSE(peer.AddCommand("Conversion", "Ctrl Shift Backspace",
+                               "CancelLastLearning"));
+
+  commands::KeyEvent key;
+  ASSERT_TRUE(KeyParser::ParseKey("Ctrl Shift Backspace", &key));
+  PrecompositionState::Commands action;
+  ASSERT_TRUE(manager.GetCommandPrecomposition(key, &action));
+  EXPECT_EQ(action, PrecompositionState::CANCEL_LAST_LEARNING);
+  CommandSequence sequence;
+  ASSERT_TRUE(manager.GetCommandSequencePrecomposition(key, &sequence));
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence.front(), "CancelLastLearning");
+}
+
 TEST_F(KeyMapTest, ZenzManualCommandAndDelayGrammar) {
   KeyMapManager manager;
   KeyMapManagerTestPeer peer(manager);
@@ -316,6 +337,26 @@ TEST_F(KeyMapTest, ZenzConversionOverridesAndInheritsConversion) {
   ASSERT_TRUE(manager.GetCommandSequenceZenzConversion(enter, &sequence));
   ASSERT_EQ(sequence.size(), 1);
   EXPECT_EQ(sequence[0], "Commit");
+}
+
+TEST_F(KeyMapTest, ExplicitSuggestionDoesNotInheritComposition) {
+  KeyMapManager manager(GetDefaultConfig(config::Config::MSIME));
+  commands::KeyEvent key;
+  CommandSequence sequence;
+  ASSERT_TRUE(KeyParser::ParseKey("Shift Enter", &key));
+  ASSERT_TRUE(manager.GetCommandSequenceExplicitSuggestion(key, &sequence));
+  ASSERT_EQ(sequence.size(), 1);
+  EXPECT_EQ(sequence.front(), "CommitFirstSuggestion");
+
+  ConversionState::Commands command;
+  ASSERT_TRUE(manager.ResolveConversionCommandName("CommitFirstSuggestion",
+                                                   &command));
+  EXPECT_EQ(command, ConversionState::COMMIT_FIRST_SUGGESTION);
+
+  ASSERT_TRUE(KeyParser::ParseKey("Enter", &key));
+  EXPECT_FALSE(manager.GetCommandSequenceExplicitSuggestion(key, &sequence));
+  ASSERT_TRUE(manager.GetCommandSequenceSuggestion(key, &sequence));
+  EXPECT_EQ(sequence.front(), "Commit");
 }
 
 TEST_F(KeyMapTest, LiveAndZenzConversionPrecedenceAndFallback) {

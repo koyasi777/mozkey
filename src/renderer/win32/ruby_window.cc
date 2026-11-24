@@ -157,6 +157,47 @@ RECT GetWorkAreaForPoint(const POINT& point) {
   return work_area;
 }
 
+bool GetFixedRubyWorkArea(const commands::RendererCommand& command,
+                          const POINT* input_point, RECT* work_area) {
+  HMONITOR monitor = input_point != nullptr
+                         ? ::MonitorFromPoint(*input_point, MONITOR_DEFAULTTONULL)
+                         : nullptr;
+  if (monitor == nullptr && command.has_application_info()) {
+    const auto& app = command.application_info();
+    if (app.has_target_window_handle() &&
+        app.target_window_handle() != 0) {
+      const HWND hwnd = WinUtil::DecodeWindowHandle(
+          app.target_window_handle());
+      if (::IsWindow(hwnd)) {
+        monitor = ::MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+      }
+    }
+  }
+  if (monitor == nullptr && command.has_preedit_rectangle()) {
+    const auto& preedit = command.preedit_rectangle();
+    const POINT point = {preedit.left(), preedit.top()};
+    monitor = ::MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+  }
+  if (monitor == nullptr) {
+    const HWND foreground = ::GetForegroundWindow();
+    if (::IsWindow(foreground)) {
+      monitor = ::MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
+    }
+  }
+  if (monitor == nullptr) {
+    const POINT origin = {0, 0};
+    monitor = ::MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+  }
+  MONITORINFO info = {};
+  info.cbSize = sizeof(info);
+  if (!::GetMonitorInfo(monitor, &info)) {
+    return false;
+  }
+  *work_area = info.rcWork;
+  return work_area->left < work_area->right &&
+         work_area->top < work_area->bottom;
+}
+
 int ClampInt(int value, int min_value, int max_value) {
   if (max_value < min_value) {
     return min_value;
@@ -172,25 +213,6 @@ int GetPreeditWidth(const commands::RendererCommand& command) {
   const commands::RendererCommand::Rectangle& rect =
       command.preedit_rectangle();
   return std::max(0, rect.right() - rect.left());
-}
-
-bool Intersects(const RECT& lhs, const RECT& rhs) {
-  return lhs.left < rhs.right && rhs.left < lhs.right &&
-         lhs.top < rhs.bottom && rhs.top < lhs.bottom;
-}
-
-bool IsUsableRubyRect(const RECT& rect, const RECT& work_area,
-                      const RECT* avoid_rect) {
-  if (rect.left >= rect.right || rect.top >= rect.bottom) {
-    return false;
-  }
-  if (rect.top < work_area.top || rect.bottom > work_area.bottom) {
-    return false;
-  }
-  if (avoid_rect != nullptr && Intersects(rect, *avoid_rect)) {
-    return false;
-  }
-  return true;
 }
 
 bool IsReasonableWorkArea(const RECT& work_area) {
@@ -544,7 +566,8 @@ void RubyWindow::UpdateFont() {
   ruby_text_color_ = theme.text_color;
 }
 
-SIZE RubyWindow::MeasureText(bool vertical_writing) const {
+SIZE RubyWindow::MeasureText(bool vertical_writing,
+                             int maximum_window_width) const {
   SIZE size = {};
   if (text_.empty()) {
     return size;
@@ -571,6 +594,9 @@ SIZE RubyWindow::MeasureText(bool vertical_writing) const {
   }
 
   HDC dc = ::GetDC(nullptr);
+  if (dc == nullptr) {
+    return size;
+  }
 
   HFONT old_font = nullptr;
   if (font_ != nullptr) {
@@ -585,6 +611,27 @@ SIZE RubyWindow::MeasureText(bool vertical_writing) const {
     size.cy = std::max<LONG>(size.cy, text_metric.tmHeight);
   }
 
+  // The follow-preedit path still measures/draws a single line, unchanged.
+  // Only the fixed-screen path supplies a positive maximum_window_width.
+  const int padding_x = GetRubyContentPaddingX(
+      theme, dpi_, /*vertical_writing=*/false);
+  if (maximum_window_width > 0 &&
+      size.cx + 2 * padding_x > maximum_window_width) {
+    const int bounded_content_width =
+        std::max(1, maximum_window_width - 2 * padding_x);
+    RECT bounds = {0, 0, bounded_content_width, 0};
+    const int wrapped_height = ::DrawTextW(
+        dc, text_.c_str(), static_cast<int>(text_.size()), &bounds,
+        DT_CALCRECT | DT_CENTER | DT_WORDBREAK | DT_EDITCONTROL |
+            DT_NOPREFIX);
+    // DT_CALCRECT may expand the rectangle for an exceptionally long Latin
+    // token. Always keep the actual surface within the specified screen cap.
+    size.cx = bounded_content_width;
+    if (wrapped_height > 0) {
+      size.cy = std::max<LONG>(size.cy, wrapped_height);
+    }
+  }
+
   if (old_font != nullptr) {
     ::SelectObject(dc, old_font);
   }
@@ -594,6 +641,9 @@ SIZE RubyWindow::MeasureText(bool vertical_writing) const {
   size.cx += GetRubyContentPaddingX(
                  theme, dpi_, /*vertical_writing=*/false) *
              2;
+  if (maximum_window_width > 0) {
+    size.cx = std::min<LONG>(size.cx, maximum_window_width);
+  }
   size.cy += GetRubyContentPaddingY(
                  theme, dpi_, /*vertical_writing=*/false) *
              2;
@@ -658,6 +708,145 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     has_vertical_composition_span_ = false;
     vertical_composition_left_ = 0;
     vertical_composition_right_ = 0;
+  }
+
+  const auto placement_config = config::ConfigHandler::GetSharedConfig();
+  const bool fixed_screen =
+      placement_config != nullptr &&
+      placement_config->ruby_window_placement_mode() ==
+          config::Config::RUBY_WINDOW_FIXED_SCREEN;
+
+  // A screen-centered overlay must never intercept clicks on the application
+  // beneath it.  Preserve the existing pointer behavior in follow mode.
+  if (m_hWnd != nullptr && ::IsWindow(m_hWnd)) {
+    const LONG_PTR flags = ::GetWindowLongPtrW(m_hWnd, GWL_EXSTYLE);
+    const LONG_PTR desired = fixed_screen
+        ? flags | WS_EX_TRANSPARENT
+        : flags & ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+    if (desired != flags) {
+      ::SetWindowLongPtrW(m_hWnd, GWL_EXSTYLE, desired);
+      ::SetWindowPos(m_hWnd, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+  }
+
+  if (fixed_screen) {
+    // Prefer already DPI-normalized composition geometry. A host window may
+    // straddle monitors; MonitorFromWindow would choose its largest overlap,
+    // not necessarily the monitor containing the active input text.
+    POINT physical_input = {};
+    int physical_line_height = 0;
+    const bool has_physical_input =
+        GetBasePosition(command, layout_manager, vertical_writing,
+                        &physical_input, &physical_line_height, nullptr) &&
+        physical_line_height > 0 &&
+        physical_line_height <= kMaxReasonableLineHeight;
+    RECT work_area = {};
+    if (!GetFixedRubyWorkArea(
+            command, has_physical_input ? &physical_input : nullptr,
+            &work_area)) {
+      Hide();
+      return;
+    }
+    const POINT work_center = {
+        work_area.left + (work_area.right - work_area.left) / 2,
+        work_area.top + (work_area.bottom - work_area.top) / 2};
+    UpdateDpi(GetDpiForPoint(work_center.x, work_center.y));
+    UpdateFont();
+    text_ = ToWide(reading);
+    vertical_writing_ = vertical_writing;
+    fixed_horizontal_wrap_ = !vertical_writing;
+    const int display_width = work_area.right - work_area.left;
+    const int display_height = work_area.bottom - work_area.top;
+    // Keep text layout and painting in the same physical-pixel rectangle.
+    // A 100% setting allows use of the whole work area, with placement
+    // still constrained by the screen bounds.
+    const uint32_t wrap_width_percent = std::clamp(
+        placement_config->ruby_window_fixed_wrap_width_percent(), 40u, 100u);
+    const int max_width = std::max(1, ::MulDiv(
+        display_width, static_cast<int>(wrap_width_percent), 100));
+    fixed_vertical_wrap_ = false;
+    fixed_vertical_full_layout_width_ = 0;
+    if (vertical_writing && text_renderer_ != nullptr &&
+        text_renderer_->SupportsVerticalWrappedText(
+            TextRenderer::FONTSET_RUBY)) {
+      // Native vertical reading flows into columns from right to left.
+      // Constrain its column height *before* the width is measured.
+      const RendererStyleHandler::RubyWindowStyle style = GetRubyWindowTheme();
+      const int padding_x = GetRubyContentPaddingX(style, dpi_, true);
+      const int padding_y = GetRubyContentPaddingY(style, dpi_, true);
+      const int maximum_height = std::max(1, display_height * 9 / 10);
+      const int content_height =
+          std::max(1, maximum_height - 2 * padding_y);
+      const Size wrapped = text_renderer_->MeasureStringVerticalWrapped(
+          TextRenderer::FONTSET_RUBY, text_, content_height);
+      if (wrapped.width > 0 && wrapped.height > 0) {
+        fixed_vertical_full_layout_width_ = wrapped.width;
+        window_size_.cx = std::min<LONG>(
+            max_width, wrapped.width + 2 * padding_x);
+        window_size_.cy = std::min<LONG>(
+            maximum_height, wrapped.height + 2 * padding_y);
+        fixed_vertical_wrap_ = true;
+      } else {
+        window_size_ = MeasureText(true);
+      }
+    } else {
+      window_size_ = MeasureText(vertical_writing,
+                                 vertical_writing ? 0 : max_width);
+    }
+
+    fixed_full_text_height_ = 0;
+    if (!vertical_writing && window_size_.cy > 0) {
+      const RendererStyleHandler::RubyWindowStyle style = GetRubyWindowTheme();
+      const int padding_y = GetRubyContentPaddingY(style, dpi_, false);
+      fixed_full_text_height_ = std::max<LONG>(0, window_size_.cy - 2 * padding_y);
+      // The entire text stays intact. Only the visible viewport is bounded;
+      // DoPaint clips the upper part if the wrapped text becomes too tall.
+      const int max_height = std::max(1, display_height * 9 / 10);
+      window_size_.cy = std::min<LONG>(window_size_.cy, max_height);
+    }
+
+    // Offsets are stored as 96-DPI logical pixels.  The screen rectangle and
+    // measured glyph bounds are physical pixels at the destination monitor.
+    const POINT offset = {
+        ::MulDiv(placement_config->ruby_window_fixed_offset_x(), dpi_, 96),
+        ::MulDiv(placement_config->ruby_window_fixed_offset_y(), dpi_, 96)};
+    Rect fixed_rect;
+    if (!WindowUtil::GetFixedRubyWindowRect(
+            Rect(work_area.left, work_area.top,
+                 work_area.right - work_area.left,
+                 work_area.bottom - work_area.top),
+            Size(window_size_.cx, window_size_.cy),
+            placement_config->ruby_window_fixed_x_percent(),
+            placement_config->ruby_window_fixed_y_percent(),
+            Point(offset.x, offset.y), &fixed_rect)) {
+      Hide();
+      return;
+    }
+    const RECT frame = {fixed_rect.Left(), fixed_rect.Top(),
+                        fixed_rect.Right(), fixed_rect.Bottom()};
+    ::SetWindowPos(m_hWnd, HWND_TOPMOST, frame.left, frame.top,
+                   window_size_.cx, window_size_.cy, SWP_NOACTIVATE);
+    if (!RenderAndPresent()) {
+      Hide();
+      return;
+    }
+    ShowWindow(SW_SHOWNOACTIVATE);
+    const RendererStyleHandler::RubyWindowStyle theme = GetRubyWindowTheme();
+    RendererWindowShadowStyle shadow_style;
+    shadow_style.size = theme.shadow.size;
+    shadow_style.opacity_percent = theme.shadow.opacity_percent;
+    shadow_style.angle_degrees = theme.shadow.angle_degrees;
+    shadow_style.distance = theme.shadow.distance;
+    const int radius = GetRendererWindowCornerRadiusInPixels(
+        theme.corner_radius, dpi_, window_size_.cx, window_size_.cy);
+    shadow_window_.Update(m_hWnd, frame, dpi_, radius, shadow_style);
+    has_vertical_composition_span_ = false;
+    vertical_composition_left_ = 0;
+    vertical_composition_right_ = 0;
+    has_last_valid_geometry_ = false;  // Follow-mode geometry isn't reusable.
+    return;
   }
 
   POINT base_point = {};
@@ -804,26 +993,34 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
     const int above_top = base_point.y - window_size_.cy - gap;
     const int below_top = base_point.y + line_height + gap;
 
-    const auto ruby_rect_at = [&](int candidate_top) {
-      return RECT{left, candidate_top, left + window_size_.cx,
-                  candidate_top + window_size_.cy};
-    };
-
-    const auto try_place = [&](int candidate_top, int* chosen_top) {
-      const RECT rect = ruby_rect_at(candidate_top);
-      if (!IsUsableRubyRect(rect, work_area, avoid_rect)) {
-        return false;
-      }
-      *chosen_top = candidate_top;
-      return true;
-    };
-
-    // Preserve the existing horizontal contract: above first, below fallback.
-    preferred_window_rect = ruby_rect_at(above_top);
+    // Preserve the existing preedit-centered X and preferred above/below
+    // policy.  The shared calculator adds candidate-edge fallbacks only after
+    // the original placements fail.
+    preferred_window_rect = {
+        left, above_top, left + window_size_.cx,
+        above_top + window_size_.cy};
     const bool looks_like_transient_geometry = ShouldRejectTransientGeometry(
         base_point, line_height, preferred_window_rect, work_area,
         from_preedit_rectangle, target_changed);
-    if (!try_place(above_top, &top) && !try_place(below_top, &top)) {
+    const Rect work_rect(work_area.left, work_area.top,
+                         work_area.right - work_area.left,
+                         work_area.bottom - work_area.top);
+    const Rect preedit_rect(base_point.x, base_point.y,
+                            std::max(0, preedit_width),
+                            std::max(1, line_height));
+    std::optional<Rect> candidate_obstacle;
+    if (avoid_rect != nullptr && avoid_rect->right > avoid_rect->left &&
+        avoid_rect->bottom > avoid_rect->top) {
+      candidate_obstacle.emplace(
+          avoid_rect->left, avoid_rect->top,
+          avoid_rect->right - avoid_rect->left,
+          avoid_rect->bottom - avoid_rect->top);
+    }
+    Rect placed_rect;
+    if (!WindowUtil::GetRubyWindowRect(
+            preedit_rect, Size(window_size_.cx, window_size_.cy), gap,
+            work_rect, candidate_obstacle ? &*candidate_obstacle : nullptr,
+            &placed_rect)) {
       restore_previous_content();
       if (looks_like_transient_geometry && KeepCurrentPlacement()) {
         return;
@@ -832,9 +1029,10 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
       HideWindowOnly();
       return;
     }
-
-    window_rect =
-        RECT{left, top, left + window_size_.cx, top + window_size_.cy};
+    left = placed_rect.Left();
+    top = placed_rect.Top();
+    window_rect = {placed_rect.Left(), placed_rect.Top(),
+                   placed_rect.Right(), placed_rect.Bottom()};
   }
   if (ShouldRejectTransientGeometry(base_point, line_height, window_rect,
                                     work_area, from_preedit_rectangle,
@@ -855,6 +1053,10 @@ void RubyWindow::OnUpdate(const commands::RendererCommand& command,
   // prepared before ShowWindow so the first visible ruby frame is already
   // antialiased and complete.
   vertical_writing_ = vertical_writing;
+  fixed_horizontal_wrap_ = false;
+  fixed_vertical_wrap_ = false;
+  fixed_vertical_full_layout_width_ = 0;
+  fixed_full_text_height_ = 0;
   SetWindowPos(HWND_TOPMOST, left, top, window_size_.cx, window_size_.cy,
                SWP_NOACTIVATE);
   if (!RenderAndPresent()) {
@@ -992,12 +1194,23 @@ void RubyWindow::DoPaint(HDC dc) {
   if (vertical_writing_) {
     if (text_renderer_ != nullptr &&
         text_renderer_->SupportsVerticalText(TextRenderer::FONTSET_RUBY)) {
-      text_renderer_->RenderTextVertical(
-          dc, text_,
-          Rect(text_rect.left, text_rect.top,
-               text_rect.right - text_rect.left,
-               text_rect.bottom - text_rect.top),
-          TextRenderer::FONTSET_RUBY);
+      const Rect content_rect(
+          text_rect.left, text_rect.top,
+          std::max<LONG>(1, text_rect.right - text_rect.left),
+          std::max<LONG>(1, text_rect.bottom - text_rect.top));
+      if (fixed_vertical_wrap_) {
+        if (fixed_vertical_full_layout_width_ > content_rect.Width()) {
+          text_renderer_->RenderTextVerticalWrappedViewport(
+              dc, text_, content_rect, fixed_vertical_full_layout_width_,
+              TextRenderer::FONTSET_RUBY);
+        } else {
+          text_renderer_->RenderTextVerticalWrapped(
+              dc, text_, content_rect, TextRenderer::FONTSET_RUBY);
+        }
+      } else {
+        text_renderer_->RenderTextVertical(
+            dc, text_, content_rect, TextRenderer::FONTSET_RUBY);
+      }
     }
     return;
   }
@@ -1009,8 +1222,28 @@ void RubyWindow::DoPaint(HDC dc) {
 
   ::SetTextColor(dc, ToColorRef(theme.text_color));
 
-  ::DrawTextW(dc, text_.c_str(), static_cast<int>(text_.size()), &text_rect,
-              DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+  const UINT flags = fixed_horizontal_wrap_
+                         ? (DT_CENTER | DT_WORDBREAK | DT_EDITCONTROL |
+                            DT_NOPREFIX)
+                         : (DT_CENTER | DT_SINGLELINE | DT_VCENTER |
+                            DT_NOPREFIX);
+  RECT draw_rect = text_rect;
+  const int available_height = std::max<LONG>(0, text_rect.bottom - text_rect.top);
+  const bool clip_to_latest =
+      fixed_horizontal_wrap_ && fixed_full_text_height_ > available_height &&
+      available_height > 0;
+  const int saved_dc = clip_to_latest ? ::SaveDC(dc) : 0;
+  if (clip_to_latest) {
+    ::IntersectClipRect(dc, text_rect.left, text_rect.top,
+                        text_rect.right, text_rect.bottom);
+    draw_rect.top -= fixed_full_text_height_ - available_height;
+    draw_rect.bottom = draw_rect.top + fixed_full_text_height_;
+  }
+  ::DrawTextW(dc, text_.c_str(), static_cast<int>(text_.size()), &draw_rect,
+              flags);
+  if (saved_dc != 0) {
+    ::RestoreDC(dc, saved_dc);
+  }
 
   if (old_font != nullptr) {
     ::SelectObject(dc, old_font);

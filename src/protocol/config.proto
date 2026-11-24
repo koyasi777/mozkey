@@ -111,6 +111,27 @@ message Config {
     KANA = 1;
   }
 
+  // Explicit English spelling exceptions. The bundled catalog is opt-in per
+  // word via AUTO_ASCII / CANDIDATE_ONLY; the product enables the feature
+  // for both new and existing profiles when unset. Explicit OFF is kept.
+  message EnglishInputException {
+    enum Behavior {
+      AUTO_ASCII = 0;
+      CANDIDATE_ONLY = 1;
+    }
+    optional string input = 1;
+    optional string preferred = 2;
+    optional Behavior behavior = 3 [default = AUTO_ASCII];
+    optional bool enabled = 4 [default = true];
+    // Immutable catalog identifier for untouched Mozkey-managed entries.
+    // UI edits strip this value and record a suppression tombstone.
+    optional string system_preset_id = 5;
+  }
+  optional bool enable_english_input_exceptions = 1060 [default = false];
+  repeated EnglishInputException english_input_exceptions = 1061;
+  optional bool auto_update_english_presets = 1062 [default = true];
+  repeated string suppressed_english_preset_ids = 1063;
+
   // Roman/Kana
   optional PreeditMethod preedit_method = 40 [default = ROMAN];
 
@@ -140,6 +161,24 @@ message Config {
 
   // custom roman table
   optional bytes custom_roman_table = 43;
+
+  // Stable ID of a bundled romaji table preset. Empty means a manually
+  // customized table or Mozc's default. The snapshot in custom_roman_table
+  // is retained for compatibility; ConfigHandler resolves this ID to the
+  // current bundled revision when loading settings.
+  optional string roman_table_preset_id = 1400 [default = ""];
+  // Stable fingerprint of the saved snapshot. Detect external user edits and
+  // fall back to custom mode rather than silently overwriting their table.
+  optional fixed64 roman_table_preset_snapshot_hash = 1401;
+
+  // User-created local romaji presets. Their identifiers are immutable; names
+  // and contents may change only through the owner's explicit operations.
+  message UserRomanTablePreset {
+    optional string id = 1;
+    optional string name = 2;
+    optional bytes table = 3;
+  }
+  repeated UserRomanTablePreset user_roman_table_presets = 1402;
 
   enum PunctuationMethod {
     TOUTEN_KUTEN = 0;
@@ -191,6 +230,11 @@ message Config {
   }
   optional HistoryLearningLevel history_learning_level = 50
       [default = DEFAULT_HISTORY];
+
+  // Preserve already committed Mozc and Zenz learning when an immediate
+  // Backspace, Undo, or similar cancellation follows the commit.  Text deletion
+  // and preedit restoration are unaffected.  The existing behavior is default.
+  optional bool preserve_learning_on_commit_undo = 1064 [default = false];
 
   // The style of candidate selection shortcut.
   // Note that if the current Request has SpecialRomajiTable (== the keyevent
@@ -735,6 +779,23 @@ message Config {
   optional string candidate_window_font_name = 1047 [default = ""];
   optional string suggest_window_font_name = 1048 [default = ""];
   optional string ruby_window_font_name = 1049 [default = ""];
+
+  // Ruby placement independent of the glyph/layout appearance.  Old profiles
+  // preserve caret-following behavior. Percentages refer to the active
+  // monitor's usable screen area; offsets are logical pixels/points.
+  enum RubyWindowPlacementMode {
+    RUBY_WINDOW_FOLLOW_PREEDIT = 0;
+    RUBY_WINDOW_FIXED_SCREEN = 1;
+  }
+  optional RubyWindowPlacementMode ruby_window_placement_mode = 1051
+      [default = RUBY_WINDOW_FOLLOW_PREEDIT];
+  optional uint32 ruby_window_fixed_x_percent = 1052 [default = 50];
+  optional uint32 ruby_window_fixed_y_percent = 1053 [default = 50];
+  optional int32 ruby_window_fixed_offset_x = 1054 [default = 0];
+  optional int32 ruby_window_fixed_offset_y = 1055 [default = 0];
+  // Maximum ruby width as a percentage of the active monitor's work area.
+  // Used by the Windows and macOS fixed-mode renderers.
+  optional uint32 ruby_window_fixed_wrap_width_percent = 1056 [default = 90];
 
   enum WindowsImeIconStyle {
     WINDOWS_IME_ICON_DEFAULT = 0;

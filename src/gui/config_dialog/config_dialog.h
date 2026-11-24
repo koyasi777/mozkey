@@ -33,10 +33,12 @@
 #define MOZC_GUI_CONFIG_DIALOG_CONFIG_DIALOG_H_
 
 #include <QObject>
+#include <QByteArray>
 #include <QTimer>
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 #include <cstdint>
 
 #include "client/client_interface.h"
@@ -71,6 +73,7 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   virtual void EditUserDictionary();
   virtual void EditKeymap();
   virtual void EditRomanTable();
+  virtual void EditEnglishInputExceptions();
   virtual void ResetToDefaults();
   virtual void SelectInputModeSetting(int index);
   virtual void SelectLiveConversionSetting(int state);
@@ -118,6 +121,10 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   std::unique_ptr<client::ClientInterface> client_;
   std::string custom_keymap_table_;
   std::string custom_roman_table_;
+  std::vector<config::Config::EnglishInputException> english_input_exceptions_;
+  std::string roman_table_preset_id_;
+  void RefreshRomanPresetUi();
+  void SelectRomanPreset(int index);
   // base_config_ keeps the original config imported from the file including
   // unconfigurable options with the GUI (e.g. composing_timeout_threshold_msec)
   config::Config base_config_;

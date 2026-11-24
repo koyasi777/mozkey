@@ -329,6 +329,9 @@ def build_on_windows(args: argparse.Namespace) -> None:
             '/largeaddressaware',
             '/dynamicbase',
             '/highentropyva',
+            # LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR: Resolve forwarded exports
+            # from the forwarder's directory, independent of caller flags.
+            '/dependentloadflag:0x100',
             '/ignore:4104',
             '/defArm64Native:mozc_arm64.def',
             '/def:mozc_x64.def',

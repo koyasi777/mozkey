@@ -471,6 +471,10 @@ message SessionCommand {
     // Continue an interrupted user keymap macro after a client callback or
     // a bounded timer. Requires command_sequence_generation to reject stales.
     RESUME_COMMAND_SEQUENCE = 31;
+
+    // Explicit user preference; does not commit a candidate.
+    PIN_CANDIDATE = 32;
+    UNPIN_CANDIDATE = 33;
   }
   required CommandType type = 1;
 
@@ -515,6 +519,8 @@ message SessionCommand {
   // Reading at the time when the delayed live conversion was scheduled.
   optional string live_conversion_key = 13;
   optional uint32 command_sequence_generation = 14;
+  // Exact reading captured by the renderer to reject stale candidate IDs.
+  optional string pin_reading = 15;
 }
 
 message Context {

@@ -287,6 +287,51 @@ VerticalRubyMetrics MeasureVerticalAttributedString(
   return result;
 }
 
+NSAttributedString *SuffixByComposedCharacterRange(
+    NSAttributedString *original, NSUInteger start) {
+  if (original == nil || [original length] == 0 || start == 0) {
+    return original;
+  }
+  NSDictionary *attributes =
+      [original attributesAtIndex:0 effectiveRange:nullptr];
+  NSMutableAttributedString *result =
+      [[NSMutableAttributedString alloc] initWithString:@"…"
+                                          attributes:attributes];
+  if (start < [original length]) {
+    [result appendAttributedString:[original attributedSubstringFromRange:
+        NSMakeRange(start, [original length] - start)]];
+  }
+  return result;
+}
+
+std::vector<NSUInteger> ComposedCharacterStarts(NSString *text) {
+  std::vector<NSUInteger> starts = {0};
+  if (text == nil) {
+    return starts;
+  }
+  const NSUInteger length = [text length];
+  for (NSUInteger pos = 0; pos < length;) {
+    const NSRange cluster =
+        [text rangeOfComposedCharacterSequenceAtIndex:pos];
+    pos = NSMaxRange(cluster);
+    starts.push_back(pos);
+  }
+  return starts;
+}
+
+CGFloat VerticalRubyContentScale(const VerticalRubyMetrics &metrics,
+                                 CGFloat maximum_width,
+                                 CGFloat horizontal_padding) {
+  if (maximum_width <= 0.0) {
+    return 1.0;
+  }
+  const CGFloat available_width =
+      std::max<CGFloat>(1.0, maximum_width - 2.0 * horizontal_padding);
+  return std::min<CGFloat>(
+      1.0, available_width /
+               std::max<CGFloat>(1.0, metrics.visual_width));
+}
+
 void DrawVerticalAttributedString(
     NSAttributedString *text, const NSRect &visual_rect,
     CGFloat technical_frame_width) {
@@ -357,6 +402,7 @@ void DrawVerticalAttributedString(
 @interface RubyView : NSView
 - (void)setVerticalWriting:(BOOL)verticalWriting;
 - (void)setRubyText:(NSAttributedString *)text;
+- (void)setFixedLayoutBoundsWithWidth:(CGFloat)width height:(CGFloat)height;
 - (void)setBackgroundColor:(NSColor *)backgroundColor
                borderColor:(NSColor *)borderColor
               cornerRadius:(CGFloat)cornerRadius
@@ -374,6 +420,9 @@ void DrawVerticalAttributedString(
   CGFloat verticalPadding_;
   BOOL verticalWriting_;
   VerticalRubyMetrics verticalMetrics_;
+  CGFloat maximumWidth_;
+  CGFloat maximumHeight_;
+  NSSize horizontalTextSize_;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -387,6 +436,9 @@ void DrawVerticalAttributedString(
     verticalPadding_ = 6.0;
     verticalWriting_ = NO;
     verticalMetrics_ = VerticalRubyMetrics();
+    maximumWidth_ = 0.0;
+    maximumHeight_ = 0.0;
+    horizontalTextSize_ = NSZeroSize;
     [self setWantsLayer:YES];
   }
   return self;
@@ -396,13 +448,102 @@ void DrawVerticalAttributedString(
   verticalWriting_ = verticalWriting;
 }
 
+- (void)setFixedLayoutBoundsWithWidth:(CGFloat)width height:(CGFloat)height {
+  maximumWidth_ = std::max<CGFloat>(0.0, width);
+  maximumHeight_ = std::max<CGFloat>(0.0, height);
+}
+
 - (void)setRubyText:(NSAttributedString *)text {
+  NSAttributedString *source = text;
+  if (source == nil) {
+    source = [[NSAttributedString alloc] initWithString:@""];
+  }
   if (verticalWriting_) {
-    text_ = [MakeVerticalAttributedString(text) copy];
+    text_ = [MakeVerticalAttributedString(source) copy];
     verticalMetrics_ = MeasureVerticalAttributedString(text_);
+    horizontalTextSize_ = NSZeroSize;
   } else {
-    text_ = [text copy];
+    if (maximumWidth_ > 0.0 && [source length] > 0) {
+      NSMutableAttributedString *styled =
+          [[NSMutableAttributedString alloc] initWithAttributedString:source];
+      NSMutableParagraphStyle *paragraph =
+          [[NSMutableParagraphStyle alloc] init];
+      [paragraph setAlignment:NSTextAlignmentCenter];
+      [paragraph setLineBreakMode:NSLineBreakByCharWrapping];
+      [styled addAttribute:NSParagraphStyleAttributeName value:paragraph
+                    range:NSMakeRange(0, [styled length])];
+      source = styled;
+    }
+    text_ = [source copy];
     verticalMetrics_ = VerticalRubyMetrics();
+  }
+
+  const NSStringDrawingOptions drawing_options =
+      NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading;
+  const CGFloat content_width =
+      std::max<CGFloat>(1.0, maximumWidth_ - 2.0 * horizontalPadding_);
+  auto measure_horizontal = [&](NSAttributedString *candidate) -> NSSize {
+    const NSSize natural = [candidate size];
+    if (maximumWidth_ <= 0.0) {
+      return natural;
+    }
+    const CGFloat width = std::max<CGFloat>(
+        1.0, std::min<CGFloat>(natural.width, content_width));
+    const NSRect box = [candidate boundingRectWithSize:
+        NSMakeSize(width, CGFLOAT_MAX)
+        options:drawing_options context:nil];
+    return NSMakeSize(std::ceil(width),
+                      std::ceil(std::max<CGFloat>(natural.height,
+                                               NSHeight(box))));
+  };
+
+  if (!verticalWriting_) {
+    horizontalTextSize_ = measure_horizontal(text_);
+  }
+  // On long compositions, preserve the most recent complete grapheme
+  // clusters. Foundation's composed-character API handles ZWJ sequences,
+  // combining marks, surrogate pairs, and other UAX #29 clusters.
+  const CGFloat available_height =
+      maximumHeight_ - 2.0 * verticalPadding_;
+  if (maximumHeight_ > 0.0 && available_height > 0.0 &&
+      [text_ length] > 0) {
+    const CGFloat original_height = verticalWriting_
+        ? verticalMetrics_.frame_height * VerticalRubyContentScale(
+              verticalMetrics_, maximumWidth_, horizontalPadding_)
+        : horizontalTextSize_.height;
+    if (original_height > available_height) {
+      NSAttributedString *complete = text_;
+      const std::vector<NSUInteger> starts =
+          ComposedCharacterStarts([complete string]);
+      size_t low = 1;
+      size_t high = starts.size() - 1;
+      while (low < high) {
+        const size_t mid = low + (high - low) / 2;
+        NSAttributedString *candidate =
+            SuffixByComposedCharacterRange(text_, starts[mid]);
+        CGFloat height = 0.0;
+        if (verticalWriting_) {
+          const VerticalRubyMetrics candidate_metrics =
+              MeasureVerticalAttributedString(candidate);
+          height = candidate_metrics.frame_height * VerticalRubyContentScale(
+              candidate_metrics, maximumWidth_, horizontalPadding_);
+        } else {
+          height = measure_horizontal(candidate).height;
+        }
+        if (height <= available_height) {
+          high = mid;
+        } else {
+          low = mid + 1;
+        }
+      }
+      text_ = [SuffixByComposedCharacterRange(
+          text_, starts[low]) copy];
+      if (verticalWriting_) {
+        verticalMetrics_ = MeasureVerticalAttributedString(text_);
+      } else {
+        horizontalTextSize_ = measure_horizontal(text_);
+      }
+    }
   }
   [self setNeedsDisplay:YES];
 }
@@ -420,17 +561,30 @@ void DrawVerticalAttributedString(
   [self setNeedsDisplay:YES];
 }
 
-- (NSSize)preferredSize {
-  if (verticalWriting_) {
-    return NSMakeSize(
-        ceil(verticalMetrics_.visual_width + horizontalPadding_ * 2.0),
-        ceil(verticalMetrics_.frame_height + verticalPadding_ * 2.0));
+- (CGFloat)verticalContentScale {
+  if (!verticalWriting_) {
+    return 1.0;
   }
+  return VerticalRubyContentScale(
+      verticalMetrics_, maximumWidth_, horizontalPadding_);
+}
 
-  const NSSize textSize = [text_ size];
-  return NSMakeSize(
-      ceil(textSize.width + horizontalPadding_ * 2.0),
-      ceil(textSize.height + verticalPadding_ * 2.0));
+- (NSSize)preferredSize {
+  const CGFloat vertical_scale = [self verticalContentScale];
+  const NSSize content = verticalWriting_
+      ? NSMakeSize(verticalMetrics_.visual_width * vertical_scale,
+                   verticalMetrics_.frame_height * vertical_scale)
+      : horizontalTextSize_;
+  CGFloat width = std::ceil(content.width + horizontalPadding_ * 2.0);
+  CGFloat height = std::ceil(content.height + verticalPadding_ * 2.0);
+  if (maximumWidth_ > 0.0) {
+    width = std::min(width, maximumWidth_);
+  }
+  if (maximumHeight_ > 0.0) {
+    height = std::min(height, maximumHeight_);
+  }
+  return NSMakeSize(std::max<CGFloat>(1.0, width),
+                    std::max<CGFloat>(1.0, height));
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
@@ -460,24 +614,49 @@ void DrawVerticalAttributedString(
   }
 
   if (verticalWriting_) {
-    const NSRect textRect =
-        NSMakeRect(
-            (NSWidth(self.bounds) - verticalMetrics_.visual_width) / 2.0,
-            verticalPadding_,
-            verticalMetrics_.visual_width,
-            verticalMetrics_.frame_height);
-    DrawVerticalAttributedString(
-        text_, textRect, verticalMetrics_.frame_width);
+    const CGFloat scale = [self verticalContentScale];
+    if (scale < 1.0) {
+      // Scale glyphs only; retain the unscaled pill and its padding.
+      CGContextRef context = [[NSGraphicsContext currentContext] CGContext];
+      if (context != nullptr) {
+        CGContextSaveGState(context);
+        CGContextTranslateCTM(
+            context, NSMidX(self.bounds), verticalPadding_);
+        CGContextScaleCTM(context, scale, scale);
+        const NSRect original_rect = NSMakeRect(
+            -verticalMetrics_.visual_width / 2.0, 0.0,
+            verticalMetrics_.visual_width, verticalMetrics_.frame_height);
+        DrawVerticalAttributedString(
+            text_, original_rect, verticalMetrics_.frame_width);
+        CGContextRestoreGState(context);
+      }
+    } else {
+      const NSRect textRect =
+          NSMakeRect(
+              (NSWidth(self.bounds) - verticalMetrics_.visual_width) / 2.0,
+              verticalPadding_,
+              verticalMetrics_.visual_width,
+              verticalMetrics_.frame_height);
+      DrawVerticalAttributedString(
+          text_, textRect, verticalMetrics_.frame_width);
+    }
     return;
   }
 
-  const NSSize textSize = [text_ size];
+  const NSSize textSize = horizontalTextSize_;
   const NSRect textRect =
       NSMakeRect((NSWidth(self.bounds) - textSize.width) / 2.0,
                  (NSHeight(self.bounds) - textSize.height) / 2.0,
                  textSize.width,
                  textSize.height);
-  [text_ drawInRect:textRect];
+  if (maximumWidth_ > 0.0) {
+    [text_ drawWithRect:textRect
+               options:NSStringDrawingUsesLineFragmentOrigin |
+                       NSStringDrawingUsesFontLeading
+               context:nil];
+  } else {
+    [text_ drawInRect:textRect];
+  }
 }
 @end
 
@@ -492,6 +671,12 @@ RubyWindow::~RubyWindow() = default;
 void RubyWindow::SetWritingDirection(
     WritingDirection writing_direction) {
   writing_direction_ = writing_direction;
+}
+
+void RubyWindow::SetFixedLayoutBounds(
+    int32_t maximum_width, int32_t maximum_height) {
+  fixed_maximum_width_ = std::max<int32_t>(0, maximum_width);
+  fixed_maximum_height_ = std::max<int32_t>(0, maximum_height);
 }
 
 bool RubyWindow::BuildReadingText(
@@ -578,6 +763,8 @@ bool RubyWindow::Update(const commands::RendererCommand &command) {
             cornerRadius:corner_radius
        horizontalPadding:horizontal_padding
          verticalPadding:vertical_padding];
+  [ruby_view setFixedLayoutBoundsWithWidth:fixed_maximum_width_
+                                   height:fixed_maximum_height_];
 
   [ruby_view setRubyText:
       MacViewUtil::ToNSAttributedString(reading, text_style)];

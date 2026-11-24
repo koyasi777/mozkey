@@ -35,17 +35,22 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "composer/composer.h"
+#include "composer/english_input_exceptions.h"
+#include "composer/table.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/segments.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "dictionary/pos_matcher.h"
 #include "protocol/commands.pb.h"
+#include "protocol/config.pb.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
 #include "testing/test_peer.h"
+#include "transliteration/transliteration.h"
 
 namespace mozc {
 
@@ -606,6 +611,706 @@ TEST_F(EnglishVariantsRewriterTest, MobileEnvironmentTest) {
         ConversionRequestBuilder().SetRequest(request).Build();
     EXPECT_EQ(rewriter_->capability(convreq), RewriterInterface::CONVERSION);
   }
+}
+
+void AddTestEnglishException(config::Config* config,
+                             absl::string_view word,
+                             absl::string_view preferred,
+                             config::Config::EnglishInputException::Behavior mode =
+                               config::Config::EnglishInputException::AUTO_ASCII) {
+  config->set_enable_english_input_exceptions(true);
+  auto* rule = config->add_english_input_exceptions();
+  rule->set_input(std::string(word));
+  rule->set_preferred(std::string(preferred));
+  rule->set_behavior(mode);
+}
+
+void AddAllTestEnglishExceptions(config::Config* config) {
+  AddTestEnglishException(config, "github", "GitHub");
+  AddTestEnglishException(config, "gitlab", "GitLab");
+  AddTestEnglishException(config, "docker", "Docker");
+  AddTestEnglishException(config, "google", "Google");
+}
+
+TEST_F(EnglishVariantsRewriterTest, CanonicalTechNamesAcrossModes) {
+  for (const ConversionRequest::RequestType type : {
+           ConversionRequest::CONVERSION, ConversionRequest::SUGGESTION,
+           ConversionRequest::PREDICTION}) {
+    for (const absl::string_view word : {"google", "github", "gitlab",
+                                         "docker"}) {
+      config::Config config;
+      config.set_preedit_method(config::Config::ROMAN);
+      config.set_auto_switch_composition_mode(true);
+      config.set_shift_key_mode_switch(config::Config::OFF);
+      AddAllTestEnglishExceptions(&config);
+      commands::Request client_request;
+      auto table = std::make_shared<composer::Table>();
+      ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request,
+                                                       config));
+      composer::Composer composer(table, client_request, config);
+      for (char c : word) {
+        commands::KeyEvent key;
+        key.set_key_code(c);
+        ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+      }
+      ASSERT_EQ(composer.GetRawString(), word);
+      ASSERT_EQ(composer.GetStringForPreedit(), word);
+      const ConversionRequest request = ConversionRequestBuilder()
+          .SetComposer(composer)
+          .SetConfig(config)
+          .SetRequest(client_request)
+          .SetRequestType(type)
+          .Build();
+      ASSERT_EQ(request.key(), word) << static_cast<int>(type);
+      EXPECT_NE(rewriter_->capability(request) &
+                    (type == ConversionRequest::CONVERSION
+                         ? RewriterInterface::CONVERSION
+                         : type == ConversionRequest::SUGGESTION
+                               ? RewriterInterface::SUGGESTION
+                               : RewriterInterface::PREDICTION),
+                0);
+      Segments segments;
+      Segment* segment = segments.add_segment();
+      segment->set_key(request.key());
+      auto* candidate = segment->add_candidate();
+      candidate->key = std::string(request.key());
+      candidate->content_key = candidate->key;
+      candidate->value = "仮";
+      candidate->content_value = candidate->value;
+      EXPECT_TRUE(rewriter_->Rewrite(request, &segments)) << word;
+      const std::string canonical =
+          word == "google" ? "Google" :
+          word == "github" ? "GitHub" :
+          word == "gitlab" ? "GitLab" : "Docker";
+      std::vector<std::string> spellings = {canonical, std::string(word)};
+      if (word == "github") spellings.push_back("Github");
+      if (word == "gitlab") spellings.push_back("Gitlab");
+      spellings.push_back(word == "google" ? "GOOGLE"
+                          : word == "github" ? "GITHUB"
+                          : word == "gitlab" ? "GITLAB"
+                                             : "DOCKER");
+      ASSERT_EQ(segment->candidates_size(), spellings.size() + 1);
+      int index = 0;
+      for (const std::string& spelling : spellings) {
+        const converter::Candidate& actual = segment->candidate(index++);
+        EXPECT_EQ(actual.value, spelling) << word;
+        // Each variant is independently hideable via (reading, surface).
+        EXPECT_EQ(actual.key, word) << spelling;
+        EXPECT_EQ(actual.content_key, word) << spelling;
+        EXPECT_EQ(actual.content_value, spelling) << word;
+        EXPECT_EQ(actual.attributes & converter::Attribute::COMMAND_CANDIDATE,
+                  0);
+      }
+      EXPECT_EQ(segment->candidate(index).value, "仮");
+      EXPECT_EQ(composer.GetRawString(), word);
+      // Rewrites must be idempotent (no duplicated candidates).
+      rewriter_->Rewrite(request, &segments);
+      EXPECT_EQ(segment->candidates_size(), spellings.size() + 1);
+    }
+  }
+}
+
+TEST_F(EnglishVariantsRewriterTest, CanonicalInJapaneseContext) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddAllTestEnglishExceptions(&config);
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("korehagithubdesu")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer.GetStringForPreedit(), "これはgithubです");
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  ASSERT_EQ(request.key(), "これはgithubです");
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key(request.key());
+  auto* candidate = segment->add_candidate();
+  candidate->key = std::string(request.key());
+  candidate->content_key = candidate->key;
+  candidate->value = std::string(request.key());
+  candidate->content_value = candidate->value;
+  ASSERT_TRUE(rewriter_->Rewrite(request, &segments));
+  EXPECT_EQ(segment->candidate(0).value, "これはGitHubです");
+  EXPECT_EQ(segment->candidate(1).value, "これはgithubです");
+  EXPECT_EQ(composer.GetRawString(), "korehagithubdesu");
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       CanonicalInJapaneseContextSkipsUnalignedCandidate) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddAllTestEnglishExceptions(&config);
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("korehagithubdesu")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer.GetStringForPreedit(), "これはgithubです");
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key(request.key());
+  auto* candidate = segment->add_candidate();
+  candidate->key = std::string(request.key());
+  candidate->content_key = candidate->key;
+  // Both strings contain "github", but neither has proven raw alignment.
+  candidate->value = "githubこれはgithubです";
+  candidate->content_value = candidate->value;
+  EXPECT_FALSE(rewriter_->Rewrite(request, &segments));
+  ASSERT_EQ(segment->candidates_size(), 1);
+  EXPECT_EQ(segment->candidate(0).value, "githubこれはgithubです");
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       CanonicalInJapaneseContextSupportsContentSuffix) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddAllTestEnglishExceptions(&config);
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("korehagithubdesu")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer.GetStringForPreedit(), "これはgithubです");
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key(request.key());
+  auto* candidate = segment->add_candidate();
+  candidate->key = std::string(request.key());
+  candidate->content_key = candidate->key;
+  candidate->value = "これはgithubです";
+  candidate->content_value = "githubです";  // Japanese prefix is omitted.
+  ASSERT_TRUE(rewriter_->Rewrite(request, &segments));
+  ASSERT_EQ(segment->candidates_size(), 2);
+  EXPECT_EQ(segment->candidate(0).value, "これはGitHubです");
+  EXPECT_EQ(segment->candidate(0).content_value, "GitHubです");
+  EXPECT_EQ(segment->candidate(1).value, "これはgithubです");
+  // Repeated rewriting must not create duplicate candidates.
+  EXPECT_FALSE(rewriter_->Rewrite(request, &segments));
+  ASSERT_EQ(segment->candidates_size(), 2);
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       CanonicalInJapaneseContextSupportsConvertedKanaAndSuffix) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddTestEnglishException(&config, "example", "Example");
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("korehaexampledesu")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer.GetStringForPreedit(), "これはexampleです");
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  ASSERT_EQ(request.key(), "これはexampleです");
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key(request.key());
+  auto* candidate = segment->add_candidate();
+  candidate->key = std::string(request.key());
+  candidate->content_key = candidate->key;
+  candidate->value = "此れはexampleです";
+  candidate->content_value = "example";
+  ASSERT_TRUE(rewriter_->Rewrite(request, &segments));
+  ASSERT_EQ(segment->candidates_size(), 2);
+  EXPECT_EQ(segment->candidate(0).value, "此れはExampleです");
+  EXPECT_EQ(segment->candidate(0).content_value, "Example");
+  EXPECT_EQ(segment->candidate(0).key, request.key());
+  EXPECT_EQ(segment->candidate(1).value, "此れはexampleです");
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       CanonicalInJapaneseContextSupportsFollowingJapaneseSegment) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddTestEnglishException(&config, "example", "Example");
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("korehaexampledesu")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer.GetStringForPreedit(), "これはexampleです");
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  Segments segments;
+  Segment* japanese = segments.add_segment();
+  japanese->set_key("これは");
+  auto* first = japanese->add_candidate();
+  first->key = "これは";
+  first->content_key = first->key;
+  first->value = "これは";
+  first->content_value = first->value;
+  Segment* english = segments.add_segment();
+  english->set_key("exampleです");
+  auto* second = english->add_candidate();
+  second->key = "exampleです";
+  second->content_key = second->key;
+  second->value = "exampleです";
+  second->content_value = "example";
+  ASSERT_TRUE(rewriter_->Rewrite(request, &segments));
+  ASSERT_EQ(english->candidates_size(), 2);
+  EXPECT_EQ(english->candidate(0).value, "Exampleです");
+  EXPECT_EQ(english->candidate(0).content_value, "Example");
+  EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "これは");
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       CanonicalInJapaneseContextRejectsUnrelatedContent) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddTestEnglishException(&config, "example", "Example");
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("korehaexampledesu")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key(request.key());
+  auto* candidate = segment->add_candidate();
+  candidate->key = std::string(request.key());
+  candidate->content_key = candidate->key;
+  candidate->value = "これはexampleです";
+  candidate->content_value = "example以外";  // Not contained in value.
+  EXPECT_FALSE(rewriter_->Rewrite(request, &segments));
+  ASSERT_EQ(segment->candidates_size(), 1);
+}
+
+
+TEST_F(EnglishVariantsRewriterTest,
+       SuppressWholeRawRomanSuggestionInMixedJapaneseEnglish) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddTestEnglishException(&config, "example", "Example");
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("korehaexampledesu")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer.GetStringForPreedit(), "これはexampleです");
+  ASSERT_EQ(composer.GetRawString(), "korehaexampledesu");
+
+  for (const auto type : {ConversionRequest::SUGGESTION,
+                          ConversionRequest::CONVERSION}) {
+    const ConversionRequest request = ConversionRequestBuilder()
+        .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+        .SetRequestType(type).Build();
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(request.key());
+    auto* raw = segment->add_candidate();
+    raw->key = std::string(request.key());
+    raw->content_key = raw->key;
+    raw->value = "korehaexampledesu";
+    raw->content_value = raw->value;
+    auto* ordinary = segment->add_candidate();
+    ordinary->key = std::string(request.key());
+    ordinary->content_key = ordinary->key;
+    ordinary->value = "これはExampleです";
+    ordinary->content_value = ordinary->value;
+    rewriter_->Rewrite(request, &segments);
+    if (type == ConversionRequest::SUGGESTION) {
+      ASSERT_EQ(segment->candidates_size(), 1);
+      EXPECT_EQ(segment->candidate(0).value, "これはExampleです");
+    } else {
+      ASSERT_EQ(segment->candidates_size(), 2);
+      EXPECT_EQ(segment->candidate(0).value, "korehaexampledesu");
+    }
+  }
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       PendingRomanDoesNotSuggestWholeRawInputForJapaneseSentence) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_enable_english_input_exceptions(true);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+
+  // No registered English token is necessary to reproduce the leak.
+  // The trailing 'k' is an unresolved Roman input in Japanese mode.
+  for (const std::string raw : {"korehanihongok", "korehaexampledesuk"}) {
+    composer::Composer composer(table, client_request, config);
+    for (char c : raw) {
+      commands::KeyEvent key;
+      key.set_key_code(c);
+      ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+    }
+    ASSERT_GT(composer.GetPendingRomanInputLength(), 0u) << raw;
+    ASSERT_NE(composer.GetStringForPreedit(), raw);
+    const ConversionRequest request = ConversionRequestBuilder()
+        .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+        .SetRequestType(ConversionRequest::SUGGESTION).Build();
+    EXPECT_NE(rewriter_->capability(request) & RewriterInterface::SUGGESTION,
+              0) << raw;
+
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(request.key());
+    auto* raw_candidate = segment->add_candidate();
+    raw_candidate->key = std::string(request.key());
+    raw_candidate->content_key = raw_candidate->key;
+    raw_candidate->value = raw;
+    raw_candidate->content_value = raw;
+    auto* japanese = segment->add_candidate();
+    japanese->key = std::string(request.key());
+    japanese->content_key = japanese->key;
+    japanese->value = "これは日本語";
+    japanese->content_value = japanese->value;
+    EXPECT_TRUE(rewriter_->Rewrite(request, &segments)) << raw;
+    for (const auto& candidate : segment->candidates()) {
+      EXPECT_NE(candidate->value, raw) << raw;
+    }
+    int rank = -1;
+    EXPECT_TRUE(GetRankFromValue(*segment, "これは日本語", &rank));
+  }
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       PendingRomanRawSuggestionRespectsDisabledFeatureAndAsciiInput) {
+  for (int scenario = 0; scenario < 2; ++scenario) {
+    config::Config config;
+    config.set_preedit_method(config::Config::ROMAN);
+    config.set_enable_english_input_exceptions(scenario != 0);
+    config.set_auto_switch_composition_mode(true);
+    config.set_shift_key_mode_switch(config::Config::OFF);
+    commands::Request client_request;
+    auto table = std::make_shared<composer::Table>();
+    ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request,
+                                                      config));
+    composer::Composer composer(table, client_request, config);
+    if (scenario == 1) {
+      composer.SetInputMode(transliteration::HALF_ASCII);
+    }
+    const std::string raw = "korehanihongok";
+    for (char c : raw) {
+      commands::KeyEvent key;
+      key.set_key_code(c);
+      ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+    }
+    const ConversionRequest request = ConversionRequestBuilder()
+        .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+        .SetRequestType(ConversionRequest::SUGGESTION).Build();
+    EXPECT_EQ(rewriter_->capability(request) & RewriterInterface::SUGGESTION,
+              0) << scenario;
+  }
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       PendingRomanRawSuggestionSuppressionDoesNotAffectConversion) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_enable_english_input_exceptions(true);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  const std::string raw = "korehanihongok";
+  for (char c : raw) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  ASSERT_GT(composer.GetPendingRomanInputLength(), 0u);
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key(request.key());
+  auto* raw_candidate = segment->add_candidate();
+  raw_candidate->key = std::string(request.key());
+  raw_candidate->content_key = raw_candidate->key;
+  raw_candidate->value = raw;
+  raw_candidate->content_value = raw;
+  auto* japanese = segment->add_candidate();
+  japanese->key = std::string(request.key());
+  japanese->content_key = japanese->key;
+  japanese->value = "これは日本語";
+  japanese->content_value = japanese->value;
+  rewriter_->Rewrite(request, &segments);
+  int rank = -1;
+  EXPECT_TRUE(GetRankFromValue(*segment, raw, &rank));
+}
+
+TEST_F(EnglishVariantsRewriterTest,
+       CanonicalSuggestionRequiresVisibleWordBoundary) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(true);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddAllTestEnglishExceptions(&config);
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("xgithuby")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  EXPECT_EQ(composer.GetRawString(), "xgithuby");
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::SUGGESTION).Build();
+  EXPECT_EQ(rewriter_->capability(request) & RewriterInterface::SUGGESTION,
+            0) << "raw=" << composer.GetRawString()
+               << " preedit=" << composer.GetStringForPreedit()
+               << " key=" << request.key()
+               << " pending=" << composer.GetPendingRomanInputLength();
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key(request.key());
+  auto* candidate = segment->add_candidate();
+  candidate->key = std::string(request.key());
+  candidate->content_key = candidate->key;
+  candidate->value = "仮";
+  candidate->content_value = "仮";
+  EXPECT_FALSE(rewriter_->Rewrite(request, &segments));
+  EXPECT_EQ(segment->candidates_size(), 1);
+}
+
+TEST_F(EnglishVariantsRewriterTest, CanonicalizationIsConservative) {
+  for (const absl::string_view word : {"GitHub", "GITHUB",
+                                       "nihongo", "sushi", "azooKey"}) {
+    config::Config config;
+    config.set_preedit_method(config::Config::ROMAN);
+    config.set_auto_switch_composition_mode(true);
+    config.set_shift_key_mode_switch(config::Config::OFF);
+    AddAllTestEnglishExceptions(&config);
+    commands::Request client_request;
+    auto table = std::make_shared<composer::Table>();
+    ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+    composer::Composer composer(table, client_request, config);
+    for (char c : word) {
+      commands::KeyEvent key;
+      key.set_key_code(c);
+      ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+    }
+    const ConversionRequest request = ConversionRequestBuilder()
+        .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+        .SetRequestType(ConversionRequest::CONVERSION).Build();
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(request.key());
+    auto* candidate = segment->add_candidate();
+    candidate->key = std::string(request.key());
+    candidate->content_key = candidate->key;
+    candidate->value = "仮";
+    candidate->content_value = "仮";
+    EXPECT_FALSE(rewriter_->Rewrite(request, &segments)) << word;
+    EXPECT_EQ(segment->candidates_size(), 1);
+  }
+}
+
+TEST_F(EnglishVariantsRewriterTest, UserDefinedExceptionsRespectSettings) {
+  // Explicit opt-in. Disabled, missing entry, manual suppression and ASCII
+  // input must not promote a candidate.
+  for (int scenario = 0; scenario < 4; ++scenario) {
+    config::Config config;
+    config.set_preedit_method(config::Config::ROMAN);
+    config.set_auto_switch_composition_mode(false);
+    config.set_shift_key_mode_switch(config::Config::OFF);
+    if (scenario != 1) AddTestEnglishException(&config, "github", "GitHub");
+    if (scenario == 0) config.set_enable_english_input_exceptions(false);
+    commands::Request client_request;
+    auto table = std::make_shared<composer::Table>();
+    ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+    composer::Composer composer(table, client_request, config);
+    if (scenario == 2) composer.SuppressLanguageAwareRawInput();
+    if (scenario == 3) composer.SetInputMode(transliteration::HALF_ASCII);
+    for (char c : std::string("github")) {
+      commands::KeyEvent key;
+      key.set_key_code(c);
+      ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+    }
+    const ConversionRequest request = ConversionRequestBuilder()
+        .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+        .SetRequestType(ConversionRequest::SUGGESTION).Build();
+    EXPECT_EQ(rewriter_->capability(request) & RewriterInterface::SUGGESTION,
+              0) << scenario;
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(request.key());
+    auto* candidate = segment->add_candidate();
+    candidate->key = std::string(request.key());
+    candidate->content_key = candidate->key;
+    candidate->value = "仮";
+    candidate->content_value = "仮";
+    EXPECT_FALSE(rewriter_->Rewrite(request, &segments)) << scenario;
+    EXPECT_EQ(segment->candidates_size(), 1) << scenario;
+  }
+}
+
+
+// This case is deliberately *not* a single Japanese segment: a complete
+// English keyboard token may look like "ちゃtgpt" in a Roman IME.
+TEST_F(EnglishVariantsRewriterTest, ChatGptCandidateOnlyWorksWithSplitReading) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddTestEnglishException(&config, "chatgpt", "ChatGPT",
+                          config::Config::EnglishInputException::CANDIDATE_ONLY);
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char ch : std::string("chatgpt")) {
+    commands::KeyEvent key;
+    key.set_key_code(ch);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer.GetRawString(), "chatgpt");
+  ASSERT_NE(composer.GetStringForPreedit(), "ChatGPT");
+  const ConversionRequest explicit_request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  const std::string full = std::string(explicit_request.key());
+  ASSERT_TRUE(full.starts_with("ちゃ")) << full;
+  ASSERT_GT(full.size(), std::string("ちゃ").size());
+  Segments parts;
+  Segment* japanese = parts.add_segment();
+  japanese->set_key("ちゃ");
+  auto* original = japanese->add_candidate();
+  original->key = japanese->key();
+  original->content_key = original->key;
+  original->value = "茶";
+  original->content_value = original->value;
+  Segment* suffix = parts.add_segment();
+  suffix->set_key(full.substr(std::string("ちゃ").size()));
+  original = suffix->add_candidate();
+  original->key = suffix->key();
+  original->content_key = original->key;
+  original->value = suffix->key();
+  original->content_value = original->value;
+  ASSERT_TRUE(rewriter_->Rewrite(explicit_request, &parts));
+  EXPECT_EQ(parts.conversion_segment(0).candidate(0).value, "ChatGPT");
+  EXPECT_EQ(parts.conversion_segment(0).candidate(0).key, full);
+  EXPECT_EQ(parts.conversion_segment(0).candidate(0)
+                .effective_converted_segment_count(), 2);
+  rewriter_->Rewrite(explicit_request, &parts);
+  int full_span_count = 0;
+  for (const auto& candidate : parts.conversion_segment(0).candidates()) {
+    if (candidate->value == "ChatGPT" &&
+        candidate->effective_converted_segment_count() == 2) {
+      ++full_span_count;
+    }
+  }
+  EXPECT_EQ(full_span_count, 1);
+
+  const ConversionRequest suggest_request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::SUGGESTION)
+      .SetKey(full).Build();
+  Segments suggested;
+  Segment* segment = suggested.add_segment();
+  segment->set_key(full);
+  ASSERT_TRUE(rewriter_->Rewrite(suggest_request, &suggested));
+  EXPECT_EQ(segment->candidate(0).value, "ChatGPT");
+}
+
+TEST_F(EnglishVariantsRewriterTest, CandidateOnlyUsesRawKeysNotKanaOutput) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(false);
+  config.set_shift_key_mode_switch(config::Config::OFF);
+  AddTestEnglishException(&config, "github", "GitHub",
+                          config::Config::EnglishInputException::CANDIDATE_ONLY);
+  commands::Request client_request;
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+  for (char c : std::string("github")) {
+    commands::KeyEvent key;
+    key.set_key_code(c);
+    ASSERT_TRUE(composer.InsertCharacterKeyEvent(key));
+  }
+  EXPECT_NE(composer.GetStringForPreedit(), "github");
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetComposer(composer).SetConfig(config).SetRequest(client_request)
+      .SetRequestType(ConversionRequest::CONVERSION).Build();
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key(request.key());
+  auto* candidate = segment->add_candidate();
+  candidate->key = std::string(request.key());
+  candidate->content_key = candidate->key;
+  candidate->value = "仮";
+  candidate->content_value = "仮";
+  ASSERT_TRUE(rewriter_->Rewrite(request, &segments));
+  EXPECT_EQ(segment->candidate(0).value, "GitHub");
+  EXPECT_EQ(segment->candidate(0).key, request.key());
+}
+
+TEST_F(EnglishVariantsRewriterTest, NoBuiltInsWhenExceptionDictionaryEmpty) {
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_auto_switch_composition_mode(false);
+  config.set_enable_english_input_exceptions(true);
+  EXPECT_EQ(config.english_input_exceptions_size(), 0);
+  // Even with the exception engine on, no implicit canonical list exists.
+  EXPECT_EQ(composer::EnglishInputExceptions::Find(config, "github"), nullptr);
 }
 
 }  // namespace mozc

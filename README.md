@@ -36,10 +36,12 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **Zenz 補正結果の採用条件：** 厳密な読み保持と、Zenz が絵文字を意図せず追加・変更・削除することを抑制する設定を用意。自動ライブ補正と手動補正の両方に適用できます。
 - **選べる Zenz の表示タイミング：** 通常のライブ変換結果を先に表示する動作に加え、Zenz の応答を一定時間待ってから表示する方式も選択できます。
 - **学習と候補のコントロール：** Zenz の採用・却下フィードバック、保存済み結果の再利用、Mozc 変換履歴への学習を個別に設定。表示中の Zenz 補正は `Ctrl+Delete` で明示的にブロックでき、学習データの管理、通常候補の履歴削除・非表示、確定直後の取り消しにも対応します。
+- **候補を先頭に固定（Windows / macOS）：** 通常変換の候補を右クリックし、「先頭に固定」でその読みの第1候補へ昇格できます。固定状態は再起動後も保持され、「固」マークと「固定を解除」から管理できます。
 - **縦書きに対応した入力 UI（Windows / macOS）：** 候補・サジェスト・用例・ルビを縦書きに合わせて配置し、対応するキー設定では候補や文節の移動方向も調整します。
 - **変換状態インジケータ（Windows / macOS）：** 未確定文字の近くで「入力中・Mozc・Zenz処理中・Zenz適用済み」を表示し、配色・形状・位置を調整できます。
 - **幅広い外観カスタマイズ：** 候補・サジェスト・ルビの配色（ライト／ダーク／自動／カスタム）、サイズ、角丸、透明度、影を個別に設定。Windows ではフォント・文字の太さ・未確定文字の色や下線、IME インジケータも調整できます。
-- **柔軟なローマ字入力とキー設定：** ローマ字テーブルの編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
+- **英字表記辞書（IME 切り替え不要）：** 日本語入力（ひらがなモード）のまま、`GitHub` や `ChatGPT` などの英字表記を入力・選択できます。別の IME や半角英数モードへの手動切り替えは不要です。登録語ごとに「自動英字化」と「候補のみ」を選べ、推奨語彙の管理や TSV / JSON の入出力にも対応します。
+- **柔軟なローマ字入力とキー設定：** プリセットの保存・管理、ローマ字テーブルの検索・編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
 - **日本語の変換品質と辞書の拡張：** 日常語彙・固有名詞・口語表現を補強し、文節分割や不自然な漢字化を抑制。日付・曜日の変換候補も拡張しています。
 - **ローカルファーストと OS 連携：** Zenz の推論はローカルで実行し、利用統計の送信機能を無効化。シークレット入力への配慮や、Windows Search などの入力欄での候補表示にも対応しています。
 
@@ -121,22 +123,28 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 主な追加機能
 ---------------------------
 
+- Windows / macOS の通常変換候補を右クリックして「先頭に固定」または「固定を解除」。固定した候補を即座に第1候補へ移動し、「固」マークを表示。読みごとの固定内容をローカルに保存し、再起動後も維持
 - 曖昧なローマ字規則でも途中表示できるオプションを追加
 - ローマ字テーブル編集画面に、そのオプション用のチェックボックス UI を追加
 - カスタムローマ字テーブルの 1 規則あたりの出力を UTF-8 で 1024 bytes 未満まで扱えるように拡張。入力・次入力の上限は従来どおり 300 bytes 未満
+- ローマ字テーブルにプリセット機能を追加。プリセットの新規保存・上書き・管理、規則の検索・行全体の枠線強調に対応
 - 句読点・記号を単打で確定できるオプションを追加
 - 単打確定の対象を設定画面のチェックボックスで選択可能
 - 句読点変換と句読点・記号の単打確定は排他的に動作
-- 変換確定直後に Backspace や Cancel キーで取り消した場合のユーザー履歴学習の扱いを改善
+- 変換確定直後の取り消しで Mozc・Zenz の学習を削除するかを辞書タブから設定可能にした（初期値 ON）。キー設定に従う `Revert` / `Undo` に加え、学習だけを強制的に取り消す `CancelLastLearning` コマンドに対応
 - 変換中に Esc / Ctrl+Z などのキャンセル操作でひらがなへ戻し、そのまま Enter または句読点・記号の単打確定で確定した場合、F6 ひらがな化確定に近い表記選好として学習されるようにした
 - 複数文節の変換キャンセル後は、キャンセル直前の文節境界を可能な限り保持し、全体 1 件としてではなく文節単位のひらがな表記選好としてユーザーセグメント履歴へ反映
-- 句読点・記号の単打確定でも、直前の通常変換確定による学習を次の実テキスト入力まで保留し、Backspace / Escape / Ctrl+Z などの Cancel 相当キー / Revert / Reset / Undo などでは取り消し、IMEOff / MakeSureIMEOff では確定扱いにするようにした
+- 句読点・記号の単打確定でも直前の通常変換確定による学習を短い取り消し可能期間に保持。確定直後にキー設定から `Revert` / `Undo` が実行され、学習削除が ON なら取り消し、OFF なら保持する。次の実テキスト入力や `IMEOff` / `MakeSureIMEOff` などの確定扱いの操作では学習を保持する
+- 英字表記辞書を追加。「自動英字化」または「候補のみ」で管理し、設定画面からの編集・検索・入出力・システム語彙の更新に対応。
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
 - ハイフンなし7桁の郵便番号（例：`1000001`）を、既存の郵便番号辞書を使って住所へ変換可能。ライブ変換では数字表記を第1候補に保ち、キー設定の `ConvertNext`（次候補、標準では Space）で住所などの後続候補を選択可能
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
 - ローマ字入力中、単なる未解決の Roman suffix では直前の passive suggestion を保持して候補ウィンドウのちらつきを抑制。一方、カスタムローマ字規則の「曖昧なローマ字規則の途中表示」によって有効な読みが現れ、予測クエリが変化した場合は、suffix が未解決のままでもサジェストを更新。候補へ移動する場合は画面に表示中の候補集合を使用
+- ライブ変換中も画面に表示されたサジェストに対するキー操作を優先。専用キー割り当てと通常の変換・編集操作は維持
+- 未解決ローマ字の入力中、表示中の英字救済候補が古くなった場合はサジェストを更新し、候補の表示・選択・確定の整合性を維持（例：`AIde` → `AIdev`）
+- 日本語と英字の混在入力では、条件を満たす `もうGoogle` を `mouGoogle` より優先。短い読みの `iPhone` / `iPad` などや未知語の `azooKey` は元の英字表記を優先
 - 明示的に選んで確定したサジェストについて、候補が持つ全文の読みと、通常変換で検証できた文節・候補順位を使ってユーザーセグメント履歴の学習を補強。確定結果やサジェスト履歴は従来どおり維持し、検証できない文節や順位は推測で学習しない
 - デフォルトでは 1 文字だけの未確定文字列で、助詞などの誤変換を避けるためライブ変換を実行しない
 - `え~`、`えー`、`ん？` のような「かな1文字 + 装飾的な末尾記号」でも、短すぎる漢字化を避けるためライブ変換を抑制
@@ -145,6 +153,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - キー設定エディタで、1つのキー入力に対して複数のコマンドを順序付きで割り当て可能
 - `ForceZenzLiveCorrection` により、未確定文字列へ手動で Zenz 補正を要求可能。Zenz の自動ライブ補正が OFF でもキー設定から明示実行できる
 - `ForceZenzLiveCorrectionWithoutFeedback` により、保存済み Zenz feedback の自動利用をこの実行に限り無視して手動補正可能。通常の Mozc 履歴・ユーザー辞書および明示的な手動ブロックは維持し、新しい確定結果の学習も設定に従う
+- 手動 Zenz 補正の結果は、続く通常の文字入力で確定して新しい未確定入力を開始。自動 Zenz ライブ補正では入力継続だけで確定せず、同じ未確定文字列を編集できる状態を維持
 - `BlockVisibleZenzCorrection` を追加。Zenz 補正結果が表示されている間に標準キー設定の `Ctrl+Delete` を押すと、その補正を手動ブロック（`hard_reject`）として保存し、通常の Mozc 変換結果へ戻す。通常の候補に対する `DeleteSelectedCandidate` とは別の操作
 - キー設定のコマンド列に `Delay(700)` などの待機ステップ（0～5000 ms）を追加。選択文字列の再変換後に待機して手動 Zenz 補正する操作にも対応
 - 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには、選択中の候補の状態と現在のキー設定に応じて履歴削除または候補非表示の操作案内を表示
@@ -155,6 +164,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Windows 版のキー設定で、Ctrl / Shift の左右条件を独立して「左右どちらでも / 左のみ / 右のみ」から選択可能。従来の汎用 Ctrl / Shift 割り当ても維持し、競合する異なるコマンドの割り当ては保存時に検出
 - Windows 版で IMEOn / IMEOff に割り当てたキーを押した場合、すでに同じ状態でも IME モードインジケータを表示
 - Windows 版で Shift などによる一時的な半角英数字入力中に `IMEOn` を押すと、未確定文字列を確定せずにひらがな入力へ復帰
+- 英字入力から明示的にひらがなへ切り替えた際は、切り替え前の英字救済サジェストを無効化し、未確定文字列を維持
 - Windows 版の設定画面から、Mozkey を Windows の既定 IME として明示的に設定し、変更前の既定 IME 設定へ戻せるボタンを追加
 - Windows 版の設定画面から、タスクバーや IME 一覧に表示される Mozkey の IME アイコンを、既定 / モノクロ（ライト・ダーク対応）/ モノクロ（黒）/ モノクロ（白）から選択可能
 - Windows Search などの immersive TSF ホストでは、候補ウィンドウ・サジェストウィンドウ・ライブ変換中のルビをホストプロセス内の renderer 経路で表示し、前面表示とマウス操作を安定化。未選択のサジェストは mouse-down だけで通常変換へ移行せず、mouse-up で実際に押したサジェストを確定
@@ -166,6 +176,9 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Windows / macOS 版の縦書き入力で、候補ウィンドウ・サジェスト・用例表示・ライブ変換中のルビを縦書きレイアウトとして表示し、対応するキー設定では候補・文節移動も視覚方向に合わせて操作可能
 - Windows / macOS 版では、縦書き時の連鎖候補ウィンドウを現在候補から本文の外側へ展開するよう配置し、必要に応じて反対側へフォールバック
 - ライブ変換中のルビ表示を設定画面から ON/OFF 可能
+- Windows / macOS 版のルビ表示に「入力文字に追従」（既定）と「入力中の画面に固定」を追加。固定表示では画面の使用可能領域を基準に中心位置（X/Y 各0～100%、既定50%）と微調整（各-400～400）、中央上・中央・中央下のプリセット、折り返し最大幅（40～100%、既定90%）を設定可能
+- 入力追従の横書きルビが画面上端・下端付近で候補ウィンドウと重なり、通常の上下位置に収まらない場合に、候補ウィンドウの上下へ代替配置する処理を追加
+- Windows / macOS の固定ルビ表示で、横書き・縦書きの長文に対する表示領域と描画を調整。候補・サジェスト・ルビの表示倍率上限を300%に拡張
 - Windows / macOS 版に、未確定文字の近くで「入力中 / Mozc / Zenz処理中 / Zenz適用済み」を示す変換状態インジケータを追加。ルビとは独立して表示でき、位置・状態別配色・形状・フォント・サイズ・影を設定可能
 - Windows 版で未確定文字の文字色・背景色・下線色を設定画面からカスタマイズ可能。「入力中の文字」「変換中の文節」「Zenz 補正中の文字」を個別に設定でき、「Zenz 補正中の文字」の下線は新規・未設定プロファイルで既定 ON、既定色は `#C4DC6C`
 - Windows 版のローマ字入力で、変換規則の途中にある末尾の未確定ローマ字だけを薄く表示する opt-in 機能を追加。既定は OFF で、薄さは 0～100%（既定 85%）の範囲で調整可能。100% は背景色と同じになり不可視
@@ -183,6 +196,8 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - 日付入力を強化し、`20260927` のような8桁数字や、`2026/9/27`、`2026-9-27`、`2026.9.27`、`9/27` などから日付候補を生成。全角入力にも対応し、存在しない日付は日付候補として展開しない
 - `きんよう` / `きんようび` などの曜日入力では、通常の「金曜」「金曜日」を優先したまま、今週・来週・先週の該当日を追加候補として提示
 - `ほんじつ` / `みょうにち` などの日付表現を補強し、`9/27` など明示的に入力された日付表記は候補順位でも尊重
+- `きょう` / `あす` / `きのう` / `あさって` などの相対日付変換に、曜日付きの候補を追加。`2026/11/22(日)` / `2026/11/22（日）`、`11月22日(日)` / `11月22日（日）`、`2026年11月22日(日)` / `2026年11月22日（日）` など、半角・全角括弧の両方を選択可能。8桁数字や区切り記号からの日付変換でも従来の半角括弧候補を維持
+- `ひづけ` から今日の日付候補（曜日付き含む）を、`ようび` から今日の曜日を `日曜日` / `(日)` / `（日）` の形式で変換可能。通常の「日付」「曜日」の候補は維持
 - llama.cpp ベースのローカル Zenz live correction pipeline を追加
 - Zenz 文脈処理を共通化し、通常 Mozc の `preceding_text` / `following_text` とは分離した `zenz_preceding_text` / `zenz_following_text` を使用
 - Zenz が必要とする preceding / following の長さを Server から Client へ通知し、Windows TSF / macOS IMK では要求された方向・長さだけ surrounding text を追加取得。右文脈は有効時に設定可能で、取得長の既定は 6 文字
@@ -205,18 +220,18 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Zenz feedback の自動ブロック設定を追加。同じ読み全体・同じ文脈クラス・同じ補正結果について、通常却下回数が「最低拒否回数」と「採用回数 + 通常却下回数に占める最低拒否割合」の両方に達した場合だけ自動ブロックする。未保存の設定では既定で有効、最低拒否回数は 1 回、最低拒否割合は 50%。自動ブロックは TSV に hard reject を固定保存せず、現在の設定と既存 feedback から動的に再評価する
 - 自動ブロック中も Zenz 推論は shadow observation として継続する。同じ読みで非表示の Zenz 結果と最終確定値が一致すれば accepted feedback を加算して自己回復でき、拒否割合がしきい値を下回れば自動的にブロックを解除する。同じ読みで異なる値が確定した場合は通常却下を加算し、入力継続などで最終的な読みが変わった場合は neutral として扱う。明示的な hard reject はこの自己回復の対象外
 - 同じ読み全体・同じ文脈クラス・同じ補正結果で通常却下回数が採用回数を上回る場合は、auto-block 無効時でも Zenz feedback による優先候補・保存済み feedback による即時補正としては使わず、「却下数優勢」の中立状態として扱います。これは hard block ではなく、Zenz が新しく同じ補正を返すことや通常 Mozc 候補を削除することはありません。
-- フィードバック記録（A）が ON の場合、Zenz 補正結果が表示されただけでは保存せず、Enter や句読点・記号の単打確定などで明示的に確定された時点で accepted feedback をローカル TSV へ即時保存する。採用記録の書き込みに失敗した場合は、Undo で補償レコードを追記して以前の正常な採用履歴を減算しないようにする
-- rollback window 内の Backspace / Escape / Revert / Undo / Ctrl+Z などでは、**書き込みに成功した accepted 記録だけ** `accepted_rollback` で補償する。これは rejected feedback ではない。Mozc 変換履歴（C）の取消は別の可逆履歴ハンドルで処理する。次の実テキスト入力や確定後の context transition で window が閉じた場合は accepted を保持し、IMEOff / MakeSureIMEOff も確定扱いにする
+- フィードバック記録（A）が ON の場合、Zenz 補正結果が表示されただけでは保存せず、Enter や句読点・記号の単打確定に加え、手動 Zenz 補正後の通常の文字入力で表示結果を確定した時点で accepted feedback をローカル TSV へ即時保存する。自動ライブ補正の入力継続では、その操作だけで accepted としない。採用記録の書き込みに失敗した場合は、Undo で補償レコードを追記して以前の正常な採用履歴を減算しないようにする
+- 確定直後の短い取り消し可能期間内に、キー設定で割り当てた `Revert` / `Undo` が実際に成立し、辞書タブの学習削除設定が ON なら、**書き込みに成功した accepted 記録だけ** `accepted_rollback` で補償する。これは rejected feedback ではない。設定が OFF なら学習を保持し、`CancelLastLearning` は設定にかかわらず取り消す。Mozc 変換履歴（C）の取り消しは別の可逆履歴ハンドルで処理する。次の実テキスト入力や確定後の context transition で期間が閉じた場合、および `IMEOff` / `MakeSureIMEOff` では accepted を保持する
 - Zenz 補正表示後に Space や候補移動などで通常変換へ移った場合は、その操作だけで rejected feedback を即時確定せず、通常 Mozc 側で最終的に確定された値を確認してから判定する。最終確定値が Zenz 補正結果と異なる場合は通常却下として記録し、同じ結果を確定した場合は不要な reject を残さない。通常操作由来の rejected feedback は候補を殺す hard reject ではなく、順位調整用の弱い negative signal として扱う
-- Zenz 補正表示中に Space で Mozc 通常変換結果へ戻した場合は、次の文字入力や句読点・記号の単打確定で、戻した通常 Mozc の結果を先に最終確定値として取得する。句読点・記号の単打確定後も短い rollback window を維持し、直後の Backspace / Escape / Ctrl+Z / Revert / Undo などでは pending な Zenz reject を破棄する。次の通常入力や確定後の context transition、Windows Search などでの pass-through Enter を含む通常の pass-through 操作へ進んだ時点で rollback window を閉じ、最終確定結果に基づいて feedback を確定する
+- Zenz 補正表示中に Space で Mozc の結果へ戻した場合、通常変換として次の文字入力で確定する経路や句読点・記号の単打確定では、戻した Mozc の結果を最終確定値として取得する。ライブ変換由来で未確定入力を継続する場合は、その Space 自体を最終的な採否とせず、最終確定値を確認して判定する。句読点・記号の単打確定後も短い取り消し可能期間を維持し、その間にキー設定から `Revert` / `Undo` が実行された場合は、学習削除設定に従って pending な Zenz feedback を扱う。次の通常入力や確定後の context transition、Windows Search などでの通常の pass-through 操作へ進んだ時点で期間を閉じ、最終確定結果に基づいて feedback を確定する
 - Zenz の**フィードバック学習データ**を設定画面から管理できる UI を追加。TSV を直接編集せず検索、インポート、エクスポート、選択項目削除、全削除が可能。ここで管理・削除するのは A/B の記録であり、C で Mozc の通常変換履歴に学習済みの内容は削除しない
 - フィードバック学習データ管理画面から、選択した Zenz 補正を明示的に手動ブロック可能。手動ブロックは B の自動利用設定が OFF でも Zenz 補正の採用判定に有効。解除するには該当エントリを削除し、必要なら再学習する
 - Zenz 補正表示中の `Ctrl+Delete` からも手動ブロックを実行可能。同じ読み全体・文脈クラス・補正文字列の組に対する永続的な `hard_reject` として保存し、同時に通常 Mozc 変換へ戻る。通常却下の統計記録は二重に行わず、通常候補の学習履歴や「非表示候補」の辞書項目も削除しない
 - B が ON の場合は Zenz feedback を通常変換候補の ranking に利用。1 文節の通常変換では保存済み feedback を score 化し、既存候補の cost を調整するか synthetic candidate を自然な位置へ追加。accepted は順位を上げ、通常操作由来の rejected は候補を除外せず順位を下げる
-- 文節境界を壊さないため、複数文節に分かれた通常変換では Zenz feedback による通常候補 ranking を行わない
+- 複数文節（2～8文節）の通常変換でも、読み全体が一致する保存済み Zenz feedback の補正全文を、既存の Mozc 文節へ一意に対応付けられる場合は、離れた複数文節を含む変更箇所の候補をまとめて補完・順位調整する。文節境界は変えず、境界を特定できない隣接する新規候補、曖昧な分割、保護属性付き候補への変更は避ける
 - 複数文節に分かれるライブ変換では、全文補正の学習を保つため、accepted Zenz feedback を session-level live correction fast path として再利用
 - sensitive-like context で得られた feedback は、通常文脈の候補 ranking / reuse には使わない
-- Mozc 変換履歴への追加学習（C）が ON で通常の履歴学習・プライバシー条件を満たす場合、明示的に確定した Zenz 補正を commit 点で Mozc の user history に即時学習する。A の記録設定とは独立。学習後は in-process の rollback handle を保持し、直後の Backspace / Escape / Revert / Undo などでは Mozc history 側の学習を revert する
+- Mozc 変換履歴への追加学習（C）が ON で通常の履歴学習・プライバシー条件を満たす場合、明示的に確定した Zenz 補正を commit 点で Mozc の user history に即時学習する。A の記録設定とは独立。学習後は in-process の可逆履歴ハンドルを保持し、確定直後に `Revert` / `Undo` が実行された場合は学習削除設定に従って保持または取り消す。`CancelLastLearning` は設定にかかわらず取り消しを要求する
 - accepted Zenz 補正は、直前の通常 Mozc ライブ変換文節へ安全に対応付けられる場合、既知の文節境界を優先してユーザー履歴を参照しない固定境界再評価を行い、必要な範囲だけ Mozc native の再文節化で検証してから外部 multi-segment commit として Mozc history に学習。複数の境界解釈が残る範囲や安全に解決できない範囲では、その推定境界を使った局所・境界学習を行わず、句読点などの区切りもまたいで学習しない。通常変換候補を再利用できる場合は candidate 構造を引き継ぎ、Zenz が実際に変更した語彙単位だけを強い選択履歴として扱う。安全な局所学習を1件も確定できなかった場合は、別経路の full-sequence Mozc-history fallback を試みる
 - 通常 Mozc ライブ変換で現在の結果として現れているユーザー辞書由来候補や ASCII / mixed-script 表記を、Zenz live correction の採用時に保護
 - ASCII / mixed-script 表記は、読みを安全に特定できる場合に Zenz prompt 内で一時 placeholder 化し、応答後に元の表記へ復元。`もずきー -> Mozkey` のような表記が `モズキー` へ上書きされるのを避けつつ、前後の文は補正できるようにした
@@ -279,6 +294,23 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 修正詳細
 ------
 
+### 日付・曜日の変換候補
+
+日付の相対表現（`きょう`、`あす`、`きのう`、`あさって` など）を変換すると、従来の日付表記に加えて曜日付き候補を選べます。`ひづけ` は「今日の日付」を調べるための別の読みとして扱い、`ようび` は今日の曜日を表示します。`日付` や `曜日` という通常の単語候補はそのまま残します。
+
+例えば、**2026年11月21日（土）**に変換した場合は次のとおりです。
+
+| 入力 | 追加される候補の例 |
+| --- | --- |
+| `きょう` / `ひづけ` | `2026/11/21(土)`、`11月21日（土）`、`2026年11月21日（土）`、`令和8年11月21日（土）` |
+| `あす` / `あした` | `2026/11/22(日)`、`11月22日（日）`、`2026年11月22日（日）`、`令和8年11月22日（日）` |
+| `きのう` | `2026/11/20(金)`、`11月20日（金）`、`2026年11月20日（金）` |
+| `ようび` | `土曜日`、`(土)`、`（土）` |
+
+日付の曜日表記は、スラッシュ区切りの数字表記では半角括弧（例：`2026/11/21(土)`）、日本語の年月日表記では全角括弧（例：`11月21日（土）`）を使用し、括弧の前にはスペースを入れません。ハイフン区切り（例：`2026-11-21`）は曜日なしの候補を維持します。
+
+8桁の日付入力（例：`20261121`）や区切り文字付き日付入力、曜日名の入力（例：`きんよう` / `きんようび`）も従来どおり使用できます。曜日名の入力では、今週・来週・先週の該当日を提示する既存の動作を維持しています。候補の実際の順位は辞書や変換履歴、既存の語彙候補によって変わることがあります。
+
 ### 曖昧なローマ字規則の途中表示
 
 このオプションを有効にすると、たとえば
@@ -299,6 +331,16 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 のような規則がある場合、`ctnnaru` は `ctn + naru` として解釈され、`ことになる` になります。
 一方で、`ctnnr` や `ctnnc` のように長い規則として成立する入力は、従来どおりその規則が使われます。
 
+### ローマ字テーブルのプリセット・検索・管理
+
+ローマ字入力設定から、プリセットを選択できます。
+
+内蔵のプリセットを選択した場合、規則を変更せずに使用している間は Mozkey 更新時の同梱プリセット変更に追従します。**ユーザーが規則を編集した場合は、その内容を優先し、更新で上書きしません。** 個人用プリセットは名前を付けて保存でき、新規保存・上書き・名前変更・ファイルへの書き出し・削除が可能です。プリセット管理画面とローマ字テーブル編集画面でキャンセルした変更は保存されません。
+
+編集画面では、入力キー・出力を大文字小文字を区別せずに検索できます。「前へ」「次へ」および検索欄での Enter で一致行を移動し、現在の一致行を枠線で強調します。検索は規則を並べ替えたりフィルターで隠したりせず、**入力順序と挿入位置を維持**します。検索欄で Enter を押しても編集画面は閉じません。
+
+保存時には未完成の規則を行番号付きで警告し、保存を中止します。ファイル読み込み時も全行を検証してからテーブルを置き換えるため、形式に問題がある場合は編集中の規則を保持します。同じ入力キーに**異なる規則**がある場合、個人用プリセットの保存前に確認します。同一内容の重複は競合として警告しません。元のデータで規則の順序が意味を持つ可能性があるため、自動並べ替えは行いません。
+
 ### 長いカスタムローマ字テーブル出力
 
 カスタムローマ字テーブルでは、1 規則あたりの出力を UTF-8 で 1024 bytes 未満まで扱えます。入力と次入力の上限は従来どおり 300 bytes 未満です。
@@ -306,6 +348,31 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 従来は入力・出力・次入力のすべてが 300 bytes 未満に制限されていたため、一般的な 3-byte UTF-8 の日本語文字では、1 規則の出力は最大 99 文字相当でした。この fork では出力だけを拡張し、最大 1023 bytes、3-byte 文字なら 341 文字相当まで扱えるようにしています。
 
 この上限はローマ字テーブルの 1 規則に設定する出力に対するものです。変換器全体の入力長制限を変更するものではありません。
+
+### 英字救済サジェストと日本語・英字の混在入力
+
+Mozkey は、英字の固有名詞や技術用語を入力できるよう、ローマ字の生打鍵列を救済候補として提示できます。未解決のローマ字入力中は通常、サジェストウィンドウのちらつきを避けるため直前の候補を保持しますが、表示中に古い英字救済候補が含まれる場合は、候補の値と実際の選択・確定先が食い違わないよう再生成します。例えば `AIde` に続けて `v` を入力しても、古い `AIde` を残さないようにします。
+
+日本語の読みの後に英字が続く場合は、例えば `mouGoogle` から作られる未確定表示 `もうGoogle` を、予測器が生成していなくても候補として補い、元の打鍵列 `mouGoogle` より優先することがあります。ただし、日本語部分が2文字以上で、対応するローマ字部分が3バイト以上あり、辞書にその読みが存在し、英字末尾と生打鍵列が一致する場合に限る保守的な判定です。`iPhone`、`iPad`、`aGoogle` のような短い読みや、`azooKey` のように辞書で確認できない読みでは、英字救済を優先します。すべての入力意図を判定するものではありません。
+
+未確定文字列の途中で英字モードから明示的にひらがなへ切り替えたときは、切り替え前の英字救済候補と古いサジェスト状態を無効化し、未確定文字列自体は確定しません。今回の修正は主として Windows の Zenz OFF・ライブ変換 OFF で実機確認しています。macOS での今回の変更、およびライブ変換 ON の全経路については未検証です。ライブ変換 ON で Shift 英字入力へ移る際に、それまでの表示結果を確定する既存動作は今回変更していません。
+
+### 英字表記辞書（IME を切り替えずに英字表記を入力）
+
+英字表記辞書は、**日本語入力（ひらがなモード）を維持したまま、別の IME や半角英数モードに手動で切り替えずに、英字表記を入力・選択する**ための機能です。特定の**小文字ローマ字の打鍵列**と希望する英字表記を明示的に対応付け、`github` → `GitHub` や `chatgpt` → `ChatGPT` のような自動英字化と、`jest` → `Jest` のような候補提示を使い分けます。英語・日本語の入力意図を自動で完全判別するものではなく、**登録した語だけ**を対象とします。Mozc の通常辞書や、上記の英字救済サジェストとは別の仕組みです。
+
+設定画面の **「英字表記辞書を有効にする」** で機能を切り替え、**「表記辞書を管理...」** から語彙と動作を編集できます。
+
+| 動作 | 説明 |
+| --- | --- |
+| **自動英字化** | 明示的に登録した打鍵列が条件に一致した場合、その部分を英字入力として表示・変換し、優先表記を候補の先頭に置きます。日本語の途中入力と衝突する語には慎重に使ってください。 |
+| **候補のみ** | 入力中の日本語を勝手に英字表記へ切り替えず、受動サジェストや明示的な Space 変換で優先表記を選べるようにします。通常の日本語ライブ変換や Zenz の自動補正からは、当該英字表記を自動採用しません。 |
+
+「候補のみ」に設定した `chatgpt` は末尾に未解決のローマ字が残るため、通常のサジェスト更新抑制だけでは `ChatGPT` が表示されない場合があります。登録語の**生打鍵列が完全一致した時点**ではサジェストを更新し、Space 変換を待たずに `ChatGPT` を選べるようにしています。一般の未解決ローマ字については、従来のサジェスト保持動作を維持します。
+
+管理画面では検索・並べ替え・複数行の削除に加え、UTF-8 の TSV（`input` / `preferred` / `mode` / `enabled` の4列）と JSON（`schema_version: 1`、`rules` 配列）のインポート・エクスポートが可能です。推奨語彙の自動更新では**未編集のシステム管理語だけ**を同期し、編集・削除した語やカスタム語は原則として保持します。自動更新は OFF にできます。管理画面での変更は、親の設定画面で **「適用」** を押して保存してください。
+
+入力側は小文字 ASCII の `a`～`z` のみ（2～64文字）、優先表記は空白なしの印字可能 ASCII（1～128文字）、登録件数は最大4,096件です。数字・ハイフン・記号を含む**打鍵列**、未登録語の推測判定、あらゆる日本語との衝突回避には対応していません。パスワード欄や対象外の入力モードでは適用されません。**新規・既存プロファイルのどちらも、有効フラグが未設定なら有効**になります。明示的に保存した ON / OFF は維持されます。
 
 ### ライブ変換
 
@@ -316,6 +383,8 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 また、`え~`、`えー`、`ん？` のように、かな1文字の後ろに装飾的な記号だけが続く場合もライブ変換を抑制します。これにより、入力途中の `え~` が `絵～` のように短すぎる漢字候補へ変換される挙動を避けます。
 
 サジェストについては、意味のある読みがまだ増えていない未解決ローマ字の打鍵ごとに候補を再生成し、候補ウィンドウがちらつくのを抑えるため、ライブ変換とは別に passive suggestion の更新を一時的に HOLD します。たとえば `今日は` の後で `s`、`sh` と入力している間は直前の候補集合を保持し、`shi` が `し` に解決すると、現在の読み `今日はし` に対するサジェストを更新します。新しい composition の先頭では、未解決のローマ字が 2 文字以下なら従来どおり更新を許可します。
+
+ただし、保持中の候補にすでに古くなった英字の生打鍵救済候補が含まれる場合は、表示候補と確定対象の整合性を優先して HOLD を解除し、現在の入力に基づく候補へ更新します。
 
 ただし、カスタムローマ字テーブルの「曖昧なローマ字規則の途中表示」（`DisplayAmbiguousResult`）が有効な規則では、後続の入力で変化する可能性のある未解決のローマ字でも、すでに有効な日本語の読みを表示できます。この状態で予測クエリが変化した場合は HOLD を解除し、新しい読みのサジェストを生成します。たとえば `a → あ`、`ms → ます`、`msn → ません` を持ち、`ms` と `msn` がさらに長い規則の接頭部分でもあるテーブルでは、`am` の候補は保持しますが、`ams` では `あます`、`amsn` では `あません` に対応して更新します。先頭からの `msn` のように未解決部分が 3 文字以上でも、同じ条件で更新できます。曖昧な読みが表示されない単なるローマ字 prefix については、従来の HOLD を維持します。
 
@@ -343,7 +412,7 @@ macOS の Zenz 同梱構成では、Mozc から scorer へユーザーごとの 
 - Backspace / Delete では、削除後の状態をすぐにライブ変換結果へ反映する
 - Enter で現在のライブ変換結果を確定する
 
-ライブ変換中は、変換後の文字を表示しながら元の読みも分かるように、未確定文字の上付近に Mozc 独自のルビ風 overlay window を表示します。
+ライブ変換中は、変換後の文字を表示しながら元の読みも分かるように、通常は未確定文字の上付近に Mozc 独自のルビ風 overlay window を表示します。Windows / macOS 版では、設定により入力中の画面への固定表示も選択できます。
 
 ライブ変換は設定画面から ON/OFF を切り替えられます。また、変換開始までの遅延時間と、ライブ変換を開始する最小文字数も設定画面から変更できます。
 
@@ -461,7 +530,7 @@ Zenz が、Mozc の通常変換で正しく選択された人名・地名・組�
 
 A・B・C は相互に独立しています。例えば **A=OFF / B=ON** なら既存データの利用だけを続けられ、**A=OFF / C=ON** ならフィードバック TSV を増やさずに Mozc 変換履歴への追加学習を行えます。新規 Mozkey 設定では3つとも ON が既定です。旧統合設定を保存済みの場合は、新項目がまだ明示されていないときだけその値を引き継ぎ、設定済みの新項目は上書きしません。
 
-A が ON の場合でも、Zenz 補正を表示しただけでは記録しません。Enter や句読点・記号の単打確定などで明示的に確定した場合に、full-sequence accepted feedback を TSV へ追加します。C による Mozc 履歴の学習は別の保存先・条件で動作します。
+A が ON の場合でも、Zenz 補正を表示しただけでは記録しません。Enter や句読点・記号の単打確定、または明示的な手動 Zenz 補正後の次の通常文字入力で表示結果を確定した場合に、full-sequence accepted feedback を TSV へ追加します。自動ライブ補正中に入力を続けただけでは採用の確定とみなしません。C による Mozc 履歴の学習は別の保存先・条件で動作します。
 
 #### 短い読みの Zenz feedback 自動適用制限
 
@@ -475,21 +544,21 @@ A が ON の場合でも、Zenz 補正を表示しただけでは記録しませ
 
 シークレットモード中は例外で、Zenz 推論は通常どおり利用できますが、Zenz feedback personalization の読み取り・書き込みを停止します。保存済み feedback による candidate ranking、複数文節 live correction の fast path、auto-block を含む feedback decision は適用せず、新しい feedback record も保存しません。シークレットモードを解除すると、削除せず保持していた既存 feedback を再び利用します。
 
-明示的確定後は、その accepted に対する短い rollback window を session 内に保持します。次の実テキスト入力や確定後の context transition で window が閉じる前に Backspace、Escape、Revert、Undo、Ctrl+Z などの修正操作が入った場合は、**実際に追記に成功した accepted だけ** `accepted_rollback` で補償します。採用記録の追記が失敗したときは補償レコードも追記しないため、以前の正常な採用履歴を誤って減算しません。`accepted_rollback` は rejected feedback ではないため、通常却下回数や auto-block の negative evidence を増やしません。IMEOff / MakeSureIMEOff は取り消しではなく確定後のモード変更として扱い、accepted を保持したまま rollback window を閉じます。表示中の Zenz 補正から Space や候補移動などの通常変換操作へ移った場合は別で、その Zenz 結果を rejected feedback として扱います。ただし Space などの通常操作由来の rejected feedback は、候補を永久に抑止する hard reject ではなく、以後の candidate ranking で順位を下げるための negative signal として扱います。
+明示的確定後は、その accepted に対する短い取り消し可能期間を session 内に保持します。この期間に、現在のキー設定で `Revert` が実行された場合や、実行可能な `Undo` が成立した場合、**辞書タブの「変換確定直後の取り消しによる学習削除」が ON なら**、実際に追記に成功した accepted だけ `accepted_rollback` で補償します。設定が OFF の場合は学習を保持します。学習だけを取り消す `CancelLastLearning` はこの設定に依存しません。採用記録の追記が失敗したときは補償レコードも追記しないため、以前の正常な採用履歴を誤って減算しません。`accepted_rollback` は rejected feedback ではないため、通常却下回数や auto-block の negative evidence を増やしません。`IMEOff` / `MakeSureIMEOff` は取り消しではなく確定後のモード変更として扱い、accepted を保持したまま取り消し可能期間を閉じます。表示中の Zenz 補正から Space や候補移動などの通常変換操作へ移った時点では rejected feedback を即時確定せず、最終的に確定された値と比較して accepted / rejected を判定します。ただし Space などの通常操作由来の rejected feedback は、候補を永久に抑止する hard reject ではなく、以後の candidate ranking で順位を下げるための negative signal として扱います。
 
 Zenz feedback の自動ブロックは、通常却下回数だけではなく拒否割合も使って判定します。同じ full-sequence feedback entry について、`通常却下回数 >= 最低拒否回数` かつ `通常却下回数 / (採用回数 + 通常却下回数) >= 最低拒否割合` の両方を満たした場合にだけブロックします。既定値は最低拒否回数 1 回、最低拒否割合 50% で、境界値も含むため `accepted=1 / rejected=1` の 50% はブロック対象です。明示的な hard reject はこの割合計算とは別の絶対ブロックとして扱います。
 
 通常の自動ブロック中は、Zenz の内部生成自体を止めず、結果だけをユーザーには表示しない shadow observation を続けます。その状態で同じ読みが最終確定され、非表示の Zenz 結果と確定値が一致した場合は accepted feedback を 1 件加算します。この hidden match は Zenz feedback の回復観測であり、Mozc user history への追加学習は行いません。一致が積み重なって拒否割合がしきい値を下回れば、たとえば `accepted=2 / rejected=1` の 33% のように自動ブロックは解除されます。同じ読みで異なる値が確定した場合は通常却下を加算し、入力継続などで最終的な読みが shadow observation の読みと異なる場合は feedback を更新しません。明示的な hard reject は shadow observation を行わず、自動回復しません。
 
-Zenz feedback TSV は、完全な読み key、完全な補正 value、粗い非可逆 context class からなる full-sequence 単位に限定します。segment-local や lexical-unit の feedback は保存しません。accepted Zenz 補正は **C が ON** でプライバシー保護や通常履歴設定の条件を満たす場合、明示的確定の同じ commit 点で Mozc user history へ外部変換結果として即時学習されます。これは **A の ON/OFF とは独立した** Mozc-history 経路であり、Zenz feedback store の追加 record ではありません。この generalized learning では in-process の rollback handle を保持し、rollback window 内の Backspace、Escape、Revert、Undo などでは直前の学習を revert します。次の実テキスト入力や ResetContext / IMEOff などで window が閉じた後は学習を保持します。exact TSV の `accepted` / `accepted_rollback` と generalized Mozc-history の revert は別々の仕組みです。また、この rollback は process 内の短い取り消し窓を対象とするもので、crash や process termination をまたぐ durable transaction / ACID rollback ではありません。局所学習では、まず直前の通常 Mozc ライブ変換で既知の文節境界を優先し、ユーザー履歴を参照しない固定境界再評価で accepted surface を正確に再現できるか確認します。その境界で説明できない範囲だけ Mozc native の再文節化と forward verification を行い、accepted surface を説明する境界・読みの経路が一意に検証できる場合だけ、その推定境界を局所学習に使います。複数の境界解釈が成立する範囲や安全に解決できない aggregate は、推定境界を学習せず非学習の barrier として扱います。その前後に独立して安全な lexical island があれば、そこは別々に学習できます。句読点などの非学習単位も lexical island の区切りとして扱い、その区切りをまたぐ境界履歴は作りません。Zenz が実際に変更したことを最終的な key/value 対応で確認できる語彙単位だけを強い選択履歴として扱います。安全な structured / local commit が1件でも成立した場合は、同じ accepted result を全文単位で重ねて Mozc history に学習しません。一方、安全な projected / local evidence を1件も commit できなかった場合は、曖昧な局所境界を捏造せず、別経路として exact accepted result の full-sequence Mozc-history fallback を試みます。Zenz feedback store 側の full-sequence accepted record はこの局所境界判定とは別に保持されます。privacy / password gate に該当する入力は、この Mozc-history 学習自体の対象外です。
+Zenz feedback TSV は、完全な読み key、完全な補正 value、粗い非可逆 context class からなる full-sequence 単位に限定します。segment-local や lexical-unit の feedback は保存しません。accepted Zenz 補正は **C が ON** でプライバシー保護や通常履歴設定の条件を満たす場合、明示的確定の同じ commit 点で Mozc user history へ外部変換結果として即時学習されます。これは **A の ON/OFF とは独立した** Mozc-history 経路であり、Zenz feedback store の追加 record ではありません。この generalized learning では in-process の可逆履歴ハンドルを保持し、短い取り消し可能期間内に `Revert` または実行可能な `Undo` が成立すると、辞書タブの学習削除設定に従って直前の学習を取り消すか保持します。`CancelLastLearning` は設定にかかわらず取り消しを要求します。次の実テキスト入力や `ResetContext` / `IMEOff` などで期間が閉じた後は学習を保持します。exact TSV の `accepted` / `accepted_rollback` と generalized Mozc-history の revert は別々の仕組みです。また、この rollback は process 内の短い取り消し窓を対象とするもので、crash や process termination をまたぐ durable transaction / ACID rollback ではありません。局所学習では、まず直前の通常 Mozc ライブ変換で既知の文節境界を優先し、ユーザー履歴を参照しない固定境界再評価で accepted surface を正確に再現できるか確認します。その境界で説明できない範囲だけ Mozc native の再文節化と forward verification を行い、accepted surface を説明する境界・読みの経路が一意に検証できる場合だけ、その推定境界を局所学習に使います。複数の境界解釈が成立する範囲や安全に解決できない aggregate は、推定境界を学習せず非学習の barrier として扱います。その前後に独立して安全な lexical island があれば、そこは別々に学習できます。句読点などの非学習単位も lexical island の区切りとして扱い、その区切りをまたぐ境界履歴は作りません。Zenz が実際に変更したことを最終的な key/value 対応で確認できる語彙単位だけを強い選択履歴として扱います。安全な structured / local commit が1件でも成立した場合は、同じ accepted result を全文単位で重ねて Mozc history に学習しません。一方、安全な projected / local evidence を1件も commit できなかった場合は、曖昧な局所境界を捏造せず、別経路として exact accepted result の full-sequence Mozc-history fallback を試みます。Zenz feedback store 側の full-sequence accepted record はこの局所境界判定とは別に保持されます。privacy / password gate に該当する入力は、この Mozc-history 学習自体の対象外です。
 
-特に Space は、Zenz 補正を単にキャンセルしてライブ変換中の入力列へ戻すキーではなく、通常変換候補へ戻る候補変更操作として扱います。deferred 表示でまだ Zenz の応答待ちの場合は、最初の Space でその時点の Mozc 通常変換結果を表示しますが、候補は次へ進めません。すでに Zenz 補正が表示されている場合も、Space を押すと補正前の Mozc 変換結果を通常変換状態として表示し、候補ウィンドウはまだ開きません。そのまま次の文字を入力した場合は、戻した Mozc 変換結果を確定してから新しい入力を開始します。さらに Space を押した場合は、従来どおり通常変換の候補ウィンドウを開いて次候補へ進みます。
+特に Space は、表示中の Zenz 補正を確定せず、元の Mozc 変換結果へ戻す操作です。deferred 表示でまだ Zenz の応答待ちの場合は、最初の Space でその時点の Mozc 変換結果を表示しますが、候補は次へ進めません。すでに Zenz 補正が表示されている場合も、Space で補正前の Mozc 変換結果へ戻し、候補ウィンドウはまだ開きません。**通常変換から手動 Zenz 補正を実行した場合**は、戻した Mozc 変換結果を次の文字入力で確定し、新しい入力を開始します。一方、**元々自動ライブ変換から移行した場合**は、Space 後も同じ未確定入力を編集・継続できます。さらに Space を押した場合は、通常変換の候補移動操作へ進みます。
 
 Zenz feedback の再利用方法は、単文節と複数文節で異なります。
 
-単文節の通常変換では、Zenz feedback は rewriter chain 内の ranked candidate reuse として再利用されます。保存済み feedback は accepted / rejected reason を score 化し、既存候補があれば score に応じて cost を調整します。候補にない場合は synthetic candidate として候補集合へ追加できますが、無条件に先頭へ挿入するのではなく、feedback-adjusted cost に基づく自然な位置へ挿入します。通常操作由来の rejected feedback は候補を削除する命令ではなく順位を下げる signal として扱い、明示的な hard reject reason だけを強い抑止として扱います。その後に UserSegmentHistoryRewriter が走るため、明示的なユーザー選択履歴が最終順位を決めます。
+単文節の通常変換では、Zenz feedback は rewriter chain 内の ranked candidate reuse として再利用されます。保存済み feedback は accepted / rejected reason を score 化し、既存候補があれば score に応じて cost を調整します。候補にない場合は synthetic candidate として候補集合へ追加できますが、無条件に先頭へ挿入するのではなく、feedback-adjusted cost に基づく自然な位置へ挿入します。通常操作由来の rejected feedback は候補を削除する命令ではなく順位を下げる signal として扱い、明示的な hard reject reason だけを強い抑止として扱います。実際の rewriter chain では UserSegmentHistoryRewriter が先に走り、その後に ZenzFeedbackCandidateRewriter が feedback による候補の補完・順位調整を行います。
 
-複数文節に分かれるライブ変換では、converter の文節境界を feedback ranking で壊さないため、rewriter chain では通常変換候補を書き換えません。その代わり、session-level の live correction fast path として再利用します。これにより、`かれはてんてきです` → `彼は天敵です` のような全文補正の学習も再利用できます。
+複数文節の通常変換でも、保存済み feedback の読み全体が現在の変換要求と一致し、補正全文を Mozc が決めた **2～8文節へ一意に対応付けられる場合**は、変更が必要な文節の既存候補を順位調整するか、新しい候補を追加します。現在の各文節の先頭候補や、その文節の読み全体に対応する既存候補を境界の手掛かりにします。たとえば `もうすこしわかりやすくおしえてください` の `もう少しわかり易く | 教えて | 下さい` に対して、`もう少しわかりやすく | 教えて | ください` の第1・第3文節を同時に補完できます。文節の分割・結合・境界変更はしません。隣り合う新規候補同士の境界を推測しなければならない場合、対応付けが複数通り成立する場合、あるいは変更対象に保護属性付き候補がある場合は、**その補正全文に対する複数文節補完を見送ります**。再利用設定 B が OFF、厳密な読み保持が ON、プライバシー条件に該当する場合なども、この rewriter での自動補完は行いません。feedback は引き続き全文の読み・表記単位で保存されるため、末尾を省略した別の読みへ自動的に一般化するものではありません。従来の session-level live correction fast path は別経路として維持します。また、この B の補完と異なり、Mozc 変換履歴への追加学習（C）では、検証できた文節境界が履歴に学習される場合があります。
 
 `sensitive_like` context で得られた feedback は、通常文脈への候補 ranking / reuse には使いません。
 
@@ -561,9 +630,9 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 
 ライブ変換が有効な場合、句読点・記号の単打確定では、ひらがなの未変換文字列ではなく、現在表示されているライブ変換結果を確定します。
 
-句読点・記号の単打確定でも、直前の通常変換確定による学習は次の実テキスト入力まで保留されます。次の操作が Backspace、Escape、Revert、Reset、Undo などの場合、その保留学習は保持せず取り消します。一方、IMEOff / MakeSureIMEOff は取り消しではなく確定後のモード変更として扱い、保留学習は確定扱いにします。
+句読点・記号の単打確定でも、直前の通常変換確定による学習は短い取り消し可能期間に保持されます。確定直後に現在のキー設定から `Revert` / `Undo` が実行された場合、辞書タブの「変換確定直後の取り消しによる学習削除」が ON ならその学習を取り消し、OFF なら保持します。`CancelLastLearning` はこの設定に関係なく学習だけを取り消します。`IMEOff` / `MakeSureIMEOff` など、取り消しではない確定後の操作は学習を保持します。
 
-句読点・記号の単打確定直後に Ctrl+Z など、現在のキー設定で Cancel に相当するキーが押され、そのキーがアプリケーションへ渡される場合も、Mozkey 側の保留学習は破棄します。実際に確定済み文字列が取り消されるかどうかは、アプリケーション側の Undo 挙動に従います。
+Mozkey による Undo 履歴がない場合、Ctrl+Z などがアプリケーションへ渡されることがあります。この場合、アプリケーション独自の Undo が実際に成功したかを Mozkey が一律に判定できるわけではなく、**アプリ側で文字が消えたことと、IME 側の学習が削除されたことは必ずしも一致しません**。
 
 ### 変換キャンセル後のひらがな確定学習
 
@@ -577,24 +646,23 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 
 ライブ変換が有効な場合も、ユーザーが Esc / Ctrl+Z などのキャンセル操作で明示的にひらがなへ戻し、そのまま Enter、Commit → IMEOff、IMEOff / MakeSureIMEOff、または句読点・記号の単打確定で確定した場合は同じ扱いになります。一方で、入力継続などの内部処理としてライブ変換状態が解除されただけの場合は、この強い学習の対象にはなりません。
 
-### 確定直後の修正による履歴学習の取り消し
+### 変換確定直後の取り消しによる学習削除
 
-変換確定直後に Backspace、または現在のキー設定で Cancel に割り当てられたキーが入力された場合、このフォークでは直前に確定した学習結果を取り消し対象として扱います。
+設定画面の **［辞書］→［学習］→「変換確定直後の取り消しによる学習削除」** で、確定直後の取り消し操作に伴う Mozc・Zenz の学習削除を切り替えられます。**初期値は ON（削除する）**です。既存ユーザーが明示的に選んだ設定値はそのまま維持されます。
 
-句読点・記号の単打確定のように、確定文字列がすでにアプリケーションへ送られており Mozkey 側の通常の Undo context に乗らない場合でも、直後の Ctrl+Z などの Cancel 相当キーは保留学習の取り消しシグナルとして扱います。この場合、キー入力自体はアプリケーションへ渡し、画面上の文字列を実際に戻すかどうかはアプリケーション側の Undo 挙動に任せます。
+| 操作・設定 | 学習の扱い | 確定済み文字列の扱い |
+| --- | --- | --- |
+| 設定 ON で確定直後に `Revert` または実行可能な `Undo` | 取り消し可能な直前の Mozc・Zenz 学習を削除する | 各操作の通常の文字削除・未確定状態への復元動作を維持 |
+| 設定 OFF で同じ操作 | 直前の学習を保持する | 文字の削除・復元動作は変えない |
+| `CancelLastLearning`（設定 ON/OFF 共通） | 取り消し可能な直前の学習だけを削除する | 確定済み文字列を削除せず、未確定状態にも戻さない |
 
-確定した文字列全体を削除した場合は、その確定によるサジェスト履歴およびユーザーセグメント履歴が、以後のサジェストや変換順位に残らないようにします。
+**学習の削除はキーの物理的な名前ではなく、現在のキー設定で選ばれ、実際に実行されたコマンドに従います。** 標準キー設定では Backspace が `Revert` に対応する場合がありますが、カスタム設定で Backspace に別のコマンドを割り当てた場合は、そのキーを押したという理由だけでは学習を削除しません。`Undo` を実行できない入力先では、文字が残ったまま学習だけを削除することを避けます。`TEST_SEND_KEY` などの事前照会では学習や Undo 履歴を変更しません。
 
-一方で、Backspace により確定文字列の末尾だけを削除した場合は、残っている部分の履歴は保持し、削除された末尾に対応する履歴だけを取り消します。
+学習だけを取り消したい場合は、キー設定エディタの **「入力文字なし（Precomposition）」** に `CancelLastLearning` を任意のキーへ割り当ててください。これは**標準のキー割り当てではありません**。`Composition` / `Conversion` 状態向けのコマンドではなく、確定後の短い取り消し可能期間に残る学習を対象とします。たとえばカスタム設定で `Precomposition + Ctrl Shift Backspace -> CancelLastLearning` と割り当てられます。
 
-たとえば:
+この仕組みは確定直後に保持している可逆状態を対象とするもので、過去の任意の学習記録や、取り消し可能期間が過ぎた学習を遡って削除する機能ではありません。また、アプリケーション独自の Ctrl+Z が成功したかを必ず検知できるわけではありません。アプリ側へキーが渡された場合、その Undo 結果と Mozkey の学習削除は独立していることがあります。
 
-- `いしとは` を `医師とは` として確定
-- Backspace を2回押して `とは` だけを削除
-- 残っている `医師` の履歴は保持
-- `医師とは` としての末尾込みの学習は取り消し
-
-これにより、変換確定直後の修正操作がユーザーの意図に近い形で履歴学習へ反映されます。
+なお、既存の履歴補正処理には、確定文字列の末尾だけを修正したとき、残った部分の履歴を維持し、削除された末尾に対応する履歴を調整する経路もあります。たとえば `いしとは` → `医師とは` の確定後に末尾の `とは` だけを削除した場合です。ただし、すべてのアプリケーションや文字削除方法で部分削除を自動識別・補償できるわけではありません。
 
 ### サジェスト確定時の全文読み・文節単位の学習
 
@@ -633,6 +701,14 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 - **両コマンド共通**: 自動の「Zenz ライブ補正を有効にする」が OFF でも実行でき、手動実行には自動補正開始用の最小読み文字数を適用しません。パスワード欄やプライバシー・入力内容の適格性検査は維持し、Zenz の出力が必ず採用されるわけではありません。変換中のフィードバック無視補正で再変換が失敗した場合、元の候補・入力モード・学習取り消し情報を維持します。
 - **遅延**: `Delay(700)` は後続コマンドを 700 ms 後に再開する指定です。設定できる値は 0～5000 ms で、`Delay(0)` は待機しません。これは自動ライブ変換や自動 Zenz 補正の遅延設定とは独立した、キー割り当て専用の待機です。
 
+**手動補正後の追加入力**
+
+自動 Zenz ライブ補正は、入力途中に IME が提示する**暫定的な変換表示**です。ユーザーが文字を続けて入力しても、その時点で変換結果を採用したとは限らないため、同じ未確定文字列として編集・再変換を続けます。
+
+一方、上記2種類の**手動 Zenz 補正はユーザー自身が明示的に変換を要求する操作**です。その結果を表示した状態で次の通常の文字を入力した場合は、「現在表示されている変換を採用し、次の入力へ進む」という意図として扱います。これにより、通常の Space 変換後に文字を入力したときと同じように、**表示中の補正結果を確定して、新しい未確定文字列を開始**します。ライブ変換の ON/OFF にかかわらず、両方の手動コマンドに適用されます。**手動コマンドを実行した瞬間には確定されません。**
+
+Zenz の非同期応答がまだ表示されていないうちに次の文字を入力した場合は、未表示の応答を勝手に採用せず、その時点で画面に表示されている変換結果を確定します。Zenz が採用されず Mozc の変換結果が表示された場合も、明示的な変換操作後の追加入力として扱います。Space で Zenz 補正を取り消して Mozc へ戻した場合は Zenz の補正結果を採用せず、元のライブ変換／通常変換の入力状態に応じた既存の操作へ戻ります。Enter での確定やキャンセル操作も引き続き利用できます。
+
 実用的なキー割り当て例（**カスタム設定例**であり、標準の既定割り当てではありません）:
 
 ```text
@@ -658,6 +734,12 @@ Conversion + Ctrl Shift Space -> ForceZenzLiveCorrectionWithoutFeedback
 ### ライブ変換・Zenz補正中のキー設定
 
 キー設定には「ライブ変換中」（`LiveConversion`）と「Zenz補正中」（`ZenzConversion`）があります。前者は Mozc のライブ変換中、後者は Zenz の補正結果が表示されている間に適用されます。
+
+#### ライブ変換中のサジェストの選択・確定
+
+ライブ変換中は内部状態が `Conversion` でも、未選択のサジェストが画面に表示されていれば、その候補に対する明示的な `Suggestion` キー設定を一部の操作に限って優先します。標準の MS-IME 風キー設定では `Shift+Enter` で**表示中の先頭サジェスト**を確定し、標準の ATOK 風キー設定では `Down` で表示中のサジェスト候補へ移動できます。通常の `Enter` はライブ変換結果を確定し、`Space`・`Backspace` は従来の変換・編集操作を維持します。
+
+同じキーに `ZenzConversion` / `LiveConversion` の**明示的な割り当て**がある場合は、そちらが優先されます。`Suggestion` から引き継ぐのは、単独の `CommitFirstSuggestion`（先頭サジェスト確定）または `PredictAndConvert`（候補選択）のみです。複数コマンドのマクロを暗黙に引き継ぐことはありません。表示候補と確定対象の一致を検証し、古い候補を誤確定しないようにします。また、下位変換器による確定が失敗しても、入力中の読み・候補・Undo 状態を保持し、再試行できるようにしています。
 
 標準キー設定での Backspace の動作は次のとおりです。
 
@@ -691,6 +773,18 @@ ZenzConversion + Ctrl Delete -> BlockVisibleZenzCorrection
 **保存条件と制約：** シークレットモード、Windows TSF の `IS_PRIVATE`、パスワード欄、その他のプライバシー保護条件では、新しい永続ブロックを保存しません。また、フィードバックファイルへの書き込みが失敗しても画面上の補正は通常 Mozc 変換へ戻ります。この場合は永続ブロックされず、現在の画面には保存成功・失敗の通知を表示しません。
 
 **CUSTOM キー設定：** `Conversion + Ctrl Delete -> DeleteSelectedCandidate` が既定どおり1行あり、`ZenzConversion` / `LiveConversion` に `Delete` を含む独自のキー割り当てがない場合だけ、専用の `ZenzConversion + Ctrl Delete` 行を自動追加します。既存の左右 Ctrl 指定などを上書きしないため、これらの条件に当てはまらない CUSTOM 設定では、必要に応じてキー設定エディタから `BlockVisibleZenzCorrection` を手動割り当てしてください。`RevertZenzToMozc` と同様に、このコマンドは**単独で**指定する必要があります。
+
+### 候補を先頭に固定（Windows / macOS）
+
+通常変換中の候補を右クリックし、**「先頭に固定」**を選ぶと、その読みの第1候補として優先できます。固定した候補はその場で先頭へ移動し、候補の補助表示に **「固」** が付きます。固定済みの候補では右クリックメニューが **「固定を解除」** に切り替わります。解除直後はマークを更新し、通常の候補順位には次回の変換から戻ります。
+
+固定は**読みと候補の表記の組**で保存します。同じ読みで別の候補を固定した場合は、その読みの固定先を置き換えます。保存先は Mozkey のユーザープロファイル内の `pinned_candidates.tsv` で、変換履歴やユーザー辞書とは別に管理します。固定・解除は通常の学習履歴を直接書き換えません。
+
+**対象と制約：** 1 文節の通常変換で、現在の候補一覧に表示されている有効な通常候補が対象です。複数文節、予測・サジェスト、文字種変換などのメタ候補、コマンド候補、ライブ変換中や Zenz 補正結果の表示中は、新たな固定の対象外です。固定先の候補がその読みの候補一覧に存在しない場合、固定情報だけから候補を生成しません。シークレットモードやパスワード入力中の固定操作も受け付けません。
+
+候補のID・読み・表記・現在の変換状態を保存前に検証して、古くなった候補IDや対象外候補による誤登録を防ぎます。保存ファイルが不正な場合は既存データを不用意に上書きせず、協調する Mozkey プロセス間の更新にはOSのファイルロックを使用します。ただし、古いMozkey版や外部エディターなど、同じロックを使わない書き込みとの競合は防げません。
+
+この機能は Mozc の通常変換候補の順位を調整するもので、Zenz が独立生成した表記を強制的に置き換えるものではありません。また、ピン留め自体は任意の候補を辞書に新規登録する機能ではありません。
 
 ### 候補の履歴削除・非表示
 
@@ -761,6 +855,8 @@ CapsLock が有効な場合も、左右指定の照合と汎用ショートカ�
 
 Shift などによって半角英数字の**一時入力モード**に切り替わっている場合、`IMEOn` に割り当てられたキーを押すと、既存の未確定文字列を確定せずに入力モードだけをひらがなへ変更します。タスクバーの入力モード表示も「あ」に更新されます。
 
+この明示的な復帰では、切り替え前の英字救済サジェストも無効化します。未確定文字列自体は保持し、Shift 入力が終わったことによる自動的な入力モード復帰とは区別します。
+
 たとえば、Shift による一時英数字切り替えが有効な設定で `Shift+G` → `o` → `o` → `IMEOn` → `a` と入力すると、`Gooあ` を同じ未確定文字列のまま入力できます。カタカナ入力から一時的に英数字へ切り替えた場合も、`IMEOn` の復帰先はひらがなです。
 
 対象は、現在の入力モードが半角英数字で、復帰先として異なる入力モードが保持されている場合です。通常のひらがな入力中や、復帰先も半角英数字である明示的な半角英数字入力中は、従来どおり `IMEOn` で入力モードを変更しません。`IMEOff` による直接入力への切り替えも従来どおりです。
@@ -822,7 +918,17 @@ Windows 版のルビ表示では、左右の余白、上下の余白、入力文
 
 候補ウィンドウ、サジェストウィンドウ、ライブ変換中のルビ表示については、主要テキストの太さもそれぞれ 100～900 の範囲で個別に設定できます。既定値は 400（標準 / Regular）です。候補番号、説明、フッター、用例ウィンドウ内の文字などの補助情報は対象外で、従来の太さを維持します。
 
-ライブ変換中のルビ表示は、設定画面から ON/OFF を切り替えられます。
+ライブ変換中のルビ表示は新規・未設定のプロファイルでは既定で ON で、設定画面から切り替えられます。リアルタイム変換サジェストは既定で OFF ですが、ライブ変換そのものは ON のままです。明示的に保存した設定は維持します。候補・サジェスト・ルビの表示倍率は最大300%まで設定できます。
+
+### ルビウィンドウの表示位置（Windows / macOS）
+
+設定画面の「ルビの表示位置」では、従来どおり未確定文字の近くにルビを置く **「入力文字に追従」** と、入力している画面の指定位置に置く **「入力中の画面に固定」** を選択できます。既定は「入力文字に追従」で、保存済みの設定値も維持します。
+
+固定表示では、入力先があるモニターの使用可能領域を基準に、ルビウィンドウの**中心位置**を横・縦それぞれ0～100%で指定します（初期値は各50%）。X/Yの微調整はそれぞれ-400～400で指定でき、プリセットは「中央上」（50%, 20%）、「中央」（50%, 50%）、「中央下」（50%, 70%）です。折り返し最大幅は使用可能領域の幅に対する40～100%で設定でき、初期値は90%です。ウィンドウが画面端を越えないよう、配置可能な範囲内に位置を制限します。
+
+横書きの入力追従モードでは、画面上端・下端付近でルビが隠れないよう、入力文字の上下に配置できない場合に候補ウィンドウの上下も代替位置として探索します。候補や未確定文字を避けられる位置が見つからない場合は非表示にするため、あらゆる状況で表示を保証するものではありません。
+
+固定表示モードでは、長い読みの折り返しや縦書きの描画・表示領域も調整しています。Linuxではこの固定表示モードは未対応で、設定UIは表示しません。
 
 ### 変換状態インジケータ（Windows / macOS）
 
@@ -981,10 +1087,12 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **Zenz correction acceptance criteria:** Optional strict reading preservation and default-on protection against Zenz adding, replacing, or removing emoji. These checks apply to both automatic live correction and explicit manual correction.
 - **Optional deferred presentation:** Choose whether to display Mozc live conversion immediately or briefly wait for Zenz before showing a result.
 - **Controllable learning and candidates:** Configure Zenz accept/reject recording, feedback reuse, and Mozc-history learning independently; use `Ctrl+Delete` to explicitly block a visible Zenz correction, manage feedback, hide ordinary candidates, and undo recent commits.
+- **Pin conversion candidates to the top (Windows / macOS):** Right-click an ordinary conversion candidate and choose `先頭に固定` (Pin to top). The pinned candidate takes the first position and remains pinned across restarts; the `固` marker and `固定を解除` (Unpin) command make it easy to manage.
 - **Vertical-writing UI on Windows and macOS:** Candidate, suggestion, infolist, and ruby layouts adapt to vertical text; supported keymaps can follow the visual navigation direction.
 - **Conversion-status indicator (Windows / macOS):** Displays Reading, Mozc, Zenz processing, or Zenz applied near the composition, with adjustable position, shape, and colors. The new macOS indicator has not yet been verified on native macOS hardware.
 - **Extensive appearance customization:** Configure colors (light/dark/system/custom), dimensions, rounded corners, opacity, and shadows per window. Windows additionally supports font/weight, preedit colors and underlines, and IME-indicator styling.
-- **Customizable romaji and shortcuts:** Edit romaji rules, show intermediate output for ambiguous sequences, commit punctuation with one key, and assign ordered key commands with delays.
+- **English spelling dictionary (no manual IME switching):** Enter or select spellings such as `GitHub` and `ChatGPT` while remaining in Japanese hiragana input, without manually switching to another IME or alphanumeric input mode. Registered rules either present the preferred ASCII spelling automatically or offer it only as a selectable candidate. Manage built-in presets and custom TSV/JSON rules.
+- **Customizable romaji and shortcuts:** Save and manage romaji presets, search and edit romaji-table rules, display intermediate output for ambiguous rules, commit punctuation and symbols with a single key, and assign ordered key commands with delays.
 - **Improved Japanese conversion and dictionaries:** Enhances everyday expressions and names, reduces unwanted segmentation and kanji conversion, and adds date and weekday suggestions.
 - **Local-first operation and OS integration:** Runs Zenz inference locally, disables inherited usage-statistics reporting, supports privacy-aware input behavior, and improves candidate display in Windows Search and other immersive TSF hosts.
 
@@ -1160,21 +1268,27 @@ Main branches
 Main features added in this fork
 --------------------------------
 
+- Adds candidate pinning on Windows / macOS: right-click an ordinary conversion candidate to pin or unpin it, promote it immediately to the first position, show a `固` marker, and persist the preference per reading across restarts
 - Adds an option to display ambiguous romaji rules before the input is fully disambiguated
 - Adds a checkbox UI for that option to the romaji table editor
 - Allows a custom romaji-table rule to produce output shorter than 1024 UTF-8 bytes while keeping the existing input and pending limits below 300 bytes
+- Adds romaji-table presets with options to create, overwrite, and manage presets, search rules, and highlight the current matching row with a full-row outline
 - Adds an option to directly commit punctuations and symbols with a single key press
 - Allows choosing direct-commit punctuations and symbols from the config dialog
 - Makes punctuation conversion and punctuation/symbol direct commit mutually exclusive
-- Improves user-history learning behavior when a committed conversion is immediately corrected with Backspace or Cancel
+- Adds a default-on Dictionary-tab preference to delete Mozc/Zenz learning after an immediate post-commit Revert/Undo, plus an explicit `CancelLastLearning` command that cancels only learning regardless of that preference
 - Learns a hiragana choice when an active conversion is canceled with Esc, Ctrl+Z, or another key bound to Cancel and the restored hiragana preedit is immediately committed with Enter or a direct-commit punctuation/symbol, similarly to F6 -> Enter
 - For multi-segment conversions canceled back to hiragana, preserves conversion-time segment boundaries when possible and learns each hiragana segment as a spelling preference, rather than as a single whole restored preedit
-- Keeps learning caused by direct-commit punctuations/symbols pending until the next real text input, reverts it on Backspace, Escape, cancel-equivalent keys such as Ctrl+Z, Revert, Reset, or Undo, and confirms it on IMEOff / MakeSureIMEOff
+- Keeps learning from direct-commit punctuations/symbols reversible briefly: a keymap-resolved Revert or supported Undo cancels it when the Dictionary-tab preference is ON and retains it when OFF; subsequent text input and mode changes such as IMEOff / MakeSureIMEOff confirm the learning
+- Adds an English spelling dictionary with automatic ASCII and candidate-only modes, a searchable editor, TSV/JSON import/export, and managed system-preset updates
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
 - Reduces candidate-window flicker by holding passive suggestions for unresolved Roman prefixes that do not change the prediction reading; when a custom DisplayAmbiguousResult rule exposes a meaningful reading and changes the prediction query, suggestions refresh even while the Roman suffix remains pending. Entering the candidate list uses the exact displayed candidates
+- Prioritizes eligible key actions for suggestions visible during live conversion, while preserving explicit state-specific key bindings and ordinary conversion/editing operations
+- Refreshes a stale raw-ASCII rescue suggestion when more Roman keys are typed (for example, `AIde` → `AIdev`), keeping the displayed candidate consistent with its selectable value
+- Prefers a mixed Japanese/Latin preedit such as `もうGoogle` over `mouGoogle` under conservative dictionary and prefix-length checks, while retaining ASCII-first suggestions for names such as `iPhone`, `iPad`, and `azooKey`
 - For explicitly accepted suggestions, verifies the complete reading, native segment mapping, and actual normal-conversion candidate order before learning segment-level preferences; preserves the original committed text and suggestion history, and skips speculative learning when the mapping or displayed ranking cannot be verified
 - By default, suppresses live conversion for one-character compositions to avoid over-converting particles
 - Suppresses live conversion for very short kana compositions with decorative trailing symbols such as `え~`, `えー`, or `ん？`
@@ -1183,6 +1297,7 @@ Main features added in this fork
 - Allows assigning multiple commands to a single key binding as an ordered command sequence
 - Adds `ForceZenzLiveCorrection` to explicitly request Zenz correction for uncommitted text, including when automatic Zenz live correction is disabled
 - Adds `ForceZenzLiveCorrectionWithoutFeedback` to request a one-shot correction without automatically reusing stored Zenz feedback, while retaining normal Mozc history, user-dictionary entries, explicit manual blocks, and settings-controlled learning of newly committed results
+- Commits the currently visible conversion on the next ordinary text key after either explicit manual Zenz command, starting a fresh composition; automatic Zenz live correction instead continues editing the same uncommitted text
 - Adds `BlockVisibleZenzCorrection`: while a Zenz correction is visibly applied, the built-in `Ctrl+Delete` shortcut records a persistent manual hard rejection and restores ordinary Mozc conversion. This differs from deleting or hiding an ordinary candidate with `DeleteSelectedCandidate`.
 - Adds `Delay(700)`-style waiting steps (0–5000 ms) in keymap command sequences, including after selected-text reconversion
 - Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows history-delete or hide guidance for the currently selected candidate using the active key binding
@@ -1193,6 +1308,7 @@ Main features added in this fork
 - On Windows, allows independently selecting Either side / Left only / Right only for Ctrl and Shift in the keybinding editor; generic Ctrl/Shift shortcuts remain supported, while conflicting bindings for different commands are rejected when saving
 - Shows the IME mode indicator even when a key assigned to IMEOn or IMEOff is pressed while Mozc is already in that state
 - On Windows, pressing `IMEOn` during temporary half-width ASCII input restores hiragana input without committing the existing preedit
+- Explicitly returning from ASCII input to hiragana invalidates previous raw-ASCII rescue suggestions while keeping the composition uncommitted
 - Adds explicit Windows default IME controls to the config dialog, with restore support for the previous default IME setting
 - Allows choosing the Windows Mozkey IME profile icon from Default, Monochrome (Light/Dark), Monochrome (Black), and Monochrome (White) in the config dialog
 - Supports candidate, suggestion, and live-conversion ruby rendering in immersive TSF hosts such as Windows Search through an in-process renderer path, keeping the UI above the host presentation layer and preserving correct mouse selection; an unfocused passive suggestion does not enter normal conversion on mouse-down, and mouse-up commits the suggestion that was actually clicked
@@ -1204,6 +1320,9 @@ Main features added in this fork
 - Adds vertical-writing layouts for candidate, suggestion, infolist, and live-conversion ruby displays on Windows and macOS, with candidate and segment navigation aligned to the visual writing direction when the active keymap uses the supported command bindings
 - On Windows and macOS, places cascading candidate windows outward from the focused vertical candidate, with fallback to the opposite side when necessary
 - Allows enabling or disabling the ruby display shown during live conversion from the config dialog
+- Adds Follow input text (default) and Fixed on active screen modes for the live-conversion ruby on Windows/macOS; fixed mode offers X/Y center coordinates (0–100%, default 50% each), offsets (-400 to 400), upper/center/lower presets, and wrap-width limits (40–100%, default 90%)
+- Improves horizontal follow-mode ruby placement near the top/bottom of the screen by seeking fallback positions above/below an obstructing candidate window when ordinary placement fails
+- Improves fixed-mode long-text and vertical ruby layout on Windows/macOS, and raises the candidate/suggestion/ruby scaling limit to 300%
 - Adds an independent conversion-status indicator for Windows/macOS near the composition, with Reading / Mozc / Zenz processing / Zenz applied states and configurable placement, colors, shape, font, size, and shadow
 - Allows customizing Windows preedit text color, background color, and underline color from the config dialog for input text, converting segments, and "Text being corrected by Zenz" separately; the underline for Zenz-corrected text defaults to enabled with `#C4DC6C` for new or otherwise unset profiles
 - Adds an opt-in Windows feature for Roman input that dims only the unresolved trailing romaji still forming an incomplete conversion-rule prefix; it defaults to OFF and the dimness can be adjusted from 0% to 100% (default 85%); 100% matches the background and becomes invisible
@@ -1221,6 +1340,8 @@ Main features added in this fork
 - Improves date input conversion for compact forms such as `20260927` and separated forms such as `2026/9/27`, `2026-9-27`, `2026.9.27`, and `9/27`; full-width input is also recognized, and invalid calendar dates are not expanded as date candidates
 - For weekday readings such as `きんよう` / `きんようび`, keeps the normal lexical candidates `金曜` / `金曜日` ahead of additional candidates for the matching date in this week, next week, and the previous week
 - Adds date expressions such as `ほんじつ` / `みょうにち` while preserving explicitly typed date forms such as `9/27` at the front of the candidate order
+- Adds weekday-annotated candidates for relative-date inputs such as `きょう`, `あす`, `きのう`, and `あさって`, offering both ASCII `(...)` and fullwidth `（...）` parentheses for date/weekday combinations. Previously available ASCII-parenthesized candidates for eight-digit and separated-date input remain selectable
+- Lets `ひづけ` offer today's date variants and `ようび` offer today's weekday as `日曜日`, `(日)`, and `（日）`, while retaining the normal lexical candidates `日付` and `曜日`
 - Adds a local Zenz live correction pipeline based on llama.cpp
 - Uses dedicated `zenz_preceding_text` / `zenz_following_text` fields for Zenz context without changing the normal Mozc `preceding_text` / `following_text` semantics
 - Lets the Server request the required preceding / following lengths and lets Windows TSF / macOS IMK acquire only the requested directions and lengths; right-context acquisition is configurable and defaults to 6 characters when enabled
@@ -1243,18 +1364,18 @@ Main features added in this fork
 - Adds adaptive Zenz feedback auto-blocking. For the same full reading, context class, and correction value, auto-blocking activates only when both the minimum ordinary-reject count and the minimum reject percentage over accepted plus ordinary-rejected observations are met. For configurations without a saved value, auto-blocking defaults to enabled with a minimum of 1 rejection and 50%. Auto-blocking does not persist irreversible hard-reject rows; it is re-evaluated dynamically from the current settings and stored feedback.
 - Keeps evaluating an auto-blocked Zenz result as a hidden shadow observation. If the final committed value for the same reading matches that hidden Zenz value, accepted feedback is added so the entry can recover automatically once its reject percentage falls below the threshold. A different final value for the same reading adds an ordinary rejection; a changed final reading is neutral. Explicit hard rejects are not eligible for shadow recovery.
 - Stops reusing a Zenz feedback entry as a preferred candidate or live-correction fast path when ordinary rejected observations outnumber accepted observations for the same full reading, context class, and correction value. This is a neutral reject-count-dominant state, not a hard block, so it does not delete ordinary Mozc candidates or prevent newly produced Zenz corrections by itself.
-- When feedback recording (A) is ON, does not persist a correction merely because it was displayed; only an explicit commit appends accepted full-sequence feedback. A failed append is not treated as a successful observation for Undo compensation
-- If Backspace, Escape, Revert, Undo, Ctrl+Z, or a similar correction action occurs inside the rollback window, Mozkey appends `accepted_rollback` only for an acceptance successfully written to the feedback TSV. Failed writes are not compensated, preventing accidental subtraction from earlier valid acceptance records. Mozc-history revert uses a separate handle. IMEOff / MakeSureIMEOff confirm rather than cancel the commit
-- Treats a visible Zenz correction as rejected feedback when the user moves to normal conversion operations such as Space or candidate movement. Ordinary rejected feedback from these operations is used as a negative ranking signal rather than as a hard command to suppress the candidate
-- When Space restores the underlying Mozc normal conversion from a visible Zenz correction, the next text input commits that restored conversion before starting a new composition
+- When feedback recording (A) is ON, does not persist a correction merely because it was displayed; acceptance is recorded on an explicit commit, including the next ordinary text key following manual Zenz correction. Continuing to type during automatic live correction does not by itself record acceptance. A failed append is not treated as a successful observation for Undo compensation
+- In the short post-commit reversible window, a keymap-resolved Revert or supported Undo compensates only successfully written `accepted` observations when the Dictionary-tab learning-deletion preference is ON. When OFF, learning is preserved; `CancelLastLearning` overrides the preference to cancel reversible learning only. Failed writes are not compensated, preventing subtraction from earlier valid records. Mozc-history revert uses a separate handle. IMEOff / MakeSureIMEOff confirm rather than cancel the commit
+- Defers feedback judgment when moving from a visible Zenz correction to normal conversion operations such as Space or candidate movement, then determines acceptance or rejection from the final committed value. Ordinary rejected feedback from these operations is used as a negative ranking signal rather than as a hard command to suppress the candidate
+- When Space restores Mozc from a visible Zenz correction, a manual correction originating from ordinary conversion returns to ordinary conversion and the next text key commits the Mozc result; a correction originating from automatic live conversion can instead continue the same uncommitted reading
 - Adds a feedback-learning data management UI to the config dialog. Users can search, import, export, delete entries, and clear the feedback TSV. Deleting this feedback does **not** delete separately learned Mozc conversion history from C
 - Allows explicitly blocking selected Zenz corrections from the feedback management UI. Manual hard rejects continue to apply even when automatic feedback reuse (B) is OFF; unblocking requires deleting the corresponding entry
 - Allows manually blocking a currently visible Zenz correction with `Ctrl+Delete`, persisting a `hard_reject` for the full reading, context class, and corrected value, then restoring the underlying Mozc result without double-counting an ordinary rejection or deleting regular Mozc candidate history.
 - When automatic reuse (B) is ON, ranks normal single-segment candidates using stored feedback and may insert synthetic candidates at feedback-adjusted positions. Accepted observations raise ranking; ordinary rejections lower it without deleting the candidate
-- Does not apply Zenz feedback ranking to multi-segment normal conversions, to avoid collapsing phrase boundaries
+- For multi-segment normal conversion (2–8 segments), conditionally projects full-reading Zenz feedback onto a unique alignment of existing Mozc segments, allowing multiple separated segments to be augmented together. It preserves native boundaries and rejects ambiguous alignments, unsupported adjacent synthetic replacements, and protected candidate changes
 - Reuses accepted Zenz feedback via the session-level live-correction fast path for multi-segment live conversion to preserve learned full-phrase corrections
 - Does not reuse feedback obtained from `sensitive_like` context for ordinary-context candidate ranking
-- When Mozc-history learning (C) is ON and privacy/history conditions allow it, learns explicitly committed Zenz corrections into Mozc user history independently of feedback recording (A), retaining an in-process revert handle for immediate Undo or similar cancellation
+- When Mozc-history learning (C) is ON and privacy/history conditions allow it, learns explicitly committed Zenz corrections into Mozc user history independently of feedback recording (A), retaining an in-process revert handle for an immediate keymap-resolved Revert, supported Undo, or explicit `CancelLastLearning`; automatic cancellation follows the Dictionary-tab preference
 - For accepted Zenz corrections that can be mapped safely onto the previous normal Mozc live-conversion segments, prefers known boundaries, verifies them with a history-free fixed-boundary conversion, and uses Mozc-native resegmentation only for ranges that still need resolution before learning an external multi-segment commit. If multiple boundary interpretations remain, Mozkey does not learn local or boundary history from that inferred split; punctuation-like separators are not crossed either. Candidate structure is reused when possible, and only lexical units with verified Zenz-change evidence are marked as strong user-selected history. If no safe projected/local Mozc-history evidence can be committed at all, the separate full-sequence Mozc-history fallback may still be attempted.
 - Protects user-dictionary candidates and ASCII / mixed-script surfaces that appear in the current normal Mozc live-conversion result before adopting Zenz live-correction output
 - For ASCII / mixed-script surfaces, temporarily replaces the reading with a placeholder in the Zenz prompt when it can be identified safely, then restores the selected surface after the response, so entries such as `もずきー -> Mozkey` are not silently overwritten as `モズキー` while surrounding text can still be corrected
@@ -1273,6 +1394,21 @@ Main features added in this fork
 
 Examples
 --------
+
+### Date and weekday conversion
+
+Relative-date readings such as `きょう` (today), `あす` (tomorrow), and `きのう` (yesterday) offer weekday-annotated dates alongside the existing plain date formats. `ひづけ` provides today's date variants, while `ようび` offers the current weekday without replacing the usual lexical candidates `日付` and `曜日`.
+
+For example, on **Saturday, November 21, 2026**:
+
+| Input | Example candidates |
+| --- | --- |
+| `きょう` / `ひづけ` | `2026/11/21(土)`, `11月21日（土）`, `2026年11月21日（土）`, `令和8年11月21日（土）` |
+| `あす` / `あした` | `2026/11/22(日)`, `11月22日（日）`, `2026年11月22日（日）`, `令和8年11月22日（日）` |
+| `きのう` | `2026/11/20(金)`, `11月20日（金）`, `2026年11月20日（金）` |
+| `ようび` | `土曜日`, `(土)`, `（土）` |
+
+Numeric slash-separated dates use halfwidth parentheses without a space (for example, `2026/11/21(土)`); Japanese-style dates use fullwidth parentheses (for example, `11月21日（土）`). Hyphen-separated dates retain their plain form without a weekday. Existing compact or separated numeric date conversion and weekday-name lookups (this/next/previous week) are preserved. Actual candidate positions may vary with other dictionary entries and conversion history.
 
 ### Ambiguous romaji display
 
@@ -1296,6 +1432,18 @@ For example, with rules such as:
 typing `ctnnaru` is interpreted as `ctn + naru`, resulting in `ことになる`,
 while valid longer rules such as `ctnnr` and `ctnnc` still work.
 
+### Romaji-table presets, search, and management
+
+You can select a preset from the romaji input settings.
+
+When you use a bundled preset without changing its rules, Mozkey follows updates to that preset in subsequent releases. **If you edit the rules, your changes take precedence and are not overwritten by updates.** You can save personal presets under custom names, and create, overwrite, rename, export, or delete them. Changes canceled in the preset manager or romaji-table editor are not saved.
+
+In the editor, you can search input keys and outputs case-insensitively. Use Previous, Next, or Enter while the search field has focus to navigate matching rows; the current match is outlined. Searching does not sort or hide rules, so **rule order and insertion positions are preserved**. Pressing Enter in the search field does not close the editor.
+
+Incomplete rules are reported with their row numbers, and saving is aborted. Imported files are fully validated before the table is replaced, so the current rules are preserved if the file is invalid. Before saving a personal preset, rules sharing the same input key but having **different definitions** trigger a confirmation. Identical duplicate rules do not trigger a conflict warning. Rules are not sorted automatically, because their original order may be significant.
+
+The sources and licenses of bundled presets are available under “Sources and Licenses” in the editor. Bundled data is stored in `src/gui/config_dialog/roman_table_presets/`. Simplified-AZIK and Shingetsu carry MIT license notices; the bundled Seoto materials include MIT and BSD-style license notices. See the `README.md` and license files in that directory for details.
+
 ### Long custom romaji-table outputs
 
 A custom romaji-table rule can produce output shorter than 1024 UTF-8 bytes. The input and pending fields keep their existing limits below 300 bytes.
@@ -1303,6 +1451,31 @@ A custom romaji-table rule can produce output shorter than 1024 UTF-8 bytes. The
 Previously, input, output, and pending all shared the same limit below 300 bytes. For typical Japanese characters encoded as three UTF-8 bytes, this limited one rule's output to the equivalent of 99 characters. This fork raises only the output limit, allowing up to 1023 bytes, or the equivalent of 341 three-byte characters.
 
 This is a per-rule romaji-table output limit. It does not change the converter's whole-composition input-length limit.
+
+### Raw-ASCII rescue and mixed Japanese/Latin suggestions
+
+Mozkey can offer the original Roman keystrokes as a rescue suggestion for Latin names and technical terms. While unresolved Roman input normally holds the current suggestion list to avoid flicker, a stale raw-ASCII rescue candidate is refreshed instead of leaving an obsolete displayed value or selectable candidate. For example, typing `v` after `AIde` no longer leaves the old `AIde` rescue candidate in place.
+
+For a mixed input such as `mouGoogle`, Mozkey can supply the uncommitted preedit `もうGoogle` even if prediction returned no matching candidate, and place it before the raw `mouGoogle` suggestion. This is a conservative heuristic: the Japanese prefix must contain at least two characters, its Roman input prefix at least three bytes, the reading must exist in the dictionary, and the literal Latin suffix must match the raw keystrokes. Short or unknown readings preserve ASCII-first behavior for names such as `iPhone`, `iPad`, `aGoogle`, and `azooKey`. This is not a general language-intent classifier.
+
+An explicit switch from ASCII input back to hiragana invalidates the previous rescue suggestion and stale suggestion state without committing the composition. The changes were tested on Windows, primarily with Zenz OFF and live conversion OFF. The modified behavior has not yet been verified on macOS hardware or across all live-conversion paths. The existing behavior that commits the visible live-conversion result when Shift-based ASCII input begins remains unchanged.
+
+### English spelling dictionary (without manually switching IMEs)
+
+The English spelling dictionary lets you **enter or select English spellings while staying in Japanese hiragana input**, without manually switching to another IME or alphanumeric input mode. It associates specific **lowercase Roman keystroke sequences** with preferred ASCII spellings: for example, `github` → `GitHub` and `chatgpt` → `ChatGPT` can be automatic, while `jest` → `Jest` can be offered as a candidate. It only applies to registered entries; it does **not** attempt to infer whether arbitrary input is English or Japanese. It is separate from the ordinary Mozc dictionary and the raw-ASCII rescue suggestion described above.
+
+Use **「英字表記辞書を有効にする」** (Enable English spelling dictionary) in the configuration dialog, then **「表記辞書を管理...」** (Manage spelling dictionary) to edit entries.
+
+| Mode | Behavior |
+| --- | --- |
+| **Automatic ASCII** (`auto`) | For an explicitly registered matching sequence, presents the matching portion as ASCII and promotes the preferred spelling in conversion candidates. Use cautiously where romaji may also be Japanese input. |
+| **Candidate only** (`candidate`) | Keeps the Japanese preedit unchanged while exposing the preferred spelling in passive suggestions and explicit Space conversion. Automatic live conversion and Zenz correction do not automatically adopt that English spelling. |
+
+When `chatgpt` is configured as candidate-only, its trigger can leave a trailing unresolved Roman consonant. On an **exact full-keystroke match**, Mozkey refreshes passive suggestions so `ChatGPT` becomes selectable without first pressing Space. Ordinary incomplete Roman input retains the existing suggestion-hold behavior.
+
+The management dialog supports filtering, sorting, multirow deletion, UTF-8 TSV (`input`, `preferred`, `mode`, `enabled`), and JSON import/export (`schema_version: 1` with a `rules` array). Automatic catalog updates reconcile **untouched system-managed entries** while preserving edited, deleted, and custom entries; updates can be disabled. To persist changes, click **Apply** in the parent configuration dialog.
+
+Triggers are lowercase ASCII `a`–`z` only (2–64 characters); preferred spellings are printable ASCII without spaces (1–128 characters), with at most 4,096 rules. Trigger strings containing digits, hyphens, or punctuation are not supported. No automatic language inference or universal romaji-conflict prevention is claimed. Password fields and excluded input modes are not affected. For both new and existing profiles, the feature is **enabled by default when the feature flag is unset**. Explicitly saved ON/OFF choices are preserved.
 
 ### Live conversion
 
@@ -1313,6 +1486,8 @@ To reduce distracting intermediate conversions, this fork applies live conversio
 Live conversion is also suppressed for very short kana compositions followed only by decorative trailing symbols, such as `え~`, `えー`, or `ん？`. This avoids noisy intermediate conversions such as `え~` becoming `絵～` while the user is still typing.
 
 To avoid candidate-window flicker from Roman keystrokes that do not yet add a meaningful reading, Mozkey temporarily holds passive-suggestion refresh separately from live conversion. For example, after `今日は`, typing `s` and then `sh` keeps the same suggestion set; when `shi` resolves to `し`, suggestions refresh for the current reading `今日はし`. At the start of a fresh composition, an unresolved Roman prefix of up to two characters can still refresh.
+
+If the held list contains a stale raw-ASCII rescue candidate, the hold is released and suggestions are refreshed for the current input to keep the visible candidate and commit target consistent.
 
 Custom romaji rules with the `DisplayAmbiguousResult` option can display a meaningful Japanese reading even though their Roman suffix is still pending and may be extended by a longer rule. If that displayed ambiguous result changes the prediction query, Mozkey refreshes suggestions instead of holding the previous set. For example, with `a → あ`, `ms → ます`, and `msn → ません`, where `ms` and `msn` are also prefixes of longer rules, typing `am` keeps the prior suggestions, while `ams` refreshes for `あます` and `amsn` refreshes for `あません`. The same exception applies to `msn` at the start of a composition even though its pending Roman suffix is longer than two characters. Ordinary unresolved prefixes without a displayed ambiguous reading continue to use the previous HOLD behavior.
 
@@ -1332,7 +1507,7 @@ For example:
 - Pressing Backspace or Delete updates the live conversion result immediately
 - Pressing Enter commits the current live conversion result
 
-During live conversion, this fork shows a small ruby-like overlay window above the preedit text so that the original reading remains visible while the converted text is shown.
+By default, live conversion shows a small ruby-like overlay window near the preedit text so that the original reading remains visible while the converted text is shown. On Windows/macOS, the overlay can instead be fixed to a position on the active screen.
 
 The live conversion feature can be enabled or disabled from the config dialog. The debounce delay and the minimum number of characters required to start live conversion can also be configured there.
 
@@ -1574,7 +1749,7 @@ The configuration dialog separates **Zenz learning (Mozc conversion history)** f
 
 These three preferences are independent. **A=OFF/B=ON** continues to use existing feedback without adding new observations, while **A=OFF/C=ON** can still learn into Mozc history. For new Mozkey configurations all three default to ON. Previously saved legacy preferences are inherited only for fields not explicitly saved under the new settings.
 
-With A enabled, a displayed Zenz result is not recorded simply because it was shown. Accepted full-sequence feedback is appended when the user explicitly commits the result (for example with Enter or direct-commit punctuation). C writes to Mozc history separately.
+With A enabled, a displayed Zenz result is not recorded simply because it was shown. Accepted full-sequence feedback is appended when the user commits the result (for example with Enter, direct-commit punctuation, or the next ordinary text key after an explicit manual correction). Continued input in automatic live correction is not, by itself, acceptance. C writes to Mozc history separately.
 
 #### Minimum reading length for automatic Zenz feedback reuse
 
@@ -1607,12 +1782,9 @@ fast path, or feedback decisions including auto-blocking, and no new feedback
 record is persisted. Leaving Incognito mode makes the existing, unmodified
 feedback available again.
 
-After that explicit commit, the session keeps a short rollback window for the
-accepted observation. If Backspace, Escape, Revert, Undo, Ctrl+Z, or a similar
-correction action occurs before the next real text input or post-commit context
-transition closes the window, Mozkey appends `accepted_rollback` **only if the preceding acceptance was successfully persisted**. If the accepted append failed, Undo will not add a compensation row that could subtract from earlier valid observations. The rollback is not rejected feedback, so it does not increase ordinary-reject or auto-block negative evidence. IMEOff / MakeSureIMEOff are
-treated as confirmation rather than cancellation and close the rollback window
-while keeping the acceptance. Moving from a visible Zenz correction to normal
+After an explicit commit, the session keeps a short reversible window for the
+accepted observation. If the current keymap executes Revert or a supported Undo
+within this window, Mozkey appends `accepted_rollback` **only when the Dictionary-tab learning-deletion preference is ON and the preceding acceptance was successfully persisted**. When the preference is OFF, the accepted learning is retained. An explicit `CancelLastLearning` bypasses this preference and cancels the most recent reversible learning only. If the accepted append failed, no compensation row is written that could subtract from earlier valid observations. `accepted_rollback` is not rejected feedback, so it does not increase ordinary-reject or auto-block negative evidence. IMEOff / MakeSureIMEOff are treated as confirmation rather than cancellation and close the window while keeping the acceptance. Moving from a visible Zenz correction to normal
 conversion operations, such as Space or candidate movement, is separate and
 starts a pending final comparison instead of immediately persisting rejected
 feedback. If the final committed value differs from the Zenz correction, Mozkey
@@ -1645,9 +1817,11 @@ and therefore do not self-recover.
 The feedback TSV is scoped to full Zenz sequences: a complete reading key, a complete correction value, and a coarse non-reversible context class. It does not store segment-local or lexical-unit feedback. With C enabled and privacy/history conditions satisfied, accepted Zenz corrections can also be learned into Mozc user history independently of A, with generalized learning applied at the explicit commit point.
 This is a separate Mozc-history path rather than an additional Zenz
 feedback-store record. Mozkey keeps an in-process revert handle for the short
-rollback window; Backspace, Escape, Revert, Undo, and similar immediate
-corrections revert the just-applied generalized learning, while the next real
-text input or a post-commit transition such as ResetContext / IMEOff keeps it.
+reversible window. A keymap-resolved Revert or supported Undo retains or
+reverts the just-applied generalized learning according to the Dictionary-tab
+learning-deletion preference. `CancelLastLearning` explicitly reverts reversible
+learning regardless of that preference. The next real text input or a
+post-commit transition such as ResetContext / IMEOff keeps it.
 The exact TSV `accepted` / `accepted_rollback` compensation and generalized
 Mozc-history revert are separate mechanisms. This rollback window is an
 in-process convenience rather than a durable transaction or ACID rollback across
@@ -1685,9 +1859,9 @@ starts a fresh composition.
 
 If the next action is a direct-commit punctuation/symbol, Mozkey first captures
 the restored Mozc result as the suffix-free final comparison value and keeps the
-short rollback window open through that punctuation/symbol commit. An immediate
-Backspace, Escape, Revert, Undo, Ctrl+Z, or equivalent cancellation discards the
-pending Zenz comparison instead of leaving a rejection behind. A subsequent
+short rollback window open through that punctuation/symbol commit. An immediate keymap-resolved Revert or supported Undo processes the pending
+Zenz comparison according to the learning-deletion preference; an explicit
+`CancelLastLearning` forces rollback of reversible learning. A subsequent
 normal text input, post-commit context transition, or ordinary pass-through key
 such as the second Enter used to submit Windows Search closes the rollback window
 and confirms the feedback from the observed final commit. Pressing Space again
@@ -1704,15 +1878,28 @@ in the candidate list, its cost is adjusted by that score. If it does not exist,
 a synthetic candidate can be inserted at a natural feedback-adjusted cost
 position instead of being forced to the top. Ordinary rejected feedback lowers
 the candidate's ranking without deleting it; only explicit hard-reject reasons
-act as strong suppression. ZenzFeedbackCandidateRewriter runs before
-UserSegmentHistoryRewriter, so explicit user selection history can still make
-the final ranking decision.
+act as strong suppression. UserSegmentHistoryRewriter runs before
+ZenzFeedbackCandidateRewriter in the rewriter chain, so feedback-based
+augmentation follows user-segment-history rewriting.
 
-For multi-segment live conversion, the rewriter-chain feedback ranking does
-not rewrite normal conversion candidates, because phrase boundaries are owned by
-the converter and should not be collapsed. Instead, accepted feedback can still be replayed via
-the session-level live-correction fast path. This preserves learned full-phrase
-corrections such as `かれはてんてきです` -> `彼は天敵です`.
+For multi-segment normal conversion, stored feedback applies only if the
+complete request reading matches and the corrected full surface has a **unique
+alignment across the existing 2–8 Mozc segments**. The current top candidate
+or an existing candidate with the segment's complete reading can anchor each
+boundary; an additional candidate may be synthesized where appropriate. For
+example, `もう少しわかり易く | 教えて | 下さい` can be augmented to
+`もう少しわかりやすく | 教えて | ください`, correcting the first and third
+segments together without changing their boundaries. The rewriter never
+splits, joins, or resizes segments. It rejects alignments that need a guessed
+boundary between adjacent synthetic-only replacements, multiple valid splits,
+or a protected candidate in any segment that would change; in such cases, it
+skips the whole multi-segment projection. This automatic reuse is disabled
+when feedback reuse (B) is OFF, strict reading preservation is ON, or privacy
+gates disallow it. Feedback remains scoped to the complete reading and surface,
+so an omitted suffix does not automatically inherit a full-reading entry.
+The session-level live-correction fast path remains separate. Unlike this
+boundary-preserving B path, Mozc-history learning (C) can persist verified
+segment-boundary changes.
 
 Feedback learned in a `sensitive_like` context is not reused for ordinary-context candidate ranking.
 
@@ -1802,17 +1989,18 @@ However, period- and comma-like punctuation immediately following a number is ex
 
 When live conversion is enabled, direct-commit punctuations/symbols commit the currently displayed live conversion result instead of committing the raw kana composition.
 
-For direct-commit punctuations/symbols, learning caused by the immediately
-committed conversion is also kept pending until the next real text input. If the
-next action is Backspace, Escape, Revert, Reset, or Undo, the pending learning is
-reverted instead of being kept. IMEOff / MakeSureIMEOff are treated as
-post-commit mode changes rather than cancellation, so the pending learning is
-confirmed.
+For direct-commit punctuation/symbols, learning from the immediately committed
+conversion remains reversible for a short window. A keymap-resolved Revert or
+supported Undo cancels that learning when the Dictionary-tab learning-deletion
+preference is ON, and retains it when OFF. An explicit `CancelLastLearning`
+cancels the most recent reversible learning regardless of the preference.
+IMEOff / MakeSureIMEOff are treated as post-commit mode changes rather than
+cancellation, so the pending learning is confirmed.
 
-When a cancel-equivalent key such as Ctrl+Z is pressed immediately after a
-direct-commit punctuation/symbol and that key is echoed back to the application,
-Mozkey also discards the pending learning. Whether the already-committed text is
-actually undone depends on the application's own Undo behavior.
+When a key such as Ctrl+Z is passed through to the application, Mozkey cannot
+universally determine whether the application's own Undo actually succeeded.
+Application-side text changes and IME-side learning cancellation therefore do
+not necessarily coincide.
 
 ### Hiragana learning after conversion cancel
 
@@ -1826,24 +2014,23 @@ This strong-learning path is intentionally narrow. It applies only when the pree
 
 With live conversion enabled, the same behavior applies when the user explicitly cancels back to hiragana and immediately commits it with Enter, Commit → IMEOff, IMEOff / MakeSureIMEOff, or a direct-commit punctuation/symbol. Internal live-conversion cancellation used only for continuing input does not trigger this strong-learning path.
 
-### Partial revert of history learning after immediate correction
+### Learning deletion after immediate cancellation of a committed conversion
 
-When a committed conversion is immediately followed by Backspace, or by a key assigned to Cancel in the current keymap, this fork treats it as a revert signal for the just-committed learning result.
+Use **Preferences → Dictionary → Learning → “Learning deletion after immediate cancellation of a committed conversion”** to choose whether a post-commit cancellation should remove Mozc/Zenz learning. **The preference is ON (delete learning) by default**; explicitly saved user choices are preserved.
 
-For direct-commit punctuations/symbols, the committed text may already have been sent to the application without using Mozkey's normal Undo context. In that case, a cancel-equivalent key such as Ctrl+Z still discards Mozkey's pending learning, while the key itself is passed through to the application. Whether the visible text is actually undone depends on the application's own Undo behavior.
+| Operation or preference | Learning | Committed text |
+| --- | --- | --- |
+| Preference ON: immediate keymap-resolved `Revert` or supported `Undo` | Discards the most recent reversible Mozc/Zenz learning | Normal text deletion or preedit restoration behavior is unchanged |
+| Preference OFF: the same operation | Preserves the recently committed learning | Text deletion or restoration behavior is unchanged |
+| `CancelLastLearning` (either preference) | Cancels only the most recent reversible learning | Does not delete committed text or restore preedit |
 
-If the entire committed text is erased, the just-committed suggestion history and user segment history do not continue to affect later suggestions or conversions.
+**Learning cancellation follows the command selected and executed by the active keymap, not the physical key name.** Backspace may invoke Revert under a standard keymap, but a custom Backspace mapping to another command does not cancel learning merely because the key is Backspace. A failed or unsupported Undo does not discard learning while the committed text remains. `TEST_SEND_KEY` probes do not modify learning or Undo state.
 
-If only the tail of the committed text is erased with Backspace, the history for the remaining part is kept while the erased tail is reverted.
+To cancel only the learning, assign `CancelLastLearning` to a custom key in the **Precomposition** (no active composition) state—for example, `Precomposition + Ctrl Shift Backspace -> CancelLastLearning`. This command has **no default key binding** and is not available as a Composition/Conversion-state binding.
 
-For example:
+The reversible window is short and does not delete arbitrary older learning entries. When a Ctrl+Z-like key passes through to the application, Mozkey cannot reliably observe whether application-specific Undo succeeded. Application-side Undo and IME-side learning cancellation may therefore differ.
 
-- Commit `いしとは` as `医師とは`
-- Press Backspace twice and erase only `とは`
-- The remaining `医師` history is kept
-- The tail-specific learning for `医師とは` is reverted
-
-This makes immediate correction after conversion confirmation behave closer to user intent.
+Separately, existing partial-correction history logic can adjust a committed phrase's history when only its tail is deleted. For instance, after committing `いしとは` as `医師とは`, deleting only `とは` may preserve the `医師` history while adjusting the tail-specific history. This behavior cannot be guaranteed for every application or editing method.
 
 ### Learning complete readings and segment preferences from accepted suggestions
 
@@ -1882,6 +2069,12 @@ The keymap editor provides `ForceZenzLiveCorrection` (normal manual correction),
 - **Both manual commands** work even when automatic Zenz live correction is OFF and bypass the automatic minimum-reading-length threshold. Password/privacy and input eligibility checks remain in effect, and the result is not guaranteed to be adopted. If feedback-bypass reconversion fails, the prior candidates, input mode, and learning rollback ownership are preserved.
 - **Delay**: `Delay(700)` resumes the remaining steps after 700 ms. Values from 0 through 5000 milliseconds are supported; `Delay(0)` does not wait. This delay is separate from the automatic live-conversion and Zenz debounce settings.
 
+**Typing after manual correction**
+
+Automatic Zenz live correction is a provisional preview while the user is still composing a phrase. Further typing extends the same uncommitted composition; it is not an acceptance signal. By contrast, either manual Zenz command represents an explicit request to convert the current text. Once its result is visible, the next ordinary text key is treated as acceptance of that visible result and starts a new composition, mirroring ordinary conversion followed by continued typing. The manual command itself does **not** commit the text. This applies with live conversion enabled or disabled.
+
+If the asynchronous Zenz response has not appeared by the next keystroke, Mozkey commits only the conversion actually visible at that time, not an unseen response. If the Zenz result is rejected, the visible Mozc result is used. Space still discards the Zenz presentation and restores the previous Mozc conversion/editing behavior; Enter and explicit cancellation retain their existing semantics.
+
 Practical custom bindings (examples, **not the defaults**):
 
 ```text
@@ -1907,6 +2100,12 @@ Note: Selected-text reconversion (`ReconvertSelectionOrInsertSpace`) is Windows-
 ### Key bindings during live conversion and Zenz correction
 
 The keymap editor includes **Live converting** (`LiveConversion`) and **Zenz correction** (`ZenzConversion`). The first applies while Mozc live conversion is active; the second applies while a Zenz correction is displayed.
+
+#### Selecting and committing visible suggestions during live conversion
+
+Even when the internal state is `Conversion`, an unfocused passive suggestion shown on screen can be the intended key-action target. In the built-in MS-IME-style keymap, `Shift+Enter` commits the **first visible suggestion**; in the built-in ATOK-style keymap, `Down` focuses the visible suggestion candidates. Ordinary `Enter` still commits the live-conversion result, while Space and Backspace retain their normal conversion/editing behavior.
+
+An explicitly assigned `ZenzConversion` or `LiveConversion` rule for the same key takes precedence. Only a single explicit `Suggestion` command of `CommitFirstSuggestion` (commit first suggestion) or `PredictAndConvert` (select candidates) can override the regular `Conversion` fallback; multi-command macros are not implicitly carried across states. Mozkey validates candidates against the displayed snapshot rather than committing a hidden or stale converter candidate. If the backend commit fails, the current reading, suggestion candidates, and Undo state remain available for retry.
 
 With the built-in keymaps, Backspace behaves as follows:
 
@@ -1940,6 +2139,18 @@ The block applies to a **full reading, coarse context class, and correction valu
 **Privacy and write failures:** No new persistent hard rejection is written in Secret/Incognito mode, TSF `IS_PRIVATE` input, password fields, or other protected contexts. If the feedback store cannot be written, the visible correction still reverts to ordinary Mozc conversion, but no durable block is created; the current UI does not report whether saving succeeded.
 
 **CUSTOM keymaps:** Mozkey adds the dedicated Zenz `Ctrl Delete` rule automatically only if there is exactly one `Conversion + Ctrl Delete -> DeleteSelectedCandidate` row and no existing `Delete`-containing assignment in `ZenzConversion` or `LiveConversion`. Otherwise, existing custom bindings are preserved; assign `BlockVisibleZenzCorrection` explicitly in the keymap editor if desired. Like `RevertZenzToMozc`, it must be configured as a **standalone command**, not inside a multi-command sequence.
+
+### Pin a conversion candidate to the top (Windows / macOS)
+
+Right-click a candidate during ordinary conversion and select **`先頭に固定` (Pin to top)** to prioritize it as the first candidate for that reading. The candidate moves to the first position immediately and displays a **`固`** marker in the candidate's auxiliary area. For a pinned candidate, the menu changes to **`固定を解除` (Unpin)**. Unpinning updates the marker immediately; the ordinary ranking is restored on the next conversion.
+
+The pin is stored as a **reading and candidate surface** pair. Pinning a different candidate for the same reading replaces that reading's previous pin. The data is persisted separately from conversion history and user dictionaries in `pinned_candidates.tsv` under Mozkey's user profile. Pinning or unpinning does not directly rewrite normal conversion-learning history.
+
+**Eligibility and limits:** Only valid ordinary candidates currently displayed in a **single-segment ordinary conversion** can be pinned. Multi-segment conversions, prediction and suggestion lists, meta candidates (including character-type conversions), command candidates, and visible live-conversion or Zenz-correction results are not eligible for new pins. A saved pin does not create a candidate when its surface is absent from the available candidates for that reading. Pinning is also blocked in Secret/Incognito mode and password input.
+
+Before saving, Mozkey validates the candidate ID, reading, surface, and current conversion state to avoid persisting a stale selection or an ineligible candidate. If the storage file is malformed or cannot be read safely, Mozkey refuses to overwrite the existing data. Cooperating Mozkey processes synchronize updates using OS file locks; writes by older versions or external tools that do not honor those locks are outside this protection.
+
+This feature adjusts the ordering of ordinary Mozc conversion candidates. It does not forcibly replace independently generated Zenz output, and it does not register new dictionary entries.
 
 ### Delete candidate history / hide candidate
 
@@ -2009,6 +2220,10 @@ This lets you use an IME on/off key not only to change the input mode, but also 
 ### Return to hiragana from temporary ASCII input with IME ON (Windows)
 
 When temporary half-width ASCII input is active (for example, after a Shift-triggered mode switch), pressing a key mapped to `IMEOn` changes the input mode to hiragana **without committing the current preedit**. The Windows taskbar mode indicator updates to hiragana (`あ`).
+The explicit switch also invalidates raw-ASCII rescue suggestions from the
+previous input mode. Unlike an automatic Shift-mode return, it preserves the
+current uncommitted text while discarding stale suggestion state.
+
 
 With Shift-based temporary ASCII input enabled, typing `Shift+G` → `o` → `o` → `IMEOn` → `a` keeps `Gooあ` in the same uncommitted composition. The return mode is hiragana even if the temporary ASCII input was entered from katakana.
 
@@ -2118,8 +2333,35 @@ for the candidate window, suggestion window, and live-conversion ruby display.
 The default is 400 (Regular). Auxiliary text such as candidate shortcuts,
 descriptions, footer labels, and infolist text keeps its existing weight.
 
-The ruby display shown during live conversion can be enabled or disabled from
-the config dialog.
+The ruby display shown during live conversion defaults to ON for new or unset
+profiles and can be changed in the config dialog. Realtime conversion
+suggestions default to OFF without disabling live conversion itself. Explicitly
+saved settings are preserved. The candidate, suggestion, and ruby scaling
+controls support up to 300%.
+
+### Ruby window placement (Windows / macOS)
+
+The config dialog provides two display modes: **Follow input text** (default),
+which keeps the reading overlay near the composition, and **Fixed on active
+screen**, which places it at a user-defined position on the monitor containing
+the active input. Existing saved settings are preserved.
+
+In fixed mode, the **window center** is configured with horizontal and vertical
+percentages (0–100%, both defaulting to 50%) relative to the monitor's usable
+area. X/Y offsets range from -400 to 400. Presets are Upper center (50%, 20%),
+Center (50%, 50%), and Lower center (50%, 70%). The maximum wrap width is 40–100%
+of the usable screen width (default 90%). Placement is clamped to the usable
+screen bounds where possible.
+
+In horizontal follow mode, when the reading cannot fit above or below the
+composition near the top or bottom of the screen, the renderer also checks
+positions above or below the candidate window. It avoids overlapping the
+composition or candidate window; if no suitable position exists, the ruby can
+still be hidden.
+
+Fixed mode also improves long-reading wrapping and vertical text layout on
+Windows and macOS. It is not implemented on Linux, where the fixed-placement
+controls are hidden.
 
 ### Conversion status indicator (Windows / macOS)
 

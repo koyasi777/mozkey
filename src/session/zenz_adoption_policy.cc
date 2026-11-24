@@ -856,15 +856,15 @@ bool ShouldProtectSelectedSystemProperNoun(
     return true;
   }
 
-  // Reviewed reading/surface pairs from the PR410 OSS dictionary ambiguity
-  // audit. Each has non-geographic lexical or inflectional evidence. The
-  // dictionary's POS identifies a candidate; it does NOT prove the speaker's
-  // intent. Let Zenz interpret these readings in context, while retaining all
-  // independent Zenz output validation, user-dictionary, and reading guards.
-  // Do not convert this to a broad reading-only exception list: e.g. an
-  // ambiguous 'あきたし/秋田市' must not also exempt 'あきたけん/秋田県'.
+  // Curated full reading/surface exceptions for ambiguous system proper nouns.
+  // Most originate from the geographic-name ambiguity audit, while some
+  // describe grammatical boundaries mistaken for a personal name.
+  // Dictionary POS alone does not prove user intent. Other Zenz safeguards,
+  // including user-dictionary protection, remain independent.
+  // Match the full reading and surface: e.g. 'あきたし/秋田市' must not exempt
+  // 'あきたけん/秋田県'.
   constexpr std::pair<absl::string_view, absl::string_view>
-      kAmbiguousGeographicNames[] = {
+      kAmbiguousSystemProperNouns[] = {
       {"あきたし", "秋田市"},
       {"いいだし", "飯田市"},
       {"おたかく", "小高区"},
@@ -926,9 +926,11 @@ bool ShouldProtectSelectedSystemProperNoun(
       {"ひたし", "日田市"},
       {"ふうふ", "風府"},
       {"べいし", "米市"},
+      // "しまうの" may be missegmented as "しま" + the surname "宇野".
+      {"うの", "宇野"},
   };
   for (const auto& [ambiguous_reading, ambiguous_surface] :
-       kAmbiguousGeographicNames) {
+       kAmbiguousSystemProperNouns) {
     if (reading == ambiguous_reading && surface == ambiguous_surface) {
       return false;
     }

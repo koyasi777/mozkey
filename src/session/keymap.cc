@@ -679,6 +679,8 @@ void KeyMapManager::InitCommandData() {
       PrecompositionState::LAUNCH_WORD_REGISTER_DIALOG);
 
   RegisterPrecompositionCommand("Revert", PrecompositionState::REVERT);
+  RegisterPrecompositionCommand("CancelLastLearning",
+                                PrecompositionState::CANCEL_LAST_LEARNING);
   RegisterPrecompositionCommand("Undo", PrecompositionState::UNDO);
   RegisterPrecompositionCommand("Reconvert", PrecompositionState::RECONVERT);
   RegisterPrecompositionCommand(
@@ -835,6 +837,8 @@ void KeyMapManager::InitCommandData() {
   RegisterConversionCommand("PredictAndConvert",
                             ConversionState::PREDICT_AND_CONVERT);
   RegisterConversionCommand("Commit", ConversionState::COMMIT);
+  RegisterConversionCommand("CommitFirstSuggestion",
+                            ConversionState::COMMIT_FIRST_SUGGESTION);
   RegisterConversionCommand("CommitOnlyFirstSegment",
                             ConversionState::COMMIT_SEGMENT);
   RegisterConversionCommand("ConvertToHiragana",
@@ -1099,6 +1103,12 @@ bool KeyMapManager::GetCommandSequenceSuggestion(
     return true;
   }
   return keymap_composition_.GetCommandSequence(key_event, commands);
+}
+
+bool KeyMapManager::GetCommandSequenceExplicitSuggestion(
+    const commands::KeyEvent& key_event,
+    CommandSequence* commands) const {
+  return keymap_suggestion_.GetCommandSequence(key_event, commands);
 }
 
 bool KeyMapManager::GetCommandSequencePrediction(

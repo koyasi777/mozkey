@@ -307,6 +307,30 @@ void ConversionStatusWindow::OnUpdate(
   auto as_rect = [](const RECT& r) {
     return Rect(r.left, r.top, r.right - r.left, r.bottom - r.top);
   };
+  Rect full_preedit;
+  const Rect* pfull_preedit = nullptr;
+  if (command.has_conversion_status_preedit_bounds()) {
+    const auto& box = command.conversion_status_preedit_bounds();
+    if (box.right() > box.left() && box.bottom() > box.top()) {
+      RECT rect{box.left(), box.top(), box.right(), box.bottom()};
+      if (command.has_application_info()) {
+        const auto& app = command.application_info();
+        if (app.input_framework() ==
+                commands::RendererCommand::ApplicationInfo::TSF &&
+            app.has_target_window_handle() && app.target_window_handle()) {
+          const HWND window = WinUtil::DecodeWindowHandle(
+              app.target_window_handle());
+          RECT physical = rect;
+          layout.GetRectInPhysicalCoords(window, rect, &physical);
+          rect = physical;
+        }
+      }
+      if (rect.right > rect.left && rect.bottom > rect.top) {
+        full_preedit = as_rect(rect);
+        pfull_preedit = &full_preedit;
+      }
+    }
+  }
   RECT wr{};
   Rect ruby_rect, obstacle_rect;
   const Rect* pruby = nullptr;
@@ -323,7 +347,8 @@ void ConversionStatusWindow::OnUpdate(
   Rect rect;
   if (!PlaceConversionStatusIndicator(
           preedit, pruby, pobstacle, as_rect(work),
-          Size(width_, height_), vertical, next_style, &rect)) {
+          Size(width_, height_), vertical, next_style, &rect,
+          pfull_preedit)) {
     Hide();
     return;
   }

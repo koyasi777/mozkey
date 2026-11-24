@@ -128,6 +128,13 @@ class TextRenderer {
   virtual void RenderTextVerticalWrapped(HDC dc, std::wstring_view text,
                                          const Rect& rect,
                                          FONT_TYPE font_type) const = 0;
+  // Full native vertical layout, clipped to a smaller visible rectangle.
+  // Right-to-left columns leave the latest reading at the layout's left edge.
+  // full_layout_width comes from MeasureStringVerticalWrapped using the same
+  // height, so this method never slices a UTF-16 character/grapheme.
+  virtual void RenderTextVerticalWrappedViewport(
+      HDC dc, std::wstring_view text, const Rect& viewport,
+      int full_layout_width, FONT_TYPE font_type) const = 0;
   virtual void RenderTextList(HDC dc,
                               absl::Span<const TextRenderingInfo> display_list,
                               FONT_TYPE font_type) const = 0;

@@ -1005,6 +1005,28 @@ TEST(ZenzAdoptionPolicyTest, SystemProperNounExceptionUsesWholeExpression) {
   EXPECT_TRUE(ShouldProtectSystemProperNounReadings({"ならけん"}));
 }
 
+TEST(ZenzAdoptionPolicyTest, UnoVerbEndingIsNotLockedAsSystemSurname) {
+  // "しまうの" can be misread as "しま" + "宇野". The single surname is
+  // ambiguous and must not block context-aware Zenz correction.
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "うの", "宇野", {"うの"}, false));
+  // Node boundaries may differ even for the same complete reading/surface.
+  EXPECT_FALSE(ShouldProtectSelectedSystemProperNoun(
+      "うの", "宇野", {"う", "の"}, false));
+  // The reading-only policy must not be globally weakened for other surnames.
+  EXPECT_TRUE(ShouldProtectSystemProperNounReadings({"うの"}));
+
+  // A verified full name and distinct names/compounds remain protected.
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "うの", "宇野", {"うの"}, true));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "うのたろう", "宇野太郎", {"うの", "たろう"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "うのしょうじ", "宇野商事", {"うの", "しょうじ"}, false));
+  EXPECT_TRUE(ShouldProtectSelectedSystemProperNoun(
+      "うの", "右野", {"うの"}, false));
+}
+
 TEST(ZenzAdoptionPolicyTest, ReviewedGeographicHomophonesAreSoftByFullPair) {
   // Even if the dictionary chooses a place, a common word or inflected verb
   // can be the intended reading. A single node and a merged path must agree.

@@ -132,6 +132,9 @@ class Session {
   // Therefore if a user commits "風"(かぜ) and Revert method is called,
   // preedit "ひいた"  will be converted into "邪引いた".
   bool Revert(mozc::commands::Command* command);
+  // Explicit keymap action: roll back only the latest still-reversible
+  // committed learning, without deleting or restoring application text.
+  bool CancelLastLearning(mozc::commands::Command* command);
   // Reset the composer and clear all the segments (including history segments).
   // Therefore preedit "ひいた"  will *not* be converted into "邪引いた"
   // on the situation described above.
@@ -171,6 +174,8 @@ class Session {
                             bool allow_pass_through = true);
   bool InsertSpaceFullWidth(mozc::commands::Command* command);
   bool InsertCharacter(mozc::commands::Command* command);
+  void RefreshClientContextAfterCommitForNextInput(
+      const mozc::commands::Command& command);
   bool UpdateComposition(mozc::commands::Command* command);
   bool UpdateCompositionInternal(mozc::commands::Command* command);
   bool Delete(mozc::commands::Command* command);
@@ -344,6 +349,12 @@ class Session {
   // live-edit continuation unless conversion actually started from streaming
   // composition (including a pending live-conversion request).
   bool live_conversion_from_composition_ = false;
+
+  // An explicit Zenz conversion is accepted when the next ordinary text key
+  // starts a new composition. Automatic Zenz corrections keep live editing.
+  // Keep this intent independent of pending asynchronous Zenz state: a failed
+  // or delayed response still leaves an explicitly requested Mozc conversion.
+  bool manual_zenz_commit_on_next_input_ = false;
 
   // True while a live conversion request has been scheduled but not applied yet.
   bool live_conversion_pending_ = false;
@@ -677,6 +688,9 @@ class Session {
   // it requires the argument id.
   bool SelectCandidate(mozc::commands::Command* command);
 
+  // Validate a visible conversion candidate before persisting a user pin.
+  bool UpdatePinnedCandidate(mozc::commands::Command* command, bool pin);
+
   // Calls EngineConverter::ConmmitHeadToFocusedSegments()
   // and deletes characters from the composer.
   void CommitHeadToFocusedSegmentsInternal(const commands::Context& context);
@@ -856,7 +870,8 @@ class Session {
       const mozc::commands::Command& command,
       absl::string_view reason);
   void ConfirmPendingDirectCommitLearning(absl::string_view reason);
-  void DiscardPendingDirectCommitLearning(absl::string_view reason);
+  void DiscardPendingDirectCommitLearning(
+      absl::string_view reason, bool force_rollback = false);
   void HandlePendingDirectCommitLearningForKeyEvent(
       const mozc::commands::KeyEvent& key);
   void HandlePendingDirectCommitLearningForSessionCommand(
@@ -879,7 +894,8 @@ class Session {
       const mozc::commands::Command& command,
       absl::string_view reason);
   void ConfirmPendingZenzFeedback();
-  void DiscardPendingZenzFeedback(absl::string_view reason);
+  void DiscardPendingZenzFeedback(
+      absl::string_view reason, bool force_rollback = false);
   void HandlePendingZenzFeedbackForKeyEvent(
       const mozc::commands::KeyEvent& key);
   void HandlePendingZenzFeedbackForSessionCommand(

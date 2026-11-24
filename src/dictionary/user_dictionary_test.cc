@@ -889,6 +889,35 @@ TEST_F(UserDictionaryTest, AddSuppressionEntryPersistsInDedicatedDictionary) {
   }
 }
 
+TEST_F(UserDictionaryTest, CanonicalEnglishSuppressionIsSurfaceSpecific) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string filename = FileUtil::JoinPath(
+      temp_dir.path(), "canonical_english_suppression_test.db");
+  std::unique_ptr<UserDictionary> user_dic(
+      CreateDictionaryWithFilename(filename));
+  user_dic->WaitForReloader();
+
+  ASSERT_TRUE(user_dic->AddSuppressionEntry("github", "GitHub"));
+  EXPECT_TRUE(user_dic->IsSuppressedEntry("github", "GitHub"));
+  EXPECT_FALSE(user_dic->IsSuppressedEntry("github", "github"));
+  EXPECT_FALSE(user_dic->IsSuppressedEntry("github", "Github"));
+  EXPECT_FALSE(user_dic->IsSuppressedEntry("github", "GITHUB"));
+
+  ASSERT_TRUE(user_dic->AddSuppressionEntry("github", "Github"));
+  EXPECT_TRUE(user_dic->IsSuppressedEntry("github", "Github"));
+  EXPECT_FALSE(user_dic->IsSuppressedEntry("github", "github"));
+  EXPECT_FALSE(user_dic->IsSuppressedEntry("github", "GITHUB"));
+
+  UserDictionaryStorage storage(filename);
+  EXPECT_OK(storage.Load());
+  const auto id = storage.GetUserDictionaryId("非表示候補");
+  ASSERT_OK(id);
+  const UserDictionaryStorage::UserDictionary* dictionary =
+      storage.GetUserDictionary(*id);
+  ASSERT_NE(dictionary, nullptr);
+  EXPECT_EQ(dictionary->entries_size(), 2);
+}
+
 TEST_F(UserDictionaryTest, ConsecutiveReloadTest) {
   TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
   const std::string filename =

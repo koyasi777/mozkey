@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <optional>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "absl/log/log.h"
@@ -444,6 +445,12 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   bool suggestionMouseGestureActive_;
   std::optional<PassiveSuggestionCandidateIdentity>
       pressedSuggestionCandidate_;
+
+  // Captured identity for the synchronous native context menu.
+  int32_t pinMenuCandidateId_;
+  std::string pinMenuCandidateValue_;
+  std::string pinMenuReading_;
+  bool pinMenuWasPinned_;
 }
 
 #pragma mark initialization
@@ -668,7 +675,8 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
   for (int i = 0; i < candidate_window_.candidate_size(); ++i) {
     const CandidateWindow::Candidate &candidate = candidate_window_.candidate(i);
     const NSAttributedString *shortcut = MacViewUtil::ToNSAttributedString(
-        candidate.annotation().shortcut(), style_.shortcut_style());
+        (candidate.pinned() ? "固" : candidate.annotation().shortcut()),
+        style_.shortcut_style());
     std::string value = candidate.value();
     if (candidate.annotation().has_prefix()) {
       value.insert(0, candidate.annotation().prefix());  // Prepend the prefix() to value.
@@ -842,7 +850,8 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
     const CandidateWindow::Candidate &candidate = candidate_window_.candidate(i);
 
     const NSAttributedString *shortcut = MacViewUtil::ToNSAttributedString(
-        candidate.annotation().shortcut(), style_.shortcut_style());
+        (candidate.pinned() ? "固" : candidate.annotation().shortcut()),
+        style_.shortcut_style());
 
     std::string value = candidate.value();
     if (candidate.annotation().has_prefix()) {
@@ -1399,6 +1408,46 @@ void DrawVerticalAttributedString(const NSAttributedString *text,
 }
 
 #pragma mark event handling callbacks
+
+- (void)togglePinFromContextMenu:(id)sender {
+  if (command_sender_ == nullptr || pinMenuCandidateValue_.empty()) return;
+  SessionCommand command;
+  command.set_type(pinMenuWasPinned_ ? SessionCommand::UNPIN_CANDIDATE
+                                   : SessionCommand::PIN_CANDIDATE);
+  command.set_id(pinMenuCandidateId_);
+  command.set_text(pinMenuCandidateValue_);
+  command.set_pin_reading(pinMenuReading_);
+  Output output;
+  command_sender_->SendCommand(command, &output);
+}
+
+- (void)rightMouseDown:(NSEvent *)event {
+  if (command_sender_ == nullptr ||
+      candidate_window_.category() != mozc::commands::CONVERSION) return;
+  const NSPoint location = [self convertPoint:[event locationInWindow]
+                                   fromView:nil];
+  const int clicked = [self candidateRowAtPoint:MacViewUtil::ToPoint(location)];
+  if (clicked < 0) return;
+  const auto& candidate = candidate_window_.candidate(clicked);
+  if (!candidate.has_id() || candidate.value().empty() ||
+      (!candidate.pinned() && !candidate.pin_eligible())) return;
+
+  pinMenuCandidateId_ = candidate.id();
+  pinMenuCandidateValue_ = candidate.value();
+  pinMenuReading_ = candidate_window_.pin_reading();
+  if (pinMenuReading_.empty()) return;
+  pinMenuWasPinned_ = candidate.pinned();
+  NSMenu* menu = [[NSMenu alloc] initWithTitle:@""];
+  NSMenuItem* item = [menu addItemWithTitle:(pinMenuWasPinned_
+                       ? @"固定を解除" : @"先頭に固定")
+                                      action:@selector(togglePinFromContextMenu:)
+                               keyEquivalent:@""];
+  [item setTarget:self];
+  [menu popUpMenuPositioningItem:nil atLocation:location inView:self];
+#if !__has_feature(objc_arc)
+  [menu release];
+#endif
+}
 
 - (void)mouseDown:(NSEvent *)event {
   const mozc::Point localPos =

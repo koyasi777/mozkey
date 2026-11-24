@@ -524,6 +524,41 @@ TEST_F(EngineConverterTest, DeleteOrSuppressCandidateKeepsMeaningsSeparate) {
   EXPECT_TRUE(converter.DeleteOrSuppressCandidate(2));
 }
 
+TEST_F(EngineConverterTest, CanonicalEnglishCandidateCanBeHidden) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("github");
+  for (const char* value : {"GitHub", "github"}) {
+    converter::Candidate* candidate = segment->add_candidate();
+    candidate->key = "github";
+    candidate->content_key = "github";
+    candidate->value = value;
+    candidate->content_value = value;
+    candidate->attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
+  }
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  composer_->InsertCharacterPreedit("github");
+  ASSERT_TRUE(converter.Convert(*composer_));
+
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry("github", "GitHub"))
+      .WillOnce(Return(true));
+  EXPECT_TRUE(converter.DeleteOrSuppressCandidate(0));
+  Mock::VerifyAndClearExpectations(&mock_converter);
+
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 1))
+      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry("github", "github"))
+      .WillOnce(Return(true));
+  EXPECT_TRUE(converter.DeleteOrSuppressCandidate(1));
+}
+
 TEST_F(EngineConverterTest,
        DeleteOrSuppressCandidateRefusesLastRegularCandidate) {
   auto mock_converter = std::make_shared<MockConverter>();
@@ -591,6 +626,97 @@ TEST_F(EngineConverterTest, SelectedProperNounSpansRejectStaleCandidateText) {
   EXPECT_TRUE(spans.empty());
 }
 
+
+// Exact candidate-only spellings must not commandeer automatic Japanese live
+// conversion, even when the normal English rewriter placed them at TOP1.
+TEST_F(EngineConverterTest, CandidateOnlyLivePrefersJapaneseButManualKeepsEnglish) {
+  config_->set_enable_english_input_exceptions(true);
+  config_->set_preedit_method(Config::ROMAN);
+  auto* rule = config_->add_english_input_exceptions();
+  rule->set_input("ai");
+  rule->set_preferred("AI");
+  rule->set_behavior(Config::EnglishInputException::CANDIDATE_ONLY);
+  table_->InitializeWithRequestAndConfig(*request_, *config_);
+  composer_ = std::make_unique<composer::Composer>(table_, *request_, *config_);
+  for (char ch : std::string("ai")) {
+    commands::KeyEvent key;
+    key.set_key_code(ch);
+    ASSERT_TRUE(composer_->InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer_->GetRawString(), "ai");
+  auto backend = std::make_shared<MockConverter>();
+  EngineConverter converter(backend, request_, config_);
+  Segments prepared;
+  Segment* part = prepared.add_segment();
+  part->set_key(composer_->GetQueryForConversion());
+  for (const char* value : {"AI", "ai", "愛"}) {
+    converter::Candidate* candidate = part->add_candidate();
+    candidate->key = part->key();
+    candidate->content_key = candidate->key;
+    candidate->value = value;
+    candidate->content_value = value;
+  }
+  EXPECT_CALL(*backend, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(prepared), Return(true)));
+  ConversionPreferences live = converter.conversion_preferences();
+  live.prevent_candidate_only_english_auto_selection = true;
+  ASSERT_TRUE(converter.Convert(*composer_, Context(), live));
+  Segments live_segments;
+  GetSegments(converter, &live_segments);
+  EXPECT_EQ(live_segments.conversion_segment(0).candidate(0).value, "愛");
+  Mock::VerifyAndClearExpectations(backend.get());
+  converter.Cancel();
+  EXPECT_CALL(*backend, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(prepared), Return(true)));
+  live.prevent_candidate_only_english_auto_selection = false;
+  ASSERT_TRUE(converter.Convert(*composer_, Context(), live));
+  Segments manual_segments;
+  GetSegments(converter, &manual_segments);
+  EXPECT_EQ(manual_segments.conversion_segment(0).candidate(0).value, "AI");
+}
+
+// The ordinary prediction key can remove the final unresolved consonant in
+// chatgpt. A full exact dictionary trigger must instead use the full key.
+TEST_F(EngineConverterTest, CandidateOnlySuggestPreservesFullRomanQuery) {
+  config_->set_enable_english_input_exceptions(true);
+  config_->set_preedit_method(Config::ROMAN);
+  auto* rule = config_->add_english_input_exceptions();
+  rule->set_input("chatgpt");
+  rule->set_preferred("ChatGPT");
+  rule->set_behavior(Config::EnglishInputException::CANDIDATE_ONLY);
+  table_->InitializeWithRequestAndConfig(*request_, *config_);
+  composer_ = std::make_unique<composer::Composer>(table_, *request_, *config_);
+  for (char ch : std::string("chatgpt")) {
+    commands::KeyEvent key;
+    key.set_key_code(ch);
+    ASSERT_TRUE(composer_->InsertCharacterKeyEvent(key));
+  }
+  ASSERT_EQ(composer_->GetRawString(), "chatgpt");
+  const std::string full_key = composer_->GetQueryForConversion();
+  ASSERT_NE(full_key, "chatgpt");
+  auto backend = std::make_shared<MockConverter>();
+  EngineConverter converter(backend, request_, config_);
+  EXPECT_CALL(*backend, StartPrediction(_, _))
+      .WillOnce([&full_key](const ConversionRequest& request,
+                            Segments* segments) {
+        EXPECT_EQ(request.request_type(), ConversionRequest::SUGGESTION);
+        EXPECT_EQ(request.key(), full_key);
+        segments->InitForConvert(request.key());
+        converter::Candidate* candidate =
+            segments->mutable_conversion_segment(0)->add_candidate();
+        candidate->key = std::string(request.key());
+        candidate->content_key = candidate->key;
+        candidate->value = "ChatGPT";
+        candidate->content_value = candidate->value;
+        return true;
+      });
+  ASSERT_TRUE(converter.Suggest(*composer_, Context()));
+  Segments suggested_segments;
+  GetSegments(converter, &suggested_segments);
+  ASSERT_EQ(suggested_segments.conversion_segment(0).candidate(0).value,
+            "ChatGPT");
+}
+
 TEST_F(EngineConverterTest, Convert) {
   auto mock_converter = std::make_shared<MockConverter>();
   EngineConverter converter(mock_converter, request_, config_);
@@ -646,6 +772,101 @@ TEST_F(EngineConverterTest, Convert) {
   // Converter should be inactive after submission
   EXPECT_FALSE(converter.IsActive());
   EXPECT_FALSE(IsCandidateListVisible(converter));
+}
+
+TEST_F(EngineConverterTest, PromotePinnedCandidateWithoutReconversion) {
+  request_->set_is_a11y_talkback_enabled(true);
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  composer_->SetPreeditTextForTestOnly("こうしょう");
+  Segments segments;
+  segments.InitForConvert("こうしょう");
+  Segment* segment = segments.mutable_conversion_segment(0);
+  for (const char* text : {"交渉", "考証", "高尚"}) {
+    converter::Candidate* candidate = segment->add_candidate();
+    candidate->key = "こうしょう";
+    candidate->content_key = candidate->key;
+    candidate->value = text;
+    candidate->content_value = candidate->value;
+  }
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  ASSERT_TRUE(converter.Convert(*composer_));
+  ASSERT_TRUE(IsCandidateListVisible(converter));
+  EXPECT_FALSE(converter.CanPinCandidate(1, "こうじょう", "考証"));
+  EXPECT_FALSE(converter.CanPinCandidate(1, "こうしょう", "存在しない候補"));
+  EXPECT_FALSE(converter.CanPinCandidate(-1, "こうしょう", "考証"));
+  EXPECT_FALSE(converter.CanPinCandidate(99, "こうしょう", "考証"));
+  EXPECT_TRUE(converter.CanPinCandidate(1, "こうしょう", "考証"));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(1, "こうじょう", "考証"));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(1, "こうしょう", "存在しない候補"));
+  EXPECT_EQ(GetSegments(converter).conversion_segment(0).candidate(0).value,
+            "交渉");
+
+  ASSERT_TRUE(converter.PromotePinnedCandidate(1, "こうしょう", "考証"));
+  EXPECT_EQ(GetSegments(converter).conversion_segment(0).candidate(0).value,
+            "考証");
+  EXPECT_EQ(GetCandidateList(converter).focused_id(), 0);
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  ASSERT_TRUE(output.has_candidate_window());
+  ASSERT_GT(output.candidate_window().candidate_size(), 0);
+  EXPECT_EQ(output.candidate_window().candidate(0).value(), "考証");
+
+  config_->set_incognito_mode(true);
+  EXPECT_FALSE(converter.CanPinCandidate(1, "こうしょう", "交渉"));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(1, "こうしょう", "交渉"));
+}
+
+TEST_F(EngineConverterTest, PinEligibilityRejectsMetaAndCommandCandidates) {
+  request_->set_is_a11y_talkback_enabled(true);
+  config_->set_use_cascading_window(false);
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  composer_->SetPreeditTextForTestOnly("こうしょう");
+  Segments segments;
+  segments.InitForConvert("こうしょう");
+  Segment* segment = segments.mutable_conversion_segment(0);
+  for (const char* value : {"交渉", "考証", "設定変更"}) {
+    converter::Candidate* candidate = segment->add_candidate();
+    candidate->key = "こうしょう";
+    candidate->content_key = candidate->key;
+    candidate->value = value;
+    candidate->content_value = candidate->value;
+  }
+  segment->mutable_candidate(2)->attributes |=
+      converter::Attribute::COMMAND_CANDIDATE;
+  FillT13Ns(&segments, composer_.get());
+  const std::string meta_value = segment->meta_candidate(0).value;
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  ASSERT_TRUE(converter.Convert(*composer_));
+  ASSERT_TRUE(IsCandidateListVisible(converter));
+  EXPECT_TRUE(converter.CanPinCandidate(0, "こうしょう", "交渉"));
+  EXPECT_TRUE(converter.CanPinCandidate(1, "こうしょう", "考証"));
+  EXPECT_FALSE(converter.CanPinCandidate(2, "こうしょう", "設定変更"));
+  EXPECT_FALSE(converter.CanPinCandidate(-1, "こうしょう", meta_value));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(2, "こうしょう", "設定変更"));
+  EXPECT_FALSE(converter.PromotePinnedCandidate(-1, "こうしょう", meta_value));
+
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  ASSERT_TRUE(output.has_candidate_window());
+  bool saw_regular = false;
+  bool saw_command = false;
+  for (const auto& item : output.candidate_window().candidate()) {
+    if (item.value() == "考証") {
+      EXPECT_TRUE(item.pin_eligible());
+      saw_regular = true;
+    }
+    if (item.value() == "設定変更") {
+      EXPECT_FALSE(item.pin_eligible());
+      saw_command = true;
+    }
+    if (item.id() < 0) EXPECT_FALSE(item.pin_eligible());
+  }
+  EXPECT_TRUE(saw_regular);
+  EXPECT_TRUE(saw_command);
 }
 
 TEST_F(EngineConverterTest, ExplicitZipcodeLiteralPriority) {
@@ -3605,6 +3826,14 @@ TEST(EngineConverterRevertTest, Revert) {
   EngineConverter converter(mock_converter);
   EXPECT_CALL(*mock_converter, RevertConversion(_));
   converter.Revert();
+}
+
+TEST(EngineConverterRevertTest, ConfirmLastCommitLearning) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter);
+  EXPECT_CALL(*mock_converter, DiscardConversionRevertState(_));
+  EXPECT_CALL(*mock_converter, RevertConversion(_)).Times(0);
+  converter.ConfirmLastCommitLearning();
 }
 
 TEST_F(EngineConverterTest, DeleteCandidateFromHistory) {

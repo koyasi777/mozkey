@@ -39,6 +39,12 @@
 
 #include "absl/container/fixed_array.h"
 #include "gui/config_dialog/generic_table_editor.h"
+#include "protocol/config.pb.h"
+
+class QLabel;
+class QLineEdit;
+class QPushButton;
+class QComboBox;
 
 namespace mozc {
 namespace gui {
@@ -50,8 +56,12 @@ class RomanTableEditorDialog : public GenericTableEditorDialog {
   explicit RomanTableEditorDialog(QWidget *parent);
 
   // show a modal dialog
+  static void ShowPresetLicenses(QWidget *parent);
   static bool Show(QWidget *parent, const std::string &current_roman_table,
-                   std::string *new_roman_table);
+                   const std::string &current_preset_id,
+                   config::Config *preset_library,
+                   std::string *new_roman_table,
+                   std::string *new_preset_id);
 
  protected slots:
   void UpdateMenuStatus() override;
@@ -71,14 +81,34 @@ class RomanTableEditorDialog : public GenericTableEditorDialog {
 
  private:
   bool InsertRomanTableEntry(int row);
+  void ImportCurrentRomanTable();
   bool LoadDefaultRomanTable();
   static std::string GetDefaultRomanTable();
+  void RefreshPresetState();
+  void SelectPresetInEditor(int index);
+  bool CreatePersonalPreset(const QString &name, const QByteArray &tsv);
+  void SaveCurrentAsPreset();
+  void OverwriteCurrentPersonalPreset();
+  bool IsUserPresetDirty();
+  void ManagePersonalPresets();
 
  private:
   absl::FixedArray<QAction *> actions_;
   QString dialog_title_;
   bool default_table_requested_;
   bool loading_table_;
+  std::string preset_id_;
+  std::string preset_snapshot_;
+  config::Config personal_presets_;
+  bool importing_table_ = false;
+  bool import_loaded_ = false;
+  QLabel *preset_state_label_ = nullptr;
+  QLineEdit *search_input_ = nullptr;
+  QPushButton *search_next_button_ = nullptr;
+  QComboBox *preset_selector_ = nullptr;
+  QPushButton *save_preset_button_ = nullptr;
+  QPushButton *overwrite_preset_button_ = nullptr;
+  QPushButton *manage_preset_button_ = nullptr;
 };
 
 }  // namespace gui

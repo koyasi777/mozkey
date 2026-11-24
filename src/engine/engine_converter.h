@@ -239,6 +239,10 @@ class EngineConverter : public EngineConverterInterface {
                      const std::vector<std::string>& segment_keys) override;
   bool GetConversionSegmentKeys(
       std::vector<std::string>* segment_keys) const override;
+  bool CanPinCandidate(int candidate_id, absl::string_view reading,
+                       absl::string_view value) const override;
+  bool PromotePinnedCandidate(int candidate_id, absl::string_view reading,
+                              absl::string_view value) override;
   bool GetSelectedProperNounSpans(
       std::vector<converter::ProperNounSpan>* spans) const override;
 
@@ -253,6 +257,9 @@ class EngineConverter : public EngineConverterInterface {
 
   // Reverts the last "Commit" operation
   void Revert() override;
+
+  // Keeps the learned result while freeing the previous commit's undo state.
+  void ConfirmLastCommitLearning() override;
 
   // Delete candidate from user input history.
   // Try to delete the current selected candidate if |id| is not specified.

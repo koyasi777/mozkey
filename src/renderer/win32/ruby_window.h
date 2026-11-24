@@ -63,7 +63,8 @@ class RubyWindow
   void ResetFont();
   void UpdateDpi(uint32_t dpi);
   void UpdateFont();
-  SIZE MeasureText(bool vertical_writing) const;
+  SIZE MeasureText(bool vertical_writing,
+                   int maximum_window_width = 0) const;
   bool BuildReadingText(const commands::RendererCommand& command,
                         std::string* reading) const;
   struct TargetIdentity {
@@ -100,6 +101,15 @@ class RubyWindow
 
   std::wstring text_;
   bool vertical_writing_ = false;
+  // True only while painting a screen-fixed horizontal ruby surface.
+  bool fixed_horizontal_wrap_ = false;
+  bool fixed_vertical_wrap_ = false;
+  // Width of the complete multi-column layout, before viewport clipping.
+  int fixed_vertical_full_layout_width_ = 0;
+  // Height of the complete wrapped text, excluding vertical padding. When
+  // the reading exceeds the screen, paint its most recent lines through a
+  // clipped viewport without slicing a UTF-16 grapheme sequence.
+  int fixed_full_text_height_ = 0;
   // Physical horizontal extent of composition columns that have been accepted
   // and rendered during the current vertical live-conversion composition.
   // Japanese vertical text advances into new columns toward the left, so ruby
