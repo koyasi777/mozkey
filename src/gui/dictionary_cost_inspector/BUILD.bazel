@@ -35,7 +35,7 @@ mozc_cc_qt_library(
         ":cost_model",
         ":query_client",
         "//base:system_util",
-        "//ipc:ipc",
+        "//ipc",
         "//protocol:commands_cc_proto",
         "@com_google_absl//absl/time",
     ],
@@ -54,17 +54,19 @@ mozc_cc_qt_library(
     ],
 )
 
-
 # Read-only query client used by the product inspector.
 mozc_cc_library(
     name = "query_client",
     srcs = ["query_client.cc"],
     hdrs = ["query_client.h"],
-    visibility = ["//gui:__subpackages__", "//session:__pkg__"],
+    visibility = [
+        "//gui:__subpackages__",
+        "//session:__pkg__",
+    ],
     deps = [
         "//base:system_util",
         "//base:util",
-        "//ipc:ipc",
+        "//ipc",
         "//protocol:commands_cc_proto",
         "//protocol:dictionary_cost_limits",
         "@com_google_absl//absl/strings",
