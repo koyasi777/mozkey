@@ -314,6 +314,15 @@ ZenzUnixSocketClient::ZenzUnixSocketClient(
                            ? startup_timeout
                            : absl::Milliseconds(1)) {}
 
+ZenzUnixSocketClient::ZenzUnixSocketClient(
+    std::string socket_path, CancellableScorerLauncher scorer_launcher,
+    absl::Duration startup_timeout)
+    : socket_path_(std::move(socket_path)),
+      cancellable_scorer_launcher_(std::move(scorer_launcher)),
+      startup_timeout_(startup_timeout > absl::ZeroDuration()
+                           ? startup_timeout
+                           : absl::Milliseconds(1)) {}
+
 bool ZenzUnixSocketClient::IsAvailable() const {
 #if defined(_WIN32)
   return false;
@@ -368,14 +377,23 @@ ZenzLiveResponse ZenzUnixSocketClient::Convert(
   SocketConnectResult connection = OpenConnectedSocket(
       socket_path_, request_deadline, cancellation_read.get());
 
-  if (connection.fd < 0 && !connection.timed_out && scorer_launcher_ &&
+  if (connection.fd < 0 && !connection.timed_out &&
+      (scorer_launcher_ || cancellable_scorer_launcher_) &&
       IsColdStartConnectError(connection.error)) {
     // Process startup and model readiness are not part of the configured
     // inference timeout. The session already polls its asynchronous worker for
     // a longer cold-start window, so wait for the scorer socket separately and
     // give the connected request a fresh inference deadline.
-    if (!scorer_launcher_()) {
-      response.debug = "scorer_launch_failed";
+    const CancelCheck is_cancelled = [&] {
+      return IsStopRequested() || IsCancelRequested() ||
+             IsCancelled(cancellation_read.get());
+    };
+    const bool launched = cancellable_scorer_launcher_
+                              ? cancellable_scorer_launcher_(is_cancelled)
+                              : scorer_launcher_();
+    if (!launched || is_cancelled()) {
+      response.debug = is_cancelled() ? "socket_cancelled"
+                                      : "scorer_launch_failed";
       return response;
     }
 

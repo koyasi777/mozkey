@@ -18,7 +18,14 @@
 #include <vector>
 
 #include <arpa/inet.h>
+#if defined(__APPLE__)
 #include <crt_externs.h>
+#elif defined(__linux__) && !defined(__ANDROID__)
+// Linux uses the process environment supplied by libc.
+extern char** environ;
+#else
+#error "Unsupported POSIX platform for Zenz guard spawning"
+#endif
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -294,8 +301,9 @@ bool ValidateOptions(const LlamaServerProcessOptions& options,
       return false;
     }
     // API key is controlled by Mozkey; never accept a second key in argv.
-    if (argument == "--api-key" ||
-        argument.starts_with("--api-key=")) {
+    if (argument == "--api-key" || argument.starts_with("--api-key=") ||
+        argument == "--api-key-file" ||
+        argument.starts_with("--api-key-file=")) {
       *error = "api_key_override_rejected";
       return false;
     }
@@ -534,7 +542,7 @@ bool LlamaServerProcess::Spawn(std::string* error) {
     *error = "guard_key_channel_nosigpipe_failed";
     return false;
   }
-#else
+#elif !defined(MSG_NOSIGNAL)
   ClosePipe(output_pipe);
   ClosePipe(lifetime_pipe);
   ClosePipe(startup_pipe);
@@ -580,6 +588,29 @@ bool LlamaServerProcess::Spawn(std::string* error) {
       result = ::posix_spawn_file_actions_addclose(&actions, fd);
     }
   }
+#if defined(__linux__) && !defined(__ANDROID__)
+  // Linux has no POSIX_SPAWN_CLOEXEC_DEFAULT. Map the only permitted guard
+  // descriptors first, then close everything else in the child. This avoids
+  // races with another thread opening a descriptor in the scorer.
+  // glibc 2.34+ provides the closefrom file action; unsupported libc must
+  // fail closed rather than silently leak unexpected descriptors.
+#if defined(__GLIBC__)
+#if __GLIBC_PREREQ(2, 34)
+  if (result == 0) {
+    result = ::posix_spawn_file_actions_addclosefrom_np(
+        &actions, kGuardApiKeyFd + 1);
+  }
+#else
+  if (result == 0) result = ENOTSUP;
+#endif
+#else
+  if (result == 0) result = ENOTSUP;
+#endif
+  for (int fd = STDERR_FILENO + 1; fd < kGuardLifetimeFd && result == 0;
+       ++fd) {
+    result = ::posix_spawn_file_actions_addclose(&actions, fd);
+  }
+#endif
   posix_spawnattr_t attributes;
   bool attr_initialized = false;
   if (result == 0) {
@@ -598,8 +629,26 @@ bool LlamaServerProcess::Spawn(std::string* error) {
   }
   pid_t guard_pid = -1;
   if (result == 0) {
+#if defined(__APPLE__)
+    char* const* child_environment = *_NSGetEnviron();
+#else
+    // Do not forward externally supplied llama.cpp credential overrides to
+    // guard or worker. Authentication must use only our private key channel.
+    std::vector<char*> private_environment;
+    for (char** item = environ; *item != nullptr; ++item) {
+      const std::string_view variable(*item);
+      if (variable.starts_with("LLAMA_API_KEY=") ||
+          variable.starts_with("LLAMA_ARG_API_KEY_FILE=")) {
+        continue;
+      }
+      private_environment.push_back(*item);
+    }
+    private_environment.push_back(nullptr);
+    char* const* child_environment = private_environment.data();
+#endif
     result = ::posix_spawn(&guard_pid, options_.guard_executable_path.c_str(),
-                           &actions, &attributes, argv.data(), *_NSGetEnviron());
+                           &actions, &attributes, argv.data(),
+                           child_environment);
   }
   if (attr_initialized) {
     ::posix_spawnattr_destroy(&attributes);
@@ -627,9 +676,16 @@ bool LlamaServerProcess::Spawn(std::string* error) {
   lifetime_pipe[1] = -1;
   bool key_sent = true;
   size_t key_bytes = 0;
+#if defined(MSG_NOSIGNAL)
+  constexpr int kKeySendFlags = MSG_NOSIGNAL;
+#else
+  // On macOS, SO_NOSIGPIPE is set on key_channel[0] above.
+  constexpr int kKeySendFlags = 0;
+#endif
   while (key_bytes < api_key_.size()) {
     const ssize_t sent = ::send(key_channel[0],
-        api_key_.data() + key_bytes, api_key_.size() - key_bytes, 0);
+        api_key_.data() + key_bytes, api_key_.size() - key_bytes,
+        kKeySendFlags);
     if (sent > 0) {
       key_bytes += static_cast<size_t>(sent);
     } else if (sent < 0 && errno == EINTR) {

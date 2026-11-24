@@ -74,13 +74,31 @@ class ZenzClient {
   void ResetStop() { stop_requested_.store(false); }
   bool IsStopRequested() const { return stop_requested_.load(); }
 
+  // Per-conversion interrupt, separate from the sticky lifecycle stop.
+  // RequestCancel() may race with transport registration: the cancellation
+  // remains latched until the *worker* reserves the next request. In-flight
+  // transports must register a ScopedInterrupt to receive the wakeup.
+  void RequestCancel() {
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    cancel_requested_.store(true);
+    if (interrupt_) {
+      interrupt_();
+    }
+  }
+
+  // Called under ZenzLiveCorrector::mu_ immediately before starting a new
+  // Convert(). Never reset on the calling/IME thread: that could erase a
+  // cancellation belonging to an earlier in-flight request.
+  void ResetCancel() { cancel_requested_.store(false); }
+  bool IsCancelRequested() const { return cancel_requested_.load(); }
+
   class ScopedInterrupt {
    public:
     ScopedInterrupt(ZenzClient& client, std::function<void()> interrupt)
         : client_(client) {
       std::lock_guard<std::mutex> lock(client_.stop_mutex_);
       client_.interrupt_ = std::move(interrupt);
-      if (client_.IsStopRequested()) {
+      if (client_.IsStopRequested() || client_.IsCancelRequested()) {
         client_.interrupt_();
       }
     }
@@ -99,6 +117,7 @@ class ZenzClient {
 
  private:
   std::atomic<bool> stop_requested_{false};
+  std::atomic<bool> cancel_requested_{false};
   std::mutex stop_mutex_;
   std::function<void()> interrupt_;
 };
@@ -114,11 +133,14 @@ class ZenzLiveCorrector {
   void Start();
   void Stop();
 
-  // Latest-only submission. A queued old request is overwritten.
+  // Latest-only submission. A queued old request is overwritten and the
+  // currently running conversion is asked to abandon its transport wait.
   void Submit(ZenzLiveRequest request);
 
-  // Clears queued request/result. Running inference is not forcibly cancelled;
-  // stale discard is handled by generation check.
+  // Clears queued request/result. Requests interruption of in-flight
+  // transport I/O without setting sticky RequestStop(). Result publication
+  // is additionally guarded by the submission epoch. Cancellation of the
+  // llama-server's own compute is not guaranteed.
   void CancelPending();
 
   // Returns the latest result only if its generation matches.
@@ -137,6 +159,9 @@ class ZenzLiveCorrector {
 
   std::optional<ZenzLiveRequest> latest_request_;
   std::optional<ZenzLiveResponse> latest_result_;
+  // Incremented on every Submit()/CancelPending(). Protects against stale
+  // in-flight completion even when generation values happen to be reused.
+  uint64_t request_epoch_ = 0;
 
   std::thread worker_;
 };

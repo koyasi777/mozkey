@@ -5,6 +5,8 @@
 #include <functional>
 #include <string>
 
+#include <sys/types.h>
+
 namespace mozc {
 namespace zenz_scorer {
 
@@ -13,6 +15,9 @@ struct PosixZenzRequest {
   uint32_t timeout_msec = 0;
   uint32_t max_output_chars = 0;
   std::string prompt;
+  // Server-owned connected peer; valid only during synchronous backend call.
+  // Not part of the ZNZ1 wire protocol.  -1 disables cancellation.
+  int peer_fd = -1;
 };
 
 struct PosixZenzResponse {
@@ -49,6 +54,9 @@ class PosixZenzScorerServer final {
   PosixZenzBackend backend_;
   int lock_fd_ = -1;
   int listen_fd_ = -1;
+  // Captured after bind; do not unlink a socket that replaced ours.
+  dev_t socket_device_ = 0;
+  ino_t socket_inode_ = 0;
   bool owns_socket_path_ = false;
 };
 

@@ -49,6 +49,7 @@ enum class IoResult {
   kOk,
   kEof,
   kTimeout,
+  kCancelled,
   kError,
 };
 
@@ -124,21 +125,37 @@ int RemainingMsec(Deadline deadline) {
       std::numeric_limits<int>::max()));
 }
 
-IoResult WaitForFd(int fd, short events, Deadline deadline) {
+// The scorer consumes exactly one framed request per Unix connection. Once
+// its prompt has been read, peer closure (or unexpected extra input) cancels
+// the response wait. No thread, signal handler, or global stop flag is needed.
+IoResult WaitForFd(int fd, short events, Deadline deadline,
+                   int cancellation_fd) {
   while (true) {
     const int timeout_msec = RemainingMsec(deadline);
     if (timeout_msec == 0) {
       return IoResult::kTimeout;
     }
 
-    pollfd descriptor = {};
-    descriptor.fd = fd;
-    descriptor.events = events;
-    const int result = ::poll(&descriptor, 1, timeout_msec);
+    pollfd descriptors[2] = {};
+    descriptors[0].fd = fd;
+    descriptors[0].events = events;
+    int count = 1;
+    if (cancellation_fd >= 0) {
+      descriptors[1].fd = cancellation_fd;
+      descriptors[1].events = POLLIN;
+      count = 2;
+    }
+    const int result = ::poll(descriptors, count, timeout_msec);
     if (result > 0) {
-      if ((descriptor.revents & events) != 0 ||
+      // Cancellation takes priority even if the HTTP socket also becomes
+      // ready. POLLIN on the consumed one-request peer indicates an EOF or
+      // unexpected extra input; either condition must fail closed.
+      if (count == 2 && descriptors[1].revents != 0) {
+        return IoResult::kCancelled;
+      }
+      if ((descriptors[0].revents & events) != 0 ||
           ((events & POLLIN) != 0 &&
-           (descriptor.revents & POLLHUP) != 0)) {
+           (descriptors[0].revents & POLLHUP) != 0)) {
         return IoResult::kOk;
       }
       return IoResult::kError;
@@ -152,7 +169,8 @@ IoResult WaitForFd(int fd, short events, Deadline deadline) {
   }
 }
 
-IoResult ConnectLoopback(int fd, int port, Deadline deadline) {
+IoResult ConnectLoopback(int fd, int port, Deadline deadline,
+                         int cancellation_fd) {
   sockaddr_in address = {};
   address.sin_family = AF_INET;
   address.sin_port = htons(static_cast<uint16_t>(port));
@@ -166,7 +184,7 @@ IoResult ConnectLoopback(int fd, int port, Deadline deadline) {
     return IoResult::kError;
   }
 
-  const IoResult wait_result = WaitForFd(fd, POLLOUT, deadline);
+  const IoResult wait_result = WaitForFd(fd, POLLOUT, deadline, cancellation_fd);
   if (wait_result != IoResult::kOk) {
     return wait_result;
   }
@@ -184,10 +202,11 @@ IoResult ConnectLoopback(int fd, int port, Deadline deadline) {
   return IoResult::kOk;
 }
 
-IoResult WriteAll(int fd, std::string_view data, Deadline deadline) {
+IoResult WriteAll(int fd, std::string_view data, Deadline deadline,
+                  int cancellation_fd) {
   size_t offset = 0;
   while (offset < data.size()) {
-    const IoResult wait_result = WaitForFd(fd, POLLOUT, deadline);
+    const IoResult wait_result = WaitForFd(fd, POLLOUT, deadline, cancellation_fd);
     if (wait_result != IoResult::kOk) {
       return wait_result;
     }
@@ -208,10 +227,10 @@ IoResult WriteAll(int fd, std::string_view data, Deadline deadline) {
 }
 
 IoResult ReadSome(int fd, char* buffer, size_t capacity, Deadline deadline,
-                  size_t* bytes_read) {
+                  int cancellation_fd, size_t* bytes_read) {
   *bytes_read = 0;
   while (true) {
-    const IoResult wait_result = WaitForFd(fd, POLLIN, deadline);
+    const IoResult wait_result = WaitForFd(fd, POLLIN, deadline, cancellation_fd);
     if (wait_result != IoResult::kOk) {
       return wait_result;
     }
@@ -788,7 +807,12 @@ LlamaHttpCompletionResponse PostLlamaHttpCompletion(
     return Error(debug);
   }
 
-  const IoResult connect_result = ConnectLoopback(fd, request.port, deadline);
+  const IoResult connect_result = ConnectLoopback(fd, request.port, deadline,
+                      request.cancellation_fd);
+  if (connect_result == IoResult::kCancelled) {
+    close_fd();
+    return Error("http_peer_disconnected");
+  }
   if (connect_result != IoResult::kOk) {
     const std::string debug = connect_result == IoResult::kTimeout
                                   ? "http_connect_timeout"
@@ -799,7 +823,11 @@ LlamaHttpCompletionResponse PostLlamaHttpCompletion(
   }
 
   const std::string http_request = BuildHttpRequest(request, n_predict);
-  const IoResult write_result = WriteAll(fd, http_request, deadline);
+  const IoResult write_result = WriteAll(fd, http_request, deadline, request.cancellation_fd);
+  if (write_result == IoResult::kCancelled) {
+    close_fd();
+    return Error("http_peer_disconnected");
+  }
   if (write_result != IoResult::kOk) {
     const std::string debug = write_result == IoResult::kTimeout
                                   ? "http_write_timeout"
@@ -843,7 +871,12 @@ LlamaHttpCompletionResponse PostLlamaHttpCompletion(
 
     size_t bytes_read = 0;
     const IoResult read_result =
-        ReadSome(fd, buffer.data(), buffer.size(), deadline, &bytes_read);
+        ReadSome(fd, buffer.data(), buffer.size(), deadline,
+                 request.cancellation_fd, &bytes_read);
+    if (read_result == IoResult::kCancelled) {
+      close_fd();
+      return Error("http_peer_disconnected");
+    }
     if (read_result == IoResult::kTimeout) {
       close_fd();
       return Timeout("http_read_timeout");

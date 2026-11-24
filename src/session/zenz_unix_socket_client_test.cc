@@ -7,6 +7,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -272,6 +273,45 @@ TEST(ZenzUnixSocketClientTest, LaunchesScorerAndUsesFreshRequestDeadline) {
   EXPECT_FALSE(response.timeout);
   EXPECT_EQ(response.value, expected_value);
   EXPECT_EQ(response.debug, expected_debug);
+}
+
+// A Linux launch callback may block waiting for the persistent process-owner
+// thread. Superseding the IME request must abort that wait independently of
+// the sticky Stop() lifecycle signal. No child/model is started by this test.
+TEST(ZenzUnixSocketClientTest, CancelInterruptsLauncherWait) {
+  ScopedSocketDirectory directory;
+  ASSERT_FALSE(directory.directory().empty());
+  std::atomic<bool> launch_entered{false};
+  std::atomic<bool> launch_finished{false};
+  auto launcher = ZenzUnixSocketClient::CancellableScorerLauncher(
+      [&](const ZenzUnixSocketClient::CancelCheck& is_cancelled) {
+        launch_entered.store(true);
+        // A simulated owner-thread launch wait; bounded so a failed test
+        // cannot permanently strand the worker on destruction.
+        for (int i = 0; i < 1500 && !is_cancelled(); ++i) {
+          absl::SleepFor(absl::Milliseconds(1));
+        }
+        launch_finished.store(true);
+        return false;
+      });
+  ZenzLiveCorrector corrector(std::make_unique<ZenzUnixSocketClient>(
+      directory.socket_path(), std::move(launcher), absl::Seconds(15)));
+  corrector.Submit(MakeRequest(151, "synthetic launch wait", 5000));
+  for (int i = 0; i < 1000 && !launch_entered.load(); ++i) {
+    absl::SleepFor(absl::Milliseconds(1));
+  }
+  ASSERT_TRUE(launch_entered.load());
+  const auto cancelled_at = absl::Now();
+  corrector.CancelPending();
+  for (int i = 0; i < 300 && !launch_finished.load(); ++i) {
+    absl::SleepFor(absl::Milliseconds(1));
+  }
+  const bool cancelled_promptly = launch_finished.load();
+  const auto elapsed = absl::Now() - cancelled_at;
+  corrector.Stop();
+  EXPECT_TRUE(cancelled_promptly);
+  EXPECT_LT(elapsed, absl::Seconds(1));
+  EXPECT_FALSE(corrector.TakeResult(151).has_value());
 }
 
 TEST(ZenzUnixSocketClientTest, StopInterruptsColdStartWait) {

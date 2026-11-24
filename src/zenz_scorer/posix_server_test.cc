@@ -2,12 +2,17 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
 
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -216,6 +221,243 @@ TEST(PosixZenzScorerServerTest, RejectsSecondServerForSameUserEndpoint) {
   }
   Cleanup(directory);
 }
+
+#if defined(__linux__)
+
+TEST(PosixZenzScorerServerTest, RejectsSymlinkDirectory) {
+  const std::string directory = MakeTestDirectory();
+  const std::string target_directory = directory + "_target";
+  const std::string socket_path = directory + "/scorer.sock";
+  Cleanup(directory);
+  ASSERT_EQ(::mkdir(target_directory.c_str(), 0700), 0);
+  ASSERT_EQ(::symlink(target_directory.c_str(), directory.c_str()), 0);
+
+  {
+    PosixZenzScorerServer server(socket_path, {});
+    std::string error;
+    EXPECT_FALSE(server.Start(&error));
+    EXPECT_EQ(error, "directory_not_directory");
+  }
+  struct stat status = {};
+  EXPECT_NE(::lstat((target_directory + "/scorer.lock").c_str(), &status),
+            0);
+  EXPECT_NE(::lstat((target_directory + "/scorer.sock").c_str(), &status),
+            0);
+  EXPECT_EQ(::unlink(directory.c_str()), 0);
+  EXPECT_EQ(::rmdir(target_directory.c_str()), 0);
+}
+
+TEST(PosixZenzScorerServerTest, DoesNotReplaceRegularFileAtSocketPath) {
+  const std::string directory = MakeTestDirectory();
+  Cleanup(directory);
+  ASSERT_EQ(::mkdir(directory.c_str(), 0700), 0);
+  const std::string socket_path = directory + "/scorer.sock";
+  const int fd = ::open(socket_path.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(::close(fd), 0);
+
+  {
+    PosixZenzScorerServer server(socket_path, {});
+    std::string error;
+    EXPECT_FALSE(server.Start(&error));
+    EXPECT_EQ(error, "socket_path_not_socket");
+  }
+  struct stat status = {};
+  ASSERT_EQ(::lstat(socket_path.c_str(), &status), 0);
+  EXPECT_TRUE(S_ISREG(status.st_mode));
+  Cleanup(directory);
+}
+
+TEST(PosixZenzScorerServerTest, DoesNotFollowSymlinkLockFile) {
+  const std::string directory = MakeTestDirectory();
+  Cleanup(directory);
+  ASSERT_EQ(::mkdir(directory.c_str(), 0700), 0);
+  const std::string sentinel_path = directory + "/sentinel";
+  const std::string lock_path = directory + "/scorer.lock";
+  const int fd = ::open(sentinel_path.c_str(), O_CREAT | O_EXCL | O_WRONLY,
+                        0600);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(::close(fd), 0);
+  ASSERT_EQ(::symlink(sentinel_path.c_str(), lock_path.c_str()), 0);
+
+  {
+    PosixZenzScorerServer server(directory + "/scorer.sock", {});
+    std::string error;
+    EXPECT_FALSE(server.Start(&error));
+    EXPECT_FALSE(error.empty());
+  }
+  struct stat status = {};
+  ASSERT_EQ(::lstat(lock_path.c_str(), &status), 0);
+  EXPECT_TRUE(S_ISLNK(status.st_mode));
+  ASSERT_EQ(::lstat(sentinel_path.c_str(), &status), 0);
+  EXPECT_TRUE(S_ISREG(status.st_mode));
+  EXPECT_EQ(::unlink(sentinel_path.c_str()), 0);
+  Cleanup(directory);
+}
+
+TEST(PosixZenzScorerServerTest, ClientDisconnectDoesNotSendSigpipe) {
+  const std::string directory = MakeTestDirectory();
+  Cleanup(directory);
+  const std::string socket_path = directory + "/scorer.sock";
+  std::atomic<bool> client_closed{false};
+  std::atomic<bool> backend_called{false};
+
+  {
+    PosixZenzScorerServer server(
+        socket_path, [&](const PosixZenzRequest& request) {
+          backend_called.store(true);
+          EXPECT_EQ(request.prompt, "synthetic");
+          while (!client_closed.load()) {
+            std::this_thread::yield();
+          }
+          PosixZenzResponse response;
+          response.status = kZenzWireStatusOk;
+          response.value = "reply";
+          return response;
+        });
+    std::string error;
+    ASSERT_TRUE(server.Start(&error)) << error;
+
+    bool client_ok = false;
+    std::thread client([&]() {
+      const int fd = Connect(socket_path);
+      if (fd >= 0) {
+        constexpr char kPrompt[] = "synthetic";
+        ZenzWireRequestHeader header = {};
+        header.magic = kZenzWireMagic;
+        header.version = kZenzWireVersion;
+        header.kind = kZenzWireKindRequest;
+        header.generation = 21;
+        header.timeout_msec = 1000;
+        header.max_output_chars = 16;
+        header.prompt_size = sizeof(kPrompt) - 1;
+        client_ok = WriteChunks(fd, &header, sizeof(header)) &&
+                    WriteChunks(fd, kPrompt, sizeof(kPrompt) - 1);
+        ::close(fd);
+      }
+      client_closed.store(true);
+    });
+
+    EXPECT_TRUE(server.ServeOne(2000, &error));
+    client.join();
+    EXPECT_TRUE(client_ok);
+    EXPECT_TRUE(backend_called.load());
+    EXPECT_EQ(error, "response_write_failed");
+  }
+  Cleanup(directory);
+}
+
+TEST(PosixZenzScorerServerTest, UnreadClientCannotBlockWritePastDeadline) {
+  const std::string directory = MakeTestDirectory();
+  Cleanup(directory);
+  const std::string socket_path = directory + "/scorer.sock";
+
+  {
+    PosixZenzScorerServer server(
+        socket_path, [](const PosixZenzRequest&) {
+          PosixZenzResponse response;
+          response.status = kZenzWireStatusOk;
+          // Within the protocol maximum, but much larger than the socket
+          // send buffer. A peer that does not read must not hang the scorer.
+          response.value.assign(1024 * 1024, 'x');
+          return response;
+        });
+    std::string error;
+    ASSERT_TRUE(server.Start(&error)) << error;
+
+    std::mutex mu;
+    std::condition_variable cv;
+    bool served = false;
+    bool client_ok = false;
+    std::thread client([&] {
+      const int fd = Connect(socket_path);
+      if (fd < 0) {
+        return;
+      }
+      const int small_buffer = 4096;
+      ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &small_buffer,
+                   sizeof(small_buffer));
+      constexpr char kPrompt[] = "p";
+      ZenzWireRequestHeader header = {};
+      header.magic = kZenzWireMagic;
+      header.version = kZenzWireVersion;
+      header.kind = kZenzWireKindRequest;
+      header.generation = 19;
+      header.timeout_msec = 1500;
+      header.max_output_chars = 256;
+      header.prompt_size = sizeof(kPrompt) - 1;
+      client_ok = WriteChunks(fd, &header, sizeof(header)) &&
+                  WriteChunks(fd, kPrompt, sizeof(kPrompt) - 1);
+      // The old blocking send() only returns when this client finally closes.
+      // A short bounded watchdog avoids an indefinitely hung regression test.
+      {
+        std::unique_lock<std::mutex> lock(mu);
+        cv.wait_for(lock, std::chrono::seconds(4), [&] { return served; });
+      }
+      ::close(fd);
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    const bool serve_ok = server.ServeOne(2000, &error);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    {
+      std::lock_guard<std::mutex> lock(mu);
+      served = true;
+    }
+    cv.notify_all();
+    client.join();
+
+    EXPECT_TRUE(client_ok);
+    EXPECT_TRUE(serve_ok) << error;
+    EXPECT_EQ(error, "response_write_failed");
+    EXPECT_LT(elapsed, std::chrono::milliseconds(2500));
+  }
+  Cleanup(directory);
+}
+
+TEST(PosixZenzScorerServerTest, DoesNotUnlinkReplacementSocketOnShutdown) {
+  const std::string directory = MakeTestDirectory();
+  Cleanup(directory);
+  const std::string socket_path = directory + "/scorer.sock";
+  const std::string renamed_socket_path = directory + "/original.sock";
+  int replacement_fd = -1;
+  struct stat replacement_identity = {};
+
+  {
+    PosixZenzScorerServer server(socket_path, {});
+    std::string error;
+    ASSERT_TRUE(server.Start(&error)) << error;
+
+    // Keep the original filesystem inode alive so the replacement cannot
+    // reuse it.  Only this test's own temporary Unix socket is moved.
+    ASSERT_EQ(::rename(socket_path.c_str(), renamed_socket_path.c_str()), 0);
+    replacement_fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    ASSERT_GE(replacement_fd, 0);
+    sockaddr_un address = {};
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, socket_path.c_str(),
+                socket_path.size() + 1);
+    const socklen_t length = static_cast<socklen_t>(
+        offsetof(sockaddr_un, sun_path) + socket_path.size() + 1);
+    ASSERT_EQ(::bind(replacement_fd,
+                     reinterpret_cast<const sockaddr*>(&address), length), 0);
+    ASSERT_EQ(::lstat(socket_path.c_str(), &replacement_identity), 0);
+    EXPECT_TRUE(S_ISSOCK(replacement_identity.st_mode));
+  }
+
+  struct stat after_shutdown = {};
+  ASSERT_EQ(::lstat(socket_path.c_str(), &after_shutdown), 0)
+      << "Shutdown must not unlink a different socket";
+  EXPECT_EQ(after_shutdown.st_dev, replacement_identity.st_dev);
+  EXPECT_EQ(after_shutdown.st_ino, replacement_identity.st_ino);
+  if (replacement_fd >= 0) {
+    ::close(replacement_fd);
+  }
+  ::unlink(renamed_socket_path.c_str());
+  Cleanup(directory);
+}
+
+#endif  // __linux__
 
 }  // namespace
 }  // namespace zenz_scorer

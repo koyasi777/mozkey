@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <fcntl.h>
+#endif
 #include <string_view>
 #include <utility>
 
@@ -319,6 +322,68 @@ TEST(LlamaServerProcessTest, RejectsKeyOverrideArgument) {
   EXPECT_EQ(error, "api_key_override_rejected");
 }
 
+TEST(LlamaServerProcessTest, RejectsKeyFileOverrideArgument) {
+  TemporaryModel model;
+  ASSERT_FALSE(model.path().empty());
+  for (const std::string& arg : {"--api-key-file", "--api-key-file=/tmp/key"}) {
+    LlamaServerProcessOptions options = MakeOptions(model.path());
+    options.additional_args = {arg};
+    LlamaServerProcess process(std::move(options));
+    std::string error;
+    EXPECT_FALSE(process.Start(&error)) << arg;
+    EXPECT_EQ(error, "api_key_override_rejected") << arg;
+  }
+}
+
+#if defined(__linux__) && !defined(__ANDROID__)
+TEST(LlamaServerProcessTest, LinuxWorkerKeyNeverAppearsInArgv) {
+  TemporaryModel model;
+  ASSERT_FALSE(model.path().empty());
+  LlamaServerProcess process(MakeOptions(model.path()));
+  std::string error;
+  ASSERT_TRUE(process.Start(&error)) << error;
+  ASSERT_GT(process.pid(), 0);
+  ASSERT_GT(process.worker_pid(), 0);
+  const std::string expected_key = process.api_key();
+  ASSERT_EQ(expected_key.size(), 64);
+
+  auto get_cmdline = [](pid_t pid) {
+    std::ifstream input("/proc/" + std::to_string(pid) + "/cmdline",
+                        std::ios::binary);
+    if (!input) return std::string();
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
+  };
+  const std::string guard_args = get_cmdline(process.pid());
+  const std::string worker_args = get_cmdline(process.worker_pid());
+  ASSERT_FALSE(guard_args.empty());
+  ASSERT_FALSE(worker_args.empty());
+  EXPECT_EQ(guard_args.find(expected_key), std::string::npos);
+  EXPECT_EQ(worker_args.find(expected_key), std::string::npos);
+  EXPECT_EQ(worker_args.find(std::string("--api-key\0", 10)),
+            std::string::npos);
+  EXPECT_NE(worker_args.find("--api-key-file"), std::string::npos);
+  EXPECT_NE(worker_args.find("/proc/self/fd/25"), std::string::npos);
+
+  // The only credential file is anonymous, read-only after sealing, and
+  // inherited via FD25. Never log or read its secret contents in the test.
+  const std::string key_path =
+      "/proc/" + std::to_string(process.worker_pid()) + "/fd/25";
+  const int key_fd = ::open(key_path.c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(key_fd, 0);
+  struct stat key_status = {};
+  EXPECT_EQ(::fstat(key_fd, &key_status), 0);
+  EXPECT_EQ(key_status.st_size, 65);  // 64 hex characters and newline.
+  const int seals = ::fcntl(key_fd, F_GET_SEALS);
+  ASSERT_GE(seals, 0);
+  constexpr int kExpectedSeals =
+      F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL;
+  EXPECT_EQ(seals & kExpectedSeals, kExpectedSeals);
+  ::close(key_fd);
+  process.Stop();
+}
+#endif
+
 TEST(LlamaServerProcessTest, RejectsNetworkEndpointOverrideArgument) {
   TemporaryModel model;
   ASSERT_FALSE(model.path().empty());
@@ -356,6 +421,63 @@ TEST(LlamaServerProcessTest, RejectsMissingRuntimeFiles) {
   EXPECT_FALSE(second.Start(&error));
   EXPECT_EQ(error, "model_not_found");
 }
+
+#if defined(__linux__) && !defined(__ANDROID__)
+// Deliberately leave two descriptors without FD_CLOEXEC in the scorer.
+// Neither the guard nor the worker may inherit these unrelated resources.
+// /proc is read only; no process is killed or identified by name.
+TEST(LlamaServerProcessTest, LinuxSpawnDoesNotInheritUnrelatedFds) {
+  TemporaryModel model;
+  ASSERT_FALSE(model.path().empty());
+  char filename[] = "/tmp/mozkey_zenz_fd_sentinel_XXXXXX";
+  const int original = ::mkstemp(filename);
+  ASSERT_GE(original, 0);
+  ASSERT_EQ(::unlink(filename), 0);
+  const int low = ::fcntl(original, F_DUPFD, STDERR_FILENO + 1);
+  const int high = ::fcntl(original, F_DUPFD, 100);
+  ::close(original);
+  ASSERT_GE(low, 0);
+  ASSERT_GE(high, 100);
+  // F_DUPFD explicitly creates an inheritable FD (unlike F_DUPFD_CLOEXEC).
+  ASSERT_EQ(::fcntl(low, F_GETFD) & FD_CLOEXEC, 0);
+  ASSERT_EQ(::fcntl(high, F_GETFD) & FD_CLOEXEC, 0);
+
+  auto proc_fd_link = [](pid_t pid, int fd) -> std::string {
+    const std::string link = "/proc/" + std::to_string(pid) +
+                             "/fd/" + std::to_string(fd);
+    char target[4096] = {};
+    const ssize_t count = ::readlink(link.c_str(), target, sizeof(target));
+    return count > 0 ? std::string(target, static_cast<size_t>(count)) : "";
+  };
+  auto points_to_sentinel = [&](pid_t pid, int fd) {
+    return proc_fd_link(pid, fd).starts_with(filename);
+  };
+  ASSERT_TRUE(points_to_sentinel(::getpid(), low));
+  ASSERT_TRUE(points_to_sentinel(::getpid(), high));
+
+  {
+    LlamaServerProcess process(MakeOptions(model.path()));
+    std::string error;
+    ASSERT_TRUE(process.Start(&error)) << error;
+    ASSERT_GT(process.pid(), 0);
+    ASSERT_GT(process.worker_pid(), 0);
+    // Confirm /proc is readable before accepting absence as non-inheritance.
+    ASSERT_FALSE(proc_fd_link(process.pid(), STDOUT_FILENO).empty());
+    ASSERT_FALSE(proc_fd_link(process.worker_pid(), STDOUT_FILENO).empty());
+    EXPECT_FALSE(points_to_sentinel(process.pid(), low))
+        << "unrelated low FD inherited by guard";
+    EXPECT_FALSE(points_to_sentinel(process.pid(), high))
+        << "unrelated high FD inherited by guard";
+    EXPECT_FALSE(points_to_sentinel(process.worker_pid(), low))
+        << "unrelated low FD inherited by worker";
+    EXPECT_FALSE(points_to_sentinel(process.worker_pid(), high))
+        << "unrelated high FD inherited by worker";
+    process.Stop();
+  }
+  ::close(low);
+  ::close(high);
+}
+#endif
 
 }  // namespace
 }  // namespace zenz_scorer
