@@ -29,6 +29,8 @@
 
 #include "engine/engine.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -39,17 +41,21 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "base/util.h"
 #include "converter/converter.h"
 #include "converter/converter_interface.h"
 #include "converter/immutable_converter.h"
 #include "converter/immutable_converter_interface.h"
 #include "data_manager/data_manager.h"
+#include "dictionary/dictionary_impl.h"
 #include "dictionary/user_dictionary.h"
 #include "engine/data_loader.h"
+#include "engine/dictionary_cost_response.h"
 #include "engine/minimal_converter.h"
 #include "engine/modules.h"
 #include "engine/supplemental_model_interface.h"
 #include "prediction/predictor.h"
+#include "protocol/dictionary_cost_limits.h"
 #include "protocol/engine_builder.pb.h"
 #include "rewriter/rewriter.h"
 #include "rewriter/rewriter_interface.h"
@@ -139,6 +145,32 @@ bool Engine::Sync() { return converter_ && converter_->Sync(); }
 bool Engine::Wait() { return converter_ && converter_->Wait(); }
 
 bool Engine::ReloadAndWait() { return Reload() && Wait(); }
+
+bool Engine::LookupDictionaryCostEntries(
+    absl::string_view reading, uint32_t max_entries_per_source,
+    commands::DictionaryCostLookupResult* result) const {
+  if (result == nullptr) {
+    return false;
+  }
+  result->Clear();
+  if (!converter_ || reading.empty() ||
+      reading.size() > commands::kDictionaryCostMaxReadingBytes ||
+      !Util::IsValidUtf8(reading) || max_entries_per_source == 0) {
+    return false;
+  }
+  // Decline for alternative or mock dictionaries without the concrete API.
+  const auto* dictionary_impl = dynamic_cast<const dictionary::DictionaryImpl*>(
+      &converter_->modules().GetDictionary());
+  if (dictionary_impl == nullptr) {
+    return false;
+  }
+  const dictionary::DictionaryCostLookupResult raw =
+      dictionary_impl->LookupExactCostEntries(
+          reading, std::min(max_entries_per_source,
+                            commands::kDictionaryCostMaxEntriesPerSource));
+  engine::internal::BuildBoundedDictionaryCostResponse(raw, result);
+  return true;
+}
 
 bool Engine::ClearUserHistory() {
   if (converter_) {

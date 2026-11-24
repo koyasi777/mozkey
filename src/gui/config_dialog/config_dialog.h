@@ -71,6 +71,7 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   virtual void ClearUnusedUserPrediction();
   virtual void EditZenzFeedback();
   virtual void EditUserDictionary();
+  virtual void InspectDictionaryCosts();
   virtual void EditKeymap();
   virtual void EditRomanTable();
   virtual void EditEnglishInputExceptions();

@@ -43,6 +43,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **英字表記辞書（IME 切り替え不要）：** 日本語入力（ひらがなモード）のまま、`GitHub` や `ChatGPT` などの英字表記を入力・選択できます。別の IME や半角英数モードへの手動切り替えは不要です。登録語ごとに「自動英字化」と「候補のみ」を選べ、推奨語彙の管理や TSV / JSON の入出力にも対応します。
 - **柔軟なローマ字入力とキー設定：** プリセットの保存・管理、ローマ字テーブルの検索・編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
 - **日本語の変換品質と辞書の拡張：** 日常語彙・固有名詞・口語表現を補強し、文節分割や不自然な漢字化を抑制。日付・曜日の変換候補も拡張しています。
+- **辞書コスト検索（Windows・読み取り専用）：** 「辞書」タブから読みの完全一致で辞書エントリを検索し、単語コスト・文脈IDなどを確認できます。辞書の編集や学習内容の変更は行いません。
 - **ローカルファーストと OS 連携：** Zenz の推論はローカルで実行し、利用統計の送信機能を無効化。シークレット入力への配慮や、Windows Search などの入力欄での候補表示にも対応しています。
 
 詳しい仕様・設定項目は、下記の「主な追加機能」と「修正詳細」で説明しています。
@@ -373,6 +374,19 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 管理画面では検索・並べ替え・複数行の削除に加え、UTF-8 の TSV（`input` / `preferred` / `mode` / `enabled` の4列）と JSON（`schema_version: 1`、`rules` 配列）のインポート・エクスポートが可能です。推奨語彙の自動更新では**未編集のシステム管理語だけ**を同期し、編集・削除した語やカスタム語は原則として保持します。自動更新は OFF にできます。管理画面での変更は、親の設定画面で **「適用」** を押して保存してください。
 
 入力側は小文字 ASCII の `a`～`z` のみ（2～64文字）、優先表記は空白なしの印字可能 ASCII（1～128文字）、登録件数は最大4,096件です。数字・ハイフン・記号を含む**打鍵列**、未登録語の推測判定、あらゆる日本語との衝突回避には対応していません。パスワード欄や対象外の入力モードでは適用されません。**新規・既存プロファイルのどちらも、有効フラグが未設定なら有効**になります。明示的に保存した ON / OFF は維持されます。
+
+### 辞書コスト検索（Windows・読み取り専用）
+
+Windows 版では、**Mozkey プロパティ →「辞書」タブ → 最下部の「辞書の解析」→「辞書コスト検索（読み取り専用）…」** から辞書エントリを調べられます。実行中の Mozkey サーバーに問い合わせる機能で、検索のためにサーバーを起動・再起動することはありません。
+
+- 読みを完全一致で検索し、システム辞書とユーザー辞書のエントリを一覧表示します。例えば「はし」で検索できます。
+- 辞書の区分、読み、表記、単語コスト、左文脈ID、右文脈ID、属性ビットを確認できます。列見出しで並べ替えでき、コストやIDなどの数値列は数値順に並びます。
+- 各辞書の検索件数上限は 1～256 件（初期値 128 件）で、上限などにより結果の一部が省略される場合はその旨を表示します。
+- **読み取り専用**です。検索によって辞書の追加・編集・保存や、学習履歴の更新は行いません。
+
+**表示される単語コストは、実際の変換候補順位や総合変換スコアではありません。** 通常の変換には接続コスト、前後の文脈、候補の書き換え、学習などが関わるため、コストの数値順と候補ウィンドウの順番は一致しないことがあります。この画面は学習結果や最終的な候補順位の内訳を解析するものではありません。
+
+この GUI 機能は現在 Windows 版向けです。macOS / Linux 向けの同等の画面は未実装です。
 
 ### ライブ変換
 
@@ -1094,6 +1108,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **English spelling dictionary (no manual IME switching):** Enter or select spellings such as `GitHub` and `ChatGPT` while remaining in Japanese hiragana input, without manually switching to another IME or alphanumeric input mode. Registered rules either present the preferred ASCII spelling automatically or offer it only as a selectable candidate. Manage built-in presets and custom TSV/JSON rules.
 - **Customizable romaji and shortcuts:** Save and manage romaji presets, search and edit romaji-table rules, display intermediate output for ambiguous rules, commit punctuation and symbols with a single key, and assign ordered key commands with delays.
 - **Improved Japanese conversion and dictionaries:** Enhances everyday expressions and names, reduces unwanted segmentation and kanji conversion, and adds date and weekday suggestions.
+- **Dictionary cost inspector (Windows, read-only):** Look up exact readings in the system and user dictionaries, inspect word costs and context IDs, and sort the results without modifying dictionaries or learning data.
 - **Local-first operation and OS integration:** Runs Zenz inference locally, disables inherited usage-statistics reporting, supports privacy-aware input behavior, and improves candidate display in Windows Search and other immersive TSF hosts.
 
 For implementation details and settings, see the feature list and detailed explanations below.
@@ -1476,6 +1491,19 @@ When `chatgpt` is configured as candidate-only, its trigger can leave a trailing
 The management dialog supports filtering, sorting, multirow deletion, UTF-8 TSV (`input`, `preferred`, `mode`, `enabled`), and JSON import/export (`schema_version: 1` with a `rules` array). Automatic catalog updates reconcile **untouched system-managed entries** while preserving edited, deleted, and custom entries; updates can be disabled. To persist changes, click **Apply** in the parent configuration dialog.
 
 Triggers are lowercase ASCII `a`–`z` only (2–64 characters); preferred spellings are printable ASCII without spaces (1–128 characters), with at most 4,096 rules. Trigger strings containing digits, hyphens, or punctuation are not supported. No automatic language inference or universal romaji-conflict prevention is claimed. Password fields and excluded input modes are not affected. For both new and existing profiles, the feature is **enabled by default when the feature flag is unset**. Explicitly saved ON/OFF choices are preserved.
+
+### Dictionary cost inspector (Windows, read-only)
+
+On Windows, open **Mozkey Properties → Dictionary tab → Dictionary analysis (the last section) → Dictionary cost search (read-only)…**. The inspector queries an already-running Mozkey server; it does not launch or restart the server for a lookup.
+
+- Search for an **exact reading** (for example, `はし`) and inspect entries from the system and user dictionaries.
+- View the dictionary category, reading, written form, word cost, left context ID, right context ID, and attribute bits. Click a column header to sort; numeric columns are sorted numerically.
+- Set a per-dictionary result limit from 1 to 256 entries (default: 128). The UI reports when results have been truncated by a limit.
+- The lookup is **read-only**: it does not add, edit, or save dictionary entries or update learning history.
+
+**A dictionary word cost is not the final conversion score or candidate rank.** Actual conversion can also involve connection costs, surrounding context, candidate rewriting, and learning. The cost-sorted table may therefore differ from the normal conversion candidate list. This inspector does not analyze learned ranking adjustments or the final scoring breakdown.
+
+The inspector GUI is currently implemented for Windows; equivalent macOS and Linux interfaces are not available.
 
 ### Live conversion
 

@@ -1,0 +1,87 @@
+# Read-only dictionary cost inspection library, used by the Mozkey tool.
+load("//:build_defs.bzl", "mozc_cc_library", "mozc_cc_test", "mozc_select")
+load("//bazel:qt.bzl", "mozc_cc_qt_library")
+
+package(default_visibility = ["//visibility:private"])
+
+mozc_cc_library(
+    name = "cost_model",
+    srcs = ["cost_model.cc"],
+    hdrs = ["cost_model.h"],
+    deps = [
+        "//base:util",
+        "//protocol:commands_cc_proto",
+        "//protocol:dictionary_cost_limits",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_test(
+    name = "cost_model_test",
+    size = "small",
+    srcs = ["cost_model_test.cc"],
+    deps = [
+        ":cost_model",
+        "//protocol:commands_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_qt_library(
+    name = "dialog",
+    srcs = ["dictionary_cost_dialog.cc"],
+    hdrs = ["dictionary_cost_dialog.h"],
+    deps = [
+        ":cost_model",
+        ":query_client",
+        "//base:system_util",
+        "//ipc:ipc",
+        "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Production-facing mode entry point; not a separate packaged executable.
+mozc_cc_qt_library(
+    name = "dictionary_cost_tool",
+    srcs = ["dictionary_cost_libmain.cc"],
+    visibility = ["//gui/tool:__pkg__"],
+    deps = [
+        ":dialog",
+        "//base:system_util",
+        "//gui/base:gui_base",
+        "//gui/base:singleton_window_helper",
+    ],
+)
+
+
+# Read-only query client used by the product inspector.
+mozc_cc_library(
+    name = "query_client",
+    srcs = ["query_client.cc"],
+    hdrs = ["query_client.h"],
+    visibility = ["//gui:__subpackages__", "//session:__pkg__"],
+    deps = [
+        "//base:system_util",
+        "//base:util",
+        "//ipc:ipc",
+        "//protocol:commands_cc_proto",
+        "//protocol:dictionary_cost_limits",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+mozc_cc_test(
+    name = "query_client_test",
+    size = "small",
+    srcs = ["query_client_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":query_client",
+        "//base/win32:wide_char",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+        "@com_google_absl//absl/time",
+    ],
+)

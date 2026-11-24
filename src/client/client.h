@@ -130,6 +130,9 @@ class Client : public ClientInterface {
 
   bool GetConfig(config::Config* config) override;
   bool SetConfig(const config::Config& config) override;
+  bool LookupDictionaryCostEntries(
+      absl::string_view reading, uint32_t max_entries_per_source,
+      commands::DictionaryCostLookupResult* result);
 
   bool ClearUserHistory() override;
   bool ClearUserPrediction() override;

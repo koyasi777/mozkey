@@ -641,6 +641,76 @@ TEST_F(ClientTest, GetConfig) {
   EXPECT_EQ(config.incognito_mode(), true);
 }
 
+TEST_F(ClientTest, DictionaryCostLookupFailureClearsOldResults) {
+  commands::DictionaryCostLookupResult result;
+  result.add_entries()->set_value("stale");
+  EXPECT_FALSE(client_->LookupDictionaryCostEntries("", 1, &result));
+  EXPECT_EQ(result.entries_size(), 0);
+
+  result.add_entries()->set_value("stale");
+  EXPECT_FALSE(client_->LookupDictionaryCostEntries(
+      std::string("\xC0\xAF", 2), 1, &result));
+  EXPECT_EQ(result.entries_size(), 0);
+
+  result.add_entries()->set_value("stale");
+  EXPECT_FALSE(client_->LookupDictionaryCostEntries(
+      std::string(301, 'a'), 1, &result));
+  EXPECT_EQ(result.entries_size(), 0);
+
+  result.add_entries()->set_value("stale");
+  EXPECT_FALSE(client_->LookupDictionaryCostEntries("きょうと", 0, &result));
+  EXPECT_EQ(result.entries_size(), 0);
+  EXPECT_FALSE(client_->LookupDictionaryCostEntries("きょうと", 1, nullptr));
+}
+
+TEST_F(ClientTest, DictionaryCostLookupAcceptsValidBoundedResponse) {
+  const int mock_id = 123;
+  ASSERT_TRUE(SetupConnection(mock_id));
+  commands::Output mock_output;
+  mock_output.set_id(mock_id);
+  auto* entry = mock_output.mutable_dictionary_cost_lookup_result()
+                    ->add_entries();
+  entry->set_source(commands::DictionaryCostEntry::SYSTEM);
+  entry->set_reading("きょうと");
+  entry->set_value("京都");
+  entry->set_cost(4000);
+  SetMockOutput(mock_output);
+
+  commands::DictionaryCostLookupResult result;
+  ASSERT_TRUE(client_->LookupDictionaryCostEntries("きょうと", 1, &result));
+  ASSERT_EQ(result.entries_size(), 1);
+  EXPECT_EQ(result.entries(0).value(), "京都");
+  EXPECT_EQ(result.entries(0).cost(), 4000);
+  commands::Input generated;
+  GetGeneratedInput(&generated);
+  EXPECT_EQ(generated.type(), commands::Input::LOOKUP_DICTIONARY_COST_ENTRIES);
+  EXPECT_EQ(generated.dictionary_cost_lookup_request().reading(), "きょうと");
+  EXPECT_EQ(
+      generated.dictionary_cost_lookup_request().max_entries_per_source(), 1);
+
+  // Simulate a missing reply payload and verify stale results are discarded.
+  mock_output.clear_dictionary_cost_lookup_result();
+  SetMockOutput(mock_output);
+  EXPECT_FALSE(client_->LookupDictionaryCostEntries("きょうと", 1, &result));
+  EXPECT_EQ(result.entries_size(), 0);
+}
+
+TEST_F(ClientTest, DictionaryCostLookupRejectsOversizedResponse) {
+  const int mock_id = 123;
+  ASSERT_TRUE(SetupConnection(mock_id));
+  commands::Output mock_output;
+  mock_output.set_id(mock_id);
+  mock_output.mutable_dictionary_cost_lookup_result()
+      ->add_entries()
+      ->set_value(std::string(300 * 1024, 'x'));
+  SetMockOutput(mock_output);
+
+  commands::DictionaryCostLookupResult result;
+  result.add_entries()->set_value("stale");
+  EXPECT_FALSE(client_->LookupDictionaryCostEntries("きょうと", 1, &result));
+  EXPECT_EQ(result.entries_size(), 0);
+}
+
 TEST_F(ClientTest, EnableCascadingWindow) {
   const int mock_id = 0;
   EXPECT_TRUE(SetupConnection(mock_id));
