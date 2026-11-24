@@ -37,6 +37,7 @@ ENTRYPOINT_BUILD = "src/zenz_scorer/BUILD.bazel"
 ENTRYPOINT_CONTRACT = re.compile(
     r'mozc_cc_binary\(\s*name\s*=\s*"mozc_zenz_scorer"\s*,\s*'
     r'srcs\s*=\s*select\(\{\s*'
+    r'(?:"@platforms//os:linux"\s*:\s*\[\s*"main_posix\.cc"\s*\]\s*,\s*)?'
     r'"@platforms//os:macos"\s*:\s*\[\s*"main_posix\.cc"\s*\]\s*,\s*'
     r'"@platforms//os:windows"\s*:\s*\[\s*"main\.cc"\s*,',
     re.MULTILINE,
