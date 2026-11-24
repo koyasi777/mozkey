@@ -43,7 +43,6 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **英字表記辞書（IME 切り替え不要）：** 日本語入力（ひらがなモード）のまま、`GitHub` や `ChatGPT` などの英字表記を入力・選択できます。別の IME や半角英数モードへの手動切り替えは不要です。登録語ごとに「自動英字化」と「候補のみ」を選べ、推奨語彙の管理や TSV / JSON の入出力にも対応します。
 - **柔軟なローマ字入力とキー設定：** プリセットの保存・管理、ローマ字テーブルの検索・編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
 - **日本語の変換品質と辞書の拡張：** 日常語彙・固有名詞・口語表現を補強し、文節分割や不自然な漢字化を抑制。日付・曜日の変換候補も拡張しています。
-- **辞書コスト検索（Windows・読み取り専用）：** 「辞書」タブから読みの完全一致で辞書エントリを検索し、単語コスト・文脈IDなどを確認できます。辞書の編集や学習内容の変更は行いません。
 - **ローカルファーストと OS 連携：** Zenz の推論はローカルで実行し、利用統計の送信機能を無効化。シークレット入力への配慮や、Windows Search などの入力欄での候補表示にも対応しています。
 
 詳しい仕様・設定項目は、下記の「主な追加機能」と「修正詳細」で説明しています。
@@ -137,6 +136,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - 複数文節の変換キャンセル後は、キャンセル直前の文節境界を可能な限り保持し、全体 1 件としてではなく文節単位のひらがな表記選好としてユーザーセグメント履歴へ反映
 - 句読点・記号の単打確定でも直前の通常変換確定による学習を短い取り消し可能期間に保持。確定直後にキー設定から `Revert` / `Undo` が実行され、学習削除が ON なら取り消し、OFF なら保持する。次の実テキスト入力や `IMEOff` / `MakeSureIMEOff` などの確定扱いの操作では学習を保持する
 - 英字表記辞書を追加。「自動英字化」または「候補のみ」で管理し、設定画面からの編集・検索・入出力・システム語彙の更新に対応。
+- Windows 版の「辞書」タブに読み取り専用の辞書コスト検索を追加。システム辞書・ユーザー辞書を読みの完全一致で検索し、単語コスト・左右文脈ID・属性ビットを確認可能。辞書や学習内容は変更しない
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
 - ハイフンなし7桁の郵便番号（例：`1000001`）を、既存の郵便番号辞書を使って住所へ変換可能。ライブ変換では数字表記を第1候補に保ち、キー設定の `ConvertNext`（次候補、標準では Space）で住所などの後続候補を選択可能
@@ -1108,7 +1108,6 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **English spelling dictionary (no manual IME switching):** Enter or select spellings such as `GitHub` and `ChatGPT` while remaining in Japanese hiragana input, without manually switching to another IME or alphanumeric input mode. Registered rules either present the preferred ASCII spelling automatically or offer it only as a selectable candidate. Manage built-in presets and custom TSV/JSON rules.
 - **Customizable romaji and shortcuts:** Save and manage romaji presets, search and edit romaji-table rules, display intermediate output for ambiguous rules, commit punctuation and symbols with a single key, and assign ordered key commands with delays.
 - **Improved Japanese conversion and dictionaries:** Enhances everyday expressions and names, reduces unwanted segmentation and kanji conversion, and adds date and weekday suggestions.
-- **Dictionary cost inspector (Windows, read-only):** Look up exact readings in the system and user dictionaries, inspect word costs and context IDs, and sort the results without modifying dictionaries or learning data.
 - **Local-first operation and OS integration:** Runs Zenz inference locally, disables inherited usage-statistics reporting, supports privacy-aware input behavior, and improves candidate display in Windows Search and other immersive TSF hosts.
 
 For implementation details and settings, see the feature list and detailed explanations below.
@@ -1296,6 +1295,7 @@ Main features added in this fork
 - For multi-segment conversions canceled back to hiragana, preserves conversion-time segment boundaries when possible and learns each hiragana segment as a spelling preference, rather than as a single whole restored preedit
 - Keeps learning from direct-commit punctuations/symbols reversible briefly: a keymap-resolved Revert or supported Undo cancels it when the Dictionary-tab preference is ON and retains it when OFF; subsequent text input and mode changes such as IMEOff / MakeSureIMEOff confirm the learning
 - Adds an English spelling dictionary with automatic ASCII and candidate-only modes, a searchable editor, TSV/JSON import/export, and managed system-preset updates
+- Adds a read-only dictionary cost inspector to the Windows Dictionary tab, with exact-reading lookup of system/user dictionary entries, word costs, left/right context IDs, and attribute bits, without modifying dictionaries or learning data
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
