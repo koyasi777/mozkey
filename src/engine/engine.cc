@@ -48,8 +48,10 @@
 #include "converter/immutable_converter.h"
 #include "converter/immutable_converter_interface.h"
 #include "config/config_handler.h"
+#include "config/external_dictionary_config.h"
 #include "data_manager/data_manager.h"
 #include "dictionary/dictionary_impl.h"
+#include "dictionary/external_dictionary_manager.h"
 #include "dictionary/user_dictionary.h"
 #include "engine/data_loader.h"
 #include "engine/dictionary_cost_response.h"
@@ -65,23 +67,21 @@
 namespace mozc {
 namespace {
 
-// Settings are the single source of truth. SetPath never touches the disk;
-// the manager's worker reads the file asynchronously after this call.
+// Settings are the single source of truth. SetSources never reads the files;
+// the manager's worker reads them asynchronously.
 void ConfigureExternalDictionary(const engine::Modules& modules) {
   const auto config = config::ConfigHandler::GetSharedConfig();
   const auto manager = modules.GetExternalDictionaryManager();
   if (!manager) return;
-  std::vector<std::string> paths;
+  std::vector<dictionary::ExternalDictionaryManager::SourceSpec> sources;
   if (config->enable_external_dictionary()) {
-    if (config->external_dictionary_paths_size() > 0) {
-      for (const std::string& path : config->external_dictionary_paths()) {
-        paths.push_back(path);
-      }
-    } else if (!config->external_dictionary_path().empty()) {
-      paths.push_back(config->external_dictionary_path());
+    using SourceOptions = config::ExternalDictionarySourceOptions;
+    for (const auto& source : config::GetExternalDictionarySources(*config)) {
+      sources.push_back({source.path(),
+                         source.match_mode() == SourceOptions::EXACT_AND_PREFIX});
     }
   }
-  manager->SetPaths(std::move(paths));
+  manager->SetSources(std::move(sources));
 }
 
 }  // namespace

@@ -60,6 +60,14 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "external_dictionary_config",
+    srcs = ["external_dictionary_config.cc"],
+    hdrs = ["external_dictionary_config.h"],
+    visibility = ["//:__subpackages__"],
+    deps = ["//protocol:config_cc_proto"],
+)
+
+mozc_cc_library(
     name = "config_handler",
     srcs = ["config_handler.cc"],
     hdrs = ["config_handler.h"],
@@ -99,6 +107,7 @@ mozc_cc_test(
     data = ["//data/test/config:config_test_data"],
     deps = [
         ":config_handler",
+        ":external_dictionary_config",
         "//base:clock",
         "//base:clock_mock",
         "//base:file_util",

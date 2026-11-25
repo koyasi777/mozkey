@@ -95,6 +95,7 @@ mozc_cc_qt_library(
     name = "external_dictionary_settings_dialog",
     srcs = ["external_dictionary_settings_dialog.cc"],
     hdrs = ["external_dictionary_settings_dialog.h"],
+    deps = ["//config:external_dictionary_config"],
 )
 
 mozc_cc_qt_library(

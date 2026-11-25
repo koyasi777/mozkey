@@ -256,6 +256,7 @@ mozc_cc_qt_library(
         "//composer:key_event_util",
         "//composer:key_parser",
         "//config:config_handler",
+        "//config:external_dictionary_config",
         "//config:roman_table_presets",
         "//config:stats_config_util",
         "//gui/base:external_dictionary_settings_dialog",

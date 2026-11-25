@@ -64,6 +64,7 @@
 #include "dictionary/user_pos.h"
 #include "gui/base/encoding_util.h"
 #include "gui/base/util.h"
+#include "config/external_dictionary_config.h"
 #include "gui/base/external_dictionary_settings_dialog.h"
 #include "protocol/config.pb.h"
 #include "gui/config_dialog/combobox_delegate.h"
@@ -395,14 +396,8 @@ DictionaryTool::DictionaryTool(QWidget* parent)
       return;
     }
     bool enabled = config.enable_external_dictionary();
-    std::vector<std::string> paths;
-    for (const std::string& path : config.external_dictionary_paths()) {
-      paths.push_back(path);
-    }
-    if (paths.empty() && !config.external_dictionary_path().empty()) {
-      paths.push_back(config.external_dictionary_path());
-    }
-    if (!ExternalDictionarySettingsDialog::Edit(this, &enabled, &paths)) return;
+    auto sources = config::GetExternalDictionarySources(config);
+    if (!ExternalDictionarySettingsDialog::Edit(this, &enabled, &sources)) return;
     // The modal editor can remain open while ConfigDialog (or another tool)
     // updates the global configuration.  Re-read immediately before saving,
     // reject conflicting external-dictionary edits, and preserve all other
@@ -430,6 +425,16 @@ DictionaryTool::DictionaryTool(QWidget* parent)
         }
       }
     }
+    if (!external_changed) {
+      external_changed = latest_config.external_dictionary_source_options_size() !=
+                         config.external_dictionary_source_options_size();
+      for (int i = 0; !external_changed &&
+                      i < config.external_dictionary_source_options_size(); ++i) {
+        external_changed =
+            latest_config.external_dictionary_source_options(i).SerializeAsString() !=
+            config.external_dictionary_source_options(i).SerializeAsString();
+      }
+    }
     if (external_changed) {
       QMessageBox::warning(
           this, windowTitle(),
@@ -438,12 +443,7 @@ DictionaryTool::DictionaryTool(QWidget* parent)
       return;
     }
     latest_config.set_enable_external_dictionary(enabled);
-    latest_config.set_external_dictionary_path(
-        paths.empty() ? std::string() : paths.front());
-    latest_config.clear_external_dictionary_paths();
-    for (const std::string& path : paths) {
-      latest_config.add_external_dictionary_paths(path);
-    }
+    config::SetExternalDictionarySources(sources, &latest_config);
     if (!client_->SetConfig(latest_config)) {
       QMessageBox::warning(this, windowTitle(),
                            QStringLiteral("外部辞書の設定を保存できませんでした。"));

@@ -70,10 +70,18 @@ class ExternalDictionarySessionHandlerE2ETest
     ASSERT_NE(session_id_, 0u);
   }
 
-  bool SendConfig(bool enabled, const std::string& path) {
+  bool SendConfig(bool enabled, const std::string& path,
+                  bool allow_prefix = false) {
     config::Config config = config::ConfigHandler::GetCopiedConfig();
     config.set_enable_external_dictionary(enabled);
     config.set_external_dictionary_path(path);
+    config.clear_external_dictionary_source_options();
+    if (allow_prefix) {
+      auto* source = config.add_external_dictionary_source_options();
+      source->set_path(path);
+      source->set_match_mode(
+          config::Config::ExternalDictionarySourceOptions::EXACT_AND_PREFIX);
+    }
     config.set_use_live_conversion(false);
     config.set_use_zenz_live_correction(false);
     config.set_show_candidate_window_on_initial_conversion(true);
@@ -94,7 +102,13 @@ class ExternalDictionarySessionHandlerE2ETest
     }
     const auto& actual = get.output().config();
     if (actual.enable_external_dictionary() != enabled ||
-        actual.external_dictionary_path() != path) {
+        actual.external_dictionary_path() != path ||
+        actual.external_dictionary_source_options_size() !=
+            (allow_prefix ? 1 : 0) ||
+        (allow_prefix &&
+         (actual.external_dictionary_source_options(0).path() != path ||
+          actual.external_dictionary_source_options(0).match_mode() !=
+              config::Config::ExternalDictionarySourceOptions::EXACT_AND_PREFIX))) {
       ADD_FAILURE() << "SET_CONFIG round-trip mismatch: "
                     << actual.ShortDebugString();
       return false;
@@ -301,6 +315,55 @@ TEST_F(ExternalDictionarySessionHandlerE2ETest,
   commands::Output out;
   ASSERT_TRUE(ConvertReading("ぐうぐるに", &out));
   EXPECT_FALSE(ContainsSurface(out, surface)) << out.ShortDebugString();
+}
+
+
+TEST_F(ExternalDictionarySessionHandlerE2ETest,
+       OssPrefixOptInSelectCommitAndDisableInExistingSession) {
+  const std::string exact = "外部辞書完全一致候補";
+  const std::string prefix = "外部辞書前方一致候補";
+  ASSERT_TRUE(FileUtil::SetContents(path_, "ぐうぐる\t" + exact + "\n" +
+                                              "ぐうぐるかぶしき\t" + prefix + "\n").ok());
+  Initialize(true);
+  ASSERT_NE(handler_, nullptr);
+  ASSERT_TRUE(SendConfig(true, path_));
+  ASSERT_TRUE(manager_->PollOnceForTesting().ok());
+  commands::Output out;
+  ASSERT_TRUE(ConvertReading("ぐうぐる", &out));
+  EXPECT_TRUE(ContainsSurface(out, exact)) << out.ShortDebugString();
+  EXPECT_FALSE(ContainsSurface(out, prefix)) << out.ShortDebugString();
+
+  // The existing session must observe a mode-only config change without
+  // re-reading the file or replacing the manager.
+  ASSERT_TRUE(SendConfig(true, path_, true));
+  ASSERT_TRUE(ConvertReading("ぐうぐる", &out));
+  ASSERT_EQ(out.preedit().segment_size(), 2) << out.ShortDebugString();
+  EXPECT_TRUE(ContainsSurface(out, exact)) << out.ShortDebugString();
+  ASSERT_TRUE(ContainsSurface(out, prefix)) << out.ShortDebugString();
+  ASSERT_TRUE(out.has_candidate_window());
+  int candidate_id = -1;
+  for (const auto& candidate : out.candidate_window().candidate()) {
+    if (candidate.value() == prefix) {
+      candidate_id = candidate.id();
+      break;
+    }
+  }
+  ASSERT_GE(candidate_id, 1) << out.ShortDebugString();
+  commands::Command submit;
+  submit.mutable_input()->set_id(session_id_);
+  submit.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  submit.mutable_input()->mutable_command()->set_type(
+      commands::SessionCommand::SUBMIT_CANDIDATE);
+  submit.mutable_input()->mutable_command()->set_id(candidate_id);
+  ASSERT_TRUE(handler_->EvalCommand(&submit)) << submit.ShortDebugString();
+  ASSERT_TRUE(submit.output().has_result()) << submit.ShortDebugString();
+  EXPECT_EQ(submit.output().result().key(), "ぐうぐる");
+  EXPECT_EQ(submit.output().result().value(), prefix);
+
+  ASSERT_TRUE(SendConfig(true, path_));
+  ASSERT_TRUE(ConvertReading("ぐうぐる", &out));
+  EXPECT_TRUE(ContainsSurface(out, exact)) << out.ShortDebugString();
+  EXPECT_FALSE(ContainsSurface(out, prefix)) << out.ShortDebugString();
 }
 
 }  // namespace

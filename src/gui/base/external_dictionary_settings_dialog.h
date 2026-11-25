@@ -3,10 +3,12 @@
 #define MOZC_GUI_BASE_EXTERNAL_DICTIONARY_SETTINGS_DIALOG_H_
 
 #include <QDialog>
-#include <string>
 #include <vector>
 
+#include "config/external_dictionary_config.h"
+
 class QCheckBox;
+class QLineEdit;
 class QPushButton;
 class QTableWidget;
 
@@ -17,26 +19,29 @@ namespace mozc::gui {
 class ExternalDictionarySettingsDialog final : public QDialog {
  public:
   static bool Edit(QWidget* parent, bool* enabled,
-                   std::vector<std::string>* paths);
+                   std::vector<config::ExternalDictionarySourceOptions>* sources);
 
  private:
   ExternalDictionarySettingsDialog(QWidget* parent, bool enabled,
-                                   const std::vector<std::string>& paths);
+                                   const std::vector<config::ExternalDictionarySourceOptions>& sources);
   void RefreshRows();
   void UpdateSelectionActions();
   void AddFiles();
+  void EditSelected();
   void RemoveSelected();
   void MoveSelected(int direction);
   void CopySelectedPath();
-  bool CollectAndValidate(bool* enabled, std::vector<std::string>* paths);
+  bool CollectAndValidate(bool* enabled, std::vector<config::ExternalDictionarySourceOptions>* sources);
 
   QCheckBox* enabled_checkbox_ = nullptr;
   QTableWidget* table_ = nullptr;
+  QLineEdit* selected_path_ = nullptr;
+  QPushButton* edit_button_ = nullptr;
   QPushButton* remove_button_ = nullptr;
   QPushButton* up_button_ = nullptr;
   QPushButton* down_button_ = nullptr;
   QPushButton* copy_path_button_ = nullptr;
-  std::vector<std::string> paths_;
+  std::vector<config::ExternalDictionarySourceOptions> sources_;
 };
 
 }  // namespace mozc::gui

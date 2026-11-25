@@ -27,10 +27,10 @@ class ExternalDictionaryRewriterTest : public ::testing::Test {
             std::chrono::seconds(3), false)),
         rewriter_(manager_) {}
 
-  void Load(const std::string& tsv) {
+  void Load(const std::string& tsv, bool allow_prefix = false) {
     const std::string path = FileUtil::JoinPath(dir_.path(), "external.tsv");
     ASSERT_TRUE(FileUtil::SetContents(path, tsv).ok());
-    manager_->SetPath(path);
+    manager_->SetSources({{path, allow_prefix}});
     ASSERT_TRUE(manager_->PollOnceForTesting().ok());
   }
 
@@ -212,6 +212,76 @@ TEST_F(ExternalDictionaryRewriterTest, DisabledSourceYieldsNoCandidate) {
   manager_->SetPath("");
   Segments segments = OneSegment("100", "100");
   EXPECT_FALSE(rewriter_.Rewrite(Request("100"), &segments));
+}
+
+
+TEST_F(ExternalDictionaryRewriterTest, PrefixFollowsExactAndUsesTypedKey) {
+  Load("せいひん\t完全一致候補\n"
+       "せいひんえー\t前方一致候補\n"
+       "せいひんびー\t完全一致候補\n"
+       "せいひんしー\t製品\n", true);
+  Segments segments = OneSegment("せいひん", "製品");
+  ASSERT_TRUE(rewriter_.Rewrite(Request("せいひん"), &segments));
+  const Segment& segment = segments.conversion_segment(0);
+  ASSERT_EQ(segment.candidates_size(), 3u);
+  EXPECT_EQ(segment.candidate(0).value, "製品");
+  EXPECT_EQ(segment.candidate(1).value, "完全一致候補");
+  EXPECT_EQ(segment.candidate(1).description, "外部辞書");
+  const auto& candidate = segment.candidate(2);
+  EXPECT_EQ(candidate.value, "前方一致候補");
+  EXPECT_EQ(candidate.description, "外部辞書（前方一致）");
+  EXPECT_EQ(candidate.key, "せいひん");
+  EXPECT_EQ(candidate.content_key, "せいひん");
+  EXPECT_EQ(candidate.effective_converted_segment_count(), 1u);
+  EXPECT_TRUE(candidate.attributes & converter::Attribute::NO_LEARNING);
+  EXPECT_TRUE(candidate.attributes & converter::Attribute::NO_VARIANTS_EXPANSION);
+  EXPECT_TRUE(candidate.attributes & converter::Attribute::NO_MODIFICATION);
+  EXPECT_TRUE(candidate.ranking_constraints & converter::RankingConstraint::NO_TOP);
+}
+
+TEST_F(ExternalDictionaryRewriterTest, PrefixSpansOnlyTypedNativeSegments) {
+  Load("ぐうぐるかぶしき\t前方一致複数文節候補\n", true);
+  Segments segments = OneSegment("ぐう", "具");
+  Segment* tail = segments.push_back_segment();
+  tail->set_key("ぐる");
+  auto* native = tail->add_candidate();
+  native->key = "ぐる";
+  native->value = "来る";
+  EXPECT_FALSE(rewriter_.Rewrite(Request("ぐうぐるに"), &segments));
+  ASSERT_TRUE(rewriter_.Rewrite(Request("ぐうぐる"), &segments));
+  ASSERT_EQ(segments.conversion_segments_size(), 2u);
+  EXPECT_FALSE(segments.resized());
+  const Segment& first = segments.conversion_segment(0);
+  ASSERT_EQ(first.candidates_size(), 2u);
+  EXPECT_EQ(first.candidate(0).value, "具");
+  EXPECT_EQ(first.candidate(1).value, "前方一致複数文節候補");
+  EXPECT_EQ(first.candidate(1).key, "ぐうぐる");
+  EXPECT_EQ(first.candidate(1).content_key, "ぐうぐる");
+  EXPECT_EQ(first.candidate(1).effective_converted_segment_count(), 2u);
+  EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "来る");
+}
+
+TEST_F(ExternalDictionaryRewriterTest, PrefixHonorsPrivateAndRequestGuards) {
+  Load("せいひんえー\t前方一致非公開候補\n", true);
+  for (int mode = 0; mode < 5; ++mode) {
+    commands::Context context;
+    config::Config config;
+    if (mode == 0) context.set_is_private_input(true);
+    if (mode == 1) context.set_input_field_type(commands::Context::PASSWORD);
+    if (mode == 2) config.set_incognito_mode(true);
+    const auto type = mode == 3 ? ConversionRequest::SUGGESTION
+                      : mode == 4 ? ConversionRequest::PREDICTION
+                                  : ConversionRequest::CONVERSION;
+    const auto request = ConversionRequestBuilder()
+        .SetContext(context)
+        .SetConfig(config)
+        .SetRequestType(type)
+        .SetKey("せいひん")
+        .Build();
+    Segments segments = OneSegment("せいひん", "製品");
+    EXPECT_FALSE(rewriter_.Rewrite(request, &segments));
+    EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 1u);
+  }
 }
 
 }  // namespace

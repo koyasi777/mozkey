@@ -24,6 +24,9 @@ constexpr size_t kMaxEntries = 200000;
 constexpr size_t kMaxValuesPerKey = 64;
 constexpr size_t kMaxKeyBytes = 256;
 constexpr size_t kMaxValueBytes = 1024;
+constexpr size_t kMinPrefixCodePoints = 3;
+constexpr size_t kMaxPrefixResults = 10;
+constexpr size_t kMaxPrefixValueVisits = 256;
 constexpr auto kFullReadInterval = std::chrono::seconds(30);
 
 bool IsValidField(absl::string_view field, size_t maximum_bytes) {
@@ -56,14 +59,23 @@ void ExternalDictionaryManager::SetPath(std::string path) {
 }
 
 void ExternalDictionaryManager::SetPaths(std::vector<std::string> paths) {
-  std::vector<std::string> normalized;
-  std::unordered_set<std::string> seen;
+  std::vector<SourceSpec> sources;
+  sources.reserve(paths.size());
   for (std::string& path : paths) {
-    if (path.empty() || !seen.insert(path).second) continue;
+    sources.push_back({std::move(path), false});
+  }
+  SetSources(std::move(sources));
+}
+
+void ExternalDictionaryManager::SetSources(std::vector<SourceSpec> sources) {
+  std::vector<SourceSpec> normalized;
+  std::unordered_set<std::string> seen;
+  for (SourceSpec& source : sources) {
+    if (source.path.empty() || !seen.insert(source.path).second) continue;
     // Refuse excessive input rather than spawning arbitrary file reads from
     // damaged/malicious settings; the UI enforces the same 32-file limit.
     if (normalized.size() >= kMaxSources) break;
-    normalized.push_back(std::move(path));
+    normalized.push_back(std::move(source));
   }
   {
     std::lock_guard<std::mutex> lock(mu_);
@@ -71,7 +83,11 @@ void ExternalDictionaryManager::SetPaths(std::vector<std::string> paths) {
     bool unchanged = normalized.size() == sources_.size();
     if (unchanged) {
       for (size_t i = 0; i < normalized.size(); ++i) {
-        if (sources_[i].path != normalized[i]) { unchanged = false; break; }
+        if (sources_[i].path != normalized[i].path ||
+            sources_[i].allow_prefix != normalized[i].allow_prefix) {
+          unchanged = false;
+          break;
+        }
       }
     }
     if (unchanged) return;
@@ -80,16 +96,19 @@ void ExternalDictionaryManager::SetPaths(std::vector<std::string> paths) {
     // sources disappear immediately, including their previously stale values.
     std::vector<Source> next;
     next.reserve(normalized.size());
-    for (const std::string& path : normalized) {
+    for (const SourceSpec& spec : normalized) {
       auto it = std::find_if(sources_.begin(), sources_.end(),
-                             [&path](const Source& s) { return s.path == path; });
+                             [&spec](const Source& s) {
+                               return s.path == spec.path;
+                             });
       if (it != sources_.end()) {
         next.push_back(std::move(*it));
       } else {
         Source source;
-        source.path = path;
+        source.path = spec.path;
         next.push_back(std::move(source));
       }
+      next.back().allow_prefix = spec.allow_prefix;
     }
     sources_ = std::move(next);
     RebuildSnapshotLocked();
@@ -100,7 +119,7 @@ void ExternalDictionaryManager::SetPaths(std::vector<std::string> paths) {
 
 std::shared_ptr<const ExternalDictionaryManager::Snapshot>
 ExternalDictionaryManager::GetSnapshot() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<std::mutex> lock(snapshot_mu_);
   return snapshot_;
 }
 
@@ -111,6 +130,46 @@ std::vector<std::string> ExternalDictionaryManager::LookupExact(
   return it == snapshot->entries.end() ? std::vector<std::string>() : it->second;
 }
 
+std::vector<std::string> ExternalDictionaryManager::Snapshot::LookupPrefix(
+    absl::string_view key) const {
+  if (prefix_entries.empty() || !IsValidField(key, kMaxKeyBytes)) return {};
+  size_t code_points = 0;
+  for (unsigned char c : key) {
+    if ((c & 0xc0) != 0x80) ++code_points;
+  }
+  if (code_points < kMinPrefixCodePoints) return {};
+
+  std::vector<std::string> result;
+  const auto exact = entries.find(std::string(key));
+  auto it = std::lower_bound(
+      prefix_entries.begin(), prefix_entries.end(), key,
+      [](const PrefixEntry& entry, absl::string_view prefix) {
+        return absl::string_view(entry.key) < prefix;
+      });
+  size_t visits = 0;
+  for (; it != prefix_entries.end() &&
+         absl::string_view(it->key).starts_with(key); ++it) {
+    if (absl::string_view(it->key) == key) continue;
+    const auto& values = entries.at(it->key);
+    for (size_t index : it->value_indices) {
+      if (visits == kMaxPrefixValueVisits) return result;
+      ++visits;
+      const std::string& value = values[index];
+      if (exact != entries.end() &&
+          std::find(exact->second.begin(), exact->second.end(), value) !=
+              exact->second.end()) {
+        continue;
+      }
+      if (std::find(result.begin(), result.end(), value) != result.end()) {
+        continue;
+      }
+      result.push_back(value);
+      if (result.size() == kMaxPrefixResults) return result;
+    }
+  }
+  return result;
+}
+
 ExternalDictionaryManager::Status ExternalDictionaryManager::GetStatus() const {
   std::lock_guard<std::mutex> lock(mu_);
   return status_;
@@ -118,21 +177,63 @@ ExternalDictionaryManager::Status ExternalDictionaryManager::GetStatus() const {
 
 void ExternalDictionaryManager::RebuildSnapshotLocked() {
   auto merged = std::make_shared<Snapshot>();
+  std::unordered_map<std::string, std::vector<size_t>> prefix_indices;
   for (const Source& source : sources_) {
     if (!source.good) continue;
     for (const auto& [key, values] : source.good->entries) {
       auto& dest = merged->entries[key];
       for (const std::string& value : values) {
-        if (std::find(dest.begin(), dest.end(), value) != dest.end()) continue;
-        if (dest.size() >= kMaxValuesPerKey ||
-            merged->entry_count >= kMaxEntries) continue;
-        dest.push_back(value);
-        ++merged->entry_count;
+        const auto existing = std::find(dest.begin(), dest.end(), value);
+        const size_t index = static_cast<size_t>(existing - dest.begin());
+        if (existing == dest.end()) {
+          if (dest.size() >= kMaxValuesPerKey ||
+              merged->entry_count >= kMaxEntries) continue;
+          dest.push_back(value);
+          ++merged->entry_count;
+        }
+        if (source.allow_prefix) {
+          // Even if an exact-only source admitted this pair first, an opted-in
+          // source may independently authorize the same pair for completion.
+          auto& indices = prefix_indices[key];
+          if (std::find(indices.begin(), indices.end(), index) == indices.end()) {
+            indices.push_back(index);
+          }
+        }
       }
     }
   }
-  snapshot_ = std::move(merged);
-  status_.entry_count = snapshot_->entry_count;
+  merged->prefix_entries.reserve(prefix_indices.size());
+  for (auto& [key, indices] : prefix_indices) {
+    merged->prefix_entries.push_back({key, std::move(indices)});
+  }
+  std::sort(merged->prefix_entries.begin(), merged->prefix_entries.end(),
+            [](const Snapshot::PrefixEntry& a, const Snapshot::PrefixEntry& b) {
+              return a.key < b.key;
+            });
+  status_.entry_count = merged->entry_count;
+  std::shared_ptr<const Snapshot> previous = std::move(merged);
+  {
+    // Publish only a completed snapshot. Never destroy a displaced snapshot
+    // while holding the publication lock.
+    std::lock_guard<std::mutex> lock(snapshot_mu_);
+    snapshot_.swap(previous);
+  }
+  // Keep a writer-owned reference until all conversion readers have released
+  // their copies. Reclaim on writer/worker paths, not on conversion paths.
+  retired_snapshots_.push_back(std::move(previous));
+  ReclaimRetiredSnapshotsLocked();
+}
+
+void ExternalDictionaryManager::ReclaimRetiredSnapshotsLocked() {
+  // No new reader can acquire a retired generation through GetSnapshot().
+  // Existing readers hold strong references for the duration of their lookup.
+  // A sole owner can therefore release the generation on this thread.
+  retired_snapshots_.erase(
+      std::remove_if(retired_snapshots_.begin(), retired_snapshots_.end(),
+                     [](const std::shared_ptr<const Snapshot>& snapshot) {
+                       return snapshot.use_count() == 1;
+                     }),
+      retired_snapshots_.end());
 }
 
 void ExternalDictionaryManager::RefreshStatusLocked() {
@@ -209,6 +310,7 @@ absl::Status ExternalDictionaryManager::PollOnce(bool force_read) {
   {
     std::lock_guard<std::mutex> lock(mu_);
     if (stopped_) return absl::FailedPreconditionError("Manager is stopped");
+    ReclaimRetiredSnapshotsLocked();
     if (sources_.empty()) return absl::OkStatus();
     generation = generation_;
     next = sources_;
@@ -291,8 +393,15 @@ absl::Status ExternalDictionaryManager::PollOnce(bool force_read) {
 void ExternalDictionaryManager::WorkerLoop() {
   std::unique_lock<std::mutex> lock(mu_);
   while (!stopped_) {
+    ReclaimRetiredSnapshotsLocked();
     if (sources_.empty()) {
-      cv_.wait(lock, [this] { return stopped_ || !sources_.empty(); });
+      if (retired_snapshots_.empty()) {
+        cv_.wait(lock, [this] { return stopped_ || !sources_.empty(); });
+      } else {
+        // Disabling the final source must not strand a retired generation.
+        cv_.wait_for(lock, poll_interval_,
+                     [this] { return stopped_ || !sources_.empty(); });
+      }
       continue;
     }
     const uint64_t generation = generation_;
@@ -313,5 +422,7 @@ void ExternalDictionaryManager::Stop() {
   }
   cv_.notify_all();
   if (worker_.joinable()) worker_.join();
+  std::lock_guard<std::mutex> lock(mu_);
+  ReclaimRetiredSnapshotsLocked();
 }
 }  // namespace mozc::dictionary

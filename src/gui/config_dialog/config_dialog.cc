@@ -117,6 +117,7 @@
 #include "client/client.h"
 #include "composer/english_input_exceptions.h"
 #include "config/config_handler.h"
+#include "config/external_dictionary_config.h"
 #include "config/roman_table_presets.h"
 #include "gui/base/util.h"
 #include "gui/base/external_dictionary_settings_dialog.h"
@@ -654,13 +655,13 @@ ConfigDialog::ConfigDialog()
   dictionaryTabLayout->insertWidget(insert_index + 2, external_controls);
   QObject::connect(manage_external, &QPushButton::clicked, this, [this]() {
     bool enabled = external_dictionary_enabled_->isChecked();
-    auto paths = external_dictionary_paths_;
-    if (ExternalDictionarySettingsDialog::Edit(this, &enabled, &paths)) {
-      external_dictionary_paths_ = std::move(paths);
+    auto sources = external_dictionary_sources_;
+    if (ExternalDictionarySettingsDialog::Edit(this, &enabled, &sources)) {
+      external_dictionary_sources_ = std::move(sources);
       external_dictionary_enabled_->setChecked(enabled);
       external_dictionary_summary_->setText(
           QStringLiteral("登録済み：%1 ファイル").arg(
-              static_cast<int>(external_dictionary_paths_.size())));
+              static_cast<int>(external_dictionary_sources_.size())));
       EnableApplyButton();
     }
   });
@@ -6242,17 +6243,10 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   SET_CHECKBOX(zipcodeConversionCheckBox, use_zip_code_conversion);
   SET_CHECKBOX(spellingCorrectionCheckBox, use_spelling_correction);
   external_dictionary_enabled_->setChecked(config.enable_external_dictionary());
-  external_dictionary_paths_.clear();
-  for (const std::string& path : config.external_dictionary_paths()) {
-    external_dictionary_paths_.push_back(path);
-  }
-  if (external_dictionary_paths_.empty() &&
-      !config.external_dictionary_path().empty()) {
-    external_dictionary_paths_.push_back(config.external_dictionary_path());
-  }
+  external_dictionary_sources_ = config::GetExternalDictionarySources(config);
   external_dictionary_summary_->setText(
       QStringLiteral("登録済み：%1 ファイル").arg(
-          static_cast<int>(external_dictionary_paths_.size())));
+          static_cast<int>(external_dictionary_sources_.size())));
 
   // InfoListConfig
   localUsageDictionaryCheckBox->setChecked(
@@ -6676,13 +6670,7 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   GET_CHECKBOX(spellingCorrectionCheckBox, use_spelling_correction);
   config->set_enable_external_dictionary(
       external_dictionary_enabled_->isChecked());
-  config->set_external_dictionary_path(
-      external_dictionary_paths_.empty() ? std::string() :
-      external_dictionary_paths_.front());
-  config->clear_external_dictionary_paths();
-  for (const std::string& path : external_dictionary_paths_) {
-    config->add_external_dictionary_paths(path);
-  }
+  config::SetExternalDictionarySources(external_dictionary_sources_, config);
 
   // InformationListConfig
   config->mutable_information_list_config()->set_use_local_usage_dictionary(

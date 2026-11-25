@@ -187,6 +187,20 @@ message Config {
   // Ordered UTF-8 TSV sources. The legacy path stays as a fallback.
   repeated string external_dictionary_paths = 1067;
 
+  // Metadata keyed by path, not by the position in external_dictionary_paths.
+  // The legacy path list remains authoritative for registration and ordering.
+  // Missing metadata (including older configs) means exact matching only.
+  message ExternalDictionarySourceOptions {
+    enum MatchMode {
+      EXACT = 0;
+      EXACT_AND_PREFIX = 1;
+    }
+    optional string path = 1;
+    optional string display_name = 2;
+    optional MatchMode match_mode = 3 [default = EXACT];
+  }
+  repeated ExternalDictionarySourceOptions external_dictionary_source_options = 1068;
+
   enum PunctuationMethod {
     TOUTEN_KUTEN = 0;
     COMMA_PERIOD = 1;

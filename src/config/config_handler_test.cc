@@ -50,6 +50,7 @@
 #include "base/file_util.h"
 #include "base/system_util.h"
 #include "base/thread.h"
+#include "config/external_dictionary_config.h"
 #include "protocol/config.pb.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
@@ -225,6 +226,119 @@ TEST_F(ConfigHandlerTest, ExternalDictionarySettingsRoundTrip) {
   const Config persisted = ConfigHandler::GetCopiedConfig();
   EXPECT_TRUE(persisted.enable_external_dictionary());
   EXPECT_EQ(persisted.external_dictionary_path(), "/tmp/社員名簿.tsv");
+}
+
+TEST_F(ConfigHandlerTest, ExternalDictionaryLegacySettingsDefaultToExact) {
+  Config config;
+  config.set_external_dictionary_path("legacy.tsv");
+  auto sources = GetExternalDictionarySources(config);
+  ASSERT_EQ(sources.size(), 1);
+  EXPECT_EQ(sources[0].path(), "legacy.tsv");
+  EXPECT_TRUE(sources[0].display_name().empty());
+  EXPECT_EQ(sources[0].match_mode(), ExternalDictionarySourceOptions::EXACT);
+
+  config.add_external_dictionary_paths("first.tsv");
+  config.add_external_dictionary_paths("second.tsv");
+  sources = GetExternalDictionarySources(config);
+  ASSERT_EQ(sources.size(), 2);
+  EXPECT_EQ(sources[0].path(), "first.tsv");
+  EXPECT_EQ(sources[1].path(), "second.tsv");
+  EXPECT_EQ(sources[1].match_mode(), ExternalDictionarySourceOptions::EXACT);
+}
+
+TEST_F(ConfigHandlerTest, ExternalDictionaryMetadataIsKeyedByRegisteredPath) {
+  Config config;
+  config.add_external_dictionary_paths("first.tsv");
+  config.add_external_dictionary_paths("");
+  config.add_external_dictionary_paths("second.tsv");
+  config.add_external_dictionary_paths("first.tsv");
+  auto* second = config.add_external_dictionary_source_options();
+  second->set_path("second.tsv");
+  second->set_display_name("製品一覧");
+  second->set_match_mode(ExternalDictionarySourceOptions::EXACT_AND_PREFIX);
+  auto* stale = config.add_external_dictionary_source_options();
+  stale->set_path("removed.tsv");
+  stale->set_match_mode(ExternalDictionarySourceOptions::EXACT_AND_PREFIX);
+  auto* duplicate = config.add_external_dictionary_source_options();
+  duplicate->set_path("second.tsv");
+  duplicate->set_display_name("duplicate");
+
+  const auto sources = GetExternalDictionarySources(config);
+  ASSERT_EQ(sources.size(), 2);
+  EXPECT_EQ(sources[0].path(), "first.tsv");
+  EXPECT_TRUE(sources[0].display_name().empty());
+  EXPECT_EQ(sources[0].match_mode(), ExternalDictionarySourceOptions::EXACT);
+  EXPECT_EQ(sources[1].path(), "second.tsv");
+  EXPECT_EQ(sources[1].display_name(), "製品一覧");
+  EXPECT_EQ(sources[1].match_mode(),
+            ExternalDictionarySourceOptions::EXACT_AND_PREFIX);
+}
+
+TEST_F(ConfigHandlerTest, ExternalDictionaryMetadataRoundTripAndRemoval) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "external_dictionary_options.db");
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+  ConfigHandler::Reload();
+  Config config = ConfigHandler::GetCopiedConfig();
+  config.set_enable_external_dictionary(false);
+  std::vector<ExternalDictionarySourceOptions> sources(2);
+  sources[0].set_path("/tmp/商品.tsv");
+  sources[0].set_display_name("商品マスター");
+  sources[0].set_match_mode(ExternalDictionarySourceOptions::EXACT_AND_PREFIX);
+  sources[1].set_path("/tmp/customers.tsv");
+  sources[1].set_display_name("顧客番号");
+  SetExternalDictionarySources(sources, &config);
+  ConfigHandler::SetConfig(config);
+  ConfigHandler::Reload();
+  config = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(config.enable_external_dictionary());
+  EXPECT_EQ(config.external_dictionary_path(), sources[0].path());
+  auto persisted = GetExternalDictionarySources(config);
+  ASSERT_EQ(persisted.size(), 2);
+  EXPECT_EQ(persisted[0].display_name(), "商品マスター");
+  EXPECT_EQ(persisted[0].match_mode(),
+            ExternalDictionarySourceOptions::EXACT_AND_PREFIX);
+  EXPECT_EQ(persisted[1].display_name(), "顧客番号");
+  EXPECT_EQ(persisted[1].match_mode(), ExternalDictionarySourceOptions::EXACT);
+
+  SetExternalDictionarySources({persisted[1], persisted[0]}, &config);
+  ConfigHandler::SetConfig(config);
+  ConfigHandler::Reload();
+  config = ConfigHandler::GetCopiedConfig();
+  persisted = GetExternalDictionarySources(config);
+  ASSERT_EQ(persisted.size(), 2);
+  EXPECT_EQ(config.external_dictionary_path(), "/tmp/customers.tsv");
+  EXPECT_EQ(persisted[0].display_name(), "顧客番号");
+  EXPECT_EQ(persisted[1].match_mode(),
+            ExternalDictionarySourceOptions::EXACT_AND_PREFIX);
+
+  SetExternalDictionarySources({persisted[0]}, &config);
+  ConfigHandler::SetConfig(config);
+  ConfigHandler::Reload();
+  config = ConfigHandler::GetCopiedConfig();
+  ASSERT_EQ(config.external_dictionary_source_options_size(), 1);
+  ASSERT_EQ(config.external_dictionary_paths_size(), 1);
+  EXPECT_EQ(config.external_dictionary_source_options(0).path(),
+            "/tmp/customers.tsv");
+  SetExternalDictionarySources({}, &config);
+  EXPECT_TRUE(config.external_dictionary_path().empty());
+  EXPECT_EQ(config.external_dictionary_paths_size(), 0);
+  EXPECT_EQ(config.external_dictionary_source_options_size(), 0);
+}
+
+TEST_F(ConfigHandlerTest, ExternalDictionarySourceCountIsBounded) {
+  Config config;
+  std::vector<ExternalDictionarySourceOptions> sources;
+  for (int i = 0; i < 33; ++i) {
+    const std::string path = absl::StrCat(i, ".tsv");
+    sources.emplace_back().set_path(path);
+    config.add_external_dictionary_paths(path);
+  }
+  EXPECT_EQ(GetExternalDictionarySources(config).size(), 32);
+  SetExternalDictionarySources(sources, &config);
+  EXPECT_EQ(config.external_dictionary_paths_size(), 32);
+  EXPECT_EQ(config.external_dictionary_source_options_size(), 32);
 }
 
 TEST_F(ConfigHandlerTest, SetConfig) {
