@@ -35,6 +35,9 @@
 #include <QObject>
 #include <QByteArray>
 #include <QTimer>
+
+class QCheckBox;
+class QLabel;
 #include <map>
 #include <memory>
 #include <string>
@@ -118,6 +121,10 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   bool IsModified() const;
 
   QWidget* conversion_status_preview_ = nullptr;
+  // The settings-only controls are added to the existing Dictionary tab.
+  QCheckBox* external_dictionary_enabled_ = nullptr;
+  QLabel* external_dictionary_summary_ = nullptr;
+  std::vector<std::string> external_dictionary_paths_;
   std::unique_ptr<client::ClientInterface> client_;
   std::string custom_keymap_table_;
   std::string custom_roman_table_;
