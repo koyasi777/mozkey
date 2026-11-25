@@ -627,7 +627,7 @@ ConfigDialog::ConfigDialog()
       new QLabel(QStringLiteral("外部辞書"), external_header));
   auto* separator = new QFrame(external_header);
   separator->setFrameShape(QFrame::HLine);
-  separator->setFrameShadow(QFrame::Plain);
+  separator->setFrameShadow(QFrame::Sunken);
   header_layout->addWidget(separator, 1);
   auto* external_controls = new QFrame(dictionaryTab);
   auto* controls_layout = new QVBoxLayout(external_controls);
