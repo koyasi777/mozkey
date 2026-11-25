@@ -386,6 +386,40 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 品詞やコストの指定は不要です。空行と `#` から始まるコメント行は無視されます。
 各データ行はちょうど2列とし、空欄や値に含まれるタブ・改行は使用できません。
 
+#### 活用例：同じ読みから複数の候補を選ぶ
+
+同じ読みを複数行に登録すると、その読みを自分で定義した選択メニューとして利用できます。
+例えば、製品一覧用の読みと個別の製品用の読みを併用できます。
+
+```tsv
+せいひんいちらん	ABC-1234
+せいひんいちらん	XYZ-5678
+せいひんいちらん	DEF-9012
+せいひんえー	ABC-1234
+せいひんびー	XYZ-5678
+せいひんしー	DEF-9012
+```
+
+`せいひんいちらん` で通常変換すると3種類の型番が外部辞書候補として追加され、
+`せいひんびー` では `XYZ-5678` を個別に呼び出せます。
+前方一致ではなく、一覧用の読みを明示的に登録する仕組みです。
+
+開発用のコマンドや業務用の定型文にも応用できます。
+
+```tsv
+ぎっと	git status
+ぎっと	git diff
+ぎっと	git log --oneline
+めーる	いつもお世話になっております。
+めーる	ご確認いただけますと幸いです。
+めーる	引き続きよろしくお願いいたします。
+```
+
+`ぎっと` や `めーる` を通常変換して、必要な文字列を候補から選択します。
+Mozkey は文字列を入力するだけで、コマンドを実行することはありません。
+商品マスターなどから一覧用・個別用の読みを含む TSV を外部プログラムで生成・更新することもできます。
+同一読みの外部辞書候補は統合後で最大64件です。1ファイル内で同じ読みの異なる候補が64件を超えると読み込みに失敗するため、大きな一覧は分類して別の読みを割り当ててください。
+
 #### 動作と制限
 
 - 初期状態では無効です。最大32ファイルを登録でき、一覧の上から順に候補を追加します。同じ読みと候補の組み合わせは重複排除されます。
@@ -1543,6 +1577,40 @@ contacts, and reusable text. Dictionaries can be version-controlled with Git or 
 These are fictional examples. For example, `せいひんえー` offers multiple product codes.
 No part of speech or cost is required. Empty lines and comment lines starting with `#` are ignored.
 Each data line must contain exactly two nonempty fields; embedded tabs and line breaks are not supported.
+
+#### Use cases: multiple candidates for the same reading
+
+Register multiple rows with the same reading to use it as a custom selection menu.
+For example, combine a reading for a product list with individual product readings.
+
+```tsv
+せいひんいちらん	ABC-1234
+せいひんいちらん	XYZ-5678
+せいひんいちらん	DEF-9012
+せいひんえー	ABC-1234
+せいひんびー	XYZ-5678
+せいひんしー	DEF-9012
+```
+
+Normal conversion of `せいひんいちらん` (product list) adds three product codes as external candidates,
+while `せいひんびー` retrieves `XYZ-5678` individually.
+The list reading is registered explicitly; this does not use prefix matching.
+
+The same approach works for development commands and reusable business text.
+
+```tsv
+ぎっと	git status
+ぎっと	git diff
+ぎっと	git log --oneline
+めーる	いつもお世話になっております。
+めーる	ご確認いただけますと幸いです。
+めーる	引き続きよろしくお願いいたします。
+```
+
+Perform normal conversion of `ぎっと` (Git) or `めーる` (email) and select the desired text.
+Mozkey inserts text only; it does not execute commands.
+External programs can generate and update TSV files with both list and individual readings from a product catalog or other data source.
+The merged dictionary supports up to 64 external candidates per reading. A file with more than 64 distinct candidates for one reading fails to load, so split larger lists into categories with separate readings.
 
 #### Behavior and limits
 
