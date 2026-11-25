@@ -17,7 +17,6 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "base/file_util.h"
 
 namespace mozc::dictionary {
 
@@ -83,7 +82,8 @@ class ExternalDictionaryManager final {
     std::string path;
     bool allow_prefix = false;
     std::shared_ptr<const Snapshot> good;
-    std::optional<FileTimeStamp> modified_at;
+    // FileUtil::GetModificationTime returns a uint64_t timestamp.
+    std::optional<uint64_t> modified_at;
     std::chrono::steady_clock::time_point full_read_at{};
     bool has_full_read = false;
     std::shared_ptr<const std::string> last_contents;
