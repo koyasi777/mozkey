@@ -41,7 +41,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **変換状態インジケータ（Windows / macOS）：** 未確定文字の近くで「入力中・Mozc・Zenz処理中・Zenz適用済み」を表示し、配色・形状・位置を調整できます。
 - **幅広い外観カスタマイズ：** 候補・サジェスト・ルビの配色（ライト／ダーク／自動／カスタム）、サイズ、角丸、透明度、影を個別に設定。Windows ではフォント・文字の太さ・未確定文字の色や下線、IME インジケータも調整できます。
 - **英字表記辞書（IME 切り替え不要）：** 日本語入力（ひらがなモード）のまま、`GitHub` や `ChatGPT` などの英字表記を入力・選択できます。別の IME や半角英数モードへの手動切り替えは不要です。登録語ごとに「自動英字化」と「候補のみ」を選べ、推奨語彙の管理や TSV / JSON の入出力にも対応します。
-- **外部辞書（TSV ファイルの動的読み込み）：** 商品マスターや連絡先、製品型番、定型文などを外部の TSV ファイルから変換候補として利用できます。ファイルの更新を自動で反映するため、辞書を登録し直す必要はありません。複数の辞書を同時に利用でき、Git や業務システム、自作スクリプトとも連携できます。[外部辞書の使い方](#外部辞書tsv-ファイルの動的読み込み)を参照してください。
+- **外部辞書（TSV ファイルの動的読み込み）：** 商品マスターや連絡先、製品型番、定型文などを外部の TSV ファイルから変換候補として利用できます。ファイルの更新を自動で反映するため、辞書を登録し直す必要はありません。複数の辞書を名前付きで管理でき、ファイルごとに完全一致または完全一致＋前方一致を選択できます。Git や業務システム、自作スクリプトによる TSV の管理・生成とも連携できます。[外部辞書の使い方](#外部辞書tsv-ファイルの動的読み込み)を参照してください。
 - **柔軟なローマ字入力とキー設定：** プリセットの保存・管理、ローマ字テーブルの検索・編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
 - **日本語の変換品質と辞書の拡張：** 日常語彙・固有名詞・口語表現を補強し、文節分割や不自然な漢字化を抑制。日付・曜日の変換候補も拡張しています。
 - **ローカルファーストと OS 連携：** Zenz の推論はローカルで実行し、利用統計の送信機能を無効化。シークレット入力への配慮や、Windows Search などの入力欄での候補表示にも対応しています。
@@ -137,7 +137,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - 複数文節の変換キャンセル後は、キャンセル直前の文節境界を可能な限り保持し、全体 1 件としてではなく文節単位のひらがな表記選好としてユーザーセグメント履歴へ反映
 - 句読点・記号の単打確定でも直前の通常変換確定による学習を短い取り消し可能期間に保持。確定直後にキー設定から `Revert` / `Undo` が実行され、学習削除が ON なら取り消し、OFF なら保持する。次の実テキスト入力や `IMEOff` / `MakeSureIMEOff` などの確定扱いの操作では学習を保持する
 - 英字表記辞書を追加。「自動英字化」または「候補のみ」で管理し、設定画面からの編集・検索・入出力・システム語彙の更新に対応。
-- 外部辞書を追加。UTF-8 TSV の動的読み込み、複数ファイルの登録・並べ替え、読み全体の完全一致による候補追加に対応。ユーザー辞書とは独立して管理し、外部辞書が追加する候補は通常の第1候補や学習を変えない設計
+- 外部辞書を追加。UTF-8 TSV の動的読み込み、複数ファイルの登録・並べ替え、任意の辞書名、ファイル単位の完全一致・前方一致設定、使い方・活用例のヘルプに対応。ユーザー辞書とは独立して管理し、通常の第1候補を維持し、新たに追加した外部辞書候補は学習対象外とする設計
 - Windows 版の「辞書」タブに読み取り専用の辞書コスト検索を追加。システム辞書・ユーザー辞書を読みの完全一致で検索し、単語コスト・左右文脈ID・属性ビットを確認可能。辞書や学習内容は変更しない
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
@@ -371,8 +371,9 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 
 1. UTF-8 の TSV ファイルを用意し、1 行に「読み」と「候補」をタブで区切って記述します。
 2. Mozkey の設定画面の「辞書」タブから **「外部辞書の設定…」** を開きます。ユーザー辞書ツールの「外部辞書の設定」からも開けます。
-3. 「追加…」でファイルを登録し、「外部辞書を使用する」を有効にして設定を保存します。設定画面から開いた場合は、設定画面側でも保存してください。
-4. 読みを入力して通常の変換操作を行い、外部辞書の候補を選択します。
+3. 「追加…」でファイルを登録します。辞書を選択して「編集…」を押すか、一覧をダブルクリックすると、任意の辞書名と一致方式を設定できます。
+4. 「外部辞書を使用する」を有効にして「決定」を押します。設定画面から開いた場合は、設定画面側でも保存してください。
+5. 読みを入力して通常の変換操作を行い、外部辞書の候補を選択します。
 
 ```tsv
 せいひんえー	ABC-1234
@@ -385,6 +386,41 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 上記は架空のデータです。例えば `せいひんえー` から複数の型番を選択できます。
 品詞やコストの指定は不要です。空行と `#` から始まるコメント行は無視されます。
 各データ行はちょうど2列とし、空欄や値に含まれるタブ・改行は使用できません。
+
+辞書名を空欄にするとファイル名が表示されます。辞書名を変更しても元のファイル名や内容は変わりません。
+選択した辞書のパスは画面下部で確認でき、「パスをコピー」でコピーできます。
+「使い方・活用例…」から独立したヘルプウィンドウを開けます。TSV の例は選択・コピーできます。
+
+#### 一致方式：完全一致と前方一致
+
+一致方式はファイルごとに設定できます。既存の登録済み辞書も、新規登録した辞書も、初期設定では完全一致です（一致方式が未設定の場合）。
+
+| 一致方式 | 動作 |
+|---|---|
+| 完全一致 | 入力した変換対象全体の読みが、登録した読みと一致した場合に候補を追加します。 |
+| 完全一致＋前方一致 | 完全一致に加え、入力した読みが登録した読みの先頭部分と一致し、登録した読みの方が長い場合にも候補を追加します。 |
+
+例えば、次の `products.tsv` を「完全一致＋前方一致」に設定します。
+
+```tsv
+せいひん	製品一覧
+せいひんえー	ABC-1234
+せいひんびー	XYZ-5678
+せいひんしー	DEF-9012
+```
+
+| 入力する読み | 完全一致候補 | 前方一致候補 |
+|---|---|---|
+| `せいひん` | `製品一覧` | `ABC-1234`、`DEF-9012`、`XYZ-5678` |
+| `せいひんえー` | `ABC-1234` | なし |
+| `せい` | なし | なし（3文字未満） |
+
+表は上記のファイルに由来する候補のみを示しています（通常の変換候補は省略）。
+同じファイルを「完全一致」に変更すると、`せいひん` では `製品一覧` だけが外部辞書候補になります。
+例えば顧客番号の辞書は完全一致にしたまま、製品の辞書だけで前方一致を使うこともできます。
+
+前方一致候補を選択すると、入力済みの読みを消費して登録された候補を確定できます。
+読みの残りを入力する必要はありません。予測・サジェストや中間一致ではなく、通常変換で利用する候補です。
 
 #### 活用例：同じ読みから複数の候補を選ぶ
 
@@ -402,7 +438,7 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 
 `せいひんいちらん` で通常変換すると3種類の型番が外部辞書候補として追加され、
 `せいひんびー` では `XYZ-5678` を個別に呼び出せます。
-前方一致ではなく、一覧用の読みを明示的に登録する仕組みです。
+一覧用の読みを明示的に登録する仕組みなので、前方一致を有効にしなくても利用できます。
 
 開発用のコマンドや業務用の定型文にも応用できます。
 
@@ -418,14 +454,17 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 `ぎっと` や `めーる` を通常変換して、必要な文字列を候補から選択します。
 Mozkey は文字列を入力するだけで、コマンドを実行することはありません。
 商品マスターなどから一覧用・個別用の読みを含む TSV を外部プログラムで生成・更新することもできます。
+Mozkey 自体が外部の業務システムに直接接続するわけではなく、ローカルの TSV を読み込みます。
 同一読みの外部辞書候補は統合後で最大64件です。1ファイル内で同じ読みの異なる候補が64件を超えると読み込みに失敗するため、大きな一覧は分類して別の読みを割り当ててください。
 
 #### 動作と制限
 
-- 初期状態では無効です。最大32ファイルを登録でき、一覧の上から順に候補を追加します。同じ読みと候補の組み合わせは重複排除されます。
-- ファイルはバックグラウンドで監視され、通常は約3秒以内に変更が検出されます。変換時の辞書検索でファイルを読み込むことはなく、Mozkey は登録元の TSV を書き換えません。
+- 初期状態では無効です。最大32ファイルを登録できます。完全一致候補はファイル一覧の上から順に追加し、前方一致候補は完全一致候補の後に登録された読みの UTF-8 バイト順で追加します。同じ読みと候補の組み合わせは重複排除され、同じ候補文字列を繰り返し追加しません。
+- ファイルはバックグラウンドで監視され、通常は約3秒以内に変更が検出されます。再構築した辞書は完成後に公開し、変換側は再構築中も公開済みの辞書を利用できます。変換時の辞書検索でファイルを読み込むことはなく、Mozkey は登録元の TSV を書き換えません。
 - 読み込みに失敗した場合（ファイルが一時的に消失した場合を含む）は、そのファイルの最後に正常に読み込んだ内容を保持します。登録解除または機能の無効化によって外部辞書の寄与を停止できます。
-- 通常の変換対象全体の読みが完全一致した場合に候補を追加します（最大16文節）。部分一致、語彙の形態素解析への追加、予測・サジェスト用の辞書ではありません。
+- 通常の変換対象全体の読み（最大16文節）を照合します。入力途中の文節だけを対象とする検索や、中間一致・曖昧一致、語彙の形態素解析への追加、予測・サジェスト用の辞書ではありません。
+- 前方一致は3文字（Unicode コードポイント）以上で、前方一致を許可したファイルの登録語が対象です。1回の検索につき最大10候補、最大256件の候補参照を調べるため、10件未満になる場合もあります。完全一致候補の上限はこれとは別に64件です。
+- 設定画面の「状態」はファイルの存在・読み取り可否を示すもので、TSV の解析成功を保証するものではありません。
 - 通常の第1候補を維持します。新たに追加した外部辞書候補は学習・表記展開・候補の加工を抑制します。既存の通常候補と重複する場合は通常候補を保持します。
 - シークレットモード、パスワード入力欄、OS が通知するプライベート入力状態では外部辞書候補を追加しません。
 - 上限は1ファイル16 MiB、1ファイルおよび統合辞書それぞれ20万エントリ、同じ読みにつき64候補、読み256 bytes、候補1024 bytes（UTF-8）です。複数ファイルの統合時には上限を超える候補は追加されません。
@@ -1181,7 +1220,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **Conversion-status indicator (Windows / macOS):** Displays Reading, Mozc, Zenz processing, or Zenz applied near the composition, with adjustable position, shape, and colors. The new macOS indicator has not yet been verified on native macOS hardware.
 - **Extensive appearance customization:** Configure colors (light/dark/system/custom), dimensions, rounded corners, opacity, and shadows per window. Windows additionally supports font/weight, preedit colors and underlines, and IME-indicator styling.
 - **English spelling dictionary (no manual IME switching):** Enter or select spellings such as `GitHub` and `ChatGPT` while remaining in Japanese hiragana input, without manually switching to another IME or alphanumeric input mode. Registered rules either present the preferred ASCII spelling automatically or offer it only as a selectable candidate. Manage built-in presets and custom TSV/JSON rules.
-- **External dictionaries (automatic TSV reload):** Use product catalogs, contacts, product codes, and reusable text from external TSV files as conversion candidates. Changes are reflected automatically without re-importing the dictionary. Multiple files can be used together, making it easy to integrate with Git, business systems, or custom scripts. See [External dictionaries](#external-dictionaries-automatic-tsv-reload).
+- **External dictionaries (automatic TSV reload):** Use product catalogs, contacts, product codes, and reusable text from external TSV files as conversion candidates. Changes are reflected automatically without re-importing the dictionary. Manage multiple named dictionaries, each with exact matching or exact plus prefix matching. Use TSV files maintained through Git, business systems, or custom scripts. See [External dictionaries](#external-dictionaries-automatic-tsv-reload).
 - **Customizable romaji and shortcuts:** Save and manage romaji presets, search and edit romaji-table rules, display intermediate output for ambiguous rules, commit punctuation and symbols with a single key, and assign ordered key commands with delays.
 - **Improved Japanese conversion and dictionaries:** Enhances everyday expressions and names, reduces unwanted segmentation and kanji conversion, and adds date and weekday suggestions.
 - **Local-first operation and OS integration:** Runs Zenz inference locally, disables inherited usage-statistics reporting, supports privacy-aware input behavior, and improves candidate display in Windows Search and other immersive TSF hosts.
@@ -1371,7 +1410,7 @@ Main features added in this fork
 - For multi-segment conversions canceled back to hiragana, preserves conversion-time segment boundaries when possible and learns each hiragana segment as a spelling preference, rather than as a single whole restored preedit
 - Keeps learning from direct-commit punctuations/symbols reversible briefly: a keymap-resolved Revert or supported Undo cancels it when the Dictionary-tab preference is ON and retains it when OFF; subsequent text input and mode changes such as IMEOff / MakeSureIMEOff confirm the learning
 - Adds an English spelling dictionary with automatic ASCII and candidate-only modes, a searchable editor, TSV/JSON import/export, and managed system-preset updates
-- Adds external dictionaries with automatic UTF-8 TSV reload, multiple ordered files, and whole-reading exact-match candidates; managed separately from the user dictionary, without replacing the normal top candidate or learning newly added external candidates
+- Adds external dictionaries with automatic UTF-8 TSV reload, multiple ordered files, optional dictionary names, per-file exact/prefix matching, and built-in help with usage examples; managed separately from the user dictionary, without replacing the normal top candidate or learning newly added external candidates
 - Adds a read-only dictionary cost inspector to the Windows Dictionary tab, with exact-reading lookup of system/user dictionary entries, word costs, left/right context IDs, and attribute bits, without modifying dictionaries or learning data
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
@@ -1563,8 +1602,9 @@ contacts, and reusable text. Dictionaries can be version-controlled with Git or 
 
 1. Prepare a UTF-8 TSV file with a reading and candidate separated by a tab on each data line.
 2. Open **「外部辞書の設定…」** (External dictionary settings) in the Dictionary tab of the config dialog, or open 「外部辞書の設定」 from the user dictionary tool.
-3. Add files with 「追加…」, enable 「外部辞書を使用する」 (Use external dictionaries), and save. If opened from the config dialog, also save that dialog.
-4. Enter the reading, perform normal conversion, and select the external candidate.
+3. Add files with 「追加…」 (Add). Select a dictionary and click 「編集…」 (Edit), or double-click the row, to set an optional dictionary name and matching mode.
+4. Enable 「外部辞書を使用する」 (Use external dictionaries) and click 「決定」 (OK). If opened from the config dialog, also save that dialog.
+5. Enter the reading, perform normal conversion, and select the external candidate.
 
 ```tsv
 せいひんえー	ABC-1234
@@ -1577,6 +1617,41 @@ contacts, and reusable text. Dictionaries can be version-controlled with Git or 
 These are fictional examples. For example, `せいひんえー` offers multiple product codes.
 No part of speech or cost is required. Empty lines and comment lines starting with `#` are ignored.
 Each data line must contain exactly two nonempty fields; embedded tabs and line breaks are not supported.
+
+Leave the dictionary name blank to display the filename. Changing the name does not rename or modify the source file.
+The selected file's path is shown below the list and can be copied with 「パスをコピー」 (Copy path).
+Open 「使い方・活用例…」 (Help and use cases) for a separate help window with selectable, copyable TSV examples.
+
+#### Matching modes: exact and prefix matching
+
+The matching mode is configurable per file. Both existing registrations and newly added files default to exact matching when no mode has been set.
+
+| Matching mode | Behavior |
+|---|---|
+| 「完全一致」 (Exact) | Adds candidates when the entire conversion reading equals a registered reading. |
+| 「完全一致＋前方一致」 (Exact + prefix) | Also adds candidates when the entered reading matches the beginning of a longer registered reading. |
+
+For example, configure the following `products.tsv` with exact + prefix matching.
+
+```tsv
+せいひん	製品一覧
+せいひんえー	ABC-1234
+せいひんびー	XYZ-5678
+せいひんしー	DEF-9012
+```
+
+| Input reading | Exact candidates | Prefix candidates |
+|---|---|---|
+| `せいひん` | `製品一覧` | `ABC-1234`, `DEF-9012`, `XYZ-5678` |
+| `せいひんえー` | `ABC-1234` | None |
+| `せい` | None | None (fewer than three characters) |
+
+The table shows only candidates from the example file; normal conversion candidates are omitted.
+If the file is switched to exact matching, `せいひん` yields only `製品一覧` from that external dictionary.
+For example, a customer-ID dictionary can remain exact-only while a product dictionary uses prefix matching.
+
+Selecting a prefix candidate commits the registered candidate using only the reading already entered.
+There is no need to type the remaining reading. These are normal conversion candidates, not prediction, suggestions, or substring matches.
 
 #### Use cases: multiple candidates for the same reading
 
@@ -1594,7 +1669,7 @@ For example, combine a reading for a product list with individual product readin
 
 Normal conversion of `せいひんいちらん` (product list) adds three product codes as external candidates,
 while `せいひんびー` retrieves `XYZ-5678` individually.
-The list reading is registered explicitly; this does not use prefix matching.
+The list reading is registered explicitly, so this also works without enabling prefix matching.
 
 The same approach works for development commands and reusable business text.
 
@@ -1610,14 +1685,17 @@ The same approach works for development commands and reusable business text.
 Perform normal conversion of `ぎっと` (Git) or `めーる` (email) and select the desired text.
 Mozkey inserts text only; it does not execute commands.
 External programs can generate and update TSV files with both list and individual readings from a product catalog or other data source.
+Mozkey reads local TSV files; it does not connect directly to external business systems.
 The merged dictionary supports up to 64 external candidates per reading. A file with more than 64 distinct candidates for one reading fails to load, so split larger lists into categories with separate readings.
 
 #### Behavior and limits
 
-- Disabled by default. Register up to 32 files; candidates are added in list order, with duplicate reading/candidate pairs removed.
-- Files are monitored in the background, normally detecting changes within about three seconds. Dictionary lookup performs no file I/O, and Mozkey does not modify the registered TSV files.
+- Disabled by default. Register up to 32 files. Exact candidates are added in file-list order, followed by prefix candidates in UTF-8 byte order of registered readings. Duplicate reading/candidate pairs are removed, and identical candidate strings are not inserted repeatedly.
+- Files are monitored in the background, normally detecting changes within about three seconds. Rebuilt dictionaries are published only when complete; conversion can continue using the published dictionary during rebuilding. Dictionary lookup performs no file I/O, and Mozkey does not modify the registered TSV files.
 - On a read failure, including temporary file disappearance, the last successfully loaded contents of that file are retained. Unregister the file or disable the feature to remove its contribution.
-- Adds candidates only for an exact match of the entire normal conversion reading (up to 16 segments). This is not a partial-match, morphological, prediction, or suggestion dictionary.
+- Matches against the entire normal conversion reading (up to 16 segments), not individual segments within the composition. This is not a substring-match, fuzzy-match, morphological, prediction, or suggestion dictionary.
+- Prefix matching requires at least three Unicode code points and applies only to registered readings in opted-in files. Each lookup returns up to ten prefix candidates and examines at most 256 candidate references, so fewer than ten may be returned. The separate exact-match limit is 64 candidates.
+- The status column indicates whether a file exists and is readable, not whether its TSV contents were parsed successfully.
 - Preserves the normal top candidate. Newly inserted external candidates are excluded from learning, variant expansion, and modification. Identical existing normal candidates are retained rather than duplicated.
 - External candidates are not added in incognito mode, password fields, or private-input contexts reported by the OS.
 - Limits: 16 MiB per file, 200,000 entries per file and in the merged dictionary, 64 candidates per reading, 256 bytes per reading, and 1,024 bytes per candidate (UTF-8). Candidates exceeding the merged limits are not added.
