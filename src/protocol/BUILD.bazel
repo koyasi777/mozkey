@@ -30,9 +30,15 @@
 load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@com_google_protobuf//bazel:java_lite_proto_library.bzl", "java_lite_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//bazel:stubs.bzl", "jspb_proto_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "dictionary_cost_limits",
+    hdrs = ["dictionary_cost_limits.h"],
+)
 
 proto_library(
     name = "commands_proto",

@@ -87,6 +87,7 @@ mozc_cc_test(
         "//request:conversion_request",
         "//request:options",
         "//testing:gunit_main",
+        "//testing:mozctest",
         "@com_google_absl//absl/strings",
     ],
 )

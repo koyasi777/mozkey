@@ -795,6 +795,36 @@
         <source>管理...</source>
         <translation>Manage...</translation>
     </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Dictionary analysis</source>
+        <translation>Dictionary analysis</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Inspect word costs and context IDs.</source>
+        <translation>Inspect word costs and context IDs.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Inspect word costs and context IDs without changing dictionaries.</source>
+        <translation>Inspect word costs and context IDs without changing dictionaries.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Requires a running Mozkey server. No dictionary data is modified.</source>
+        <translation>Requires a running Mozkey server. No dictionary data is modified.</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Dictionary cost search (read-only)...</source>
+        <translation>Dictionary cost search (read-only)...</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Could not open the dictionary cost inspector.</source>
+        <translation>Could not open the dictionary cost inspector.</translation>
+    </message>
 </context>
 <context>
     <name>GenericTableEditorDialog</name>

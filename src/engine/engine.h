@@ -92,6 +92,10 @@ class Engine : public EngineInterface {
   bool Wait() override;
   bool ReloadAndWait() override;
 
+  bool LookupDictionaryCostEntries(
+      absl::string_view reading, uint32_t max_entries_per_source,
+      commands::DictionaryCostLookupResult* result) const;
+
   bool ClearUserHistory() override;
   bool ClearUserPrediction() override;
   bool ClearUnusedUserPrediction() override;

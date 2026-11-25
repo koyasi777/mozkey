@@ -1177,4 +1177,82 @@ TEST_F(SessionHandlerTest, AddUserHistoryRespectsPrivacySettings) {
   EXPECT_EQ(add_history(), commands::Output::SESSION_SUCCESS);
 }
 
+TEST_F(SessionHandlerTest, DictionaryCostLookupReadOnlyIPC) {
+  SessionHandler handler(CreateMockDataEngine());
+  commands::Command query;
+  query.mutable_input()->set_type(
+      commands::Input::LOOKUP_DICTIONARY_COST_ENTRIES);
+  query.mutable_input()->mutable_dictionary_cost_lookup_request()->set_reading(
+      "きょうと");
+  query.mutable_input()
+      ->mutable_dictionary_cost_lookup_request()
+      ->set_max_entries_per_source(1);
+  EXPECT_TRUE(handler.EvalCommand(&query));
+  EXPECT_EQ(query.output().error_code(), commands::Output::SESSION_SUCCESS);
+  ASSERT_TRUE(query.output().has_dictionary_cost_lookup_result());
+  const auto& entries = query.output().dictionary_cost_lookup_result().entries();
+  ASSERT_FALSE(entries.empty());
+  EXPECT_LE(entries.size(), 2);  // independently bounded by source
+  EXPECT_EQ(entries.Get(0).source(), commands::DictionaryCostEntry::SYSTEM);
+  EXPECT_EQ(entries.Get(0).reading(), "きょうと");
+
+  // Invalid input fails without asking the engine to perform a lookup.
+  query.mutable_output()->Clear();
+  query.mutable_input()->mutable_dictionary_cost_lookup_request()->set_reading(
+      "");
+  EXPECT_TRUE(handler.EvalCommand(&query));
+  EXPECT_EQ(query.output().error_code(), commands::Output::SESSION_FAILURE);
+
+  query.mutable_output()->Clear();
+  query.mutable_input()->mutable_dictionary_cost_lookup_request()->set_reading(
+      "きょうと");
+  query.mutable_input()
+      ->mutable_dictionary_cost_lookup_request()
+      ->set_max_entries_per_source(0);
+  EXPECT_TRUE(handler.EvalCommand(&query));
+  EXPECT_EQ(query.output().error_code(), commands::Output::SESSION_FAILURE);
+
+  // Reject malformed UTF-8 before reaching the dictionary.
+  query.mutable_output()->Clear();
+  query.mutable_input()->mutable_dictionary_cost_lookup_request()->set_reading(
+      std::string("\xC0\xAF", 2));
+  query.mutable_input()
+      ->mutable_dictionary_cost_lookup_request()
+      ->set_max_entries_per_source(1);
+  EXPECT_TRUE(handler.EvalCommand(&query));
+  EXPECT_EQ(query.output().error_code(), commands::Output::SESSION_FAILURE);
+  EXPECT_FALSE(query.output().has_dictionary_cost_lookup_result());
+
+  query.mutable_output()->Clear();
+  query.mutable_input()->mutable_dictionary_cost_lookup_request()->set_reading(
+      std::string(301, 'a'));
+  EXPECT_TRUE(handler.EvalCommand(&query));
+  EXPECT_EQ(query.output().error_code(), commands::Output::SESSION_FAILURE);
+
+  query.mutable_output()->Clear();
+  query.mutable_input()->mutable_dictionary_cost_lookup_request()->set_reading(
+      "きょうと");
+  query.mutable_input()
+      ->mutable_dictionary_cost_lookup_request()
+      ->set_max_entries_per_source(0xFFFFFFFFu);
+  EXPECT_TRUE(handler.EvalCommand(&query));
+  EXPECT_EQ(query.output().error_code(), commands::Output::SESSION_SUCCESS);
+  ASSERT_TRUE(query.output().has_dictionary_cost_lookup_result());
+  EXPECT_LE(query.output().dictionary_cost_lookup_result().entries_size(), 512);
+  EXPECT_LE(query.output().dictionary_cost_lookup_result().ByteSizeLong(),
+            256u * 1024u);
+
+  // A mock EngineInterface must decline without a vtable extension.
+  SessionHandler mock_handler(std::make_unique<MockEngine>());
+  commands::Command mock_query;
+  mock_query.mutable_input()->set_type(
+      commands::Input::LOOKUP_DICTIONARY_COST_ENTRIES);
+  mock_query.mutable_input()
+      ->mutable_dictionary_cost_lookup_request()
+      ->set_reading("きょうと");
+  EXPECT_TRUE(mock_handler.EvalCommand(&mock_query));
+  EXPECT_EQ(mock_query.output().error_code(),
+            commands::Output::SESSION_FAILURE);
+}
+
 }  // namespace mozc

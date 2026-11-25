@@ -1108,6 +1108,32 @@ message UserHistoryData {
   optional string value = 2;
 }
 
+// Local, read-only dictionary word-cost inspection request.
+message DictionaryCostLookupRequest {
+  optional string reading = 1;
+  optional uint32 max_entries_per_source = 2 [default = 128];
+}
+
+message DictionaryCostEntry {
+  enum Source {
+    SYSTEM = 0;
+    USER = 1;
+  }
+  optional Source source = 1;
+  optional string reading = 2;
+  optional string value = 3;
+  optional int32 cost = 4;
+  optional uint32 lid = 5;
+  optional uint32 rid = 6;
+  optional uint32 attributes = 7;
+}
+
+message DictionaryCostLookupResult {
+  repeated DictionaryCostEntry entries = 1;
+  optional bool system_truncated = 2;
+  optional bool user_truncated = 3;
+}
+
 message Input {
   enum CommandType {
     NONE = 0;
@@ -1199,10 +1225,13 @@ message Input {
     // Add a specific entry to the user history storage.
     ADD_USER_HISTORY = 32;
 
+    // Read-only dictionary metadata query for the native cost editor.
+    LOOKUP_DICTIONARY_COST_ENTRIES = 33;
+
     // Number of commands.
     // When new command is added, the command should use below number
     // and NUM_OF_COMMANDS should be incremented.
-    NUM_OF_COMMANDS = 33;
+    NUM_OF_COMMANDS = 34;
   }
   required CommandType type = 1;
 
@@ -1282,6 +1311,8 @@ message Input {
   optional mozc.EngineReloadRequest engine_reload_request = 15;
 
   optional UserHistoryData user_history_data = 18;
+
+  optional DictionaryCostLookupRequest dictionary_cost_lookup_request = 19;
 
   reserved 16;  // deprecated check_spelling_request
 }
@@ -1423,7 +1454,7 @@ message DeletionRange {
   optional int32 length = 2;
 }
 
-// Next ID: 33
+// Next ID: 35
 message Output {
   optional uint64 id = 1 [jstype = JS_STRING];
 
@@ -1541,6 +1572,9 @@ message Output {
   // must bound the text eventually written to Context::zenz_*_text.
   optional uint32 zenz_preceding_text_request_length = 1001 [default = 0];
   optional uint32 zenz_following_text_request_length = 1002 [default = 0];
+
+  // Raw dictionary entries. No user data is sent to a remote service.
+  optional DictionaryCostLookupResult dictionary_cost_lookup_result = 34;
 
   reserved 19;  // Deprecated storage_entry
   reserved 20;  // Deprecated cloud_sync_status

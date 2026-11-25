@@ -747,6 +747,14 @@ IPCClient::~IPCClient() {}
 
 bool IPCClient::Connected() const { return connected_; }
 
+uint32_t IPCClient::GetConnectedServerProcessId() const {
+  if (!connected_) {
+    return 0;
+  }
+  const uint32_t pid = GetServerProcessIdImpl(pipe_handle_.get());
+  return pid == static_cast<uint32_t>(-1) ? 0 : pid;
+}
+
 bool IPCClient::Call(absl::string_view request, std::string *response,
                      absl::Duration timeout) {
   last_ipc_error_ = IPC_NO_ERROR;

@@ -795,6 +795,36 @@
         <source>管理...</source>
         <translation>管理...</translation>
     </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Dictionary analysis</source>
+        <translation>辞書の解析</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Inspect word costs and context IDs.</source>
+        <translation>単語コストや文脈IDを調べます</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Inspect word costs and context IDs without changing dictionaries.</source>
+        <translation>辞書を変更せずに、単語コストや文脈IDを調べます。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Requires a running Mozkey server. No dictionary data is modified.</source>
+        <translation>実行中の Mozkey サーバーが必要です。辞書データは変更しません。</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Dictionary cost search (read-only)...</source>
+        <translation>辞書コスト検索（読み取り専用）...</translation>
+    </message>
+    <message>
+        <location filename="config_dialog.ui" line="0"/>
+        <source>Could not open the dictionary cost inspector.</source>
+        <translation>辞書コスト検索を起動できませんでした。</translation>
+    </message>
 </context>
 <context>
     <name>GenericTableEditorDialog</name>
