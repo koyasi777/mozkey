@@ -166,6 +166,7 @@ mozc_cc_qt_library(
         "//dictionary:user_dictionary_util",
         "//dictionary:user_pos",
         "//gui/base:encoding_util",
+        "//gui/base:external_dictionary_settings_dialog",
         "//gui/base:gui_base",
         "//gui/base:msime_user_dictionary_importer",
         "//gui/base:singleton_window_helper",

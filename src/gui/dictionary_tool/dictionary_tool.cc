@@ -35,6 +35,7 @@
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QShortcut>
+#include <QSizePolicy>
 #include <QTimer>
 #include <QtGui>
 #include <algorithm>
@@ -63,6 +64,8 @@
 #include "dictionary/user_pos.h"
 #include "gui/base/encoding_util.h"
 #include "gui/base/util.h"
+#include "gui/base/external_dictionary_settings_dialog.h"
+#include "protocol/config.pb.h"
 #include "gui/config_dialog/combobox_delegate.h"
 #include "gui/dictionary_tool/find_dialog.h"
 #include "gui/dictionary_tool/import_dialog.h"
@@ -374,6 +377,78 @@ DictionaryTool::DictionaryTool(QWidget* parent)
   toolbar_->addWidget(dic_menu_button_);
   toolbar_->addWidget(new_word_button_);
   toolbar_->addWidget(delete_word_button_);
+  // Keep the original toolbar controls left aligned; add the cross-link at
+  // the right edge, without changing user dictionary storage or editing.
+  auto* toolbar_spacer = new QWidget(this);
+  toolbar_spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  toolbar_->addWidget(toolbar_spacer);
+  auto* external_settings_button =
+      new QPushButton(QStringLiteral("外部辞書の設定"), this);
+  external_settings_button->setFlat(true);
+  toolbar_->addWidget(external_settings_button);
+  connect(external_settings_button, &QPushButton::clicked, this, [this] {
+    config::Config config;
+    if (!client_->CheckVersionOrRestartServer() ||
+        !client_->GetConfig(&config)) {
+      QMessageBox::warning(this, windowTitle(),
+                           QStringLiteral("Mozkey の設定を取得できませんでした。"));
+      return;
+    }
+    bool enabled = config.enable_external_dictionary();
+    std::vector<std::string> paths;
+    for (const std::string& path : config.external_dictionary_paths()) {
+      paths.push_back(path);
+    }
+    if (paths.empty() && !config.external_dictionary_path().empty()) {
+      paths.push_back(config.external_dictionary_path());
+    }
+    if (!ExternalDictionarySettingsDialog::Edit(this, &enabled, &paths)) return;
+    // The modal editor can remain open while ConfigDialog (or another tool)
+    // updates the global configuration.  Re-read immediately before saving,
+    // reject conflicting external-dictionary edits, and preserve all other
+    // settings from the freshest available Config.
+    config::Config latest_config;
+    if (!client_->CheckVersionOrRestartServer() ||
+        !client_->GetConfig(&latest_config)) {
+      QMessageBox::warning(this, windowTitle(),
+                           QStringLiteral("現在の設定を再取得できませんでした。保存は行われていません。"));
+      return;
+    }
+    bool external_changed =
+        latest_config.enable_external_dictionary() !=
+            config.enable_external_dictionary() ||
+        latest_config.external_dictionary_path() !=
+            config.external_dictionary_path() ||
+        latest_config.external_dictionary_paths_size() !=
+            config.external_dictionary_paths_size();
+    if (!external_changed) {
+      for (int i = 0; i < config.external_dictionary_paths_size(); ++i) {
+        if (latest_config.external_dictionary_paths(i) !=
+            config.external_dictionary_paths(i)) {
+          external_changed = true;
+          break;
+        }
+      }
+    }
+    if (external_changed) {
+      QMessageBox::warning(
+          this, windowTitle(),
+          QStringLiteral("外部辞書の設定が別のウィンドウで更新されました。"
+                         "\n上書きを防ぐため、もう一度開いて設定してください。"));
+      return;
+    }
+    latest_config.set_enable_external_dictionary(enabled);
+    latest_config.set_external_dictionary_path(
+        paths.empty() ? std::string() : paths.front());
+    latest_config.clear_external_dictionary_paths();
+    for (const std::string& path : paths) {
+      latest_config.add_external_dictionary_paths(path);
+    }
+    if (!client_->SetConfig(latest_config)) {
+      QMessageBox::warning(this, windowTitle(),
+                           QStringLiteral("外部辞書の設定を保存できませんでした。"));
+    }
+  });
 
   // Cosmetic tweaks for Mac.
 #ifdef __APPLE__
