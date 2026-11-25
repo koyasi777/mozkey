@@ -138,6 +138,13 @@ class IPCClient : public IPCClientInterface {
 
   uint32_t GetServerProcessId() const override;
 
+#ifdef _WIN32
+  // Returns the OS-reported PID of the current named-pipe peer.
+  // Returns 0 if disconnected or the PID cannot be obtained.
+  // Unlike GetServerProcessId(), this does not read IPC path metadata.
+  uint32_t GetConnectedServerProcessId() const;
+#endif  // _WIN32
+
   // Synchronous IPC call:
   // Client request is encoded in 'request'.
   // Server response is stored in 'response'.

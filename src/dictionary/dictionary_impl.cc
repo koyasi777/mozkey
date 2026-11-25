@@ -34,6 +34,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/log/check.h"
@@ -80,6 +81,49 @@ bool DictionaryImpl::HasValue(absl::string_view value) const {
 }
 
 namespace {
+
+constexpr size_t kMaxCostEntriesPerSource = 256;
+
+// Only collects raw exact-match dictionary tokens.  A per-source limit avoids
+// allowing a large system-dictionary result to hide user-dictionary entries.
+class ExactCostEntryCollector final : public DictionaryInterface::Callback {
+ public:
+  using Source = DictionaryImpl::CostEntry::Source;
+
+  ExactCostEntryCollector(absl::string_view reading, Source source,
+                          size_t limit,
+                          DictionaryImpl::CostLookupResult* result)
+      : reading_(reading),
+        source_(source),
+        limit_(limit),
+        result_(result),
+        start_size_(result->entries.size()) {}
+
+  ResultType OnToken(absl::string_view /*key*/,
+                     absl::string_view /*actual_key*/,
+                     Token token) override {
+    // Do not expose kana-expanded or other non-exact dictionary keys.
+    if (token.key != reading_) {
+      return TRAVERSE_CONTINUE;
+    }
+    if (result_->entries.size() - start_size_ >= limit_) {
+      truncated_ = true;
+      return TRAVERSE_DONE;
+    }
+    result_->entries.push_back({source_, std::move(token)});
+    return TRAVERSE_CONTINUE;
+  }
+
+  bool truncated() const { return truncated_; }
+
+ private:
+  const absl::string_view reading_;
+  const Source source_;
+  const size_t limit_;
+  DictionaryImpl::CostLookupResult* const result_;
+  const size_t start_size_;
+  bool truncated_ = false;
+};
 
 class CallbackWithFilter : public DictionaryInterface::Callback {
  public:
@@ -234,6 +278,27 @@ void LookupZipcodeAlias(const DictionaryInterface& dictionary,
 }
 
 }  // namespace
+
+DictionaryImpl::CostLookupResult DictionaryImpl::LookupExactCostEntries(
+    absl::string_view reading, size_t max_entries_per_source) const {
+  CostLookupResult result;
+  if (reading.empty() || max_entries_per_source == 0) {
+    return result;
+  }
+  const size_t limit =
+      std::min(max_entries_per_source, kMaxCostEntriesPerSource);
+
+  ExactCostEntryCollector system_collector(
+      reading, CostEntry::Source::kSystem, limit, &result);
+  system_dictionary_->LookupExact(reading, &system_collector);
+  result.system_truncated = system_collector.truncated();
+
+  ExactCostEntryCollector user_collector(
+      reading, CostEntry::Source::kUser, limit, &result);
+  user_dictionary_.LookupExact(reading, &user_collector);
+  result.user_truncated = user_collector.truncated();
+  return result;
+}
 
 void DictionaryImpl::LookupPredictive(absl::string_view key,
                                       const ConversionOptions& options,

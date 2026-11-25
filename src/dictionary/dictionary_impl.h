@@ -30,12 +30,14 @@
 #ifndef MOZC_DICTIONARY_DICTIONARY_IMPL_H_
 #define MOZC_DICTIONARY_DICTIONARY_IMPL_H_
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "absl/strings/string_view.h"
 #include "dictionary/dictionary_interface.h"
+#include "dictionary/dictionary_token.h"
 #include "dictionary/pos_matcher.h"
 #include "request/options.h"
 
@@ -65,6 +67,22 @@ class DictionaryImpl : public DictionaryInterface {
 
   bool HasKey(absl::string_view key) const override;
   bool HasValue(absl::string_view value) const override;
+
+  // Read-only dictionary entry data, NOT ranked conversion candidates.
+  // Source is determined from the dictionary being searched, rather than
+  // token attributes.  ValueDictionary is intentionally not searched.
+  using CostEntry = DictionaryCostEntry;
+  using CostLookupResult = DictionaryCostLookupResult;
+
+  // Exact reading only; searches each source independently and bounds each
+  // source by max_entries_per_source (hard maximum: 256).  Does not apply
+  // rewriters, history, suppression filters, or conversion options.  Token::cost
+  // is the dictionary's existing word cost, not the final candidate score.
+  // Concrete, non-virtual metadata API. Do not add a virtual method to
+  // DictionaryInterface: it would shift UserDictionaryInterface vtable slots.
+  CostLookupResult LookupExactCostEntries(
+      absl::string_view reading,
+      size_t max_entries_per_source = 256) const;
 
   void LookupPredictive(absl::string_view key,
                         Callback* callback) const override;

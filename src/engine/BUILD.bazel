@@ -193,6 +193,32 @@ mozc_cc_test(
     ]),
 )
 
+# Raw word-cost response packing is independent of the conversion path.
+mozc_cc_library(
+    name = "dictionary_cost_response",
+    srcs = ["dictionary_cost_response.cc"],
+    hdrs = ["dictionary_cost_response.h"],
+    visibility = ["//engine:__pkg__"],
+    deps = [
+        "//dictionary:dictionary_interface",
+        "//protocol:commands_cc_proto",
+        "//protocol:dictionary_cost_limits",
+    ],
+)
+
+mozc_cc_test(
+    name = "dictionary_cost_response_test",
+    size = "small",
+    srcs = ["dictionary_cost_response_test.cc"],
+    deps = [
+        ":dictionary_cost_response",
+        "//dictionary:dictionary_interface",
+        "//protocol:commands_cc_proto",
+        "//protocol:dictionary_cost_limits",
+        "//testing:gunit_main",
+    ],
+)
+
 mozc_cc_library(
     name = "engine",
     srcs = [
@@ -204,22 +230,27 @@ mozc_cc_library(
     ],
     deps = [
         ":data_loader",
+        ":dictionary_cost_response",
         ":engine_converter",
         ":engine_converter_interface",
         ":engine_interface",
         ":minimal_converter",
         ":modules",
         ":supplemental_model_interface",
+        "//base:util",
         "//converter",
         "//converter:converter_interface",
         "//converter:immutable_converter",
         "//converter:immutable_converter_interface",
         "//config:config_handler",
         "//data_manager",
+        "//dictionary:dictionary_impl",
+        "//dictionary:dictionary_interface",
         "//dictionary:user_dictionary",
         "//prediction:predictor",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
+        "//protocol:dictionary_cost_limits",
         "//protocol:engine_builder_cc_proto",
         "//rewriter",
         "//rewriter:rewriter_interface",

@@ -664,6 +664,15 @@ ConfigDialog::ConfigDialog()
       EnableApplyButton();
     }
   });
+  QObject::connect(inspectDictionaryCostButton, SIGNAL(clicked()), this,
+                   SLOT(InspectDictionaryCosts()));
+#ifndef _WIN32
+  // Product query client currently supports Windows only. Until the
+  // platform-specific transport is implemented, do not expose a dead action.
+  inspectDictionaryCostButton->setVisible(false);
+  dictionaryCostHeader->setVisible(false);
+  dictionaryCostGroup->setVisible(false);
+#endif
   QObject::connect(editKeymapButton, SIGNAL(clicked()), this,
                    SLOT(EditKeymap()));
   QObject::connect(resetToDefaultsButton, SIGNAL(clicked()), this,
@@ -8048,6 +8057,18 @@ void ConfigDialog::EditZenzFeedback() {
 
 void ConfigDialog::EditUserDictionary() {
   client_->LaunchTool("dictionary_tool", "");
+}
+
+void ConfigDialog::InspectDictionaryCosts() {
+#ifdef _WIN32
+  // Launch only. No config mutation, server start, or dictionary write.
+  // QueryRunningMozkey() runs in the tool only after explicit user search.
+  if (!client_->LaunchTool("dictionary_cost_inspector", "")) {
+    QMessageBox::warning(
+        this, windowTitle(),
+        tr("Could not open the dictionary cost inspector."));
+  }
+#endif
 }
 
 void ConfigDialog::EditKeymap() {

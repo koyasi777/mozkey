@@ -138,6 +138,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - 句読点・記号の単打確定でも直前の通常変換確定による学習を短い取り消し可能期間に保持。確定直後にキー設定から `Revert` / `Undo` が実行され、学習削除が ON なら取り消し、OFF なら保持する。次の実テキスト入力や `IMEOff` / `MakeSureIMEOff` などの確定扱いの操作では学習を保持する
 - 英字表記辞書を追加。「自動英字化」または「候補のみ」で管理し、設定画面からの編集・検索・入出力・システム語彙の更新に対応。
 - 外部辞書を追加。UTF-8 TSV の動的読み込み、複数ファイルの登録・並べ替え、読み全体の完全一致による候補追加に対応。ユーザー辞書とは独立して管理し、外部辞書が追加する候補は通常の第1候補や学習を変えない設計
+- Windows 版の「辞書」タブに読み取り専用の辞書コスト検索を追加。システム辞書・ユーザー辞書を読みの完全一致で検索し、単語コスト・左右文脈ID・属性ビットを確認可能。辞書や学習内容は変更しない
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
 - ハイフンなし7桁の郵便番号（例：`1000001`）を、既存の郵便番号辞書を使って住所へ変換可能。ライブ変換では数字表記を第1候補に保ち、キー設定の `ConvertNext`（次候補、標準では Space）で住所などの後続候補を選択可能
@@ -414,6 +415,19 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 管理画面では検索・並べ替え・複数行の削除に加え、UTF-8 の TSV（`input` / `preferred` / `mode` / `enabled` の4列）と JSON（`schema_version: 1`、`rules` 配列）のインポート・エクスポートが可能です。推奨語彙の自動更新では**未編集のシステム管理語だけ**を同期し、編集・削除した語やカスタム語は原則として保持します。自動更新は OFF にできます。管理画面での変更は、親の設定画面で **「適用」** を押して保存してください。
 
 入力側は小文字 ASCII の `a`～`z` のみ（2～64文字）、優先表記は空白なしの印字可能 ASCII（1～128文字）、登録件数は最大4,096件です。数字・ハイフン・記号を含む**打鍵列**、未登録語の推測判定、あらゆる日本語との衝突回避には対応していません。パスワード欄や対象外の入力モードでは適用されません。**新規・既存プロファイルのどちらも、有効フラグが未設定なら有効**になります。明示的に保存した ON / OFF は維持されます。
+
+### 辞書コスト検索（Windows・読み取り専用）
+
+Windows 版では、**Mozkey プロパティ →「辞書」タブ → 最下部の「辞書の解析」→「辞書コスト検索（読み取り専用）…」** から辞書エントリを調べられます。実行中の Mozkey サーバーに問い合わせる機能で、検索のためにサーバーを起動・再起動することはありません。
+
+- 読みを完全一致で検索し、システム辞書とユーザー辞書のエントリを一覧表示します。例えば「はし」で検索できます。
+- 辞書の区分、読み、表記、単語コスト、左文脈ID、右文脈ID、属性ビットを確認できます。列見出しで並べ替えでき、コストやIDなどの数値列は数値順に並びます。
+- 各辞書の検索件数上限は 1～256 件（初期値 128 件）で、上限などにより結果の一部が省略される場合はその旨を表示します。
+- **読み取り専用**です。検索によって辞書の追加・編集・保存や、学習履歴の更新は行いません。
+
+**表示される単語コストは、実際の変換候補順位や総合変換スコアではありません。** 通常の変換には接続コスト、前後の文脈、候補の書き換え、学習などが関わるため、コストの数値順と候補ウィンドウの順番は一致しないことがあります。この画面は学習結果や最終的な候補順位の内訳を解析するものではありません。
+
+この GUI 機能は現在 Windows 版向けです。macOS / Linux 向けの同等の画面は未実装です。
 
 ### ライブ変換
 
@@ -1324,6 +1338,7 @@ Main features added in this fork
 - Keeps learning from direct-commit punctuations/symbols reversible briefly: a keymap-resolved Revert or supported Undo cancels it when the Dictionary-tab preference is ON and retains it when OFF; subsequent text input and mode changes such as IMEOff / MakeSureIMEOff confirm the learning
 - Adds an English spelling dictionary with automatic ASCII and candidate-only modes, a searchable editor, TSV/JSON import/export, and managed system-preset updates
 - Adds external dictionaries with automatic UTF-8 TSV reload, multiple ordered files, and whole-reading exact-match candidates; managed separately from the user dictionary, without replacing the normal top candidate or learning newly added external candidates
+- Adds a read-only dictionary cost inspector to the Windows Dictionary tab, with exact-reading lookup of system/user dictionary entries, word costs, left/right context IDs, and attribute bits, without modifying dictionaries or learning data
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
@@ -1558,6 +1573,19 @@ When `chatgpt` is configured as candidate-only, its trigger can leave a trailing
 The management dialog supports filtering, sorting, multirow deletion, UTF-8 TSV (`input`, `preferred`, `mode`, `enabled`), and JSON import/export (`schema_version: 1` with a `rules` array). Automatic catalog updates reconcile **untouched system-managed entries** while preserving edited, deleted, and custom entries; updates can be disabled. To persist changes, click **Apply** in the parent configuration dialog.
 
 Triggers are lowercase ASCII `a`–`z` only (2–64 characters); preferred spellings are printable ASCII without spaces (1–128 characters), with at most 4,096 rules. Trigger strings containing digits, hyphens, or punctuation are not supported. No automatic language inference or universal romaji-conflict prevention is claimed. Password fields and excluded input modes are not affected. For both new and existing profiles, the feature is **enabled by default when the feature flag is unset**. Explicitly saved ON/OFF choices are preserved.
+
+### Dictionary cost inspector (Windows, read-only)
+
+On Windows, open **Mozkey Properties → Dictionary tab → Dictionary analysis (the last section) → Dictionary cost search (read-only)…**. The inspector queries an already-running Mozkey server; it does not launch or restart the server for a lookup.
+
+- Search for an **exact reading** (for example, `はし`) and inspect entries from the system and user dictionaries.
+- View the dictionary category, reading, written form, word cost, left context ID, right context ID, and attribute bits. Click a column header to sort; numeric columns are sorted numerically.
+- Set a per-dictionary result limit from 1 to 256 entries (default: 128). The UI reports when results have been truncated by a limit.
+- The lookup is **read-only**: it does not add, edit, or save dictionary entries or update learning history.
+
+**A dictionary word cost is not the final conversion score or candidate rank.** Actual conversion can also involve connection costs, surrounding context, candidate rewriting, and learning. The cost-sorted table may therefore differ from the normal conversion candidate list. This inspector does not analyze learned ranking adjustments or the final scoring breakdown.
+
+The inspector GUI is currently implemented for Windows; equivalent macOS and Linux interfaces are not available.
 
 ### Live conversion
 

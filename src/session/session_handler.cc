@@ -52,11 +52,14 @@
 #include "base/stopwatch.h"
 #include "base/version.h"
 #include "base/vlog.h"
+#include "base/util.h"
 #include "composer/table.h"
 #include "config/character_form_manager.h"
 #include "config/config_handler.h"
+#include "engine/engine.h"
 #include "engine/engine_interface.h"
 #include "protocol/commands.pb.h"
+#include "protocol/dictionary_cost_limits.h"
 #include "protocol/config.pb.h"
 #include "protocol/engine_builder.pb.h"
 #include "protocol/user_dictionary_storage.pb.h"
@@ -290,6 +293,33 @@ bool SessionHandler::AddUserHistory(commands::Command* command) {
                                  user_history_data.value());
 }
 
+bool SessionHandler::LookupDictionaryCostEntries(
+    commands::Command* command) const {
+  if (!command->input().has_dictionary_cost_lookup_request()) {
+    return false;
+  }
+  const auto& request = command->input().dictionary_cost_lookup_request();
+  // Bound IPC data and avoid expensive unbounded dictionary traversals.
+  if (request.reading().empty() ||
+      request.reading().size() > commands::kDictionaryCostMaxReadingBytes ||
+      !Util::IsValidUtf8(request.reading()) ||
+      request.max_entries_per_source() == 0) {
+    return false;
+  }
+  // The administrative query is deliberately not part of EngineInterface's
+  // vtable.  Alternative engines decline the optional operation.
+  const auto* concrete_engine = dynamic_cast<const Engine*>(engine_.get());
+  if (concrete_engine == nullptr) {
+    return false;
+  }
+  const uint32_t max_entries = std::min(
+      request.max_entries_per_source(),
+      commands::kDictionaryCostMaxEntriesPerSource);
+  return concrete_engine->LookupDictionaryCostEntries(
+      request.reading(), max_entries,
+      command->mutable_output()->mutable_dictionary_cost_lookup_result());
+}
+
 bool SessionHandler::GetConfig(commands::Command* command) {
   MOZC_VLOG(1) << "Getting config";
   *command->mutable_output()->mutable_config() =
@@ -404,6 +434,9 @@ bool SessionHandler::EvalCommand(commands::Command* command) {
       break;
     case commands::Input::GET_SERVER_VERSION:
       eval_succeeded = GetServerVersion(command);
+      break;
+    case commands::Input::LOOKUP_DICTIONARY_COST_ENTRIES:
+      eval_succeeded = LookupDictionaryCostEntries(command);
       break;
     default:
       eval_succeeded = false;

@@ -49,6 +49,7 @@
 #include "base/file_util.h"
 #include "base/process.h"
 #include "base/system_util.h"
+#include "base/util.h"
 #include "base/version.h"
 #include "base/vlog.h"
 #include "client/character_renderability.h"
@@ -56,6 +57,7 @@
 #include "config/config_handler.h"
 #include "ipc/ipc.h"
 #include "protocol/commands.pb.h"
+#include "protocol/dictionary_cost_limits.h"
 #include "protocol/config.pb.h"
 #include "session/key_info_util.h"
 
@@ -528,6 +530,42 @@ bool Client::GetConfig(config::Config *config) {
 
   config->Clear();
   *config = output.config();
+  return true;
+}
+
+bool Client::LookupDictionaryCostEntries(
+    absl::string_view reading, uint32_t max_entries_per_source,
+    commands::DictionaryCostLookupResult* result) {
+  if (result == nullptr) {
+    return false;
+  }
+  // Even a failed request must not leave stale entries visible in the GUI.
+  result->Clear();
+  if (reading.empty() ||
+      reading.size() > commands::kDictionaryCostMaxReadingBytes ||
+      !Util::IsValidUtf8(reading) || max_entries_per_source == 0) {
+    return false;
+  }
+  commands::Input input;
+  InitInput(&input);
+  input.set_type(commands::Input::LOOKUP_DICTIONARY_COST_ENTRIES);
+  auto* request = input.mutable_dictionary_cost_lookup_request();
+  request->set_reading(std::string(reading));
+  request->set_max_entries_per_source(max_entries_per_source);
+
+  commands::Output output;
+  if (!Call(input, &output) ||
+      output.error_code() != commands::Output::SESSION_SUCCESS ||
+      !output.has_dictionary_cost_lookup_result()) {
+    return false;
+  }
+  const auto& incoming = output.dictionary_cost_lookup_result();
+  if (incoming.entries_size() >
+          2 * commands::kDictionaryCostMaxEntriesPerSource ||
+      incoming.ByteSizeLong() > commands::kDictionaryCostMaxResponseBytes) {
+    return false;
+  }
+  *result = incoming;
   return true;
 }
 

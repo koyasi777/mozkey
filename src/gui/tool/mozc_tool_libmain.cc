@@ -66,6 +66,7 @@ ABSL_DECLARE_FLAG(std::string, error_type);
 int RunAboutDialog(int argc, char *argv[]);
 int RunConfigDialog(int argc, char *argv[]);
 int RunDictionaryTool(int argc, char *argv[]);
+int RunDictionaryCostInspector(int argc, char *argv[]);
 int RunWordRegisterDialog(int argc, char *argv[]);
 int RunErrorMessageDialog(int argc, char *argv[]);
 
@@ -306,6 +307,8 @@ int RunMozcTool(int argc, char *argv[]) {
     return RunConfigDialog(argc, argv);
   } else if (absl::GetFlag(FLAGS_mode) == "dictionary_tool") {
     return RunDictionaryTool(argc, argv);
+  } else if (absl::GetFlag(FLAGS_mode) == "dictionary_cost_inspector") {
+    return RunDictionaryCostInspector(argc, argv);
   } else if (absl::GetFlag(FLAGS_mode) == "word_register_dialog") {
     return RunWordRegisterDialog(argc, argv);
   } else if (absl::GetFlag(FLAGS_mode) == "error_message_dialog") {

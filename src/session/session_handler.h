@@ -124,6 +124,7 @@ class SessionHandler {
   bool Cleanup(commands::Command* command);
   bool ImportUserDictionary(commands::Command* command);
   bool AddUserHistory(commands::Command* command);
+  bool LookupDictionaryCostEntries(commands::Command* command) const;
   bool IsEngineReloadPathAllowed(absl::string_view path) const;
   bool SendEngineReloadRequest(commands::Command* command);
   bool NoOperation(commands::Command* command);

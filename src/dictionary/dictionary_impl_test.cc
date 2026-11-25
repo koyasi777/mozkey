@@ -29,6 +29,7 @@
 
 #include "dictionary/dictionary_impl.h"
 
+#include <algorithm>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -51,12 +52,34 @@
 #include "request/conversion_request.h"
 #include "request/options.h"
 #include "testing/gunit.h"
+#include "testing/mozctest.h"
 
 namespace mozc {
 namespace dictionary {
 namespace {
 
 using UserEntry = user_dictionary::UserDictionary::Entry;
+
+// A deterministic dictionary for testing exact raw-token provenance, without
+// depending on the contents of the shipped system dictionary.
+class SingleTokenDictionary final : public DictionaryInterface {
+ public:
+  explicit SingleTokenDictionary(Token token) : token_(std::move(token)) {}
+
+  void LookupExact(absl::string_view reading,
+                   Callback* callback) const override {
+    if (reading != token_.key ||
+        callback->OnKey(reading) != Callback::TRAVERSE_CONTINUE ||
+        callback->OnActualKey(reading, reading, 0) !=
+            Callback::TRAVERSE_CONTINUE) {
+      return;
+    }
+    callback->OnToken(reading, reading, token_);
+  }
+
+ private:
+  Token token_;
+};
 
 struct DictionaryData {
   std::unique_ptr<UserDictionaryInterface> user_dictionary;
@@ -82,6 +105,10 @@ std::unique_ptr<DictionaryData> CreateDictionaryData() {
 
   ret->user_dictionary = std::make_unique<dictionary::UserDictionary>(
       std::move(user_pos), *ret->pos_matcher);
+  // Complete the asynchronous reload of the isolated test profile before
+  // loading synthetic entries; a late reload must not replace test fixtures.
+  ret->user_dictionary->WaitForReloader();
+
   ret->dictionary = std::make_unique<DictionaryImpl>(
       std::move(sys_dict), std::move(val_dict), *ret->user_dictionary,
       *ret->pos_matcher);
@@ -90,7 +117,7 @@ std::unique_ptr<DictionaryData> CreateDictionaryData() {
 
 }  // namespace
 
-class DictionaryImplTest : public ::testing::Test {
+class DictionaryImplTest : public testing::TestWithTempUserProfile {
  protected:
   void SetUp() override { config::ConfigHandler::GetDefaultConfig(&config_); }
 
@@ -465,6 +492,113 @@ TEST_F(DictionaryImplTest, HasKeyValue) {
 
   EXPECT_FALSE(d->HasKey("__きょうと__"));
   EXPECT_FALSE(d->HasValue("__京都__"));
+}
+
+TEST_F(DictionaryImplTest, CostLookupSeparatesSourcesAndIgnoresValueDictionary) {
+  auto data = CreateDictionaryData();
+  user_dictionary::UserDictionaryStorage storage;
+  UserEntry* user_entry = storage.add_dictionaries()->add_entries();
+  user_entry->set_key("てすとよみ");
+  user_entry->set_value("ユーザー語");
+  user_entry->set_pos(user_dictionary::UserDictionary::NOUN);
+  ASSERT_TRUE(data->user_dictionary->Load(storage));
+
+  DictionaryImpl dictionary(
+      std::make_unique<SingleTokenDictionary>(
+          Token("てすとよみ", "システム語", 4800, 1, 2, 0)),
+      std::make_unique<SingleTokenDictionary>(
+          Token("てすとよみ", "値辞書の合成語", 100, 3, 4, 0)),
+      *data->user_dictionary, *data->pos_matcher);
+
+  const auto result = dictionary.LookupExactCostEntries("てすとよみ");
+  ASSERT_EQ(result.entries.size(), 2);
+  EXPECT_FALSE(result.system_truncated);
+  EXPECT_FALSE(result.user_truncated);
+
+  const auto& system_entry = result.entries[0];
+  EXPECT_EQ(system_entry.source, DictionaryImpl::CostEntry::Source::kSystem);
+  EXPECT_EQ(system_entry.token.key, "てすとよみ");
+  EXPECT_EQ(system_entry.token.value, "システム語");
+  EXPECT_EQ(system_entry.token.cost, 4800);
+  EXPECT_EQ(system_entry.token.lid, 1);
+  EXPECT_EQ(system_entry.token.rid, 2);
+
+  const auto& actual_user_entry = result.entries[1];
+  EXPECT_EQ(actual_user_entry.source,
+            DictionaryImpl::CostEntry::Source::kUser);
+  EXPECT_EQ(actual_user_entry.token.key, "てすとよみ");
+  EXPECT_EQ(actual_user_entry.token.value, "ユーザー語");
+  EXPECT_GT(actual_user_entry.token.cost, 0);
+  EXPECT_TRUE(actual_user_entry.token.attributes & Token::USER_DICTIONARY);
+}
+
+TEST_F(DictionaryImplTest, CostLookupLimitsSourcesIndependently) {
+  auto data = CreateDictionaryData();
+  user_dictionary::UserDictionaryStorage storage;
+  for (const char* value : {"ユーザー語一", "ユーザー語二"}) {
+    UserEntry* entry = storage.add_dictionaries()->add_entries();
+    entry->set_key("てすとよみ");
+    entry->set_value(value);
+    entry->set_pos(user_dictionary::UserDictionary::NOUN);
+  }
+  ASSERT_TRUE(data->user_dictionary->Load(storage));
+
+  DictionaryImpl dictionary(
+      std::make_unique<SingleTokenDictionary>(
+          Token("てすとよみ", "システム語", 4800, 1, 2, 0)),
+      std::make_unique<SingleTokenDictionary>(
+          Token("てすとよみ", "値辞書の合成語", 100, 3, 4, 0)),
+      *data->user_dictionary, *data->pos_matcher);
+
+  const auto limited = dictionary.LookupExactCostEntries("てすとよみ", 1);
+  ASSERT_EQ(limited.entries.size(), 2);
+  EXPECT_EQ(limited.entries[0].source,
+            DictionaryImpl::CostEntry::Source::kSystem);
+  EXPECT_EQ(limited.entries[1].source,
+            DictionaryImpl::CostEntry::Source::kUser);
+  EXPECT_FALSE(limited.system_truncated);
+  EXPECT_TRUE(limited.user_truncated);
+
+  const auto all = dictionary.LookupExactCostEntries("てすとよみ", 2);
+  EXPECT_EQ(all.entries.size(), 3);
+  EXPECT_FALSE(all.system_truncated);
+  EXPECT_FALSE(all.user_truncated);
+  const auto none = dictionary.LookupExactCostEntries("てすとよみ", 0);
+  EXPECT_TRUE(none.entries.empty());
+  EXPECT_FALSE(none.system_truncated);
+  EXPECT_FALSE(none.user_truncated);
+}
+
+TEST_F(DictionaryImplTest, CostLookupRequiresExactNonEmptyReading) {
+  auto data = CreateDictionaryData();
+  DictionaryImpl* dictionary =
+      static_cast<DictionaryImpl*>(data->dictionary.get());
+  EXPECT_TRUE(dictionary->LookupExactCostEntries("").entries.empty());
+  EXPECT_TRUE(dictionary->LookupExactCostEntries("__きょうと__").entries.empty());
+  const auto exact = dictionary->LookupExactCostEntries("きょうと");
+  EXPECT_TRUE(std::any_of(
+      exact.entries.begin(), exact.entries.end(),
+      [](const DictionaryImpl::CostEntry& entry) {
+        return entry.source == DictionaryImpl::CostEntry::Source::kSystem &&
+               entry.token.key == "きょうと";
+      }));
+}
+
+TEST_F(DictionaryImplTest, CostLookupDoesNotExposeSuggestionOnlyUserWords) {
+  auto data = CreateDictionaryData();
+  user_dictionary::UserDictionaryStorage storage;
+  UserEntry* entry = storage.add_dictionaries()->add_entries();
+  entry->set_key("てすとよみ");
+  entry->set_value("サジェスト専用");
+  entry->set_pos(user_dictionary::UserDictionary::SUGGESTION_ONLY);
+  ASSERT_TRUE(data->user_dictionary->Load(storage));
+  DictionaryImpl dictionary(
+      std::make_unique<SingleTokenDictionary>(
+          Token("べつのよみ", "システム語", 1000, 1, 2, 0)),
+      std::make_unique<SingleTokenDictionary>(
+          Token("べつのよみ", "値辞書の合成語", 100, 3, 4, 0)),
+      *data->user_dictionary, *data->pos_matcher);
+  EXPECT_TRUE(dictionary.LookupExactCostEntries("てすとよみ").entries.empty());
 }
 
 }  // namespace dictionary

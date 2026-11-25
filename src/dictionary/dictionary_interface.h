@@ -30,6 +30,7 @@
 #ifndef MOZC_DICTIONARY_DICTIONARY_INTERFACE_H_
 #define MOZC_DICTIONARY_DICTIONARY_INTERFACE_H_
 
+#include <cstddef>
 #include <functional>
 #include <string>
 #include <utility>
@@ -42,6 +43,20 @@
 
 namespace mozc {
 namespace dictionary {
+
+// Raw dictionary tokens for the cost-management editor. These are not
+// converted candidates and have not passed through the rewriter pipeline.
+struct DictionaryCostEntry {
+  enum class Source { kSystem, kUser };
+  Source source;
+  Token token;
+};
+
+struct DictionaryCostLookupResult {
+  std::vector<DictionaryCostEntry> entries;
+  bool system_truncated = false;
+  bool user_truncated = false;
+};
 
 // DictionaryInterface only defines pure immutable lookup operations.
 // mutable operations, e.g., Reload, Load are defined
