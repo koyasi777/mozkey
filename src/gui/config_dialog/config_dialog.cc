@@ -117,8 +117,10 @@
 #include "client/client.h"
 #include "composer/english_input_exceptions.h"
 #include "config/config_handler.h"
+#include "config/external_dictionary_config.h"
 #include "config/roman_table_presets.h"
 #include "gui/base/util.h"
+#include "gui/base/external_dictionary_settings_dialog.h"
 #include "gui/config_dialog/keymap_editor.h"
 #include "gui/config_dialog/roman_table_editor.h"
 #include "protocol/config.pb.h"
@@ -617,6 +619,52 @@ ConfigDialog::ConfigDialog()
                    SLOT(EditZenzFeedback()));
   QObject::connect(editUserDictionaryButton, SIGNAL(clicked()), this,
                    SLOT(EditUserDictionary()));
+  // Keep the external overlay distinct from user_dictionary.db.
+  auto* external_header = new QFrame(dictionaryTab);
+  auto* header_layout = new QHBoxLayout(external_header);
+  header_layout->setContentsMargins(9, 9, 9, 9);
+  header_layout->setSpacing(6);
+  header_layout->addWidget(
+      new QLabel(QStringLiteral("外部辞書"), external_header));
+  auto* separator = new QFrame(external_header);
+  separator->setFrameShape(QFrame::HLine);
+  separator->setFrameShadow(QFrame::Sunken);
+  header_layout->addWidget(separator, 1);
+  auto* external_controls = new QFrame(dictionaryTab);
+  auto* controls_layout = new QVBoxLayout(external_controls);
+  controls_layout->setContentsMargins(24, 9, 24, 9);
+  controls_layout->setSpacing(8);
+  // Place the management action at the right edge of the same row as
+  // the enable switch; the registered-file summary follows directly below.
+  auto* external_action_row = new QHBoxLayout();
+  external_dictionary_enabled_ =
+      new QCheckBox(QStringLiteral("外部 TSV 辞書を使用する"), external_controls);
+  external_action_row->addWidget(external_dictionary_enabled_);
+  external_action_row->addStretch(1);
+  auto* manage_external =
+      new QPushButton(QStringLiteral("外部辞書の設定…"), external_controls);
+  external_action_row->addWidget(manage_external);
+  controls_layout->addLayout(external_action_row);
+  external_dictionary_summary_ =
+      new QLabel(QStringLiteral("登録済み：0 ファイル"), external_controls);
+  external_dictionary_summary_->setWordWrap(true);
+  external_dictionary_summary_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  controls_layout->addWidget(external_dictionary_summary_);
+  const int insert_index = dictionaryTabLayout->indexOf(userDictionaryGroup);
+  dictionaryTabLayout->insertWidget(insert_index + 1, external_header);
+  dictionaryTabLayout->insertWidget(insert_index + 2, external_controls);
+  QObject::connect(manage_external, &QPushButton::clicked, this, [this]() {
+    bool enabled = external_dictionary_enabled_->isChecked();
+    auto sources = external_dictionary_sources_;
+    if (ExternalDictionarySettingsDialog::Edit(this, &enabled, &sources)) {
+      external_dictionary_sources_ = std::move(sources);
+      external_dictionary_enabled_->setChecked(enabled);
+      external_dictionary_summary_->setText(
+          QStringLiteral("登録済み：%1 ファイル").arg(
+              static_cast<int>(external_dictionary_sources_.size())));
+      EnableApplyButton();
+    }
+  });
   QObject::connect(inspectDictionaryCostButton, SIGNAL(clicked()), this,
                    SLOT(InspectDictionaryCosts()));
 #ifndef _WIN32
@@ -938,6 +986,12 @@ bool ConfigDialog::Update() {
 
   config::Config config;
   ConvertToProto(&config);
+  if (config.enable_external_dictionary() &&
+      config.external_dictionary_paths_size() == 0) {
+    QMessageBox::warning(this, windowTitle(),
+                         QStringLiteral("外部辞書ファイルを追加してください。"));
+    return false;
+  }
 
   if (config.session_keymap() == config::Config::CUSTOM &&
       config.custom_keymap_table().empty()) {
@@ -1000,6 +1054,24 @@ bool ConfigDialog::Update() {
           config.use_custom_zenz_live_correction_underline_color() ||
       initial_zenz_live_correction_underline_color_ !=
           config.zenz_live_correction_underline_color();
+
+  // The dictionary tool saves Config independently.  Do not overwrite its
+  // newly saved external-dictionary paths (or other settings) from the stale
+  // snapshot on which this dialog's controls were originally based.
+  config::Config latest_config;
+  if (!GetConfig(&latest_config)) {
+    QMessageBox::warning(
+        this, windowTitle(),
+        QStringLiteral("現在の設定を再取得できませんでした。保存は行われていません。"));
+    return false;
+  }
+  if (latest_config.SerializeAsString() != base_config_.SerializeAsString()) {
+    QMessageBox::warning(
+        this, windowTitle(),
+        QStringLiteral("別のウィンドウで Mozkey の設定が更新されました。"
+                       "\n変更内容の上書きを防ぐため、設定画面を開き直してください。"));
+    return false;
+  }
 
   if (!SetConfig(config)) {
     QMessageBox::critical(this, windowTitle(), tr("Failed to update config"));
@@ -6170,6 +6242,11 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
   SET_CHECKBOX(t13nConversionCheckBox, use_t13n_conversion);
   SET_CHECKBOX(zipcodeConversionCheckBox, use_zip_code_conversion);
   SET_CHECKBOX(spellingCorrectionCheckBox, use_spelling_correction);
+  external_dictionary_enabled_->setChecked(config.enable_external_dictionary());
+  external_dictionary_sources_ = config::GetExternalDictionarySources(config);
+  external_dictionary_summary_->setText(
+      QStringLiteral("登録済み：%1 ファイル").arg(
+          static_cast<int>(external_dictionary_sources_.size())));
 
   // InfoListConfig
   localUsageDictionaryCheckBox->setChecked(
@@ -6591,6 +6668,9 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   GET_CHECKBOX(t13nConversionCheckBox, use_t13n_conversion);
   GET_CHECKBOX(zipcodeConversionCheckBox, use_zip_code_conversion);
   GET_CHECKBOX(spellingCorrectionCheckBox, use_spelling_correction);
+  config->set_enable_external_dictionary(
+      external_dictionary_enabled_->isChecked());
+  config::SetExternalDictionarySources(external_dictionary_sources_, config);
 
   // InformationListConfig
   config->mutable_information_list_config()->set_use_local_usage_dictionary(

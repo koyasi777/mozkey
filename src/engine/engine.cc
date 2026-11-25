@@ -35,6 +35,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -46,8 +47,11 @@
 #include "converter/converter_interface.h"
 #include "converter/immutable_converter.h"
 #include "converter/immutable_converter_interface.h"
+#include "config/config_handler.h"
+#include "config/external_dictionary_config.h"
 #include "data_manager/data_manager.h"
 #include "dictionary/dictionary_impl.h"
+#include "dictionary/external_dictionary_manager.h"
 #include "dictionary/user_dictionary.h"
 #include "engine/data_loader.h"
 #include "engine/dictionary_cost_response.h"
@@ -61,6 +65,26 @@
 #include "rewriter/rewriter_interface.h"
 
 namespace mozc {
+namespace {
+
+// Settings are the single source of truth. SetSources never reads the files;
+// the manager's worker reads them asynchronously.
+void ConfigureExternalDictionary(const engine::Modules& modules) {
+  const auto config = config::ConfigHandler::GetSharedConfig();
+  const auto manager = modules.GetExternalDictionaryManager();
+  if (!manager) return;
+  std::vector<dictionary::ExternalDictionaryManager::SourceSpec> sources;
+  if (config->enable_external_dictionary()) {
+    using SourceOptions = config::ExternalDictionarySourceOptions;
+    for (const auto& source : config::GetExternalDictionarySources(*config)) {
+      sources.push_back({source.path(),
+                         source.match_mode() == SourceOptions::EXACT_AND_PREFIX});
+    }
+  }
+  manager->SetSources(std::move(sources));
+}
+
+}  // namespace
 
 absl::StatusOr<std::unique_ptr<Engine>> Engine::CreateEngine(
     std::unique_ptr<const DataManager> data_manager) {
@@ -101,6 +125,9 @@ absl::Status Engine::ReloadModules(std::unique_ptr<engine::Modules> modules) {
 }
 
 absl::Status Engine::Init(std::unique_ptr<engine::Modules> modules) {
+  // Configure newly constructed modules as well as module replacements;
+  // otherwise cold start would require a manual RELOAD command.
+  ConfigureExternalDictionary(*modules);
   auto immutable_converter_factory = [](const engine::Modules& modules) {
     return std::make_unique<ImmutableConverter>(modules);
   };
@@ -138,7 +165,13 @@ absl::Status Engine::Init(std::unique_ptr<engine::Modules> modules) {
   return absl::OkStatus();
 }
 
-bool Engine::Reload() { return converter_ && converter_->Reload(); }
+bool Engine::Reload() {
+  if (!converter_) return false;
+  // SessionHandler calls Reload after SET_CONFIG.  Reuse the existing manager
+  // so all converters observe the same source without a server restart.
+  ConfigureExternalDictionary(converter_->modules());
+  return converter_->Reload();
+}
 
 bool Engine::Sync() { return converter_ && converter_->Sync(); }
 

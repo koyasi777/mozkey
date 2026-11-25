@@ -1560,6 +1560,39 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "external_dictionary_rewriter",
+    srcs = ["external_dictionary_rewriter.cc"],
+    hdrs = ["external_dictionary_rewriter.h"],
+    deps = [
+        ":rewriter_interface",
+        "//converter:attribute",
+        "//converter:segments",
+        "//dictionary:external_dictionary_manager",
+        "//protocol:commands_cc_proto",
+        "//request:conversion_request",
+    ],
+)
+
+mozc_cc_test(
+    name = "external_dictionary_rewriter_test",
+    size = "small",
+    srcs = ["external_dictionary_rewriter_test.cc"],
+    deps = [
+        ":external_dictionary_rewriter",
+        "//base:file_util",
+        "//base/file:temp_dir",
+        "//converter:attribute",
+        "//converter:segments",
+        "//dictionary:external_dictionary_manager",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//request:conversion_request",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+    ],
+)
+
+mozc_cc_library(
     name = "rewriter",
     srcs = [
         "rewriter.cc",
@@ -1581,6 +1614,7 @@ mozc_cc_library(
         ":emoticon_rewriter",
         ":english_variants_rewriter",
         ":environmental_filter_rewriter",
+        ":external_dictionary_rewriter",
         ":focus_candidate_rewriter",
         ":fortune_rewriter",
         ":ivs_variants_rewriter",
@@ -1624,11 +1658,14 @@ mozc_cc_test(
     deps = [
         "rewriter",
         ":rewriter_interface",
+        "//base:file_util",
+        "//base/file:temp_dir",
         "//config:character_form_manager",
         "//converter:attribute",
         "//converter:inner_segment",
         "//converter:segments",
         "//data_manager/testing:mock_data_manager",
+        "//dictionary:external_dictionary_manager",
         "//engine:modules",
         "//protocol:config_cc_proto",
         "//request:conversion_request",

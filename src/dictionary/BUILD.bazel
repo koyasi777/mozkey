@@ -44,6 +44,33 @@ load(
 package(default_visibility = ["//visibility:private"])
 
 mozc_cc_library(
+    name = "external_dictionary_manager",
+    srcs = ["external_dictionary_manager.cc"],
+    hdrs = ["external_dictionary_manager.h"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//base:file_util",
+        "//base/strings:unicode",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_test(
+    name = "external_dictionary_manager_test",
+    size = "small",
+    srcs = ["external_dictionary_manager_test.cc"],
+    deps = [
+        ":external_dictionary_manager",
+        "//base:file_util",
+        "//base/file:temp_dir",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+    ],
+)
+
+mozc_cc_library(
     name = "dictionary_interface",
     hdrs = ["dictionary_interface.h"],
     visibility = [
