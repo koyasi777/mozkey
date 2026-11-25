@@ -27,7 +27,7 @@ class ExternalDictionarySettingsDialog final : public QDialog {
   void AddFiles();
   void RemoveSelected();
   void MoveSelected(int direction);
-  void OpenSelected();
+  void CopySelectedPath();
   bool CollectAndValidate(bool* enabled, std::vector<std::string>* paths);
 
   QCheckBox* enabled_checkbox_ = nullptr;
@@ -35,7 +35,7 @@ class ExternalDictionarySettingsDialog final : public QDialog {
   QPushButton* remove_button_ = nullptr;
   QPushButton* up_button_ = nullptr;
   QPushButton* down_button_ = nullptr;
-  QPushButton* open_button_ = nullptr;
+  QPushButton* copy_path_button_ = nullptr;
   std::vector<std::string> paths_;
 };
 

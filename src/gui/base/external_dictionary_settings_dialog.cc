@@ -2,12 +2,13 @@
 #include "gui/base/external_dictionary_settings_dialog.h"
 
 #include <QCheckBox>
-#include <QDesktopServices>
+#include <QClipboard>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
 #include <QGroupBox>
+#include <QGuiApplication>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -16,7 +17,6 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -93,8 +93,11 @@ ExternalDictionarySettingsDialog::ExternalDictionarySettingsDialog(
   remove_button_ = new QPushButton(QStringLiteral("削除"), this);
   up_button_ = new QPushButton(QStringLiteral("上へ"), this);
   down_button_ = new QPushButton(QStringLiteral("下へ"), this);
-  open_button_ = new QPushButton(QStringLiteral("ファイルを開く"), this);
-  for (auto* button : {add, remove_button_, up_button_, down_button_, open_button_}) {
+  copy_path_button_ = new QPushButton(QStringLiteral("パスをコピー"), this);
+  copy_path_button_->setToolTip(QStringLiteral(
+      "選択した辞書ファイルのパスをクリップボードにコピーします。"));
+  for (auto* button : {add, remove_button_, up_button_, down_button_,
+                       copy_path_button_}) {
     button->setMinimumWidth(112);
     buttons->addWidget(button);
   }
@@ -136,7 +139,8 @@ ExternalDictionarySettingsDialog::ExternalDictionarySettingsDialog(
   connect(remove_button_, &QPushButton::clicked, this, [this] { RemoveSelected(); });
   connect(up_button_, &QPushButton::clicked, this, [this] { MoveSelected(-1); });
   connect(down_button_, &QPushButton::clicked, this, [this] { MoveSelected(1); });
-  connect(open_button_, &QPushButton::clicked, this, [this] { OpenSelected(); });
+  connect(copy_path_button_, &QPushButton::clicked, this,
+          [this] { CopySelectedPath(); });
   connect(table_, &QTableWidget::itemSelectionChanged,
           this, [this] { UpdateSelectionActions(); });
   connect(footer, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -175,7 +179,7 @@ void ExternalDictionarySettingsDialog::UpdateSelectionActions() {
   const int row = table_->currentRow();
   const bool selected = row >= 0 && row < static_cast<int>(paths_.size());
   remove_button_->setEnabled(selected);
-  open_button_->setEnabled(selected);
+  copy_path_button_->setEnabled(selected);
   up_button_->setEnabled(selected && row > 0);
   down_button_->setEnabled(selected && row + 1 < static_cast<int>(paths_.size()));
 }
@@ -213,17 +217,10 @@ void ExternalDictionarySettingsDialog::MoveSelected(int direction) {
   table_->selectRow(target);
 }
 
-void ExternalDictionarySettingsDialog::OpenSelected() {
+void ExternalDictionarySettingsDialog::CopySelectedPath() {
   const int row = table_->currentRow();
   if (row < 0 || row >= static_cast<int>(paths_.size())) return;
-  const QString path = FromUtf8(paths_[row]);
-  if (!QFileInfo(path).isFile()) {
-    QMessageBox::warning(this, windowTitle(), QStringLiteral("ファイルが見つかりません。"));
-    return;
-  }
-  if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
-    QMessageBox::warning(this, windowTitle(), QStringLiteral("ファイルを開けませんでした。"));
-  }
+  QGuiApplication::clipboard()->setText(FromUtf8(paths_[row]));
 }
 
 bool ExternalDictionarySettingsDialog::CollectAndValidate(
