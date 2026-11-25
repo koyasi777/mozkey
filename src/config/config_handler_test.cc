@@ -187,6 +187,46 @@ TEST_F(ConfigHandlerTest, PreserveLearningOnCommitUndoRoundTrip) {
                    .preserve_learning_on_commit_undo());
 }
 
+TEST_F(ConfigHandlerTest, ExternalDictionaryMultiplePathsRoundTrip) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "external_dictionary_multi.db");
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+  ConfigHandler::Reload();
+  Config config = ConfigHandler::GetCopiedConfig();
+  config.set_enable_external_dictionary(true);
+  config.set_external_dictionary_path("/tmp/first.tsv");
+  config.add_external_dictionary_paths("/tmp/first.tsv");
+  config.add_external_dictionary_paths("/tmp/second.tsv");
+  ConfigHandler::SetConfig(config);
+  ConfigHandler::Reload();
+  const Config persisted = ConfigHandler::GetCopiedConfig();
+  ASSERT_EQ(persisted.external_dictionary_paths_size(), 2);
+  EXPECT_EQ(persisted.external_dictionary_paths(0), "/tmp/first.tsv");
+  EXPECT_EQ(persisted.external_dictionary_paths(1), "/tmp/second.tsv");
+  EXPECT_EQ(persisted.external_dictionary_path(), "/tmp/first.tsv");
+  EXPECT_TRUE(persisted.enable_external_dictionary());
+}
+
+TEST_F(ConfigHandlerTest, ExternalDictionarySettingsRoundTrip) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "external_dictionary_settings.db");
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+  ConfigHandler::Reload();
+
+  Config config = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(config.enable_external_dictionary());
+  EXPECT_TRUE(config.external_dictionary_path().empty());
+  config.set_enable_external_dictionary(true);
+  config.set_external_dictionary_path("/tmp/社員名簿.tsv");
+  ConfigHandler::SetConfig(config);
+  ConfigHandler::Reload();
+  const Config persisted = ConfigHandler::GetCopiedConfig();
+  EXPECT_TRUE(persisted.enable_external_dictionary());
+  EXPECT_EQ(persisted.external_dictionary_path(), "/tmp/社員名簿.tsv");
+}
+
 TEST_F(ConfigHandlerTest, SetConfig) {
   Config input;
   Config output;

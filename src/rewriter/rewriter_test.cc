@@ -39,6 +39,8 @@
 #include "absl/flags/flag.h"
 #include "absl/flags/reflection.h"
 #include "absl/log/check.h"
+#include "base/file_util.h"
+#include "base/file/temp_dir.h"
 #include "config/character_form_manager.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
@@ -318,6 +320,39 @@ TEST_F(RewriterTest, PreservesNoVariantsExpansionThroughPipeline) {
     EXPECT_EQ(top.value, "Google");
     EXPECT_TRUE(top.attributes & converter::Attribute::NO_VARIANTS_EXPANSION);
   }
+}
+
+TEST_F(RewriterTest, ExternalDictionaryIsConnectedToRewriterPipeline) {
+  const auto dir = testing::MakeTempDirectoryOrDie();
+  const std::string path = FileUtil::JoinPath(dir.path(), "customer.tsv");
+  ASSERT_TRUE(FileUtil::SetContents(path, "001234\t外部会社\n").ok());
+  auto manager = modules_->GetExternalDictionaryManager();
+  ASSERT_TRUE(manager);
+  manager->SetPath(path);
+  ASSERT_TRUE(manager->PollOnceForTesting().ok());
+
+  Segments segments;
+  Segment* segment = segments.push_back_segment();
+  segment->set_key("001234");
+  converter::Candidate* native = segment->add_candidate();
+  native->key = "001234";
+  native->content_key = "001234";
+  native->value = "001234";
+  native->content_value = "001234";
+  const ConversionRequest request = ConversionRequestBuilder()
+      .SetRequestType(ConversionRequest::CONVERSION)
+      .SetKey("001234")
+      .Build();
+  EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
+  bool found = false;
+  for (size_t i = 0; i < segment->candidates_size(); ++i) {
+    const auto& candidate = segment->candidate(i);
+    if (candidate.value == "外部会社") {
+      EXPECT_TRUE(candidate.attributes & converter::Attribute::NO_LEARNING);
+      found = true;
+    }
+  }
+  EXPECT_TRUE(found);
 }
 
 }  // namespace mozc

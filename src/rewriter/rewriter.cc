@@ -48,6 +48,7 @@
 #include "rewriter/emoticon_rewriter.h"
 #include "rewriter/english_variants_rewriter.h"
 #include "rewriter/environmental_filter_rewriter.h"
+#include "rewriter/external_dictionary_rewriter.h"
 #include "rewriter/focus_candidate_rewriter.h"
 #include "rewriter/ivs_variants_rewriter.h"
 #include "rewriter/language_aware_rewriter.h"
@@ -197,6 +198,9 @@ Rewriter::Rewriter(const engine::Modules& modules) {
   AddRewriter(make_unique_from_tuples<CorrectionRewriter>(
       modules, data_manager.GetReadingCorrectionData()));
   AddRewriter(std::make_unique<T13nPromotionRewriter>());
+  // Only add externally sourced candidates after native rewrites/reranking.
+  AddRewriter(std::make_unique<ExternalDictionaryRewriter>(
+      modules.GetExternalDictionaryManager()));
   AddRewriter(make_unique_from_tuples<EnvironmentalFilterRewriter>(
       data_manager.GetEmojiRewriterData()));
   AddRewriter(std::make_unique<RemoveRedundantCandidateRewriter>());

@@ -87,6 +87,11 @@ absl::Status Modules::Init(std::unique_ptr<const DataManager> data_manager) {
   RETURN_IF_NULL(data_manager);
   data_manager_ = std::move(data_manager);
 
+  if (!external_dictionary_manager_) {
+    external_dictionary_manager_ =
+        std::make_shared<dictionary::ExternalDictionaryManager>();
+  }
+
   if (!pos_matcher_) {
     pos_matcher_ = std::make_unique<dictionary::PosMatcher>(
         data_manager_->GetPosMatcherData());

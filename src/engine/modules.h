@@ -38,6 +38,7 @@
 #include "converter/segmenter.h"
 #include "data_manager/data_manager.h"
 #include "dictionary/dictionary_interface.h"
+#include "dictionary/external_dictionary_manager.h"
 #include "dictionary/pos_group.h"
 #include "dictionary/pos_matcher.h"
 #include "dictionary/single_kanji_dictionary.h"
@@ -80,6 +81,13 @@ class Modules {
   dictionary::UserDictionaryInterface& GetUserDictionary() const {
     DCHECK(user_dictionary_);
     return *user_dictionary_;
+  }
+
+  // Shared with Rewriter. The manager's snapshot can be replaced independently
+  // without rebuilding the Converter or taking locks during file I/O.
+  std::shared_ptr<dictionary::ExternalDictionaryManager>
+  GetExternalDictionaryManager() const {
+    return external_dictionary_manager_;
   }
 
   const dictionary::DictionaryInterface& GetSuffixDictionary() const {
@@ -135,6 +143,9 @@ class Modules {
   Connector connector_;
   std::unique_ptr<const Segmenter> segmenter_;
   std::unique_ptr<dictionary::UserDictionaryInterface> user_dictionary_;
+  // Starts disabled; Phase 3 will supply a configured external TSV path.
+  std::shared_ptr<dictionary::ExternalDictionaryManager>
+      external_dictionary_manager_;
   std::unique_ptr<dictionary::DictionaryInterface> suffix_dictionary_;
   std::unique_ptr<dictionary::DictionaryInterface> dictionary_;
   std::unique_ptr<const dictionary::PosGroup> pos_group_;

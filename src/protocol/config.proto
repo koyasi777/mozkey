@@ -180,6 +180,13 @@ message Config {
   }
   repeated UserRomanTablePreset user_roman_table_presets = 1402;
 
+  // Read-only UTF-8 TSV file (reading TAB candidate).  The source remains
+  // disabled unless the user explicitly opts in.  Never reuse these field IDs.
+  optional bool enable_external_dictionary = 1065 [default = false];
+  optional string external_dictionary_path = 1066 [default = ""];
+  // Ordered UTF-8 TSV sources. The legacy path stays as a fallback.
+  repeated string external_dictionary_paths = 1067;
+
   enum PunctuationMethod {
     TOUTEN_KUTEN = 0;
     COMMA_PERIOD = 1;

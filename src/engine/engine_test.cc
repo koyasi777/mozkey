@@ -32,9 +32,13 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/strings/string_view.h"
+#include "base/file_util.h"
+#include "base/file/temp_dir.h"
+#include "config/config_handler.h"
 #include "data_manager/data_manager.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "engine/modules.h"
@@ -125,6 +129,74 @@ class EngineTest : public testing::TestWithTempUserProfile {
   EngineReloadRequest invalid_path_request_;
   EngineReloadRequest invalid_data_request_;
 };
+
+TEST_F(EngineTest, ExternalDictionaryMultiSourceConfigReload) {
+  const auto dir = testing::MakeTempDirectoryOrDie();
+  const std::string first = FileUtil::JoinPath(dir.path(), "one.tsv");
+  const std::string second = FileUtil::JoinPath(dir.path(), "two.tsv");
+  ASSERT_TRUE(FileUtil::SetContents(first, "ぐう\t第一\n").ok());
+  ASSERT_TRUE(FileUtil::SetContents(second, "ぐう\t第二\n").ok());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_enable_external_dictionary(true);
+  config.set_external_dictionary_path(first);
+  config.clear_external_dictionary_paths();
+  config.add_external_dictionary_paths(first);
+  config.add_external_dictionary_paths(second);
+  config::ConfigHandler::SetConfig(config);
+  auto modules = Modules::Create(std::make_unique<testing::MockDataManager>());
+  ASSERT_TRUE(modules.ok());
+  ASSERT_TRUE(engine_->ReloadModules(std::move(*modules)).ok());
+  auto manager = engine_->GetModulesForTesting().GetExternalDictionaryManager();
+  ASSERT_NE(manager, nullptr);
+  ASSERT_TRUE(manager->PollOnceForTesting().ok());
+  EXPECT_EQ(manager->LookupExact("ぐう"),
+            (std::vector<std::string>{"第一", "第二"}));
+  config.set_enable_external_dictionary(false);
+  config::ConfigHandler::SetConfig(config);
+  EXPECT_TRUE(engine_->Reload());
+  EXPECT_TRUE(manager->LookupExact("ぐう").empty());
+  config.clear_external_dictionary_paths();
+  config.set_external_dictionary_path("");
+  config::ConfigHandler::SetConfig(config);
+}
+
+TEST_F(EngineTest, ExternalDictionaryConfigSurvivesEngineReload) {
+  const auto dir = testing::MakeTempDirectoryOrDie();
+  const std::string path = FileUtil::JoinPath(dir.path(), "external.tsv");
+  ASSERT_TRUE(FileUtil::SetContents(path, "001234\tテスト会社\n").ok());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_enable_external_dictionary(true);
+  config.set_external_dictionary_path(path);
+  config::ConfigHandler::SetConfig(config);
+  auto modules = Modules::Create(std::make_unique<testing::MockDataManager>());
+  ASSERT_TRUE(modules.ok());
+  ASSERT_TRUE(engine_->ReloadModules(std::move(*modules)).ok());
+  auto manager = engine_->GetModulesForTesting().GetExternalDictionaryManager();
+  ASSERT_NE(manager, nullptr);
+  EXPECT_EQ(manager->GetStatus().path, path);
+  ASSERT_TRUE(manager->PollOnceForTesting().ok());
+  EXPECT_EQ(manager->LookupExact("001234").size(), 1u);
+
+  config.set_enable_external_dictionary(false);
+  config::ConfigHandler::SetConfig(config);
+  EXPECT_TRUE(engine_->Reload());
+  EXPECT_EQ(manager->GetStatus().state,
+            dictionary::ExternalDictionaryManager::State::kDisabled);
+  EXPECT_TRUE(manager->LookupExact("001234").empty());
+
+  config.set_enable_external_dictionary(true);
+  config.set_external_dictionary_path(path);
+  config::ConfigHandler::SetConfig(config);
+  EXPECT_TRUE(engine_->Reload());
+  ASSERT_TRUE(manager->PollOnceForTesting().ok());
+  EXPECT_EQ(manager->LookupExact("001234").size(), 1u);
+
+  // Restore settings before subsequent tests in this process.
+  config.set_enable_external_dictionary(false);
+  config.set_external_dictionary_path("");
+  config::ConfigHandler::SetConfig(config);
+  EXPECT_TRUE(engine_->Reload());
+}
 
 TEST_F(EngineTest, ReloadModulesTest) {
   std::unique_ptr<Modules> modules =

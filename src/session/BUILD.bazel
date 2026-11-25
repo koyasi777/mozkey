@@ -1123,3 +1123,28 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:linux"],
     visibility = ["//session:__pkg__"],
 )
+
+# SessionHandler-level external-dictionary integration tests (mock + OSS data).
+mozc_cc_test(
+    name = "external_dictionary_session_handler_e2e_test",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["external_dictionary_session_handler_e2e_test.cc"],
+    data = ["//data_manager/oss:mozc.data"],
+    deps = [
+        ":session_handler",
+        ":session_handler_test_util",
+        "//base:file_util",
+        "//base/file:temp_dir",
+        "//config:config_handler",
+        "//data_manager",
+        "//data_manager/testing:mock_data_manager",
+        "//dictionary:external_dictionary_manager",
+        "//engine",
+        "//protocol:candidate_window_cc_proto",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+    ],
+)
