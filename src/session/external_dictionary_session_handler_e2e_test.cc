@@ -213,7 +213,7 @@ TEST_F(ExternalDictionarySessionHandlerE2ETest,
   Initialize(false);
   ASSERT_NE(handler_, nullptr);
 
-  // SET_CONFIG must trigger SessionHandler::MaybeUpdateConfig -> Engine::Reload.
+  // SET_CONFIG must apply the effective external sources to the live engine.
   ASSERT_TRUE(SendConfig(true, path_));
   ASSERT_TRUE(manager_->PollOnceForTesting().ok());
   commands::Output out;
@@ -235,6 +235,63 @@ TEST_F(ExternalDictionarySessionHandlerE2ETest,
             dictionary::ExternalDictionaryManager::State::kDisabled);
   ASSERT_TRUE(ConvertReading("ぐうぐる", &out));
   EXPECT_FALSE(ContainsSurface(out, replacement)) << out.ShortDebugString();
+}
+
+TEST_F(ExternalDictionarySessionHandlerE2ETest,
+       ConditionalConfigAppliesOnlyEffectiveExternalSources) {
+  ASSERT_TRUE(FileUtil::SetContents(path_, "ぐうぐる\t外部辞書候補\n").ok());
+  Initialize(false);
+  ASSERT_NE(handler_, nullptr);
+  const auto save = [&](const config::Config& requested) {
+    commands::Command command;
+    auto* input = command.mutable_input();
+    input->set_type(commands::Input::COMPARE_AND_SET_CONFIG);
+    *input->mutable_expected_config() = config::ConfigHandler::GetCopiedConfig();
+    *input->mutable_config() = requested;
+    EXPECT_TRUE(handler_->EvalCommand(&command));
+    EXPECT_EQ(command.output().error_code(), commands::Output::SESSION_SUCCESS);
+    return command.output();
+  };
+  config::Config requested = config::ConfigHandler::GetCopiedConfig();
+  requested.set_enable_external_dictionary(true);
+  requested.set_external_dictionary_path(path_);
+  requested.clear_external_dictionary_paths();
+  requested.clear_external_dictionary_source_options();
+  auto* source = requested.add_external_dictionary_source_options();
+  source->set_path(path_);
+  source->set_display_name("first");
+  const auto first = save(requested);
+  ASSERT_EQ(first.config_update_result(),
+            commands::Output::CONFIG_UPDATE_SUCCESS);
+  ASSERT_TRUE(manager_->PollOnceForTesting().ok());
+  const auto snapshot = manager_->GetSnapshot();
+  ASSERT_FALSE(manager_->LookupExact("ぐうぐる").empty());
+
+  requested = first.config();
+  requested.set_use_emoji_conversion(!requested.use_emoji_conversion());
+  requested.mutable_external_dictionary_source_options(0)->set_display_name(
+      "renamed");
+  const auto renamed = save(requested);
+  ASSERT_EQ(renamed.config_update_result(),
+            commands::Output::CONFIG_UPDATE_SUCCESS);
+  EXPECT_EQ(manager_->GetSnapshot(), snapshot);
+
+  // Matching-mode changes are effective even without any file modification.
+  requested = renamed.config();
+  requested.mutable_external_dictionary_source_options(0)->set_match_mode(
+      config::Config::ExternalDictionarySourceOptions::EXACT_AND_PREFIX);
+  const auto prefix = save(requested);
+  ASSERT_EQ(prefix.config_update_result(),
+            commands::Output::CONFIG_UPDATE_SUCCESS);
+  EXPECT_NE(manager_->GetSnapshot(), snapshot);
+  EXPECT_FALSE(manager_->GetSnapshot()->prefix_entries.empty());
+  requested = prefix.config();
+  requested.set_enable_external_dictionary(false);
+  ASSERT_EQ(save(requested).config_update_result(),
+            commands::Output::CONFIG_UPDATE_SUCCESS);
+  EXPECT_TRUE(manager_->LookupExact("ぐうぐる").empty());
+  EXPECT_EQ(manager_->GetStatus().state,
+            dictionary::ExternalDictionaryManager::State::kDisabled);
 }
 
 // With the actual OSS dictionary, a short standalone reading can stay within

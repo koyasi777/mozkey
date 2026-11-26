@@ -61,6 +61,11 @@ class EngineInterface {
   // Gets the version of underlying data set.
   virtual absl::string_view GetDataVersion() const = 0;
 
+  // Applies a changed configuration without reloading unrelated user data.
+  // Engines without config-dependent shared modules have nothing to do here.
+  virtual void ApplyConfig(const config::Config& previous,
+                           const config::Config& current) {}
+
   // Reloads internal data, e.g., user dictionary, etc.
   // This function may read data from local files.
   // Returns true if successfully reloaded or did nothing.

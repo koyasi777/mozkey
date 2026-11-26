@@ -168,6 +168,30 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.suggestions_size(), 3);
 }
 
+TEST_F(ConfigHandlerTest, DisplayRefreshIgnoresOnlyGeneratedMetadata) {
+  Config requested;
+  requested.set_verbose_level(0);
+  Config committed;
+  auto* general = committed.mutable_general_config();
+  general->set_config_version(1);
+  general->set_last_modified_time(123);
+  general->set_last_modified_product_version("1.1.0");
+  general->set_platform("Windows");
+  EXPECT_FALSE(ConfigHandler::RequiresDisplayRefresh(requested, committed));
+
+  general->set_ui_locale("ja");
+  EXPECT_TRUE(ConfigHandler::RequiresDisplayRefresh(requested, committed));
+  general->clear_ui_locale();
+  committed.set_verbose_level(1);
+  EXPECT_TRUE(ConfigHandler::RequiresDisplayRefresh(requested, committed));
+  committed.clear_verbose_level();
+  committed.set_use_emoji_conversion(!requested.use_emoji_conversion());
+  EXPECT_TRUE(ConfigHandler::RequiresDisplayRefresh(requested, committed));
+  committed.clear_use_emoji_conversion();
+  committed.set_custom_roman_table("a\tあ\n");
+  EXPECT_TRUE(ConfigHandler::RequiresDisplayRefresh(requested, committed));
+}
+
 TEST_F(ConfigHandlerTest, PreserveLearningOnCommitUndoRoundTrip) {
   TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
   const std::string config_file =
@@ -1210,6 +1234,153 @@ TEST_F(ConfigHandlerTest, ZenzFeedbackIndependentSettingsSurviveReload) {
   EXPECT_TRUE(persisted.use_zenz_feedback_recording());
   EXPECT_TRUE(persisted.use_zenz_feedback_reuse());
   EXPECT_TRUE(persisted.use_zenz_mozc_history_learning());
+}
+
+TEST_F(ConfigHandlerTest, CompareAndSetConfigReturnsCommittedSnapshot) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string file = FileUtil::JoinPath(temp_dir.path(), "cas.db");
+  ConfigHandler::SetConfigFileNameForTesting(file);
+  using Result = ConfigHandler::UpdateResult;
+  const Config initial = ConfigHandler::GetCopiedConfig();
+  Config pending = initial;
+  pending.set_use_emoji_conversion(!initial.use_emoji_conversion());
+  Config committed;
+  ASSERT_EQ(ConfigHandler::CompareAndSetConfig(initial, pending, &committed),
+            Result::kSuccess);
+  EXPECT_EQ(committed.SerializeAsString(),
+            ConfigHandler::GetCopiedConfig().SerializeAsString());
+  EXPECT_TRUE(committed.general_config().has_last_modified_time());
+  EXPECT_EQ(committed.use_emoji_conversion(), pending.use_emoji_conversion());
+
+  // Stale writers cannot overwrite the first save.
+  Config untouched;
+  untouched.set_verbose_level(42);
+  EXPECT_EQ(ConfigHandler::CompareAndSetConfig(initial, initial, &untouched),
+            Result::kConflict);
+  EXPECT_EQ(untouched.verbose_level(), 42);
+  EXPECT_EQ(ConfigHandler::GetCopiedConfig().SerializeAsString(),
+            committed.SerializeAsString());
+
+  // A second apply from the exact acknowledgement succeeds, including a reset
+  // whose edit base is deliberately independent of the server snapshot.
+  const Config defaults = ConfigHandler::GetProductDefaultConfig();
+  Config second;
+  ASSERT_EQ(ConfigHandler::CompareAndSetConfig(committed, defaults, &second),
+            Result::kSuccess);
+  EXPECT_EQ(second.SerializeAsString(),
+            ConfigHandler::GetCopiedConfig().SerializeAsString());
+  Config same;
+  ASSERT_EQ(ConfigHandler::CompareAndSetConfig(second, second, &same),
+            Result::kSuccess);
+  EXPECT_EQ(second.SerializeAsString(), same.SerializeAsString());
+}
+
+TEST_F(ConfigHandlerTest, CompareAndSetConfigNoOpDoesNotRepublish) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  ConfigHandler::SetConfigFileNameForTesting(
+      FileUtil::JoinPath(temp_dir.path(), "cas_no_op.db"));
+  using Result = ConfigHandler::UpdateResult;
+  const Config initial = ConfigHandler::GetCopiedConfig();
+  Config requested = initial;
+  requested.set_use_emoji_conversion(!initial.use_emoji_conversion());
+  Config first;
+  ASSERT_EQ(ConfigHandler::CompareAndSetConfig(initial, requested, &first),
+            Result::kSuccess);
+  const auto published = ConfigHandler::GetSharedConfig();
+  Config same = first;
+  same.mutable_general_config()->set_last_modified_time(1);
+  same.mutable_general_config()->set_last_modified_product_version("old");
+  same.mutable_general_config()->set_platform("old");
+#ifdef NDEBUG
+  same.set_verbose_level(0);
+#endif
+  Config committed;
+  ASSERT_EQ(ConfigHandler::CompareAndSetConfig(first, same, &committed),
+            Result::kSuccess);
+  EXPECT_EQ(ConfigHandler::GetSharedConfig(), published);
+  EXPECT_EQ(committed.SerializeAsString(), first.SerializeAsString());
+
+  ConfigHandler::Reload();
+  const auto reloaded = ConfigHandler::GetSharedConfig();
+  ASSERT_EQ(ConfigHandler::CompareAndSetConfig(*reloaded, same, &committed),
+            Result::kSuccess);
+  EXPECT_EQ(ConfigHandler::GetSharedConfig(), reloaded);
+}
+
+TEST_F(ConfigHandlerTest, CompareAndSetConfigWriteFailureDoesNotPublish) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string file = FileUtil::JoinPath(
+      FileUtil::JoinPath(temp_dir.path(), "missing_parent"), "config.db");
+  ConfigHandler::SetConfigFileNameForTesting(file);
+  const Config initial = ConfigHandler::GetCopiedConfig();
+  Config pending = initial;
+  pending.set_use_emoji_conversion(!initial.use_emoji_conversion());
+  Config committed;
+  committed.set_verbose_level(42);
+  using Result = ConfigHandler::UpdateResult;
+  EXPECT_EQ(ConfigHandler::CompareAndSetConfig(initial, pending, &committed),
+            Result::kFailure);
+  EXPECT_EQ(ConfigHandler::GetCopiedConfig().SerializeAsString(),
+            initial.SerializeAsString());
+  EXPECT_EQ(committed.verbose_level(), 42);
+  EXPECT_EQ(ConfigHandler::CompareAndSetConfig(initial, pending, &committed),
+            Result::kFailure);
+}
+
+TEST_F(ConfigHandlerTest, LegacyConfigWriteFailureAppliesAndRetries) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string parent = FileUtil::JoinPath(temp_dir.path(), "missing_parent");
+  const std::string file = FileUtil::JoinPath(parent, "config.db");
+  ConfigHandler::SetConfigFileNameForTesting(file);
+  Config pending = ConfigHandler::GetCopiedConfig();
+  pending.set_incognito_mode(true);
+  EXPECT_FALSE(ConfigHandler::SetConfig(pending));
+  const Config runtime = ConfigHandler::GetCopiedConfig();
+  EXPECT_TRUE(runtime.incognito_mode());
+  // The identical runtime value is not a persisted no-op.
+  EXPECT_FALSE(ConfigHandler::SetConfig(runtime));
+  Config committed;
+  using Result = ConfigHandler::UpdateResult;
+  const Config before_retry = ConfigHandler::GetCopiedConfig();
+  EXPECT_EQ(ConfigHandler::CompareAndSetConfig(before_retry, before_retry,
+                                               &committed),
+            Result::kFailure);
+  ASSERT_TRUE(FileUtil::CreateDirectory(parent).ok());
+  const Config current = ConfigHandler::GetCopiedConfig();
+  ASSERT_EQ(ConfigHandler::CompareAndSetConfig(current, current, &committed),
+            Result::kSuccess);
+  ConfigHandler::Reload();
+  EXPECT_TRUE(ConfigHandler::GetCopiedConfig().incognito_mode());
+}
+
+TEST_F(ConfigHandlerTest, CompareAndSetConfigAllowsOnlyOneConcurrentWriter) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string file = FileUtil::JoinPath(temp_dir.path(), "concurrent.db");
+  ConfigHandler::SetConfigFileNameForTesting(file);
+  const Config initial = ConfigHandler::GetCopiedConfig();
+  Config a = initial;
+  a.set_use_emoji_conversion(!initial.use_emoji_conversion());
+  Config b = initial;
+  b.set_incognito_mode(!initial.incognito_mode());
+  using Result = ConfigHandler::UpdateResult;
+  Result result_a = Result::kFailure;
+  Result result_b = Result::kFailure;
+  absl::Notification start;
+  Thread first([&] {
+    start.WaitForNotification();
+    Config committed;
+    result_a = ConfigHandler::CompareAndSetConfig(initial, a, &committed);
+  });
+  Thread second([&] {
+    start.WaitForNotification();
+    Config committed;
+    result_b = ConfigHandler::CompareAndSetConfig(initial, b, &committed);
+  });
+  start.Notify();
+  first.Join();
+  second.Join();
+  EXPECT_TRUE((result_a == Result::kSuccess && result_b == Result::kConflict) ||
+              (result_b == Result::kSuccess && result_a == Result::kConflict));
 }
 
 TEST_F(ConfigHandlerTest, SetMetadata) {

@@ -576,12 +576,45 @@ bool Client::SetConfig(const config::Config &config) {
   *input.mutable_config() = config;
 
   commands::Output output;
-  if (!Call(input, &output)) {
+  if (!Call(input, &output) ||
+      output.error_code() != commands::Output::SESSION_SUCCESS) {
     return false;
   }
 
-  direct_mode_keys_ = KeyInfoUtil::ExtractSortedDirectModeKeys(config);
-  return true;
+  // Legacy servers may omit the acknowledgement or the returned config.
+  // A new server returns the actual runtime config even on persistence failure.
+  direct_mode_keys_ = KeyInfoUtil::ExtractSortedDirectModeKeys(
+      output.has_config() ? output.config() : config);
+  return !output.has_config_update_result() ||
+         output.config_update_result() == commands::Output::CONFIG_UPDATE_SUCCESS;
+}
+
+commands::Output::ConfigUpdateResult Client::CompareAndSetConfig(
+    const config::Config& expected, const config::Config& config,
+    config::Config* committed) {
+  if (committed == nullptr) {
+    return commands::Output::CONFIG_UPDATE_FAILED;
+  }
+  commands::Input input;
+  InitInput(&input);
+  input.set_type(commands::Input::COMPARE_AND_SET_CONFIG);
+  *input.mutable_expected_config() = expected;
+  *input.mutable_config() = config;
+
+  commands::Output output;
+  if (!Call(input, &output) ||
+      output.error_code() != commands::Output::SESSION_SUCCESS ||
+      !output.has_config_update_result()) {
+    return commands::Output::CONFIG_UPDATE_UNKNOWN;
+  }
+  if (output.config_update_result() == commands::Output::CONFIG_UPDATE_SUCCESS) {
+    if (!output.has_config()) {
+      return commands::Output::CONFIG_UPDATE_UNKNOWN;
+    }
+    *committed = output.config();
+    direct_mode_keys_ = KeyInfoUtil::ExtractSortedDirectModeKeys(*committed);
+  }
+  return output.config_update_result();
 }
 
 bool Client::ClearUserHistory() {
@@ -679,7 +712,12 @@ bool Client::CallAndCheckVersion(const commands::Input &input,
 }
 
 bool Client::Call(const commands::Input &input, commands::Output *output) {
-  MOZC_VLOG(2) << "commands::Input: " << std::endl << input;
+  const bool has_config = input.has_config() || input.has_expected_config();
+  if (has_config) {
+    MOZC_VLOG(2) << "Config command: " << input.type();
+  } else {
+    MOZC_VLOG(2) << "commands::Input: " << std::endl << input;
+  }
 
   // don't repeat Call() if the status is either
   // SERVER_FATAL, SERVER_TIMEOUT, or SERVER_BROKEN_MESSAGE
@@ -740,7 +778,7 @@ bool Client::Call(const commands::Input &input, commands::Output *output) {
   }
 
   if (!client->Call(request, &response_, timeout_)) {
-    LOG(ERROR) << "Call failure" << input.DebugString();
+    LOG(ERROR) << "Call failure, command type: " << input.type();
     if (client->GetLastIPCError() == IPC_TIMEOUT_ERROR) {
       server_status_ = SERVER_TIMEOUT;
     } else {
@@ -751,8 +789,7 @@ bool Client::Call(const commands::Input &input, commands::Output *output) {
   }
 
   if (!output->ParseFromString(response_)) {
-    LOG(ERROR) << "Parse failure of the result of the request:"
-               << input.DebugString();
+    LOG(ERROR) << "Parse failure, command type: " << input.type();
     server_status_ = SERVER_BROKEN_MESSAGE;
     return false;
   }
@@ -763,7 +800,12 @@ bool Client::Call(const commands::Input &input, commands::Output *output) {
          server_status_ == SERVER_UNKNOWN /* during StartServer() */)
       << " " << server_status_;
 
-  MOZC_VLOG(2) << "commands::Output: " << std::endl << *output;
+  if (has_config || output->has_config()) {
+    MOZC_VLOG(2) << "Config response, command type: " << input.type()
+                 << ", error: " << output->error_code();
+  } else {
+    MOZC_VLOG(2) << "commands::Output: " << std::endl << *output;
+  }
 
   return true;
 }

@@ -40,6 +40,7 @@ class QCheckBox;
 class QLabel;
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -107,7 +108,8 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
 
  private:
   bool GetConfig(config::Config *config);
-  bool SetConfig(const config::Config &config);
+  commands::Output::ConfigUpdateResult SetConfig(
+      const config::Config& config, config::Config* committed);
   void ConvertToProto(config::Config *config) const;
   void InitializeRendererAppearanceControls();
   void UpdateConversionStatusPreview();
@@ -134,8 +136,10 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   std::string roman_table_preset_id_;
   void RefreshRomanPresetUi();
   void SelectRomanPreset(int index);
-  // base_config_ keeps the original config imported from the file including
-  // unconfigurable options with the GUI (e.g. composing_timeout_threshold_msec)
+  // Only populated by a successful GET_CONFIG or conditional save response.
+  // Never modified by editors, defaults, or UI conversion.
+  std::optional<config::Config> server_config_snapshot_;
+  // Editable base, including fields not represented by GUI controls.
   config::Config base_config_;
   config::Config last_applied_config_;
   bool initial_ime_hot_key_disabled_;

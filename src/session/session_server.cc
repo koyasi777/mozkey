@@ -109,8 +109,13 @@ bool SessionServer::Process(absl::string_view request, std::string* response) {
     return true;
   }
 
-  // debug message
-  MOZC_VLOG(2) << command;
+  // Config requests and responses can contain private paths and custom tables.
+  if (command.input().has_config() || command.input().has_expected_config() ||
+      command.output().has_config()) {
+    MOZC_VLOG(2) << "Config command: " << command.input().type();
+  } else {
+    MOZC_VLOG(2) << command;
+  }
 
   return true;
 }

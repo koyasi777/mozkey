@@ -624,6 +624,67 @@ TEST_F(ClientTest, SetConfig) {
   EXPECT_TRUE(client_->SetConfig(config));
 }
 
+TEST_F(ClientTest, SetConfigReportsPersistenceFailure) {
+  ASSERT_TRUE(SetupConnection(0));
+  config::Config config;
+  config.set_incognito_mode(true);
+  commands::Output reply;
+  reply.set_id(0);
+  *reply.mutable_config() = config;
+  reply.set_config_update_result(commands::Output::CONFIG_UPDATE_FAILED);
+  SetMockOutput(reply);
+  EXPECT_FALSE(client_->SetConfig(config));
+  reply.set_config_update_result(commands::Output::CONFIG_UPDATE_SUCCESS);
+  SetMockOutput(reply);
+  EXPECT_TRUE(client_->SetConfig(config));
+  reply.set_error_code(commands::Output::SESSION_FAILURE);
+  SetMockOutput(reply);
+  EXPECT_FALSE(client_->SetConfig(config));
+}
+
+TEST_F(ClientTest, CompareAndSetConfigRequiresExplicitAcknowledgement) {
+  ASSERT_TRUE(SetupConnection(0));
+  config::Config expected;
+  config::Config pending;
+  pending.set_use_emoji_conversion(true);
+  config::Config committed;
+  committed.set_verbose_level(42);
+  commands::Output reply;
+  reply.set_id(0);
+  *reply.mutable_config() = pending;
+  reply.mutable_config()->mutable_general_config()->set_last_modified_time(123);
+  SetMockOutput(reply);
+  EXPECT_EQ(client_->CompareAndSetConfig(expected, pending, &committed),
+            commands::Output::CONFIG_UPDATE_UNKNOWN);
+  EXPECT_EQ(committed.verbose_level(), 42);
+  reply.set_config_update_result(commands::Output::CONFIG_UPDATE_FAILED);
+  SetMockOutput(reply);
+  EXPECT_EQ(client_->CompareAndSetConfig(expected, pending, &committed),
+            commands::Output::CONFIG_UPDATE_FAILED);
+  EXPECT_EQ(committed.verbose_level(), 42);
+  reply.set_config_update_result(commands::Output::CONFIG_UPDATE_CONFLICT);
+  SetMockOutput(reply);
+  EXPECT_EQ(client_->CompareAndSetConfig(expected, pending, &committed),
+            commands::Output::CONFIG_UPDATE_CONFLICT);
+  EXPECT_EQ(committed.verbose_level(), 42);
+  reply.set_config_update_result(commands::Output::CONFIG_UPDATE_SUCCESS);
+  SetMockOutput(reply);
+  ASSERT_EQ(client_->CompareAndSetConfig(expected, pending, &committed),
+            commands::Output::CONFIG_UPDATE_SUCCESS);
+  EXPECT_EQ(committed.SerializeAsString(), reply.config().SerializeAsString());
+  commands::Input generated;
+  GetGeneratedInput(&generated);
+  EXPECT_EQ(generated.type(), commands::Input::COMPARE_AND_SET_CONFIG);
+  ASSERT_TRUE(generated.has_expected_config());
+  EXPECT_EQ(generated.expected_config().SerializeAsString(),
+            expected.SerializeAsString());
+  EXPECT_EQ(generated.config().SerializeAsString(), pending.SerializeAsString());
+  reply.clear_config();
+  SetMockOutput(reply);
+  EXPECT_EQ(client_->CompareAndSetConfig(expected, pending, &committed),
+            commands::Output::CONFIG_UPDATE_UNKNOWN);
+}
+
 TEST_F(ClientTest, GetConfig) {
   const int mock_id = 0;
   EXPECT_TRUE(SetupConnection(mock_id));

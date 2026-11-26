@@ -154,6 +154,13 @@ class ClientInterface {
   virtual bool GetConfig(config::Config* config) = 0;
   virtual bool SetConfig(const config::Config& config) = 0;
 
+  // No fallback to unconditional SET_CONFIG. Unsupported clients fail closed.
+  // The output snapshot is only modified on an explicitly acknowledged success.
+  virtual commands::Output::ConfigUpdateResult CompareAndSetConfig(
+      const config::Config&, const config::Config&, config::Config*) {
+    return commands::Output::CONFIG_UPDATE_FAILED;
+  }
+
   // Clear history data
   virtual bool ClearUserHistory() = 0;
   virtual bool ClearUserPrediction() = 0;

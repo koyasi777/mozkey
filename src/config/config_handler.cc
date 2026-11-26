@@ -497,6 +497,20 @@ void SetMetaData(Config* config) {
   general_config->set_platform(SystemUtil::GetOSVersionString());
 }
 
+// These fields are assigned by SetMetaData, not by the user. Keep all other
+// GeneralConfig fields (including unknown fields) intact.
+void ClearGeneratedMetadata(Config* config) {
+  if (!config->has_general_config()) return;
+  auto* general = config->mutable_general_config();
+  general->clear_config_version();
+  general->clear_last_modified_time();
+  general->clear_last_modified_product_version();
+  general->clear_platform();
+  if (general->ByteSizeLong() == 0) {
+    config->clear_general_config();
+  }
+}
+
 void NormalizeConfig(Config* config) {
 #ifdef NDEBUG
   // Delete the optional field from the config.
@@ -537,7 +551,9 @@ class ConfigHandlerImpl final {
   std::shared_ptr<const Config> GetSharedConfig() const;
   std::shared_ptr<const Config> GetSharedDefaultConfig() const;
 
-  void SetConfig(Config config);
+  bool SetConfig(Config config);
+  ConfigHandler::UpdateResult CompareAndSetConfig(
+      const Config& expected, Config config, Config* committed);
   void Reload();
 
   void SetConfigFileName(absl::string_view filename)
@@ -547,6 +563,9 @@ class ConfigHandlerImpl final {
 
  private:
   void SetConfigInternal(std::shared_ptr<Config> config);
+  bool SetConfigLocked(Config config, bool require_persistence)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  void ReloadLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   std::string filename_ ABSL_GUARDED_BY(mutex_);
   std::atomic<uint64_t> config_hash_ = 0;   // hash of final config.
@@ -576,7 +595,29 @@ void ConfigHandlerImpl::SetConfigInternal(std::shared_ptr<Config> config) {
   config_.store(std::move(config));
 }
 
-void ConfigHandlerImpl::SetConfig(Config config) {
+bool ConfigHandlerImpl::SetConfig(Config config) {
+  absl::WriterMutexLock lock(mutex_);
+  return SetConfigLocked(std::move(config), /*require_persistence=*/false);
+}
+
+ConfigHandler::UpdateResult ConfigHandlerImpl::CompareAndSetConfig(
+    const Config& expected, Config config, Config* committed) {
+  if (committed == nullptr) {
+    return ConfigHandler::UpdateResult::kFailure;
+  }
+  absl::WriterMutexLock lock(mutex_);
+  if (GetSharedConfig()->SerializeAsString() != expected.SerializeAsString()) {
+    return ConfigHandler::UpdateResult::kConflict;
+  }
+  if (!SetConfigLocked(std::move(config), /*require_persistence=*/true)) {
+    return ConfigHandler::UpdateResult::kFailure;
+  }
+  *committed = *GetSharedConfig();
+  return ConfigHandler::UpdateResult::kSuccess;
+}
+
+bool ConfigHandlerImpl::SetConfigLocked(Config config,
+                                        bool require_persistence) {
   MaybeMigrateMozkeyCustomKeymap(&config);
 
   const uint64_t config_hash = CityFingerprint(config.SerializeAsString());
@@ -584,7 +625,7 @@ void ConfigHandlerImpl::SetConfig(Config config) {
   // If the wire format of config is identical to the one of the previously
   // stored config, skip updating.
   if (config_hash_ == config_hash) {
-    return;
+    return true;
   }
 
   auto output_config = std::make_shared<Config>(std::move(config));
@@ -592,24 +633,36 @@ void ConfigHandlerImpl::SetConfig(Config config) {
   // Fix config because `config` may be broken.
   NormalizeConfig(output_config.get());
 
-  // If the wire format of the config w/o metadata is identical to the one of
-  // the previous config, skip updating.
-  output_config->mutable_general_config()->clear_last_modified_time();
+  // Compare the same metadata-free representation after every normalization,
+  // including the first save from a profile without server metadata.
+  ClearGeneratedMetadata(output_config.get());
   const uint64_t content_hash =
       CityFingerprint(output_config->SerializeAsString());
   if (content_hash_ == content_hash) {
-    return;
+    return true;
   }
-  content_hash_ = content_hash;
 
-  // Set metadata and update `config_hash_`.
   SetMetaData(output_config.get());
-  config_hash_ = CityFingerprint(output_config->SerializeAsString());
-
-  const std::string filename = GetConfigFileName();
+  const std::string serialized = output_config->SerializeAsString();
+  const std::string& filename = filename_;
 
   MOZC_VLOG(1) << "Setting new config: " << filename;
-  ConfigFileStream::AtomicUpdate(filename, output_config->SerializeAsString());
+  if (!ConfigFileStream::AtomicUpdate(filename, serialized)) {
+    LOG(ERROR) << "Failed to persist config";
+    if (require_persistence) {
+      // NormalizeConfig also changes the process-local logging level.
+      mozc::internal::SetConfigVLogLevel(GetSharedConfig()->verbose_level());
+    } else {
+      // Preserve the legacy runtime behavior, including incognito commands.
+      // The published config is not persisted; a subsequent save must retry.
+      config_hash_ = 0;
+      content_hash_ = 0;
+      SetConfigInternal(std::move(output_config));
+    }
+    return false;
+  }
+  content_hash_ = content_hash;
+  config_hash_ = CityFingerprint(serialized);
 
 #ifdef _WIN32
   ConfigFileStream::FixupFilePermission(filename);
@@ -624,11 +677,17 @@ void ConfigHandlerImpl::SetConfig(Config config) {
 #endif  // DEBUG
 
   SetConfigInternal(output_config);
+  return true;
 }
 
 // Reload from file
 void ConfigHandlerImpl::Reload() {
-  const std::string filename = GetConfigFileName();
+  absl::WriterMutexLock lock(mutex_);
+  ReloadLocked();
+}
+
+void ConfigHandlerImpl::ReloadLocked() {
+  const std::string& filename = filename_;
 
   MOZC_VLOG(1) << "Reloading config file: " << filename;
   std::unique_ptr<std::istream> is(ConfigFileStream::OpenReadBinary(filename));
@@ -671,9 +730,9 @@ void ConfigHandlerImpl::Reload() {
   // A missing or broken file has no persisted config to deduplicate against.
   if (loaded_from_file) {
     config_hash_ = CityFingerprint(input_config->SerializeAsString());
-    Config without_modified_time = *input_config;
-    without_modified_time.mutable_general_config()->clear_last_modified_time();
-    content_hash_ = CityFingerprint(without_modified_time.SerializeAsString());
+    Config without_metadata = *input_config;
+    ClearGeneratedMetadata(&without_metadata);
+    content_hash_ = CityFingerprint(without_metadata.SerializeAsString());
   } else {
     config_hash_ = 0;
     content_hash_ = 0;
@@ -683,12 +742,10 @@ void ConfigHandlerImpl::Reload() {
 }
 
 void ConfigHandlerImpl::SetConfigFileName(const absl::string_view filename) {
-  {
-    absl::WriterMutexLock lock(mutex_);
-    MOZC_VLOG(1) << "set new config file name: " << filename;
-    strings::Assign(filename_, filename);
-  }
-  Reload();
+  absl::WriterMutexLock lock(mutex_);
+  MOZC_VLOG(1) << "set new config file name: " << filename;
+  strings::Assign(filename_, filename);
+  ReloadLocked();
 }
 
 std::string ConfigHandlerImpl::GetConfigFileName() const {
@@ -703,8 +760,29 @@ std::shared_ptr<const Config> ConfigHandler::GetSharedConfig() {
   return GetConfigHandlerImpl()->GetSharedConfig();
 }
 
-void ConfigHandler::SetConfig(Config config) {
-  GetConfigHandlerImpl()->SetConfig(std::move(config));
+bool ConfigHandler::SetConfig(Config config) {
+  return GetConfigHandlerImpl()->SetConfig(std::move(config));
+}
+
+ConfigHandler::UpdateResult ConfigHandler::CompareAndSetConfig(
+    const Config& expected, Config config, Config* committed) {
+  return GetConfigHandlerImpl()->CompareAndSetConfig(
+      expected, std::move(config), committed);
+}
+
+bool ConfigHandler::RequiresDisplayRefresh(const Config& requested,
+                                          const Config& committed) {
+  const auto without_generated_metadata = [](Config config) {
+    ClearGeneratedMetadata(&config);
+    // Release builds normalize an explicitly set zero to an absent field.
+    // Both represent the same value in the settings UI.
+    if (config.verbose_level() == 0) {
+      config.clear_verbose_level();
+    }
+    return config.SerializeAsString();
+  };
+  return without_generated_metadata(requested) !=
+         without_generated_metadata(committed);
 }
 
 // static

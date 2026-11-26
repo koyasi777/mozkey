@@ -875,18 +875,16 @@ ConfigDialog::ConfigDialog()
   EnableApplyButton();
 }
 
-bool ConfigDialog::SetConfig(const config::Config &config) {
+commands::Output::ConfigUpdateResult ConfigDialog::SetConfig(
+    const config::Config& config, config::Config* committed) {
+  if (!server_config_snapshot_) {
+    return commands::Output::CONFIG_UPDATE_UNKNOWN;
+  }
   if (!client_->CheckVersionOrRestartServer()) {
-    LOG(ERROR) << "CheckVersionOrRestartServer failed";
-    return false;
+    return commands::Output::CONFIG_UPDATE_FAILED;
   }
-
-  if (!client_->SetConfig(config)) {
-    LOG(ERROR) << "SetConfig failed";
-    return false;
-  }
-
-  return true;
+  return client_->CompareAndSetConfig(*server_config_snapshot_, config,
+                                      committed);
 }
 
 bool ConfigDialog::GetConfig(config::Config *config) {
@@ -906,8 +904,11 @@ bool ConfigDialog::GetConfig(config::Config *config) {
 void ConfigDialog::Reload() {
   config::Config config;
   if (!GetConfig(&config)) {
+    server_config_snapshot_.reset();
     QMessageBox::critical(this, windowTitle(),
                           tr("Failed to get current config values."));
+  } else {
+    server_config_snapshot_ = config;
   }
 
   const bool was_suppressed = suppress_apply_button_update_;
@@ -1002,6 +1003,52 @@ bool ConfigDialog::Update() {
     return false;
   }
 
+  // The immutable server snapshot is independent of staged editor state.
+  // Compare and save in a single server operation, not two IPC requests.
+  config::Config committed;
+  const auto result = SetConfig(config, &committed);
+  if (result == commands::Output::CONFIG_UPDATE_CONFLICT) {
+    QMessageBox::warning(
+        this, windowTitle(),
+        QStringLiteral("編集中に Mozkey の設定が更新されました。"
+                       "\n変更内容の上書きを防ぐため、設定画面を開き直してください。"));
+    return false;
+  }
+  if (result == commands::Output::CONFIG_UPDATE_UNKNOWN) {
+    server_config_snapshot_.reset();
+    QMessageBox::warning(
+        this, windowTitle(),
+        QStringLiteral("現在の設定または保存結果を確認できませんでした。"
+                       "\n設定画面を開き直し、現在の設定を確認してください。"));
+    return false;
+  }
+  if (result != commands::Output::CONFIG_UPDATE_SUCCESS) {
+    QMessageBox::critical(this, windowTitle(), tr("Failed to update config"));
+    return false;
+  }
+
+  // Always adopt the exact server snapshot. Rebuild controls only if the
+  // server actually corrected values, not for metadata or zero verbose level.
+  const bool refresh_display =
+      config::ConfigHandler::RequiresDisplayRefresh(config, committed);
+  server_config_snapshot_ = committed;
+  base_config_ = committed;
+  config = std::move(committed);
+  if (refresh_display) {
+    const bool was_suppressed = suppress_apply_button_update_;
+    suppress_apply_button_update_ = true;
+#ifdef __APPLE__
+    // ConvertFromProto also reads the login item, which is not part of Config.
+    const bool requested_startup = startupCheckBox->isChecked();
+#endif  // __APPLE__
+    ConvertFromProto(config);
+    UpdateDependentControls();
+#ifdef __APPLE__
+    startupCheckBox->setChecked(requested_startup);
+#endif  // __APPLE__
+    suppress_apply_button_update_ = was_suppressed;
+  }
+
   const bool preedit_setting_changed =
       (initial_preedit_method_ != static_cast<int>(config.preedit_method())) ||
       (initial_use_keyboard_to_change_preedit_method_ !=
@@ -1055,29 +1102,6 @@ bool ConfigDialog::Update() {
       initial_zenz_live_correction_underline_color_ !=
           config.zenz_live_correction_underline_color();
 
-  // The dictionary tool saves Config independently.  Do not overwrite its
-  // newly saved external-dictionary paths (or other settings) from the stale
-  // snapshot on which this dialog's controls were originally based.
-  config::Config latest_config;
-  if (!GetConfig(&latest_config)) {
-    QMessageBox::warning(
-        this, windowTitle(),
-        QStringLiteral("現在の設定を再取得できませんでした。保存は行われていません。"));
-    return false;
-  }
-  if (latest_config.SerializeAsString() != base_config_.SerializeAsString()) {
-    QMessageBox::warning(
-        this, windowTitle(),
-        QStringLiteral("別のウィンドウで Mozkey の設定が更新されました。"
-                       "\n変更内容の上書きを防ぐため、設定画面を開き直してください。"));
-    return false;
-  }
-
-  if (!SetConfig(config)) {
-    QMessageBox::critical(this, windowTitle(), tr("Failed to update config"));
-    return false;
-  }
-
 #if defined(_WIN32)
   if (preedit_setting_changed) {
     QMessageBox::information(this, windowTitle(),
@@ -1086,9 +1110,6 @@ bool ConfigDialog::Update() {
     initial_preedit_method_ = static_cast<int>(config.preedit_method());
     initial_use_keyboard_to_change_preedit_method_ =
         config.use_keyboard_to_change_preedit_method();
-  }
-  if (QWidget* preview = findChild<QWidget*>("modeIndicatorLivePreview")) {
-    preview->repaint();
   }
 #endif  // _WIN32
 
@@ -1165,11 +1186,18 @@ bool ConfigDialog::Update() {
 #endif  // _WIN32
 
 #ifdef _WIN32
+  // SetIMEHotKeyDisabled already checks the current registry value.
   if (!WinUtil::SetIMEHotKeyDisabled(IMEHotKeyDisabledCheckBox->isChecked())) {
-    // Do not show any dialog here, since this operation will not fail
-    // in almost all cases.
-    // TODO(taku): better to show dialog?
     LOG(ERROR) << "Failed to update IME HotKey status";
+    // Config is already committed. Keep the OS operation retryable without
+    // treating the committed config as pending edits.
+    ConvertToProto(&last_applied_config_);
+    initial_ime_hot_key_disabled_ = WinUtil::GetIMEHotKeyDisabled();
+    EnableApplyButton();
+    QMessageBox::warning(
+        this, windowTitle(),
+        QStringLiteral("設定は保存されましたが、Windows の IME ホットキー設定を"
+                       "反映できませんでした。\nもう一度適用してください。"));
     return false;
   }
 #endif  // _WIN32
@@ -1186,7 +1214,6 @@ bool ConfigDialog::Update() {
   }
 #endif  // __APPLE__
 
-  base_config_ = config;
   RecordCurrentStateAsApplied();
   EnableApplyButton();
 

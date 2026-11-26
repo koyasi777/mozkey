@@ -85,6 +85,9 @@ class Engine : public EngineInterface {
     return std::make_unique<engine::EngineConverter>(GetConverter());
   }
 
+  void ApplyConfig(const config::Config& previous,
+                   const config::Config& current) override;
+
   // Functions for Reload, Sync, Wait return true if successfully operated
   // or did nothing.
   bool Reload() override;

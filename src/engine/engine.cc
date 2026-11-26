@@ -67,21 +67,28 @@
 namespace mozc {
 namespace {
 
-// Settings are the single source of truth. SetSources never reads the files;
-// the manager's worker reads them asynchronously.
-void ConfigureExternalDictionary(const engine::Modules& modules) {
-  const auto config = config::ConfigHandler::GetSharedConfig();
-  const auto manager = modules.GetExternalDictionaryManager();
-  if (!manager) return;
-  std::vector<dictionary::ExternalDictionaryManager::SourceSpec> sources;
-  if (config->enable_external_dictionary()) {
+using ExternalSource = dictionary::ExternalDictionaryManager::SourceSpec;
+
+// Only active paths, their order and matching modes affect the manager.
+std::vector<ExternalSource> GetActiveExternalSources(
+    const config::Config& config) {
+  std::vector<ExternalSource> sources;
+  if (config.enable_external_dictionary()) {
     using SourceOptions = config::ExternalDictionarySourceOptions;
-    for (const auto& source : config::GetExternalDictionarySources(*config)) {
+    for (const auto& source : config::GetExternalDictionarySources(config)) {
       sources.push_back({source.path(),
                          source.match_mode() == SourceOptions::EXACT_AND_PREFIX});
     }
   }
-  manager->SetSources(std::move(sources));
+  return sources;
+}
+
+// Cold start and explicit reload reconcile the manager with the current config.
+void ConfigureExternalDictionary(const engine::Modules& modules) {
+  const auto manager = modules.GetExternalDictionaryManager();
+  if (!manager) return;
+  manager->SetSources(
+      GetActiveExternalSources(*config::ConfigHandler::GetSharedConfig()));
 }
 
 }  // namespace
@@ -165,10 +172,26 @@ absl::Status Engine::Init(std::unique_ptr<engine::Modules> modules) {
   return absl::OkStatus();
 }
 
+void Engine::ApplyConfig(const config::Config& previous,
+                         const config::Config& current) {
+  if (!converter_) return;
+  const auto manager = converter_->modules().GetExternalDictionaryManager();
+  if (!manager) return;
+  const auto old_sources = GetActiveExternalSources(previous);
+  auto sources = GetActiveExternalSources(current);
+  if (std::equal(old_sources.begin(), old_sources.end(), sources.begin(),
+                 sources.end(),
+                 [](const ExternalSource& a, const ExternalSource& b) {
+                   return a.path == b.path && a.allow_prefix == b.allow_prefix;
+                 })) {
+    return;
+  }
+  // Avoid entering the manager's lock at all for unrelated config changes.
+  manager->SetSources(std::move(sources));
+}
+
 bool Engine::Reload() {
   if (!converter_) return false;
-  // SessionHandler calls Reload after SET_CONFIG.  Reuse the existing manager
-  // so all converters observe the same source without a server restart.
   ConfigureExternalDictionary(converter_->modules());
   return converter_->Reload();
 }
