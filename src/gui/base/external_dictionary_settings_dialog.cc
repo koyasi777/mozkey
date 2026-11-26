@@ -1,29 +1,39 @@
 // Copyright 2026 Mozkey contributors.
 #include "gui/base/external_dictionary_settings_dialog.h"
 
+#include <QAction>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
 #include <QGuiApplication>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,6 +50,65 @@ std::string ToUtf8(const QString& value) {
   return value.toUtf8().toStdString();
 }
 using SourceOptions = config::ExternalDictionarySourceOptions;
+
+int SingleSelectedRow(const QTableWidget* table) {
+  const auto rows = table->selectionModel()->selectedRows();
+  return rows.size() == 1 ? rows.front().row() : -1;
+}
+
+void SelectOnlyRow(QTableWidget* table, int row) {
+  table->setCurrentCell(row, 0, QItemSelectionModel::ClearAndSelect |
+                                    QItemSelectionModel::Rows);
+}
+
+// Handle file URLs rather than the item model's default drag/drop format.
+// Never negotiate MoveAction: registration must not move a source file.
+class ExternalDictionaryDropTable final : public QTableWidget {
+ public:
+  ExternalDictionaryDropTable(
+      QWidget* parent, std::function<void(const QStringList&)> add_files)
+      : QTableWidget(parent), add_files_(std::move(add_files)) {
+    setDragDropMode(QAbstractItemView::DropOnly);
+    setDragEnabled(false);
+    setAcceptDrops(true);
+    viewport()->setAcceptDrops(true);
+    setDropIndicatorShown(false);
+  }
+
+ protected:
+  void dragEnterEvent(QDragEnterEvent* event) override { AcceptFiles(event); }
+  void dragMoveEvent(QDragMoveEvent* event) override { AcceptFiles(event); }
+
+  void dropEvent(QDropEvent* event) override {
+    if (!AcceptFiles(event)) return;
+    QStringList paths;
+    for (const QUrl& url : event->mimeData()->urls()) {
+      if (url.isLocalFile() && !url.toLocalFile().isEmpty()) {
+        paths.append(url.toLocalFile());
+      }
+    }
+    add_files_(paths);
+  }
+
+ private:
+  static bool AcceptFiles(QDropEvent* event) {
+    if (event->possibleActions().testFlag(Qt::CopyAction) &&
+        event->mimeData()->hasUrls()) {
+      const auto urls = event->mimeData()->urls();
+      for (const QUrl& url : urls) {
+        if (url.isLocalFile() && !url.toLocalFile().isEmpty()) {
+          event->setDropAction(Qt::CopyAction);
+          event->accept();
+          return true;
+        }
+      }
+    }
+    event->ignore();
+    return false;
+  }
+
+  std::function<void(const QStringList&)> add_files_;
+};
 
 void ShowHelp(QWidget* parent) {
   QDialog dialog(parent);
@@ -72,13 +141,17 @@ void ShowHelp(QWidget* parent) {
   };
   add_page(QStringLiteral("基本・書式"), QStringLiteral(
       "1. UTF-8 の TSV ファイルを用意します。\n"
-      "2. 追加… でファイルを登録し、外部辞書を使用する を有効にします。\n"
+      "2. 追加… または一覧へのドラッグ＆ドロップでファイルを登録し、"
+      "外部辞書を使用する を有効にします。複数ファイルをまとめて追加でき、"
+      "登録済みのファイルはスキップされます。\n"
       "3. 決定し、設定画面から開いた場合は設定画面側でも保存します。\n"
       "4. 登録した読みを入力し、通常の変換操作で候補を選択します。\n\n"
       "読みと候補をタブで区切った2列構成です。品詞やコストは不要です。"
       "空行と # から始まるコメント行は無視されます。空欄、値に含まれるタブ・改行は使用できません。\n\n"
       "編集… で辞書名と一致方式を変更できます。名前が空欄ならファイル名が表示されます。"
-      "名前を変更しても元のファイルは変更されません。パスをコピー でファイルの所在を確認できます。"),
+      "名前を変更しても元のファイルは変更されません。パスをコピー でファイルの所在を確認できます。\n\n"
+      "一覧では複数の辞書を選択できます。削除 ボタンまたは右クリックメニューから選択中の辞書をまとめて削除できます。"
+      "削除されるのは登録情報だけで、元の TSV ファイルは削除されません。"),
       QStringLiteral("せいひんえー\tABC-1234\n0312345678\t山田 太郎"));
   add_page(QStringLiteral("一致方式"), QStringLiteral(
       "完全一致（初期設定）\n"
@@ -105,6 +178,23 @@ void ShowHelp(QWidget* parent) {
       "業務用と個人用の辞書を分けて管理することもできます。"),
       QStringLiteral("ぎっと\tgit status\nぎっと\tgit diff\nぎっと\tgit log --oneline\n"
                      "めーる\tいつもお世話になっております。\nめーる\tご確認いただけますと幸いです。"));
+  add_page(QStringLiteral("リアルタイム連携"), QStringLiteral(
+      "外部プログラムで為替・天気・ニュース・予定などの情報を定期的に取得し、"
+      "TSV を更新すると、変化する情報も変換候補として利用できます。\n\n"
+      "1. Python や PowerShell などで情報を取得し、UTF-8 の2列 TSV を生成します。\n"
+      "2. ファイルを外部辞書に登録します（通常は完全一致で十分です）。\n"
+      "3. 外部プログラムで同じパスの TSV を定期的に更新します。"
+      "一時ファイルに書き込んでから置き換える方法を推奨します。\n"
+      "4. 更新が反映された後に読みを入力し、通常変換します。再登録や再起動は不要です。\n\n"
+      "Mozkey 自体が API に接続したり、この機能で入力した読みを外部サービスへ送信したりすることはありません。"
+      "取得間隔とファイルの変更検出（通常約3秒以内）は別です。表示中の候補が自動で書き換わるわけではありません。\n\n"
+      "取得や読み込みに失敗すると古い情報が残る場合があります。情報源・取得日時を付記し、"
+      "有効期限や取得失敗時の扱いは外部プログラム側で管理してください。"
+      "信頼できるデータ源・プログラムを使用し、個人情報の扱いに注意してください。下の例は架空のデータです。"),
+      QStringLiteral("どるえん\t1米ドル = 150.1234円（11/25 12:00取得・参考値）\n"
+                     "きょうのてんき\t東京：晴れ、最高18℃（11/25 12:00取得）\n"
+                     "きょうのにゅーす\t技術：新バージョンが公開（11/25 12:00取得）\n"
+                     "きょうのよてい\t14:00 開発ミーティング"));
   add_page(QStringLiteral("連携・制限"), QStringLiteral(
       "外部プログラムや業務システムでローカル TSV を生成・更新できます。"
       "Git での管理も可能です。Mozkey が外部システムに直接接続する機能ではありません。\n\n"
@@ -152,20 +242,24 @@ ExternalDictionarySettingsDialog::ExternalDictionarySettingsDialog(
   enabled_checkbox_->setChecked(enabled);
   root->addWidget(enabled_checkbox_);
 
-  auto* heading = new QLabel(QStringLiteral("登録済みの辞書ファイル"), this);
+  auto* heading = new QLabel(QStringLiteral(
+      "登録済みの辞書ファイル（ドラッグ＆ドロップで追加可能）"), this);
+  heading->setWordWrap(true);
   QFont heading_font = heading->font();
   heading_font.setBold(true);
   heading->setFont(heading_font);
   root->addWidget(heading);
 
   auto* list_row = new QHBoxLayout();
-  table_ = new QTableWidget(this);
+  table_ = new ExternalDictionaryDropTable(
+      this, [this](const QStringList& files) { AddFilePaths(files); });
   table_->setColumnCount(3);
   table_->setHorizontalHeaderLabels(
       {QStringLiteral("辞書名"), QStringLiteral("一致方式"),
        QStringLiteral("状態")});
   table_->setSelectionBehavior(QAbstractItemView::SelectRows);
-  table_->setSelectionMode(QAbstractItemView::SingleSelection);
+  table_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+  table_->setContextMenuPolicy(Qt::CustomContextMenu);
   table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
   table_->verticalHeader()->setVisible(false);
   table_->horizontalHeader()->setStretchLastSection(false);
@@ -226,6 +320,23 @@ ExternalDictionarySettingsDialog::ExternalDictionarySettingsDialog(
   connect(table_, &QTableWidget::cellDoubleClicked, this,
           [this](int, int) { EditSelected(); });
   connect(remove_button_, &QPushButton::clicked, this, [this] { RemoveSelected(); });
+  connect(table_, &QWidget::customContextMenuRequested, this,
+          [this](const QPoint& pos) {
+            const QModelIndex index = table_->indexAt(pos);
+            if (!index.isValid()) return;
+            // Preserve a multi-selection when opening its context menu.
+            if (!table_->selectionModel()->isSelected(index)) {
+              SelectOnlyRow(table_, index.row());
+            }
+            const auto count = table_->selectionModel()->selectedRows().size();
+            if (count == 0) return;
+            QMenu menu(this);
+            auto* remove = menu.addAction(
+                QStringLiteral("選択中の%1件を削除").arg(count));
+            if (menu.exec(table_->viewport()->mapToGlobal(pos)) == remove) {
+              RemoveSelected();
+            }
+          });
   connect(up_button_, &QPushButton::clicked, this, [this] { MoveSelected(-1); });
   connect(down_button_, &QPushButton::clicked, this, [this] { MoveSelected(1); });
   connect(copy_path_button_, &QPushButton::clicked, this,
@@ -266,19 +377,23 @@ void ExternalDictionarySettingsDialog::RefreshRows() {
     table_->setItem(static_cast<int>(i), 2, new QTableWidgetItem(state));
   }
   if (!sources_.empty()) {
-    table_->selectRow(std::max(0, std::min(previous,
-                              static_cast<int>(sources_.size()) - 1)));
+    SelectOnlyRow(table_, std::max(0, std::min(
+        previous, static_cast<int>(sources_.size()) - 1)));
   }
   UpdateSelectionActions();
 }
 
 void ExternalDictionarySettingsDialog::UpdateSelectionActions() {
-  const int row = table_->currentRow();
+  const auto rows = table_->selectionModel()->selectedRows();
+  const int row = rows.size() == 1 ? rows.front().row() : -1;
   const bool selected = row >= 0 && row < static_cast<int>(sources_.size());
   edit_button_->setEnabled(selected);
+  selected_path_->setPlaceholderText(
+      rows.size() > 1 ? QStringLiteral("%1件の辞書を選択中").arg(rows.size())
+                      : QStringLiteral("辞書を選択してください"));
   selected_path_->setText(selected ? FromUtf8(sources_[row].path()) : QString());
   selected_path_->setCursorPosition(0);
-  remove_button_->setEnabled(selected);
+  remove_button_->setEnabled(!rows.isEmpty());
   copy_path_button_->setEnabled(selected);
   up_button_->setEnabled(selected && row > 0);
   down_button_->setEnabled(selected && row + 1 < static_cast<int>(sources_.size()));
@@ -288,23 +403,42 @@ void ExternalDictionarySettingsDialog::AddFiles() {
   const QStringList files = QFileDialog::getOpenFileNames(
       this, QStringLiteral("外部 TSV 辞書を追加"), QString(),
       QStringLiteral("TSV ファイル (*.tsv);;すべてのファイル (*)"));
+  AddFilePaths(files);
+}
+
+void ExternalDictionarySettingsDialog::AddFilePaths(const QStringList& files) {
+  bool limit_reached = false;
+  bool added = false;
   for (const QString& file : files) {
-    const std::string path = ToUtf8(QFileInfo(file).absoluteFilePath());
-    if (std::any_of(sources_.begin(), sources_.end(), [&path](const auto& source) {
-          return source.path() == path;
-        })) continue;
+    if (file.isEmpty()) continue;
+    const QFileInfo info(file);
+    if (!info.isFile()) continue;
+    const QString absolute_path = QDir::cleanPath(info.absoluteFilePath());
+    const std::string path = ToUtf8(absolute_path);
+    if (std::any_of(sources_.begin(), sources_.end(),
+                    [&path, &info](const auto& source) {
+                      if (source.path() == path) return true;
+                      const QFileInfo existing(FromUtf8(source.path()));
+                      return existing.isFile() && existing == info;
+                    })) {
+      continue;
+    }
     if (sources_.size() >= kMaxSources) {
-      QMessageBox::warning(this, windowTitle(),
-                           QStringLiteral("登録できるファイルは最大32個です。"));
+      limit_reached = true;
       break;
     }
     sources_.emplace_back().set_path(path);
+    added = true;
   }
-  RefreshRows();
+  if (added) RefreshRows();
+  if (limit_reached) {
+    QMessageBox::warning(this, windowTitle(),
+                         QStringLiteral("登録できるファイルは最大32個です。"));
+  }
 }
 
 void ExternalDictionarySettingsDialog::EditSelected() {
-  const int row = table_->currentRow();
+  const int row = SingleSelectedRow(table_);
   if (row < 0 || row >= static_cast<int>(sources_.size())) return;
   auto& source = sources_[row];
   QDialog dialog(this);
@@ -341,23 +475,33 @@ void ExternalDictionarySettingsDialog::EditSelected() {
 }
 
 void ExternalDictionarySettingsDialog::RemoveSelected() {
-  const int row = table_->currentRow();
-  if (row < 0 || row >= static_cast<int>(sources_.size())) return;
-  sources_.erase(sources_.begin() + row);
+  std::vector<int> rows;
+  const auto selected = table_->selectionModel()->selectedRows();
+  for (const QModelIndex& index : selected) {
+    const int row = index.row();
+    if (row < 0 || row >= static_cast<int>(sources_.size())) return;
+    rows.push_back(row);
+  }
+  if (rows.empty()) return;
+  // Erase from the end so earlier row indices remain valid.
+  std::sort(rows.begin(), rows.end(), std::greater<int>());
+  for (const int row : rows) {
+    sources_.erase(sources_.begin() + row);
+  }
   RefreshRows();
 }
 
 void ExternalDictionarySettingsDialog::MoveSelected(int direction) {
-  const int row = table_->currentRow();
+  const int row = SingleSelectedRow(table_);
   const int target = row + direction;
   if (row < 0 || target < 0 || target >= static_cast<int>(sources_.size())) return;
   std::swap(sources_[row], sources_[target]);
   RefreshRows();
-  table_->selectRow(target);
+  SelectOnlyRow(table_, target);
 }
 
 void ExternalDictionarySettingsDialog::CopySelectedPath() {
-  const int row = table_->currentRow();
+  const int row = SingleSelectedRow(table_);
   if (row < 0 || row >= static_cast<int>(sources_.size())) return;
   QGuiApplication::clipboard()->setText(FromUtf8(sources_[row].path()));
 }

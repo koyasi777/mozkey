@@ -41,7 +41,7 @@ upstream Mozc との追従性および既存インストールとの互換性を
 - **変換状態インジケータ（Windows / macOS）：** 未確定文字の近くで「入力中・Mozc・Zenz処理中・Zenz適用済み」を表示し、配色・形状・位置を調整できます。
 - **幅広い外観カスタマイズ：** 候補・サジェスト・ルビの配色（ライト／ダーク／自動／カスタム）、サイズ、角丸、透明度、影を個別に設定。Windows ではフォント・文字の太さ・未確定文字の色や下線、IME インジケータも調整できます。
 - **英字表記辞書（IME 切り替え不要）：** 日本語入力（ひらがなモード）のまま、`GitHub` や `ChatGPT` などの英字表記を入力・選択できます。別の IME や半角英数モードへの手動切り替えは不要です。登録語ごとに「自動英字化」と「候補のみ」を選べ、推奨語彙の管理や TSV / JSON の入出力にも対応します。
-- **外部辞書（TSV ファイルの動的読み込み）：** 商品マスターや連絡先、製品型番、定型文などを外部の TSV ファイルから変換候補として利用できます。ファイルの更新を自動で反映するため、辞書を登録し直す必要はありません。複数の辞書を名前付きで管理でき、ファイルごとに完全一致または完全一致＋前方一致を選択できます。Git や業務システム、自作スクリプトによる TSV の管理・生成とも連携できます。[外部辞書の使い方](#外部辞書tsv-ファイルの動的読み込み)を参照してください。
+- **外部辞書（TSV ファイルの動的読み込み）：** 商品マスターや連絡先、製品型番、定型文などを外部の TSV ファイルから変換候補として利用できます。ファイルの更新を自動で反映するため、辞書を登録し直す必要はありません。複数の辞書を名前付きで管理でき、ファイルごとに完全一致または完全一致＋前方一致を選択できます。Git や業務システム、自作スクリプトによる TSV の管理・生成とも連携でき、為替・天気・ニュースなどの動的な情報も外部プログラム経由で候補にできます。[外部辞書の使い方](#外部辞書tsv-ファイルの動的読み込み)を参照してください。
 - **柔軟なローマ字入力とキー設定：** プリセットの保存・管理、ローマ字テーブルの検索・編集、曖昧な規則の途中表示、句読点・記号の単打確定、複数コマンドや待機ステップを組み合わせたキー割り当てに対応します。
 - **日本語の変換品質と辞書の拡張：** 日常語彙・固有名詞・口語表現を補強し、文節分割や不自然な漢字化を抑制。日付・曜日の変換候補も拡張しています。
 - **ローカルファーストと OS 連携：** Zenz の推論はローカルで実行し、利用統計の送信機能を無効化。シークレット入力への配慮や、Windows Search などの入力欄での候補表示にも対応しています。
@@ -371,7 +371,7 @@ Mozkey は、英字の固有名詞や技術用語を入力できるよう、ロ�
 
 1. UTF-8 の TSV ファイルを用意し、1 行に「読み」と「候補」をタブで区切って記述します。
 2. Mozkey の設定画面の「辞書」タブから **「外部辞書の設定…」** を開きます。ユーザー辞書ツールの「外部辞書の設定」からも開けます。
-3. 「追加…」でファイルを登録します。辞書を選択して「編集…」を押すか、一覧をダブルクリックすると、任意の辞書名と一致方式を設定できます。
+3. 「追加…」または一覧へのドラッグ＆ドロップでファイルを登録します。複数ファイルをまとめて追加でき、登録済みのファイルはスキップされます。フォルダーや Web URL は登録されません。辞書を選択して「編集…」を押すか、一覧をダブルクリックすると、任意の辞書名と一致方式を設定できます。
 4. 「外部辞書を使用する」を有効にして「決定」を押します。設定画面から開いた場合は、設定画面側でも保存してください。
 5. 読みを入力して通常の変換操作を行い、外部辞書の候補を選択します。
 
@@ -456,6 +456,29 @@ Mozkey は文字列を入力するだけで、コマンドを実行すること�
 商品マスターなどから一覧用・個別用の読みを含む TSV を外部プログラムで生成・更新することもできます。
 Mozkey 自体が外部の業務システムに直接接続するわけではなく、ローカルの TSV を読み込みます。
 同一読みの外部辞書候補は統合後で最大64件です。1ファイル内で同じ読みの異なる候補が64件を超えると読み込みに失敗するため、大きな一覧は分類して別の読みを割り当ててください。
+
+#### 活用例：リアルタイム情報との連携
+
+外部プログラムで情報を定期的に取得し、登録済みの TSV を更新すると、為替、天気、ニュース、予定、交通情報など、時間とともに変化するデータも通常の変換候補として利用できます。
+例えば `どるえん` を変換して最新の取得レートを選択したり、`きょうのてんき` や `きょうのにゅーす` で取得済みの情報を呼び出したりできます。
+
+```tsv
+どるえん	1米ドル = 150.1234円（11/25 12:00取得・参考値）
+きょうのてんき	東京：晴れ、最高18℃（11/25 12:00取得）
+きょうのにゅーす	技術：新バージョンが公開（11/25 12:00取得）
+きょうのよてい	14:00 開発ミーティング
+```
+
+上記は架空のデータです。例えば Python や PowerShell で為替 API、天気 API、RSS などから情報を取得し、次の手順で連携できます。
+
+1. 外部プログラムでデータを取得し、UTF-8 の2列 TSV に整形します。候補に含まれるタブ・改行は取り除き、必要に応じて情報源や取得日時を付記します。
+2. 生成したファイルを外部辞書として登録します。これらの用途では、通常は完全一致で十分です。
+3. 外部プログラムで同じパスの TSV を定期的に更新します。同じディレクトリに一時ファイルを生成し、書き込み完了後に置き換える方法を推奨します。
+4. 更新が反映された後に、読みを入力して新たに通常変換を行います。辞書の再登録や Mozkey の再起動は不要です。
+
+Mozkey 自体が API に接続したり、入力した読みを外部サービスへ送信したりする機能ではありません。
+外部プログラムによる取得間隔と Mozkey によるファイルの変更検出（通常約3秒以内）は別です。表示中の候補が自動で書き換わるわけではなく、情報の即時性や正確性は保証しません。
+取得や読み込みに失敗すると古い情報が残る場合があるため、外部プログラム側で有効期限や取得失敗時の扱いを管理してください。信頼できるデータ源とプログラムを使用し、個人情報などの取り扱いにも注意してください。
 
 #### 動作と制限
 
@@ -1220,7 +1243,7 @@ Mozkey is not an official Google Japanese Input or google/mozc distribution.
 - **Conversion-status indicator (Windows / macOS):** Displays Reading, Mozc, Zenz processing, or Zenz applied near the composition, with adjustable position, shape, and colors. The new macOS indicator has not yet been verified on native macOS hardware.
 - **Extensive appearance customization:** Configure colors (light/dark/system/custom), dimensions, rounded corners, opacity, and shadows per window. Windows additionally supports font/weight, preedit colors and underlines, and IME-indicator styling.
 - **English spelling dictionary (no manual IME switching):** Enter or select spellings such as `GitHub` and `ChatGPT` while remaining in Japanese hiragana input, without manually switching to another IME or alphanumeric input mode. Registered rules either present the preferred ASCII spelling automatically or offer it only as a selectable candidate. Manage built-in presets and custom TSV/JSON rules.
-- **External dictionaries (automatic TSV reload):** Use product catalogs, contacts, product codes, and reusable text from external TSV files as conversion candidates. Changes are reflected automatically without re-importing the dictionary. Manage multiple named dictionaries, each with exact matching or exact plus prefix matching. Use TSV files maintained through Git, business systems, or custom scripts. See [External dictionaries](#external-dictionaries-automatic-tsv-reload).
+- **External dictionaries (automatic TSV reload):** Use product catalogs, contacts, product codes, and reusable text from external TSV files as conversion candidates. Changes are reflected automatically without re-importing the dictionary. Manage multiple named dictionaries, each with exact matching or exact plus prefix matching. Use TSV files maintained through Git, business systems, or custom scripts, including frequently updated information such as exchange rates, weather, and news. See [External dictionaries](#external-dictionaries-automatic-tsv-reload).
 - **Customizable romaji and shortcuts:** Save and manage romaji presets, search and edit romaji-table rules, display intermediate output for ambiguous rules, commit punctuation and symbols with a single key, and assign ordered key commands with delays.
 - **Improved Japanese conversion and dictionaries:** Enhances everyday expressions and names, reduces unwanted segmentation and kanji conversion, and adds date and weekday suggestions.
 - **Local-first operation and OS integration:** Runs Zenz inference locally, disables inherited usage-statistics reporting, supports privacy-aware input behavior, and improves candidate display in Windows Search and other immersive TSF hosts.
@@ -1602,7 +1625,7 @@ contacts, and reusable text. Dictionaries can be version-controlled with Git or 
 
 1. Prepare a UTF-8 TSV file with a reading and candidate separated by a tab on each data line.
 2. Open **「外部辞書の設定…」** (External dictionary settings) in the Dictionary tab of the config dialog, or open 「外部辞書の設定」 from the user dictionary tool.
-3. Add files with 「追加…」 (Add). Select a dictionary and click 「編集…」 (Edit), or double-click the row, to set an optional dictionary name and matching mode.
+3. Add files with 「追加…」 (Add) or drag and drop them onto the dictionary list. Multiple files can be added at once; already registered files are skipped. Folders and web URLs are not registered. Select a dictionary and click 「編集…」 (Edit), or double-click the row, to set an optional dictionary name and matching mode.
 4. Enable 「外部辞書を使用する」 (Use external dictionaries) and click 「決定」 (OK). If opened from the config dialog, also save that dialog.
 5. Enter the reading, perform normal conversion, and select the external candidate.
 
@@ -1687,6 +1710,29 @@ Mozkey inserts text only; it does not execute commands.
 External programs can generate and update TSV files with both list and individual readings from a product catalog or other data source.
 Mozkey reads local TSV files; it does not connect directly to external business systems.
 The merged dictionary supports up to 64 external candidates per reading. A file with more than 64 distinct candidates for one reading fails to load, so split larger lists into categories with separate readings.
+
+#### Use cases: live and frequently updated information
+
+An external program can periodically fetch information and update a registered TSV file, making changing data such as exchange rates, weather, news, schedules, and transport updates available as normal conversion candidates.
+For example, convert `どるえん` (USD/JPY) to select the latest fetched exchange rate, or use `きょうのてんき` (today's weather) and `きょうのにゅーす` (today's news) to retrieve previously fetched information.
+
+```tsv
+どるえん	1米ドル = 150.1234円（11/25 12:00取得・参考値）
+きょうのてんき	東京：晴れ、最高18℃（11/25 12:00取得）
+きょうのにゅーす	技術：新バージョンが公開（11/25 12:00取得）
+きょうのよてい	14:00 開発ミーティング
+```
+
+These are fictional examples. A Python or PowerShell program could fetch data from an exchange-rate API, a weather API, or an RSS feed and integrate it as follows:
+
+1. Fetch the data with the external program and format it as a two-column UTF-8 TSV file. Remove embedded tabs and line breaks, and include the source and retrieval time where appropriate.
+2. Register the generated file as an external dictionary. Exact matching is usually sufficient for these use cases.
+3. Periodically update the TSV at the same path. Prefer writing a temporary file in the same directory and replacing the registered file after the write is complete.
+4. Once the update is loaded, enter the reading and perform a new normal conversion. There is no need to re-register the dictionary or restart Mozkey.
+
+Mozkey itself does not connect to these APIs or send the entered reading to external services as part of this feature.
+The external program's fetch interval is separate from Mozkey's file change detection (normally within about three seconds). Already displayed candidates are not automatically rewritten, and information freshness and accuracy are not guaranteed.
+Old information may remain after a fetch or read failure, so the external program should manage data expiry and fetch failures. Use trusted data sources and programs, and take care when handling personal information.
 
 #### Behavior and limits
 
