@@ -767,6 +767,98 @@ TEST_F(SessionRegressionTest, ConsistencyBetweenPredictionAndSuggestion) {
   EXPECT_EQ(prediction_commit_result, suggestion_first_candidate);
 }
 
+TEST_F(SessionRegressionTest, PunctuationModeDoesNotScheduleLiveConversion) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_auto_conversion(true);
+  config.set_auto_conversion_key(config::Config::AUTO_CONVERSION_KUTEN);
+  config.set_use_live_conversion(true);
+  config.set_use_zenz_live_correction(true);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("aiueo", &command);
+  EXPECT_EQ(session_->context().state(), session::ImeContext::COMPOSITION);
+  EXPECT_FALSE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().live_conversion_pending());
+  EXPECT_FALSE(command.output().has_callback());
+
+  InsertCharacterChars(".", &command);
+  EXPECT_EQ(session_->context().state(), session::ImeContext::CONVERSION);
+  EXPECT_FALSE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().live_conversion_pending());
+  EXPECT_FALSE(command.output().has_callback());
+}
+
+TEST_F(SessionRegressionTest, PunctuationModeInvalidatesPendingLiveConversion) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_auto_conversion(false);
+  config.set_use_live_conversion(true);
+  config.set_use_zenz_live_correction(false);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  const commands::SessionCommand old_callback =
+      command.output().callback().session_command();
+  ASSERT_EQ(old_callback.type(),
+            commands::SessionCommand::APPLY_LIVE_CONVERSION);
+
+  config.set_use_auto_conversion(true);
+  config.set_auto_conversion_key(config::Config::AUTO_CONVERSION_KUTEN);
+  session_->SetConfig(config);
+
+  commands::Command delayed;
+  delayed.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *delayed.mutable_input()->mutable_command() = old_callback;
+  ASSERT_TRUE(session_->SendCommand(&delayed));
+  EXPECT_EQ(session_->context().state(), session::ImeContext::COMPOSITION);
+  EXPECT_EQ(GetComposition(delayed), "かんじ");
+  EXPECT_FALSE(delayed.output().live_conversion());
+  EXPECT_FALSE(delayed.output().live_conversion_pending());
+  EXPECT_FALSE(delayed.output().has_callback());
+
+  InsertCharacterChars(".", &command);
+  EXPECT_EQ(session_->context().state(), session::ImeContext::CONVERSION);
+  EXPECT_FALSE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().live_conversion_pending());
+}
+
+TEST_F(SessionRegressionTest, PunctuationModeExitsActiveLiveConversion) {
+  InitSessionToPrecomposition(session_.get());
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_auto_conversion(false);
+  config.set_use_live_conversion(true);
+  config.set_use_zenz_live_correction(false);
+  config.set_live_conversion_delay_msec(228);
+  session_->SetConfig(config);
+
+  commands::Command command;
+  InsertCharacterChars("kanji", &command);
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  commands::Command materialized;
+  materialized.mutable_input()->set_type(commands::Input::SEND_COMMAND);
+  *materialized.mutable_input()->mutable_command() =
+      command.output().callback().session_command();
+  ASSERT_TRUE(session_->SendCommand(&materialized));
+  ASSERT_TRUE(materialized.output().live_conversion());
+
+  config.set_use_auto_conversion(true);
+  config.set_auto_conversion_key(config::Config::AUTO_CONVERSION_KUTEN);
+  session_->SetConfig(config);
+  EXPECT_EQ(session_->context().state(), session::ImeContext::COMPOSITION);
+  InsertCharacterChars(".", &command);
+  EXPECT_EQ(session_->context().state(), session::ImeContext::CONVERSION);
+  EXPECT_FALSE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().live_conversion_pending());
+}
+
 TEST_F(SessionRegressionTest, AutoConversionTest) {
   // Default mode
   {

@@ -535,6 +535,13 @@ void NormalizeConfig(Config* config) {
 
   ApplyMozkeyProductDefaults(config);
 
+  // Punctuation-triggered conversion is an alternative to automatic live
+  // conversion. Prefer the explicit punctuation mode in legacy conflicts,
+  // including configs whose live-conversion field was absent.
+  if (config->use_auto_conversion()) {
+    config->set_use_live_conversion(false);
+  }
+
   // Follows bundled preset revisions only while the saved snapshot is intact.
   NormalizeRomanTablePreset(config);
 }
