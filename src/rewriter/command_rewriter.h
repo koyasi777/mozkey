@@ -32,6 +32,7 @@
 
 #include <cstddef>
 
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
@@ -40,8 +41,7 @@
 namespace mozc {
 
 // CommandRewriter is a Rewriter which inserts
-// "Command candidates" with which user can change the configurations
-// of Suggestions and/or Incogito mode.
+// "Command candidates" with which users can change configuration settings.
 class CommandRewriter : public RewriterInterface {
  public:
   CommandRewriter() = default;
@@ -53,22 +53,18 @@ class CommandRewriter : public RewriterInterface {
  private:
   bool RewriteSegment(const config::Config& config, Segment* segment) const;
 
-  // Insert a new IncogitoModeToggle Command candidate.
-  // Use segment->candidate(base_pos) as a reference candidate.
-  // |insert_pos| is the actual position where the new candidate
-  // is inserted.
-  void InsertIncognitoModeToggleCommand(const config::Config& config,
-                                        Segment* segment, size_t reference_pos,
-                                        size_t insert_pos) const;
-
-  // Insert a new IncogitoModeToggle Command candidate.
-  // Use segment->candidate(base_pos) as a reference candidate.
-  // |insert_pos| is the actual position where the new candidate
-  // is inserted.
-  void InsertDisableAllSuggestionToggleCommand(const config::Config& config,
-                                               Segment* segment,
-                                               size_t reference_pos,
-                                               size_t insert_pos) const;
+  void InsertIncognitoModeToggleCommand(
+      const config::Config& config, Segment* segment,
+      const converter::Candidate& reference, size_t insert_pos) const;
+  void InsertDisableAllSuggestionToggleCommand(
+      const config::Config& config, Segment* segment,
+      const converter::Candidate& reference, size_t insert_pos) const;
+  void InsertLiveConversionToggleCommand(
+      const config::Config& config, Segment* segment,
+      const converter::Candidate& reference, size_t insert_pos) const;
+  void InsertZenzLiveCorrectionToggleCommand(
+      const config::Config& config, Segment* segment,
+      const converter::Candidate& reference, size_t insert_pos) const;
 };
 
 }  // namespace mozc

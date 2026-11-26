@@ -85,6 +85,10 @@ class Candidate {
     DISABLE_INCOGNITO_MODE,     // disables "incognito mode".
     ENABLE_PRESENTATION_MODE,   // enables "presentation mode".
     DISABLE_PRESENTATION_MODE,  // disables "presentation mode".
+    ENABLE_LIVE_CONVERSION,
+    DISABLE_LIVE_CONVERSION,
+    ENABLE_ZENZ_LIVE_CORRECTION,
+    DISABLE_ZENZ_LIVE_CORRECTION,
   };
 
   enum Category {
