@@ -73,21 +73,30 @@ struct ParserContext {
 // 1. Precedence (from lowest to highest):
 //    Expression : '+' | '-'               (Left-associative)
 //    Term       : '*' | '/' | '%'         (Left-associative)
-//    Factor     : '^'                     (Right-associative)
 //    Unary      : '+' | '-'               (Prefix, right-associative)
+//    Factor     : '^'                     (Right-associative)
 //    Primary    : Integer | Function | '(' Expression ')'
+//
+//    Note: Factor := Primary ('^' Unary)?. '^' binds tighter than a unary sign
+//    on its left (e.g., -3^2 = -(3^2)), while its right operand accepts Unary
+//    for signed exponents (e.g., 2^-3^2 = 2^(-(3^2))).
 //
 // -----------------------------------------------------------------------------
 // 2. Behavior of right-associativity vs left-associativity:
 //    - '+' and '-' (binary) are parsed using loop evaluation:
 //        A + B + C is processed as (A + B) + C.
 //    - '^' is right-associative:
-//        A ^ B ^ C is processed as A ^ (B ^ C) via direct recursive calls.
+//        A ^ B ^ C is processed as A ^ (B ^ C) via recursive calls
+//        (ParseFactor -> ParseUnary -> ParseFactor).
 //
 // -----------------------------------------------------------------------------
 // 3. Mutual Recursion:
-//    - ParsePrimary handles parentheses '( Expression )' and functions.
-//    - Minimum forward-declaration is required below to allow this cycle.
+//    - ParsePrimary <-> ParseExpression: handles parentheses '( Expression )'
+//      and function arguments.
+//    - ParseFactor <-> ParseUnary: allows signed exponents on the right of '^'
+//      while keeping '^' higher precedence than a unary sign on its left.
+//    - Forward declarations are used below only where required for these
+//      cycles.
 //    - Recursive calls are guarded by the operation count limit
 //      (kMaxOperations) to prevent stack overflow.
 // -----------------------------------------------------------------------------
@@ -176,6 +185,35 @@ std::optional<double> ParsePrimary(ParserContext& ctx) {
   return std::nullopt;
 }
 
+std::optional<double> ParseUnary(ParserContext& ctx);
+
+// factor := primary ('^' unary)?
+// POW binds tighter than a unary sign on its left, e.g. -3^2 = -(3^2), but
+// its right operand may carry a sign, e.g. 2^-2. POW is right-associative.
+std::optional<double> ParseFactor(ParserContext& ctx) {
+  if (++ctx.operation_count > kMaxOperations) {
+    return std::nullopt;
+  }
+  std::optional<double> val = ParsePrimary(ctx);
+  if (!val.has_value()) {
+    return std::nullopt;
+  }
+  if (ctx.pos < ctx.tokens.size() &&
+      ctx.tokens[ctx.pos].type == TokenType::POW) {
+    ++ctx.pos;
+    std::optional<double> rhs = ParseUnary(ctx);
+    if (!rhs.has_value()) {
+      return std::nullopt;
+    }
+    *val = std::pow(*val, *rhs);
+    if (!std::isfinite(*val)) {
+      return std::nullopt;
+    }
+  }
+  return val;
+}
+
+// unary := ('+' | '-') unary | factor
 std::optional<double> ParseUnary(ParserContext& ctx) {
   if (++ctx.operation_count > kMaxOperations) {
     return std::nullopt;
@@ -196,38 +234,14 @@ std::optional<double> ParseUnary(ParserContext& ctx) {
     }
     return -(*rhs);
   }
-  return ParsePrimary(ctx);
-}
-
-std::optional<double> ParseFactor(ParserContext& ctx) {
-  if (++ctx.operation_count > kMaxOperations) {
-    return std::nullopt;
-  }
-  std::optional<double> val = ParseUnary(ctx);
-  if (!val.has_value()) {
-    return std::nullopt;
-  }
-  // POW is right-associative: call ParseFactor recursively for the right side.
-  if (ctx.pos < ctx.tokens.size() &&
-      ctx.tokens[ctx.pos].type == TokenType::POW) {
-    ++ctx.pos;
-    std::optional<double> rhs = ParseFactor(ctx);
-    if (!rhs.has_value()) {
-      return std::nullopt;
-    }
-    *val = std::pow(*val, *rhs);
-    if (!std::isfinite(*val)) {
-      return std::nullopt;
-    }
-  }
-  return val;
+  return ParseFactor(ctx);
 }
 
 std::optional<double> ParseTerm(ParserContext& ctx) {
   if (++ctx.operation_count > kMaxOperations) {
     return std::nullopt;
   }
-  std::optional<double> val = ParseFactor(ctx);
+  std::optional<double> val = ParseUnary(ctx);
   if (!val.has_value()) {
     return std::nullopt;
   }
@@ -238,7 +252,7 @@ std::optional<double> ParseTerm(ParserContext& ctx) {
       break;
     }
     ++ctx.pos;
-    std::optional<double> rhs = ParseFactor(ctx);
+    std::optional<double> rhs = ParseUnary(ctx);
     if (!rhs.has_value()) {
       return std::nullopt;
     }

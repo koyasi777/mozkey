@@ -192,6 +192,41 @@ TEST(CalculatorTest, BasicTest) {
   VerifyRejection(calculator, "sin(3=");
 }
 
+TEST(CalculatorTest, UnaryMinusAndPower) {
+  Calculator calculator;
+
+  // '^' binds tighter than a unary sign on its left: -3^2 = -(3^2).
+  VerifyCalculation(calculator, "-3^2=", "-9");
+  VerifyCalculation(calculator, "=-3^2", "-9");
+  VerifyCalculation(calculator, "ー3＾2＝", "-9");
+  VerifyCalculation(calculator, "+-2^2=", "-4");
+  VerifyCalculation(calculator, "2*-3^2=", "-18");
+  VerifyCalculation(calculator, "-2^0.5=", "-1.4142136");
+  // A sign on the right operand of '^' applies to the exponent.
+  VerifyCalculation(calculator, "2^-3^2=", "0.001953125");
+  VerifyCalculation(calculator, "-2^-2=", "-0.25");
+
+  // Trailing multiplicative and additive operators bind looser than '^' and
+  // unary signs.
+  VerifyCalculation(calculator, "2^-3*4=", "0.5");
+  VerifyCalculation(calculator, "2^-2/4=", "0.0625");
+  VerifyCalculation(calculator, "2^-3+1=", "1.125");
+  VerifyCalculation(calculator, "-3^2+10=", "1");
+
+  // Parentheses still make the sign part of the base.
+  VerifyCalculation(calculator, "(-3)^2=", "9");
+  VerifyCalculation(calculator, "1-3^2=", "-8");
+  VerifyCalculation(calculator, "2^3^2=", "512");
+
+  // Non-finite power results (e.g., fractional power of a parenthesized
+  // negative base) and incomplete or malformed power expressions are rejected.
+  VerifyRejection(calculator, "(-2)^0.5=");
+  VerifyRejection(calculator, "0^-1=");
+  VerifyRejection(calculator, "2^=");
+  VerifyRejection(calculator, "2^-=");
+  VerifyRejection(calculator, "2^*3=");
+}
+
 // Test large number of queries.  Test data is located at
 // data/test/calculator/testset.txt.
 // In this file, each test case is written in one line in the format
