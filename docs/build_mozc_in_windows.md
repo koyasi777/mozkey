@@ -144,6 +144,24 @@ python build_tools/build_qt.py --release --confirm_license --target_arch=x64
 bazelisk build package --config release_build --platforms=//:windows-x86_64 --config win_universal_installer
 ```
 
+### Selecting a Windows SDK version (optional)
+
+When the automatically selected SDK lacks libraries for a target architecture,
+select a complete installed SDK by setting `BAZEL_WINSDK_FULL_VERSION` before
+running Bazel. For example, in PowerShell (use a version installed locally):
+
+```powershell
+$env:BAZEL_WINSDK_FULL_VERSION = "10.0.26100.0"
+bazelisk build package --config release_build --platforms=//:windows-x86_64 --config win_universal_installer
+Remove-Item Env:BAZEL_WINSDK_FULL_VERSION
+```
+
+This selects the SDK for the rules_cc C/C++ toolchain and the ARM64X TIP
+forwarder. Other SDK discovery mechanisms are not affected. If specifying the
+version using Bazel flags instead of the environment, set both `--repo_env` and
+`--action_env` to the same `BAZEL_WINSDK_FULL_VERSION` value. Without an override,
+the existing automatic selection is retained.
+
 ## Bazel command examples
 
 ### Bazel User Guide

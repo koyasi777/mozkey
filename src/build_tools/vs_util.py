@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 from typing import Union
@@ -141,6 +142,8 @@ def get_vcvarsall(
 def get_vs_env_vars(
     arch: str,
     vcvarsall_path_hint: Union[str, None] = None,
+    *,
+    windows_sdk_version: Union[str, None] = None,
 ) -> dict[str, str]:
   """Returns environment variables for the specified Visual Studio C++ tool.
 
@@ -169,6 +172,7 @@ def get_vs_env_vars(
   Args:
     arch: The architecture to be used, e.g. 'amd64_x86'
     vcvarsall_path_hint: optional path to vcvarsall.bat
+    windows_sdk_version: optional full Windows SDK version, e.g. 10.0.26100.0.
 
   Returns:
     A dict of environment variable.
@@ -177,6 +181,11 @@ def get_vs_env_vars(
     ChildProcessError: When 'vcvarsall.bat' cannot be executed.
     FileNotFoundError: When 'vcvarsall.bat' cannot be found.
   """
+  if windows_sdk_version and not re.fullmatch(
+      r'[0-9]+(?:\.[0-9]+){3}', windows_sdk_version
+  ):
+    raise ValueError('Expected a full numeric Windows SDK version.')
+  sdk_arg = f' {windows_sdk_version}' if windows_sdk_version else ''
   vcvarsall = get_vcvarsall(arch, vcvarsall_path_hint)
 
   pycmd = (
@@ -184,13 +193,25 @@ def get_vs_env_vars(
       r'import os;'
       r'print(json.dumps(dict(os.environ), ensure_ascii=True))'
   )
-  cmd = f'("{vcvarsall}" {arch}>nul)&&("{sys.executable}" -c "{pycmd}")'
+  cmd = (
+      f'("{vcvarsall}" {arch}{sdk_arg}>nul)'
+      f'&&("{sys.executable}" -c "{pycmd}")'
+  )
   process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
   stdout, _ = process.communicate()
   exitcode = process.wait()
   if exitcode != 0:
     raise ChildProcessError(f'Failed to execute {vcvarsall}')
-  return json.loads(stdout.decode('ascii'))
+  env = json.loads(stdout.decode('ascii'))
+  if windows_sdk_version:
+    selected = next(
+        (v for k, v in env.items() if k.upper() == 'WINDOWSSDKVERSION'), ''
+    ).rstrip('\\/')
+    if selected != windows_sdk_version:
+      raise ChildProcessError(
+          f'Requested Windows SDK {windows_sdk_version}, got {selected!r}.'
+      )
+  return env
 
 
 def get_vc_dir(

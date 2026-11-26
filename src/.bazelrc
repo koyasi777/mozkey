@@ -40,6 +40,9 @@ build:windows_env --extra_toolchains=@local_config_cc//:cc-toolchain-x64_x86_win
 build:windows_env --host_platform=//:host-windows-clang-cl
 build:windows_env --repo_env=BAZEL_WIN32_WINNT=/D_WIN32_WINNT=0x0A00
 build:windows_env --action_env=BAZEL_VC
+# Keep the optional SDK override visible to both rules_cc and TIP genrules.
+build:windows_env --repo_env=BAZEL_WINSDK_FULL_VERSION
+build:windows_env --action_env=BAZEL_WINSDK_FULL_VERSION
 
 ## Compiler options
 common:linux_env   --config=compiler_gcc_like
