@@ -3,6 +3,7 @@
 #define MOZC_GUI_BASE_EXTERNAL_DICTIONARY_SETTINGS_DIALOG_H_
 
 #include <QDialog>
+#include <QStringList>
 #include <vector>
 
 #include "config/external_dictionary_config.h"
@@ -27,6 +28,7 @@ class ExternalDictionarySettingsDialog final : public QDialog {
   void RefreshRows();
   void UpdateSelectionActions();
   void AddFiles();
+  void AddFilePaths(const QStringList& files);
   void EditSelected();
   void RemoveSelected();
   void MoveSelected(int direction);
