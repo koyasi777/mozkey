@@ -2008,6 +2008,18 @@ void MaybeFillConfig(converter::Candidate::Command command,
     case converter::Candidate::DISABLE_PRESENTATION_MODE:
       output->mutable_config()->set_presentation_mode(false);
       break;
+    case converter::Candidate::ENABLE_LIVE_CONVERSION:
+      output->mutable_config()->set_use_live_conversion(true);
+      break;
+    case converter::Candidate::DISABLE_LIVE_CONVERSION:
+      output->mutable_config()->set_use_live_conversion(false);
+      break;
+    case converter::Candidate::ENABLE_ZENZ_LIVE_CORRECTION:
+      output->mutable_config()->set_use_zenz_live_correction(true);
+      break;
+    case converter::Candidate::DISABLE_ZENZ_LIVE_CORRECTION:
+      output->mutable_config()->set_use_zenz_live_correction(false);
+      break;
     default:
       LOG(WARNING) << "Unknown command: " << command;
       break;
@@ -2382,6 +2394,10 @@ bool EngineConverter::MaybePerformCommandCandidate(const size_t index,
         case converter::Candidate::DISABLE_INCOGNITO_MODE:
         case converter::Candidate::ENABLE_PRESENTATION_MODE:
         case converter::Candidate::DISABLE_PRESENTATION_MODE:
+        case converter::Candidate::ENABLE_LIVE_CONVERSION:
+        case converter::Candidate::DISABLE_LIVE_CONVERSION:
+        case converter::Candidate::ENABLE_ZENZ_LIVE_CORRECTION:
+        case converter::Candidate::DISABLE_ZENZ_LIVE_CORRECTION:
           updated_command_ = candidate.command;
           break;
         default:

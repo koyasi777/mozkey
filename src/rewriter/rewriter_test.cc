@@ -108,7 +108,7 @@ TEST_F(RewriterTest, CommandRewriterAvailability) {
 #ifdef __ANDROID__
     EXPECT_EQ(CommandCandidatesSize(*seg), 0);
 #else  // __ANDROID__
-    EXPECT_EQ(CommandCandidatesSize(*seg), 2);
+    EXPECT_EQ(CommandCandidatesSize(*seg), 4);
 #endif  // __ANDROID__
     seg->clear_candidates();
   }
