@@ -187,6 +187,44 @@ bool SystemDictionaryTest::CompareTokensForLookup(const Token& a,
   return true;
 }
 
+// The reader limit applies to encoded bytes, not the UTF-8 input size.
+// The codec encodes each of these hiragana characters into one byte.
+std::string RepeatHiragana(absl::string_view kana, size_t count) {
+  std::string result;
+  for (size_t i = 0; i < count; ++i) {
+    result.append(kana.data(), kana.size());
+  }
+  return result;
+}
+
+TEST(SystemDictionaryBuilderTest, AcceptsEncodedLengthAtOrBelowLimit) {
+  for (const size_t length : {255u, 256u}) {
+    SCOPED_TRACE(length);
+    Token token = {RepeatHiragana("あ", length),
+                   RepeatHiragana("い", length), 100, 50, 70, Token::NONE};
+    std::vector<Token*> tokens = {&token};
+    SystemDictionaryBuilder builder;
+    builder.BuildFromTokens(tokens);
+  }
+}
+
+TEST(SystemDictionaryBuilderDeathTest, RejectsOverlongEncodedKey) {
+  Token token = {RepeatHiragana("あ", 257), "い", 100, 50, 70, Token::NONE};
+  std::vector<Token*> tokens = {&token};
+  SystemDictionaryBuilder builder;
+  EXPECT_DEATH_IF_SUPPORTED(builder.BuildFromTokens(tokens),
+                            "too long key string in input");
+}
+
+TEST(SystemDictionaryBuilderDeathTest, RejectsOverlongEncodedValue) {
+  // 128 ASCII characters encode to 256 bytes; one hiragana adds one byte.
+  Token token = {"あ", std::string(128, 'A') + "い", 100, 50, 70, Token::NONE};
+  std::vector<Token*> tokens = {&token};
+  SystemDictionaryBuilder builder;
+  EXPECT_DEATH_IF_SUPPORTED(builder.BuildFromTokens(tokens),
+                            "too long value string in input");
+}
+
 TEST_F(SystemDictionaryTest, Callback) {
   std::vector<Token> tokens = {
       {"star", "star"}, {"start", "start"}, {"starting", "starting"}};
