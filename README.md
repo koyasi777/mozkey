@@ -141,6 +141,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Windows 版の「辞書」タブに読み取り専用の辞書コスト検索を追加。システム辞書・ユーザー辞書を読みの完全一致で検索し、単語コスト・左右文脈ID・属性ビットを確認可能。辞書や学習内容は変更しない
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
+- `こまんど` の変換候補から、設定画面を開かずにライブ変換と Zenz ライブ補正を個別に ON/OFF 可能
 - ハイフンなし7桁の郵便番号（例：`1000001`）を、既存の郵便番号辞書を使って住所へ変換可能。ライブ変換では数字表記を第1候補に保ち、キー設定の `ConvertNext`（次候補、標準では Space）で住所などの後続候補を選択可能
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
@@ -566,6 +567,8 @@ Windows 版では、**Mozkey プロパティ →「辞書」タブ → 最下部
 ライブ変換中は、変換後の文字を表示しながら元の読みも分かるように、通常は未確定文字の上付近に Mozc 独自のルビ風 overlay window を表示します。Windows / macOS 版では、設定により入力中の画面への固定表示も選択できます。
 
 ライブ変換は設定画面から ON/OFF を切り替えられます。また、変換開始までの遅延時間と、ライブ変換を開始する最小文字数も設定画面から変更できます。
+
+また、`こまんど` と入力して変換すると、「【ライブ変換をオン】／【ライブ変換をオフ】」「【Zenzライブ補正をオン】／【Zenzライブ補正をオフ】」のコマンド候補から、設定画面を開かずに両機能を個別に切り替えられます。設定値は独立して保持されますが、Zenz の自動ライブ補正には両方を有効にする必要があります。コマンド自体は文字として入力されません。
 
 ### ハイフンなし郵便番号の変換
 
@@ -1437,6 +1440,7 @@ Main features added in this fork
 - Adds a read-only dictionary cost inspector to the Windows Dictionary tab, with exact-reading lookup of system/user dictionary entries, word costs, left/right context IDs, and attribute bits, without modifying dictionaries or learning data
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
+- Allows toggling live conversion and Zenz live correction independently through conversion candidates for `こまんど` (komando), without opening the config dialog
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
 - Reduces candidate-window flicker by holding passive suggestions for unresolved Roman prefixes that do not change the prediction reading; when a custom DisplayAmbiguousResult rule exposes a meaningful reading and changes the prediction query, suggestions refresh even while the Roman suffix remains pending. Entering the candidate list uses the exact displayed candidates
@@ -1812,6 +1816,8 @@ For example:
 By default, live conversion shows a small ruby-like overlay window near the preedit text so that the original reading remains visible while the converted text is shown. On Windows/macOS, the overlay can instead be fixed to a position on the active screen.
 
 The live conversion feature can be enabled or disabled from the config dialog. The debounce delay and the minimum number of characters required to start live conversion can also be configured there.
+
+You can also type `こまんど` (komando), open the conversion candidate list, and select and commit a command to turn live conversion or Zenz live correction on or off without opening the config dialog. The two settings are stored independently, but automatic Zenz live correction requires both to be enabled. Command candidates change the settings without inserting text.
 
 ### Hyphenless postal-code conversion
 
