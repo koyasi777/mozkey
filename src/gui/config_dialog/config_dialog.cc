@@ -6206,6 +6206,11 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
 
 
 void ConfigDialog::ConvertFromProto(const config::Config &config) {
+  // Loading settings is not a user toggle. Resolve conflicting legacy values
+  // explicitly, then refresh dependent controls after all values are loaded.
+  const QSignalBlocker block_live_conversion(liveConversionCheckBox);
+  const QSignalBlocker block_auto_conversion(useAutoConversion);
+  const QSignalBlocker block_direct_commit(useDirectCommit);
   base_config_ = config;
   // tab1
   SetComboboxForPreeditMethod(config, inputModeComboBox);
@@ -6261,7 +6266,8 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
     english_input_exceptions_.push_back(entry);
   }
 
-  SET_CHECKBOX(liveConversionCheckBox, use_live_conversion);
+  liveConversionCheckBox->setChecked(config.use_live_conversion() &&
+                                     !config.use_auto_conversion());
   SET_CHECKBOX(showCandidateWindowOnInitialConversionCheckBox,
                show_candidate_window_on_initial_conversion);
 
@@ -6393,7 +6399,8 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
       config.auto_conversion_key() &
       config::Config::AUTO_CONVERSION_EXCLAMATION_MARK);
 
-  SET_CHECKBOX(useDirectCommit, use_direct_commit);
+  useDirectCommit->setChecked(config.use_direct_commit() &&
+                              !config.use_auto_conversion());
   directCommitKutenCheckBox->setChecked(
       config.direct_commit_key() &
       config::Config::DIRECT_COMMIT_KUTEN);
@@ -6999,8 +7006,10 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
   }
   config->set_direct_commit_key(direct_commit_key);
 
-  // Mutual exclusion normalization.
+  // Mutual exclusion normalization. Keep the Zenz live correction preference
+  // intact: it is only effective when live conversion itself is enabled.
   if (config->use_auto_conversion()) {
+    config->set_use_live_conversion(false);
     config->set_use_direct_commit(false);
     config->set_direct_commit_key(0);
   } else if (config->use_direct_commit()) {
@@ -9112,6 +9121,10 @@ void ConfigDialog::SelectInputModeSetting(int index) {
 void ConfigDialog::SelectLiveConversionSetting(int state) {
   const bool enabled = static_cast<bool>(state);
 
+  if (enabled && useAutoConversion->isChecked()) {
+    useAutoConversion->setChecked(false);
+  }
+
   liveConversionDelayLabel->setEnabled(enabled);
   liveConversionDelaySpinBox->setEnabled(enabled);
   liveConversionMinKeyLengthLabel->setEnabled(enabled);
@@ -9199,6 +9212,9 @@ void ConfigDialog::SelectAutoConversionSetting(int state) {
   questionMarkCheckBox->setEnabled(enabled);
   exclamationMarkCheckBox->setEnabled(enabled);
 
+  if (enabled && liveConversionCheckBox->isChecked()) {
+    liveConversionCheckBox->setChecked(false);
+  }
   if (enabled && useDirectCommit->isChecked()) {
     useDirectCommit->setChecked(false);
   }

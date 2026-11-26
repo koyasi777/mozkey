@@ -3771,6 +3771,22 @@ void Session::SetTable(std::shared_ptr<const composer::Table> table) {
 void Session::SetConfig(std::shared_ptr<const config::Config> config) {
   DCHECK(config);
   ClearUndoContext();
+  if (config->use_auto_conversion()) {
+    // Also protect callers that supply a Config directly instead of using
+    // ConfigHandler's normalization.
+    if (config->use_live_conversion()) {
+      auto normalized = std::make_shared<config::Config>(*config);
+      normalized->set_use_live_conversion(false);
+      config = std::move(normalized);
+    }
+    // A settings change must invalidate existing automatic live work, not
+    // just prevent scheduling new work. Keep ordinary/manual conversion.
+    if (live_conversion_pending_ ||
+        (live_conversion_active_ && live_conversion_from_composition_)) {
+      CancelLiveConversionForEditing();
+      ClearLiveConversionState();
+    }
+  }
   context_->SetConfig(std::move(config));
 }
 

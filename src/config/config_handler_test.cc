@@ -968,6 +968,65 @@ TEST_F(ConfigHandlerTest, MissingConfigUsesMozkeyProductDefaults) {
   ExpectMozkeyProductDefaults(ConfigHandler::GetCopiedConfig());
 }
 
+TEST_F(ConfigHandlerTest, PunctuationConversionOverridesLiveConversion) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "punctuation_conversion.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  Config input;
+  input.set_use_auto_conversion(true);
+  input.set_auto_conversion_key(Config::AUTO_CONVERSION_TOUTEN);
+  input.set_use_live_conversion(true);
+  input.set_use_zenz_live_correction(true);
+  ConfigHandler::SetConfig(input);
+  ConfigHandler::Reload();
+  Config output = ConfigHandler::GetCopiedConfig();
+  EXPECT_TRUE(output.use_auto_conversion());
+  EXPECT_FALSE(output.use_live_conversion());
+  EXPECT_TRUE(output.use_zenz_live_correction());
+  EXPECT_EQ(output.auto_conversion_key(), Config::AUTO_CONVERSION_TOUTEN);
+
+  // Switching back to live conversion must retain the Zenz preference.
+  output.set_use_auto_conversion(false);
+  output.set_use_live_conversion(true);
+  ConfigHandler::SetConfig(output);
+  ConfigHandler::Reload();
+  output = ConfigHandler::GetCopiedConfig();
+  EXPECT_FALSE(output.use_auto_conversion());
+  EXPECT_TRUE(output.use_live_conversion());
+  EXPECT_TRUE(output.use_zenz_live_correction());
+}
+
+TEST_F(ConfigHandlerTest, PunctuationConversionNormalizesLegacyConfigOnReload) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "punctuation_legacy.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+
+  // A legacy config may omit the field that Mozkey now defaults to true.
+  for (const bool explicit_live : {false, true}) {
+    Config input;
+    input.set_use_auto_conversion(true);
+    input.set_use_zenz_live_correction(false);
+    if (explicit_live) {
+      input.set_use_live_conversion(true);
+    }
+    {
+      std::ofstream ofs(config_file, std::ios::binary | std::ios::trunc);
+      ASSERT_TRUE(ofs);
+      ASSERT_TRUE(input.SerializeToOstream(&ofs));
+    }
+    ConfigHandler::Reload();
+    const Config output = ConfigHandler::GetCopiedConfig();
+    EXPECT_TRUE(output.use_auto_conversion());
+    EXPECT_FALSE(output.use_live_conversion());
+    EXPECT_FALSE(output.use_zenz_live_correction());
+  }
+}
+
 TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
   const std::string config_file =
