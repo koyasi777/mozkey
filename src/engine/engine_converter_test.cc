@@ -38,6 +38,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -4119,6 +4120,71 @@ TEST_F(EngineConverterTest, ExecuteCommandCandidate) {
     EXPECT_TRUE(output.has_config());
     EXPECT_FALSE(output.config().presentation_mode());
     EXPECT_FALSE(config_->presentation_mode());
+  }
+}
+
+TEST_F(EngineConverterTest, ExecuteLiveCommandCandidates) {
+  using Candidate = converter::Candidate;
+  const Candidate::Command commands_to_test[] = {
+      Candidate::ENABLE_LIVE_CONVERSION,
+      Candidate::DISABLE_LIVE_CONVERSION,
+      Candidate::ENABLE_ZENZ_LIVE_CORRECTION,
+      Candidate::DISABLE_ZENZ_LIVE_CORRECTION,
+  };
+  for (const bool live : {false, true}) {
+    for (const bool zenz : {false, true}) {
+      for (const Candidate::Command command : commands_to_test) {
+        SCOPED_TRACE(::testing::Message()
+                     << "live=" << live << " zenz=" << zenz
+                     << " command=" << command);
+        config_->set_use_live_conversion(live);
+        config_->set_use_zenz_live_correction(zenz);
+        const Config before = *config_;
+        Config expected = before;
+        switch (command) {
+          case Candidate::ENABLE_LIVE_CONVERSION:
+            expected.set_use_live_conversion(true);
+            break;
+          case Candidate::DISABLE_LIVE_CONVERSION:
+            expected.set_use_live_conversion(false);
+            break;
+          case Candidate::ENABLE_ZENZ_LIVE_CORRECTION:
+            expected.set_use_zenz_live_correction(true);
+            break;
+          case Candidate::DISABLE_ZENZ_LIVE_CORRECTION:
+            expected.set_use_zenz_live_correction(false);
+            break;
+          default:
+            FAIL() << "Unexpected command";
+        }
+        auto mock_converter = std::make_shared<MockConverter>();
+        EngineConverter converter(mock_converter, request_, config_);
+        Segments segments;
+        SetAiueo(&segments);
+        SetCommandCandidate(&segments, 0, 0, command);
+        EXPECT_CALL(*mock_converter, StartConversion(_, _))
+            .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+        EXPECT_CALL(*mock_converter, CommitSegmentValue(_, _, _)).Times(0);
+        EXPECT_CALL(*mock_converter, FinishConversion(_, _)).Times(0);
+        composer_->Reset();
+        composer_->InsertCharacterPreedit(kChars_Aiueo);
+        ASSERT_TRUE(converter.Convert(*composer_));
+        commands::Output output;
+        converter.FillOutput(*composer_, &output);
+        EXPECT_FALSE(output.has_config());
+        converter.Commit(*composer_, Context::default_instance());
+        output.Clear();
+        converter.PopOutput(*composer_, &output);
+        EXPECT_FALSE(output.has_result());
+        ASSERT_TRUE(output.has_config());
+        EXPECT_EQ(output.config().SerializeAsString(),
+                  expected.SerializeAsString());
+        EXPECT_EQ(config_->SerializeAsString(), before.SerializeAsString());
+        output.Clear();
+        converter.PopOutput(*composer_, &output);
+        EXPECT_FALSE(output.has_config());
+      }
+    }
   }
 }
 

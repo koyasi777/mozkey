@@ -55,6 +55,10 @@ constexpr char kIncoginitoModeOn[] = "シークレットモードをオン";
 constexpr char kIncoginitoModeOff[] = "シークレットモードをオフ";
 constexpr char kDisableAllSuggestionOn[] = "サジェスト機能の一時停止";
 constexpr char kDisableAllSuggestionOff[] = "サジェスト機能を元に戻す";
+constexpr char kLiveConversionOn[] = "ライブ変換をオン";
+constexpr char kLiveConversionOff[] = "ライブ変換をオフ";
+constexpr char kZenzLiveCorrectionOn[] = "Zenzライブ補正をオン";
+constexpr char kZenzLiveCorrectionOff[] = "Zenzライブ補正をオフ";
 
 // Trigger CommandRewriter if and only if the Segment::key is one of
 // kTriggerKeys[]
@@ -81,14 +85,14 @@ bool FindString(const absl::string_view query,
   return absl::c_find(values, query) != values.end();
 }
 
-converter::Candidate* InsertCommandCandidate(Segment* segment,
-                                             size_t reference_pos,
-                                             size_t insert_pos) {
+converter::Candidate* InsertCommandCandidate(
+    Segment* segment, const converter::Candidate& reference,
+    size_t insert_pos) {
   DCHECK(segment);
   converter::Candidate* candidate = segment->insert_candidate(
       std::min(segment->candidates_size(), insert_pos));
   DCHECK(candidate);
-  *candidate = segment->candidate(reference_pos);
+  *candidate = reference;
   candidate->attributes |= converter::Attribute::COMMAND_CANDIDATE;
   candidate->attributes |= converter::Attribute::NO_LEARNING;
   candidate->description = kDescription;
@@ -105,10 +109,10 @@ bool IsSuggestionEnabled(const config::Config& config) {
 }  // namespace
 
 void CommandRewriter::InsertIncognitoModeToggleCommand(
-    const config::Config& config, Segment* segment, size_t reference_pos,
-    size_t insert_pos) const {
+    const config::Config& config, Segment* segment,
+    const converter::Candidate& reference, size_t insert_pos) const {
   converter::Candidate* candidate =
-      InsertCommandCandidate(segment, reference_pos, insert_pos);
+      InsertCommandCandidate(segment, reference, insert_pos);
   DCHECK(candidate);
   if (config.incognito_mode()) {
     candidate->value = kIncoginitoModeOff;
@@ -121,14 +125,14 @@ void CommandRewriter::InsertIncognitoModeToggleCommand(
 }
 
 void CommandRewriter::InsertDisableAllSuggestionToggleCommand(
-    const config::Config& config, Segment* segment, size_t reference_pos,
-    size_t insert_pos) const {
+    const config::Config& config, Segment* segment,
+    const converter::Candidate& reference, size_t insert_pos) const {
   if (!IsSuggestionEnabled(config)) {
     return;
   }
 
   converter::Candidate* candidate =
-      InsertCommandCandidate(segment, reference_pos, insert_pos);
+      InsertCommandCandidate(segment, reference, insert_pos);
 
   DCHECK(candidate);
   if (config.presentation_mode()) {
@@ -141,24 +145,65 @@ void CommandRewriter::InsertDisableAllSuggestionToggleCommand(
   candidate->content_value = candidate->value;
 }
 
+void CommandRewriter::InsertLiveConversionToggleCommand(
+    const config::Config& config, Segment* segment,
+    const converter::Candidate& reference, size_t insert_pos) const {
+  converter::Candidate* candidate =
+      InsertCommandCandidate(segment, reference, insert_pos);
+  DCHECK(candidate);
+  if (config.use_live_conversion()) {
+    candidate->value = kLiveConversionOff;
+    candidate->command = converter::Candidate::DISABLE_LIVE_CONVERSION;
+  } else {
+    candidate->value = kLiveConversionOn;
+    candidate->command = converter::Candidate::ENABLE_LIVE_CONVERSION;
+  }
+  candidate->content_value = candidate->value;
+}
+
+void CommandRewriter::InsertZenzLiveCorrectionToggleCommand(
+    const config::Config& config, Segment* segment,
+    const converter::Candidate& reference, size_t insert_pos) const {
+  converter::Candidate* candidate =
+      InsertCommandCandidate(segment, reference, insert_pos);
+  DCHECK(candidate);
+  if (config.use_zenz_live_correction()) {
+    candidate->value = kZenzLiveCorrectionOff;
+    candidate->command = converter::Candidate::DISABLE_ZENZ_LIVE_CORRECTION;
+  } else {
+    candidate->value = kZenzLiveCorrectionOn;
+    candidate->command = converter::Candidate::ENABLE_ZENZ_LIVE_CORRECTION;
+  }
+  candidate->content_value = candidate->value;
+}
+
 bool CommandRewriter::RewriteSegment(const config::Config& config,
                                      Segment* segment) const {
   DCHECK(segment);
 
   for (size_t i = 0; i < segment->candidates_size(); ++i) {
-    absl::string_view value = segment->candidate(i).value;
+    // Segment owns candidates independently of their positions in the list.
+    const converter::Candidate& reference = segment->candidate(i);
+    const absl::string_view value = reference.value;
     if (FindString(value, kCommandValues)) {
-      // insert command candidate at an fixed position.
-      InsertDisableAllSuggestionToggleCommand(config, segment, i, 6);
-      InsertIncognitoModeToggleCommand(config, segment, i, 6);
+      // Insert in reverse display order at the same clamped position, even
+      // when the segment has fewer than six ordinary candidates.
+      const size_t insert_pos = std::min(segment->candidates_size(), size_t{6});
+      InsertZenzLiveCorrectionToggleCommand(config, segment, reference,
+                                            insert_pos);
+      InsertLiveConversionToggleCommand(config, segment, reference, insert_pos);
+      InsertDisableAllSuggestionToggleCommand(config, segment, reference,
+                                              insert_pos);
+      InsertIncognitoModeToggleCommand(config, segment, reference, insert_pos);
       return true;
     }
     if (FindString(value, kIncognitoModeValues)) {
-      InsertIncognitoModeToggleCommand(config, segment, i, i + 3);
+      InsertIncognitoModeToggleCommand(config, segment, reference, i + 3);
       return true;
     }
     if (FindString(value, kDisableAllSuggestionValues)) {
-      InsertDisableAllSuggestionToggleCommand(config, segment, i, i + 3);
+      InsertDisableAllSuggestionToggleCommand(config, segment, reference,
+                                              i + 3);
       return true;
     }
   }

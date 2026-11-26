@@ -30,6 +30,7 @@
 #include "rewriter/command_rewriter.h"
 
 #include <cstddef>
+#include <initializer_list>
 #include <string>
 
 #include "config/config_handler.h"
@@ -95,6 +96,7 @@ TEST_F(CommandRewriterTest, Rewrite) {
   Segments segments;
   Segment* seg = segments.push_back_segment();
 
+  config_.set_use_history_suggest(true);
   const ConversionRequest convreq = ConvReq(config_, request_);
   EXPECT_FALSE(rewriter.Rewrite(convreq, &segments));
 
@@ -103,7 +105,7 @@ TEST_F(CommandRewriterTest, Rewrite) {
     seg->set_key("こまんど");
     candidate->value = "コマンド";
     EXPECT_TRUE(rewriter.Rewrite(convreq, &segments));
-    EXPECT_EQ(CommandCandidatesSize(*seg), 2);
+    EXPECT_EQ(CommandCandidatesSize(*seg), 4);
     seg->clear_candidates();
   }
 
@@ -145,6 +147,82 @@ TEST_F(CommandRewriterTest, Rewrite) {
     candidate2->value = "です";
     EXPECT_FALSE(rewriter.Rewrite(convreq, &segments));
     EXPECT_EQ(CommandCandidatesSize(*seg), 0);
+  }
+}
+
+TEST_F(CommandRewriterTest, LiveCommandCandidates) {
+  using Candidate = converter::Candidate;
+  CommandRewriter rewriter;
+  for (const bool live : {false, true}) {
+    for (const bool zenz : {false, true}) {
+      for (const bool suggest : {false, true}) {
+        for (const size_t count : {size_t{1}, size_t{9}}) {
+          SCOPED_TRACE(::testing::Message()
+                       << "live=" << live << " zenz=" << zenz
+                       << " suggest=" << suggest << " count=" << count);
+          config_.set_use_live_conversion(live);
+          config_.set_use_zenz_live_correction(zenz);
+          config_.set_use_history_suggest(suggest);
+          config_.set_use_dictionary_suggest(false);
+          config_.set_use_realtime_conversion(false);
+          config_.set_incognito_mode(false);
+          config_.set_presentation_mode(false);
+          Segments segments;
+          Segment* seg = segments.push_back_segment();
+          seg->set_key("こまんど");
+          for (size_t i = 1; i < count; ++i) {
+            seg->add_candidate()->value = std::to_string(i);
+          }
+          Candidate* reference = seg->add_candidate();
+          reference->key = "こまんど";
+          reference->content_key = reference->key;
+          reference->value = "コマンド";
+          reference->content_value = reference->value;
+          reference->cost = 1234;
+          const size_t first = count < 6 ? count : 6;
+          const size_t command_count = suggest ? 4 : 3;
+          ASSERT_TRUE(rewriter.Rewrite(ConvReq(config_, request_), &segments));
+          ASSERT_EQ(CommandCandidatesSize(*seg), command_count);
+          ASSERT_EQ(seg->candidates_size(), count + command_count);
+          EXPECT_EQ(seg->candidate(first).command,
+                    Candidate::ENABLE_INCOGNITO_MODE);
+          if (suggest) {
+            EXPECT_EQ(seg->candidate(first + 1).command,
+                      Candidate::ENABLE_PRESENTATION_MODE);
+          }
+          const Candidate& live_candidate =
+              seg->candidate(first + command_count - 2);
+          const Candidate& zenz_candidate =
+              seg->candidate(first + command_count - 1);
+          EXPECT_EQ(live_candidate.value,
+                    live ? "ライブ変換をオフ" : "ライブ変換をオン");
+          EXPECT_EQ(live_candidate.command,
+                    live ? Candidate::DISABLE_LIVE_CONVERSION
+                         : Candidate::ENABLE_LIVE_CONVERSION);
+          EXPECT_EQ(zenz_candidate.value,
+                    zenz ? "Zenzライブ補正をオフ" : "Zenzライブ補正をオン");
+          EXPECT_EQ(zenz_candidate.command,
+                    zenz ? Candidate::DISABLE_ZENZ_LIVE_CORRECTION
+                         : Candidate::ENABLE_ZENZ_LIVE_CORRECTION);
+          for (size_t i = first; i < first + command_count; ++i) {
+            const Candidate& candidate = seg->candidate(i);
+            EXPECT_TRUE(candidate.attributes &
+                        converter::Attribute::COMMAND_CANDIDATE);
+            EXPECT_TRUE(candidate.attributes & converter::Attribute::NO_LEARNING);
+            EXPECT_EQ(candidate.key, "こまんど");
+            EXPECT_EQ(candidate.content_key, "こまんど");
+            EXPECT_EQ(candidate.cost, 1234);
+            EXPECT_EQ(candidate.value, candidate.content_value);
+            EXPECT_EQ(candidate.prefix, "【");
+            EXPECT_EQ(candidate.suffix, "】");
+            EXPECT_EQ(candidate.description, "設定を変更します");
+            EXPECT_TRUE(candidate.inner_segment_boundary.empty());
+          }
+          EXPECT_EQ(reference->value, "コマンド");
+          EXPECT_EQ(reference->command, Candidate::DEFAULT_COMMAND);
+        }
+      }
+    }
   }
 }
 
