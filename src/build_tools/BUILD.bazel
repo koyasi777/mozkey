@@ -201,3 +201,10 @@ mozc_py_library(
     name = "vs_util",
     srcs = ["vs_util.py"],
 )
+
+py_test(
+    name = "vs_util_sdk_test",
+    size = "small",
+    srcs = ["vs_util_sdk_test.py"],
+    deps = [":vs_util"],
+)
