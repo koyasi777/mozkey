@@ -32,6 +32,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 
 #include "storage/louds/simple_succinct_bit_vector_index.h"
@@ -82,7 +83,7 @@ class Louds {
     friend class Louds;
   };
 
-  Louds() = default;
+  Louds() { Reset(); }
 
   Louds(const Louds&) = delete;
   Louds& operator=(const Louds&) = delete;
@@ -109,10 +110,25 @@ class Louds {
   // Initializes a Node instance from node ID.
   // Note: to get the root node, just allocate a default Node instance.
   void InitNodeFromNodeId(int node_id, Node* node) const {
+    if (node_id <= 1) {
+      if (node_id == 1 && index_.GetNum1Bits() >= 1) {
+        *node = Node();
+      } else {
+        SetInvalidNode(node);
+      }
+      return;
+    }
+    if (static_cast<size_t>(node_id) < select1_cache_size_) {
+      node->node_id_ = node_id;
+      node->edge_index_ = select1_cache_ptr_[node_id];
+      return;
+    }
+    if (node_id > index_.GetNum1Bits()) {
+      SetInvalidNode(node);
+      return;
+    }
     node->node_id_ = node_id;
-    node->edge_index_ = node_id < select1_cache_size_
-                            ? select1_cache_ptr_[node_id]
-                            : index_.Select1(node_id);
+    node->edge_index_ = index_.Select1(node_id);
   }
 
   // Returns true if the given node is the root.
@@ -151,10 +167,26 @@ class Louds {
   //   * node 5 -> node 3
   // REQUIRES: |node| is valid and not root.
   void MoveToParent(Node* node) const {
-    node->node_id_ = node->edge_index_ - node->node_id_ + 1;
-    node->edge_index_ = node->node_id_ < select1_cache_size_
-                            ? select1_cache_ptr_[node->node_id_]
-                            : index_.Select1(node->node_id_);
+    const int parent_id = node->edge_index_ - node->node_id_ + 1;
+    if (parent_id < 1 || parent_id >= node->node_id_) {
+      SetInvalidNode(node);
+      return;
+    }
+    if (parent_id == 1) {
+      *node = Node();
+      return;
+    }
+    if (static_cast<size_t>(parent_id) < select1_cache_size_) {
+      node->node_id_ = parent_id;
+      node->edge_index_ = select1_cache_ptr_[parent_id];
+      return;
+    }
+    if (parent_id > index_.GetNum1Bits()) {
+      SetInvalidNode(node);
+      return;
+    }
+    node->node_id_ = parent_id;
+    node->edge_index_ = index_.Select1(parent_id);
   }
 
   // Returns true if |node| is in a valid state.
@@ -162,12 +194,45 @@ class Louds {
     return index_.Get(node.edge_index_) != 0;
   }
 
+  // Marks |node| invalid so IsValidNode(*node) returns false without adding
+  // bounds checks to IsValidNode(). Bit 1 is always 0 in both valid LOUDS
+  // images (super-root "10") and the reset sentinel image.
+  static void SetInvalidNode(Node* node) {
+    node->edge_index_ = 1;
+    node->node_id_ = 0;
+  }
+
+  int num_nodes() const { return index_.GetNum1Bits(); }
+
+  // Validates the LOUDS tree structure (super-root "10", BFS prefix invariant
+  // Select1(k) < Select0(k), zero trailing padding, and depth <= |max_depth|)
+  // so downward and upward traversals are memory-safe without per-lookup bounds
+  // checks.
+  bool IsValidStructure(
+      size_t max_depth = std::numeric_limits<size_t>::max()) const;
+
  private:
+  // LoudsTrie may use these operations only after Open() has validated the
+  // tree and the initial node ID. The raw Louds API remains checked.
+  friend class LoudsTrie;
+
+  void InitNodeFromValidatedNodeId(int node_id, Node* node) const {
+    node->node_id_ = node_id;
+    node->edge_index_ = static_cast<size_t>(node_id) < select1_cache_size_
+                            ? select1_cache_ptr_[node_id]
+                            : index_.Select1(node_id);
+  }
+
+  static int ParentIdOfValidatedNode(const Node& node) {
+    return node.edge_index_ - node.node_id_ + 1;
+  }
+
   SimpleSuccinctBitVectorIndex index_;
   size_t select0_cache_size_ = 0;
   size_t select1_cache_size_ = 0;
   std::unique_ptr<int[]> select_cache_;
-  int* select1_cache_ptr_;  // = select_cache_.get() + select0_cache_size_
+  int* select1_cache_ptr_ =
+      nullptr;  // = select_cache_.get() + select0_cache_size_
 };
 
 }  // namespace louds

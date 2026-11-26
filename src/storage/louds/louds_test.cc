@@ -165,6 +165,112 @@ INSTANTIATE_TEST_SUITE_P(
                       CacheSizeParam(2, 2, 2, 2), CacheSizeParam(8, 8, 8, 8),
                       CacheSizeParam(1024, 1024, 1024, 1024)));
 
+TEST(LoudsStructureValidationTest, ValidatesTreeDegreePrefixAndMaxDepth) {
+  Louds louds;
+  EXPECT_FALSE(louds.IsValidStructure());
+  EXPECT_FALSE(louds.IsValidNode(Louds::Node()));
+
+  // Valid root-only tree ("10 0", depth 0; padded to a full byte for
+  // MakeSequence).
+  {
+    const std::vector<uint8_t> kRootOnly = MakeSequence("10 0 00000");
+    louds.Init(kRootOnly.data(), kRootOnly.size(), 0, 0, 0, 0);
+    EXPECT_TRUE(louds.IsValidStructure(0));
+  }
+
+  // Valid depth-2 tree ("10 110 0 110 0 0").
+  {
+    const std::vector<uint8_t> kSeq = MakeSequence("10 110 0 110 0 0");
+    louds.Init(kSeq.data(), kSeq.size(), 0, 0, 0, 0);
+    EXPECT_TRUE(louds.IsValidStructure(2));
+    EXPECT_FALSE(louds.IsValidStructure(1));
+  }
+
+  // Invalid super-root encodings ("00..." or "110...").
+  {
+    const std::vector<uint8_t> kZeroFirst = MakeSequence("00 10 0 000");
+    louds.Init(kZeroFirst.data(), kZeroFirst.size(), 0, 0, 0, 0);
+    EXPECT_FALSE(louds.IsValidStructure());
+
+    const std::vector<uint8_t> kTwoRoots = MakeSequence("110 0 0 000");
+    louds.Init(kTwoRoots.data(), kTwoRoots.size(), 0, 0, 0, 0);
+    EXPECT_FALSE(louds.IsValidStructure());
+  }
+
+  // Equal 1-bit and 0-bit counts (16 ones and 16 zeros in 32 bits).
+  {
+    const std::vector<uint8_t> kEqualCounts =
+        MakeSequence("10 111111111111111");
+    louds.Init(kEqualCounts.data(), kEqualCounts.size(), 0, 0, 0, 0);
+    EXPECT_FALSE(louds.IsValidStructure());
+  }
+
+  // Disconnected / prefix-violating 1-bits where Select1(k) > Select0(k).
+  {
+    // Bit 0 = 1, bits 1..29 = 0, bit 30 = 1, bit 31 = 0.
+    const uint32_t kLateOneWord = 0x40000001u;
+    louds.Init(reinterpret_cast<const uint8_t*>(&kLateOneWord),
+               sizeof(kLateOneWord), 0, 0, 0, 0);
+    EXPECT_FALSE(louds.IsValidStructure());
+
+    // Bit 0 = 1, bits 1..2 = 0, bit 3 = 1, bits 4..31 = 0 (self-loop parent).
+    const uint32_t kSelfLoopWord = 0x00000009u;
+    louds.Init(reinterpret_cast<const uint8_t*>(&kSelfLoopWord),
+               sizeof(kSelfLoopWord), 0, 0, 0, 0);
+    EXPECT_FALSE(louds.IsValidStructure());
+
+    // Trailing 1-bit in padding after a valid tree.
+    const std::vector<uint8_t> kTrailingOne = MakeSequence("10 10 0 0000 1");
+    louds.Init(kTrailingOne.data(), kTrailingOne.size(), 0, 0, 0, 0);
+    EXPECT_FALSE(louds.IsValidStructure());
+  }
+
+  louds.Reset();
+  EXPECT_FALSE(louds.IsValidStructure());
+  EXPECT_FALSE(louds.IsValidNode(Louds::Node()));
+}
+
+TEST(LoudsMalformedBitVectorTest, MoveToParentTerminatesOnNonDecreasingParent) {
+  Louds empty_louds;
+  Louds::Node node;
+  empty_louds.InitNodeFromNodeId(1, &node);
+  EXPECT_FALSE(empty_louds.IsValidNode(node));
+  EXPECT_EQ(node.node_id(), 0);
+
+  // Root-only tree ("10 0", num_nodes == 1): test InitNodeFromNodeId bounds and
+  // MoveToParent when parent_id > num_nodes.
+  const std::vector<uint8_t> kRootOnly = MakeSequence("10 0 00000");
+  Louds root_only;
+  root_only.Init(kRootOnly.data(), kRootOnly.size(), 0, 0, 0, 0);
+  root_only.InitNodeFromNodeId(0, &node);
+  EXPECT_FALSE(root_only.IsValidNode(node));
+  root_only.InitNodeFromNodeId(1, &node);
+  EXPECT_TRUE(root_only.IsRoot(node));
+  EXPECT_TRUE(root_only.IsValidNode(node));
+  root_only.InitNodeFromNodeId(2, &node);
+  EXPECT_FALSE(root_only.IsValidNode(node));
+  EXPECT_EQ(node.node_id(), 0);
+  Louds::MoveToNextSibling(&node);
+  Louds::MoveToNextSibling(&node);
+  Louds::MoveToNextSibling(&node);
+  root_only.MoveToParent(&node);
+  EXPECT_FALSE(root_only.IsValidNode(node));
+  EXPECT_EQ(node.node_id(), 0);
+
+  // Too many early 0-bits ("10 000 1110") cause edge_index >= 2 * node_id - 1,
+  // which would compute parent_id >= node_id without the monotonicity guard.
+  const std::vector<uint8_t> kMalformed = MakeSequence("10 000 1110");
+  Louds louds;
+  louds.Init(kMalformed.data(), kMalformed.size(), 0, 0, 0, 0);
+
+  louds.InitNodeFromNodeId(2, &node);
+  EXPECT_EQ(node.node_id(), 2);
+
+  louds.MoveToParent(&node);
+  EXPECT_FALSE(louds.IsValidNode(node));
+  EXPECT_EQ(node.node_id(), 0);
+}
+
 }  // namespace
 }  // namespace louds
 }  // namespace storage
