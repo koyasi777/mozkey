@@ -316,7 +316,7 @@ bool WinUtil::SetIMEHotKeyDisabled(bool disabled) {
 
     result = key.DeleteValue(kIMEHotKeyEntryValue);
 
-    return (result == ERROR_SUCCESS || result != ERROR_FILE_NOT_FOUND);
+    return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
   }
 }
 

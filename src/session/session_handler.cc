@@ -194,17 +194,21 @@ void SessionHandler::SetAllowedEngineReloadPaths(
 }
 
 void SessionHandler::UpdateSessions(
-    std::unique_ptr<const commands::Request> request) {
+    std::unique_ptr<const commands::Request> request, bool force) {
   std::shared_ptr<const config::Config> current_config =
       config::ConfigHandler::GetSharedConfig();
 
   const bool is_config_updated = current_config != config_;
+  if (!is_config_updated && !request && !force) {
+    return;
+  }
   const bool is_key_manager_updated =
       is_config_updated &&
       !keymap::KeyMapManager::IsSameKeyMapManagerApplicable(*config_,
                                                             *current_config);
 
   if (is_config_updated) {
+    engine_->ApplyConfig(*config_, *current_config);
     config_ = current_config;
   }
 
@@ -252,14 +256,14 @@ bool SessionHandler::Shutdown(commands::Command* command) {
 
 bool SessionHandler::Reload(commands::Command* command) {
   MOZC_VLOG(1) << "Reloading server";
-  UpdateSessions();
+  UpdateSessions(nullptr, /*force=*/true);
   engine_->Reload();
   return true;
 }
 
 bool SessionHandler::ReloadAndWait(commands::Command* command) {
   MOZC_VLOG(1) << "Reloading server and wait for reloader";
-  UpdateSessions();
+  UpdateSessions(nullptr, /*force=*/true);
   engine_->ReloadAndWait();
   return true;
 }
@@ -322,11 +326,10 @@ bool SessionHandler::LookupDictionaryCostEntries(
 
 bool SessionHandler::GetConfig(commands::Command* command) {
   MOZC_VLOG(1) << "Getting config";
-  *command->mutable_output()->mutable_config() =
-      config::ConfigHandler::GetCopiedConfig();
-  // Ensure the on-memory config is same as the locally stored one
-  // because the local data could be changed by sync.
+  // The config may have changed through another local path. Synchronize only
+  // when necessary and return the same snapshot that sessions observe.
   UpdateSessions();
+  *command->mutable_output()->mutable_config() = *config_;
   return true;
 }
 
@@ -341,6 +344,33 @@ bool SessionHandler::SetConfig(commands::Command* command) {
   MaybeUpdateConfig(command);
 
   return true;
+}
+
+bool SessionHandler::CompareAndSetConfig(commands::Command* command) {
+  if (!command->input().has_config() ||
+      !command->input().has_expected_config()) {
+    return false;
+  }
+  using UpdateResult = config::ConfigHandler::UpdateResult;
+  config::Config committed;
+  const UpdateResult result = config::ConfigHandler::CompareAndSetConfig(
+      command->input().expected_config(), command->input().config(),
+      &committed);
+  auto* output = command->mutable_output();
+  switch (result) {
+    case UpdateResult::kSuccess:
+      *output->mutable_config() = std::move(committed);
+      output->set_config_update_result(commands::Output::CONFIG_UPDATE_SUCCESS);
+      UpdateSessions();
+      return true;
+    case UpdateResult::kConflict:
+      output->set_config_update_result(commands::Output::CONFIG_UPDATE_CONFLICT);
+      return true;
+    case UpdateResult::kFailure:
+      output->set_config_update_result(commands::Output::CONFIG_UPDATE_FAILED);
+      return true;
+  }
+  return false;
 }
 
 bool SessionHandler::SetRequest(commands::Command* command) {
@@ -401,6 +431,9 @@ bool SessionHandler::EvalCommand(commands::Command* command) {
       break;
     case commands::Input::SET_CONFIG:
       eval_succeeded = SetConfig(command);
+      break;
+    case commands::Input::COMPARE_AND_SET_CONFIG:
+      eval_succeeded = CompareAndSetConfig(command);
       break;
     case commands::Input::SET_REQUEST:
       eval_succeeded = SetRequest(command);
@@ -469,8 +502,16 @@ void SessionHandler::MaybeUpdateConfig(commands::Command* command) {
     return;
   }
 
-  config::ConfigHandler::SetConfig(command->output().config());
-  Reload(command);
+  const bool persisted =
+      config::ConfigHandler::SetConfig(command->output().config());
+  // Setting config is not a request to reload mutable dictionary/history data.
+  UpdateSessions();
+  auto* output = command->mutable_output();
+  *output->mutable_config() = *config_;
+  output->set_config_update_result(
+      persisted ? commands::Output::CONFIG_UPDATE_SUCCESS
+                : commands::Output::CONFIG_UPDATE_FAILED);
+  // A persistence failure is not a session failure; the key is not replayed.
 }
 
 bool SessionHandler::SendKey(commands::Command* command) {
@@ -612,10 +653,9 @@ bool SessionHandler::CreateSession(commands::Command* command) {
   command->mutable_output()->set_id(new_id);
 
   // The created session has not been fully initialized yet.
-  // SetConfig() will complete the initialization by setting information
-  // (e.g., config, request, keymap, ...) to all the sessions,
-  // including the newly created one.
-  UpdateSessions();
+  // Even with unchanged config and request, the new session needs all of its
+  // settings, keymap and table to be initialized.
+  UpdateSessions(nullptr, /*force=*/true);
 
   // session is not empty.
   last_session_empty_time_ = absl::InfinitePast();

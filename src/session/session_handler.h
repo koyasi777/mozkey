@@ -114,12 +114,15 @@ class SessionHandler {
   bool ReloadAndWait(commands::Command* command);
   bool GetConfig(commands::Command* command);
   bool SetConfig(commands::Command* command);
+  bool CompareAndSetConfig(commands::Command* command);
   // Updates all the sessions by UpdateSessions() with given |request|.
   bool SetRequest(commands::Command* command);
-  // Update sessions if ConfigHandler::GetSharedConfig() is updated
-  // or `request` is not null. This method doesn't reload the sessions.
+  // Update sessions when config or request changes. Force initialization for
+  // new sessions and preserve the explicit reload path's refresh semantics.
+  // Does not reload dictionary/history data.
   void UpdateSessions(
-      std::unique_ptr<const commands::Request> request = nullptr);
+      std::unique_ptr<const commands::Request> request = nullptr,
+      bool force = false);
 
   bool Cleanup(commands::Command* command);
   bool ImportUserDictionary(commands::Command* command);

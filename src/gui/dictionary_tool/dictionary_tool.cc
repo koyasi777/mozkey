@@ -438,13 +438,27 @@ DictionaryTool::DictionaryTool(QWidget* parent)
     if (external_changed) {
       QMessageBox::warning(
           this, windowTitle(),
-          QStringLiteral("外部辞書の設定が別のウィンドウで更新されました。"
+          QStringLiteral("編集中に外部辞書の設定が更新されました。"
                          "\n上書きを防ぐため、もう一度開いて設定してください。"));
       return;
     }
-    latest_config.set_enable_external_dictionary(enabled);
-    config::SetExternalDictionarySources(sources, &latest_config);
-    if (!client_->SetConfig(latest_config)) {
+    config::Config pending = latest_config;
+    pending.set_enable_external_dictionary(enabled);
+    config::SetExternalDictionarySources(sources, &pending);
+    config::Config committed;
+    const auto result = client_->CompareAndSetConfig(latest_config, pending,
+                                                     &committed);
+    if (result == commands::Output::CONFIG_UPDATE_CONFLICT) {
+      QMessageBox::warning(
+          this, windowTitle(),
+          QStringLiteral("編集中に Mozkey の設定が更新されました。"
+                         "\n上書きを防ぐため、もう一度開いて設定してください。"));
+    } else if (result == commands::Output::CONFIG_UPDATE_UNKNOWN) {
+      QMessageBox::warning(
+          this, windowTitle(),
+          QStringLiteral("外部辞書の設定の保存結果を確認できませんでした。"
+                         "\nもう一度開いて現在の設定を確認してください。"));
+    } else if (result != commands::Output::CONFIG_UPDATE_SUCCESS) {
       QMessageBox::warning(this, windowTitle(),
                            QStringLiteral("外部辞書の設定を保存できませんでした。"));
     }

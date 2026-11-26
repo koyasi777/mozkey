@@ -88,6 +88,7 @@ class KeyMapManagerAccessorTestPeer : public testing::TestPeer<SessionHandler> {
 
   PEER_VARIABLE(key_map_manager_);
   PEER_VARIABLE(session_map_);
+  PEER_METHOD(MaybeUpdateConfig);
 };
 
 namespace {
@@ -468,6 +469,156 @@ TEST_F(SessionHandlerTest, ElapsedTimeTest) {
   Clock::SetClockForUnitTest(&clock);
   EXPECT_TRUE(CreateSession(handler, &id));
   Clock::SetClockForUnitTest(nullptr);
+}
+
+TEST_F(SessionHandlerTest, CompareAndSetConfigRoundTrip) {
+  SessionHandler handler(CreateMockDataEngine());
+  commands::Command read;
+  read.mutable_input()->set_type(commands::Input::GET_CONFIG);
+  ASSERT_TRUE(handler.EvalCommand(&read));
+  ASSERT_TRUE(read.output().has_config());
+  const config::Config initial = read.output().config();
+  config::Config pending = initial;
+  pending.set_use_emoji_conversion(!initial.use_emoji_conversion());
+  const auto save = [&](const config::Config& expected,
+                        const config::Config& requested) {
+    commands::Command command;
+    auto* input = command.mutable_input();
+    input->set_type(commands::Input::COMPARE_AND_SET_CONFIG);
+    *input->mutable_expected_config() = expected;
+    *input->mutable_config() = requested;
+    EXPECT_TRUE(handler.EvalCommand(&command));
+    EXPECT_EQ(command.output().error_code(), commands::Output::SESSION_SUCCESS);
+    return command.output();
+  };
+  const auto first = save(initial, pending);
+  ASSERT_EQ(first.config_update_result(), commands::Output::CONFIG_UPDATE_SUCCESS);
+  ASSERT_TRUE(first.has_config());
+  EXPECT_EQ(first.config().SerializeAsString(),
+            config::ConfigHandler::GetCopiedConfig().SerializeAsString());
+  const auto stale = save(initial, initial);
+  EXPECT_EQ(stale.config_update_result(), commands::Output::CONFIG_UPDATE_CONFLICT);
+  EXPECT_FALSE(stale.has_config());
+  const auto second = save(first.config(), initial);
+  ASSERT_EQ(second.config_update_result(), commands::Output::CONFIG_UPDATE_SUCCESS);
+  ASSERT_TRUE(second.has_config());
+  EXPECT_EQ(second.config().use_emoji_conversion(), initial.use_emoji_conversion());
+  EXPECT_EQ(second.config().SerializeAsString(),
+            config::ConfigHandler::GetCopiedConfig().SerializeAsString());
+
+  commands::Command malformed;
+  malformed.mutable_input()->set_type(commands::Input::COMPARE_AND_SET_CONFIG);
+  *malformed.mutable_input()->mutable_config() = pending;
+  EXPECT_TRUE(handler.EvalCommand(&malformed));
+  EXPECT_EQ(malformed.output().error_code(), commands::Output::SESSION_FAILURE);
+  EXPECT_EQ(config::ConfigHandler::GetCopiedConfig().SerializeAsString(),
+            second.config().SerializeAsString());
+}
+
+TEST_F(SessionHandlerTest, LegacyConfigFailurePreservesRuntimeAndSession) {
+  using config::ConfigHandler;
+  const std::string filename = ConfigHandler::GetConfigFileNameForTesting();
+  struct RestoreFilename {
+    std::string filename;
+    ~RestoreFilename() { ConfigHandler::SetConfigFileNameForTesting(filename); }
+  } restore{filename};
+  // ConfigFileStream explicitly rejects writes to system:// resources.
+  ConfigHandler::SetConfigFileNameForTesting(
+      "system://mozkey_config_save_failure_test.db");
+  SessionHandler handler(CreateMockDataEngine());
+  commands::Command save;
+  save.mutable_input()->set_type(commands::Input::SET_CONFIG);
+  auto* requested = save.mutable_input()->mutable_config();
+  *requested = ConfigHandler::GetCopiedConfig();
+  requested->set_incognito_mode(false);
+  requested->set_use_emoji_conversion(!requested->use_emoji_conversion());
+  ASSERT_TRUE(handler.EvalCommand(&save));
+  EXPECT_EQ(save.output().error_code(), commands::Output::SESSION_SUCCESS);
+  ASSERT_TRUE(save.output().has_config_update_result());
+  EXPECT_EQ(save.output().config_update_result(),
+            commands::Output::CONFIG_UPDATE_FAILED);
+  EXPECT_EQ(save.output().config().use_emoji_conversion(),
+            requested->use_emoji_conversion());
+  EXPECT_FALSE(ConfigHandler::GetCopiedConfig().incognito_mode());
+
+  // Exercise the same helper used after SEND_KEY and SEND_COMMAND with a
+  // synthetic mode-change output; the consumed key must not become a failure.
+  commands::Command mode;
+  mode.mutable_input()->set_type(commands::Input::SEND_KEY);
+  mode.mutable_output()->set_consumed(true);
+  *mode.mutable_output()->mutable_config() = ConfigHandler::GetCopiedConfig();
+  mode.mutable_output()->mutable_config()->set_incognito_mode(true);
+  KeyMapManagerAccessorTestPeer peer(handler);
+  peer.MaybeUpdateConfig(&mode);
+  EXPECT_TRUE(mode.output().consumed());
+  EXPECT_EQ(mode.output().error_code(), commands::Output::SESSION_SUCCESS);
+  ASSERT_TRUE(mode.output().has_config_update_result());
+  EXPECT_EQ(mode.output().config_update_result(),
+            commands::Output::CONFIG_UPDATE_FAILED);
+  EXPECT_TRUE(ConfigHandler::GetCopiedConfig().incognito_mode());
+  EXPECT_TRUE(mode.output().config().incognito_mode());
+}
+
+class ConfigApplyingMockEngine : public MockEngine {
+ public:
+  MOCK_METHOD(void, ApplyConfig,
+              (const config::Config&, const config::Config&), (override));
+};
+
+TEST_F(SessionHandlerTest, ConfigSaveDoesNotReloadUserData) {
+  auto engine = std::make_unique<ConfigApplyingMockEngine>();
+  auto* engine_ptr = engine.get();
+  EXPECT_CALL(*engine_ptr, Reload()).Times(0);
+  EXPECT_CALL(*engine_ptr, ReloadAndWait()).Times(0);
+  EXPECT_CALL(*engine_ptr, ApplyConfig(::testing::_, ::testing::_)).Times(2);
+  SessionHandler handler(std::move(engine));
+  const auto save = [&](commands::Input::CommandType type,
+                        const config::Config& expected,
+                        const config::Config& requested) {
+    commands::Command command;
+    auto* input = command.mutable_input();
+    input->set_type(type);
+    *input->mutable_config() = requested;
+    if (type == commands::Input::COMPARE_AND_SET_CONFIG) {
+      *input->mutable_expected_config() = expected;
+    }
+    EXPECT_TRUE(handler.EvalCommand(&command));
+    EXPECT_EQ(command.output().error_code(), commands::Output::SESSION_SUCCESS);
+    return command.output();
+  };
+  const config::Config initial = config::ConfigHandler::GetCopiedConfig();
+  config::Config changed = initial;
+  changed.set_use_emoji_conversion(!initial.use_emoji_conversion());
+  const auto first = save(commands::Input::COMPARE_AND_SET_CONFIG, initial,
+                          changed);
+  ASSERT_EQ(first.config_update_result(),
+            commands::Output::CONFIG_UPDATE_SUCCESS);
+  const auto unchanged = save(commands::Input::COMPARE_AND_SET_CONFIG,
+                              first.config(), first.config());
+  EXPECT_EQ(unchanged.config_update_result(),
+            commands::Output::CONFIG_UPDATE_SUCCESS);
+  const auto stale = save(commands::Input::COMPARE_AND_SET_CONFIG, initial,
+                          initial);
+  EXPECT_EQ(stale.config_update_result(),
+            commands::Output::CONFIG_UPDATE_CONFLICT);
+  commands::Command get;
+  get.mutable_input()->set_type(commands::Input::GET_CONFIG);
+  ASSERT_TRUE(handler.EvalCommand(&get));
+  EXPECT_EQ(get.output().config().SerializeAsString(),
+            first.config().SerializeAsString());
+
+  // The legacy accessor still applies settings, without reloading user data.
+  save(commands::Input::SET_CONFIG, first.config(), initial);
+  EXPECT_TRUE(::testing::Mock::VerifyAndClearExpectations(engine_ptr));
+  EXPECT_CALL(*engine_ptr, ApplyConfig(::testing::_, ::testing::_)).Times(0);
+  EXPECT_CALL(*engine_ptr, Reload()).WillOnce(Return(true));
+  EXPECT_CALL(*engine_ptr, ReloadAndWait()).WillOnce(Return(true));
+  commands::Command reload;
+  reload.mutable_input()->set_type(commands::Input::RELOAD);
+  EXPECT_TRUE(handler.EvalCommand(&reload));
+  commands::Command reload_wait;
+  reload_wait.mutable_input()->set_type(commands::Input::RELOAD_AND_WAIT);
+  EXPECT_TRUE(handler.EvalCommand(&reload_wait));
 }
 
 TEST_F(SessionHandlerTest, ConfigTest) {

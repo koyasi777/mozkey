@@ -67,8 +67,24 @@ class ConfigHandler {
   // updated asynchronously.
   static std::shared_ptr<const config::Config> GetSharedConfig();
 
-  // Sets config.
-  static void SetConfig(Config config);
+  // Applies config in memory even if persistence fails (legacy behavior).
+  // Returns true if persisted or already persisted; false on write failure.
+  // Use CompareAndSetConfig when publication requires successful persistence.
+  static bool SetConfig(Config config);
+
+  enum class UpdateResult { kSuccess, kConflict, kFailure };
+
+  // Compares and commits under the same writer lock. On success, committed
+  // receives the exact authoritative snapshot, including server metadata.
+  // On conflict or failure, committed is not modified.
+  static UpdateResult CompareAndSetConfig(const Config& expected, Config config,
+                                          Config* committed);
+
+  // Whether a saved config differs from the displayed request, excluding
+  // generated metadata and absent vs explicit zero verbose level. This is
+  // for UI refresh decisions only, never for conflict detection.
+  static bool RequiresDisplayRefresh(const Config& requested,
+                                     const Config& committed);
 
   // Gets default config value.
   //
