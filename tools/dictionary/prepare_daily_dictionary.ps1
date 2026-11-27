@@ -79,5 +79,5 @@ Write-Host "  bazelisk build --config oss_windows --config release_build package
 Write-Host "  python build_tools/open.py bazel-bin/win32/installer/Mozc64.msi"
 Write-Host "  cd .."
 Write-Host ""
-Write-Host "Before committing unrelated work, run:"
-Write-Host '  .\tools\dictionary\use_merge_ut_profile.ps1 -Profile sample'
+Write-Host "The checked-in dictionary profile is daily."
+Write-Host "Before committing unrelated work, keep the checked-in profile and check git status."

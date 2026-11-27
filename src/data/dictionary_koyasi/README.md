@@ -8,7 +8,7 @@ This directory contains additional dictionary data and generated dictionary arti
 - Generated dictionary files are not committed by default.
 - External dictionaries must be imported through scripts.
 - Large dictionaries should be separated by profile, such as `sample`, `daily`, `rich`, and `max`.
-- The default committed Bazel profile should remain `sample` because `daily`, `rich`, and `max` depend on locally generated files.
+- The checked-in Bazel configuration selects `daily`. Prepare its generated files before building. Use `sample` for lightweight local development and experiments that do not require generated external dictionaries.
 - When adding a new external dictionary source, document its upstream URL, license note, generated output path, and whether the generated artifact is committed.
 
 ## External dictionary sources and licenses
@@ -121,10 +121,10 @@ python build_tools/open.py bazel-bin/win32/installer/Mozc64.msi
 cd ..
 ```
 
-Before committing unrelated work, return to the tracked sample profile:
+Before committing unrelated work, preserve the checked-in `daily` profile. If you temporarily selected another profile, prepare the daily files if necessary and switch back:
 
 ```powershell
-.\tools\dictionary\use_merge_ut_profile.ps1 -Profile sample
+.\tools\dictionary\use_merge_ut_profile.ps1 -Profile daily
 ```
 
 Then confirm:
@@ -203,7 +203,7 @@ Use the locally generated daily dictionary:
 .\tools\dictionary\use_merge_ut_profile.ps1 -Profile daily
 ```
 
-The default committed state should use `sample`, because `daily`, `rich`, and `max` dictionaries are locally generated and are not committed.
+The checked-in configuration selects `daily`, but its generated dictionary files are not committed. Prepare them with the daily workflow before building. Selecting `sample` is a local development choice, not the default committed configuration.
 
 ## Nico/Pixiv dictionary workflow
 
@@ -398,9 +398,9 @@ The suffix collision scanner is diagnostic only. Its output should not be blindl
 
 ### `sample`
 
-Tracked, small, and safe for committed Bazel state.
+Small tracked dictionary for lightweight local builds without generated external dictionary files. It does not represent the full daily dictionary.
 
-Use this before committing unrelated work:
+To select it temporarily:
 
 ```powershell
 .\tools\dictionary\use_merge_ut_profile.ps1 -Profile sample
@@ -408,7 +408,7 @@ Use this before committing unrelated work:
 
 ### `daily`
 
-Locally generated enhanced dictionary for daily use.
+Locally generated enhanced dictionary for daily use and the profile selected by the checked-in Bazel configuration.
 
 It currently combines:
 
@@ -453,10 +453,10 @@ src/data/dictionary_koyasi/generated/profiled/mozcdic-ut-personal-names-daily.tx
 src/data/dictionary_koyasi/generated/profiled/koyasi-syntax-guard.txt
 ```
 
-Before committing, verify:
+Before committing unrelated work, preserve the checked-in `daily` profile. If a different profile was selected temporarily, switch back after preparing the required daily files. Verify that there are no unintended profile changes:
 
 ```powershell
-.\tools\dictionary\use_merge_ut_profile.ps1 -Profile sample
+git diff HEAD -- src/data/dictionary_oss/BUILD.bazel
 git status --short
 ```
 
