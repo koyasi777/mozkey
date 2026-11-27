@@ -26405,7 +26405,12 @@ TEST_F(SessionTest, DeleteHistory) {
   Segments segments;
   Segment* segment = segments.add_segment();
   segment->set_key("delete");
-  segment->add_candidate()->value = "DeleteHistory";
+  converter::Candidate* candidate = segment->add_candidate();
+  candidate->key = "delete";
+  candidate->content_key = candidate->key;
+  candidate->value = "DeleteHistory";
+  candidate->content_value = candidate->value;
+  candidate->attributes |= converter::Attribute::USER_HISTORY_PREDICTION;
   EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
       .WillRepeatedly(DoAll(SetArgPointee<2>(segments), Return(true)));
 
@@ -26419,17 +26424,71 @@ TEST_F(SessionTest, DeleteHistory) {
   // Start prediction. Preedit = "DeleteHistory".
   command.Clear();
   EXPECT_TRUE(session.PredictAndConvert(&command));
-  EXPECT_TRUE(command.output().has_candidate_window());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  const auto& annotation =
+      command.output().candidate_window().candidate(0).annotation();
+  EXPECT_TRUE(annotation.deletable());
+  EXPECT_FALSE(annotation.suppressible());
   EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
   EXPECT_PREEDIT("DeleteHistory", command);
 
-  // Do DeleteHistory command. After that, the session should be back in
-  // composition state and preedit gets back to "でｌ" again.
+  // Ctrl+Delete must perform the advertised history deletion, not suppression.
   EXPECT_CALL(*converter, DeleteCandidateFromHistory(_, 0, 0))
       .WillOnce(Return(true));
+  EXPECT_CALL(*converter, AddSuppressionEntry(_, _)).Times(0);
   EXPECT_TRUE(SendKey("Ctrl Delete", &session, &command));
   EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
   EXPECT_PREEDIT("でｌ", command);
+}
+
+TEST_F(SessionTest, SuppressLastPredictionCandidate) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("delete");
+  converter::Candidate* candidate = segment->add_candidate();
+  candidate->key = "delete";
+  candidate->content_key = candidate->key;
+  candidate->value = "HideCandidate";
+  candidate->content_value = candidate->value;
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .WillOnce(DoAll(SetArgPointee<2>(segments), Return(true)));
+
+  commands::Command command;
+  EXPECT_TRUE(SendKey("d", &session, &command));
+  EXPECT_TRUE(SendKey("e", &session, &command));
+  EXPECT_TRUE(SendKey("l", &session, &command));
+  EXPECT_PREEDIT("でｌ", command);
+
+  command.Clear();
+  ASSERT_TRUE(session.PredictAndConvert(&command));
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 1);
+  const auto& window = command.output().candidate_window();
+  EXPECT_EQ(window.category(), commands::PREDICTION);
+  EXPECT_FALSE(window.candidate(0).annotation().deletable());
+  EXPECT_TRUE(window.candidate(0).annotation().suppressible());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_PREEDIT("HideCandidate", command);
+
+  // The last prediction candidate may be suppressed. Mock the refreshed
+  // suggestion returning no candidates, and verify the session keeps preedit.
+  EXPECT_CALL(*converter, DeleteCandidateFromHistory(_, _, _)).Times(0);
+  EXPECT_CALL(*converter, AddSuppressionEntry("delete", "HideCandidate"))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, StartPrediction(_, _)).WillOnce(Return(false));
+  ASSERT_TRUE(SendKey("Ctrl Delete", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_PREEDIT("でｌ", command);
+  EXPECT_FALSE(command.output().has_candidate_window());
+  EXPECT_FALSE(command.output().has_result());
 }
 
 TEST_F(SessionTest, SendKeyWithKeyStringDirect) {

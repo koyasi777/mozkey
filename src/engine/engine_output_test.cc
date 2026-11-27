@@ -99,6 +99,108 @@ TEST(EngineOutputTest, FillPreeditMarksOnlyPendingRomanTail) {
   EXPECT_EQ(preedit.cursor(), composer.GetCursor());
 }
 
+TEST(EngineOutputTest, CandidateDeletionAnnotationsMatchAction) {
+  Segment segment;
+  segment.set_key("key");
+  CandidateList candidate_list(true);
+  for (const char* value : {"history", "segment history", "dictionary",
+                            "command", "empty key"}) {
+    converter::Candidate* c = segment.push_back_candidate();
+    c->key = "key";
+    c->content_key = c->key;
+    c->value = value;
+    c->content_value = c->value;
+    candidate_list.AddCandidate(segment.candidates_size() - 1, value);
+  }
+  segment.mutable_candidate(0)->attributes =
+      converter::Attribute::USER_HISTORY_PREDICTION;
+  segment.mutable_candidate(1)->attributes =
+      converter::Attribute::USER_SEGMENT_HISTORY_REWRITER;
+  segment.mutable_candidate(3)->attributes =
+      converter::Attribute::COMMAND_CANDIDATE;
+  segment.mutable_candidate(4)->key.clear();
+
+  commands::CandidateList words;
+  output::FillAllCandidateWords(segment, candidate_list, commands::PREDICTION,
+                                &words);
+  ASSERT_EQ(words.candidates_size(), 5);
+  for (int i = 0; i < 5; ++i) {
+    SCOPED_TRACE(i);
+    Candidate candidate;
+    candidate.set_id(i);
+    commands::CandidateWindow_Candidate window_candidate;
+    output::FillCandidate(segment, candidate, &window_candidate);
+    EXPECT_EQ(window_candidate.annotation().deletable(), i < 2);
+    EXPECT_EQ(window_candidate.annotation().suppressible(), i == 2);
+    EXPECT_EQ(words.candidates(i).annotation().deletable(), i < 2);
+    EXPECT_EQ(words.candidates(i).annotation().suppressible(), i == 2);
+  }
+
+  Segment single;
+  converter::Candidate* c = single.push_back_candidate();
+  c->key = "key";
+  c->value = "value";
+  Candidate candidate;
+  candidate.set_id(0);
+  commands::CandidateWindow_Candidate proto;
+  output::FillCandidate(single, candidate, &proto);
+  EXPECT_FALSE(proto.annotation().deletable());
+  EXPECT_FALSE(proto.annotation().suppressible());
+  c->attributes = converter::Attribute::USER_HISTORY_PREDICTION;
+  proto.Clear();
+  output::FillCandidate(single, candidate, &proto);
+  EXPECT_TRUE(proto.annotation().deletable());
+  EXPECT_FALSE(proto.annotation().suppressible());
+}
+
+TEST(EngineOutputTest, CandidateDeletionLastSuggestionAnnotations) {
+  Segment segment;
+  segment.set_key("key");
+  converter::Candidate* c = segment.push_back_candidate();
+  c->key = "key";
+  c->content_key = c->key;
+  c->value = "value";
+  c->content_value = c->value;
+  CandidateList candidate_list(true);
+  candidate_list.AddCandidate(0, c->value);
+  candidate_list.set_focused(true);
+  for (const bool allow_last : {false, true}) {
+    SCOPED_TRACE(allow_last);
+    for (const bool history : {false, true}) {
+      c->attributes = history ? converter::Attribute::USER_HISTORY_PREDICTION
+                              : 0;
+      commands::CandidateWindow window;
+      output::FillCandidateWindow(segment, candidate_list, 0, &window,
+                                  allow_last);
+      commands::CandidateList words;
+      output::FillAllCandidateWords(
+          segment, candidate_list,
+          allow_last ? commands::PREDICTION : commands::CONVERSION, &words,
+          allow_last);
+      ASSERT_EQ(window.candidate_size(), 1);
+      ASSERT_EQ(words.candidates_size(), 1);
+      EXPECT_EQ(window.candidate(0).annotation().deletable(), history);
+      EXPECT_EQ(words.candidates(0).annotation().deletable(), history);
+      EXPECT_EQ(window.candidate(0).annotation().suppressible(),
+                allow_last && !history);
+      EXPECT_EQ(words.candidates(0).annotation().suppressible(),
+                allow_last && !history);
+    }
+  }
+  // The relaxed count rule must not permit a command or an empty key/value.
+  for (int i = 0; i < 3; ++i) {
+    c->attributes = i == 0 ? converter::Attribute::COMMAND_CANDIDATE : 0;
+    c->key = i == 1 ? "" : "key";
+    c->value = i == 2 ? "" : "value";
+    Candidate candidate;
+    candidate.set_id(0);
+    commands::CandidateWindow_Candidate proto;
+    output::FillCandidate(segment, candidate, &proto, true);
+    EXPECT_FALSE(proto.annotation().suppressible());
+    EXPECT_FALSE(proto.annotation().deletable());
+  }
+}
+
 TEST(EngineOutputTest, FillCandidate) {
   Segment segment;
   Candidate candidate;

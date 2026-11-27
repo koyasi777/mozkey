@@ -510,19 +510,57 @@ TEST_F(EngineConverterTest, DeleteOrSuppressCandidateKeepsMeaningsSeparate) {
   EXPECT_TRUE(converter.DeleteOrSuppressCandidate(0));
   Mock::VerifyAndClearExpectations(&mock_converter);
 
-  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 1))
+  // A stale history annotation must not turn a failed history deletion into
+  // suppression. The displayed action remains history deletion.
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0))
       .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry(_, _)).Times(0);
+  EXPECT_FALSE(converter.DeleteOrSuppressCandidate(0));
+  Mock::VerifyAndClearExpectations(&mock_converter);
+
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 1)).Times(0);
   EXPECT_CALL(*mock_converter, AddSuppressionEntry("こうしょう", "公称"))
       .WillOnce(Return(true));
   EXPECT_TRUE(converter.DeleteOrSuppressCandidate(1));
   Mock::VerifyAndClearExpectations(&mock_converter);
 
-  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 2))
-      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 2)).Times(0);
   EXPECT_CALL(*mock_converter,
               AddSuppressionEntry("こうしょう", "ユーザー辞書"))
       .WillOnce(Return(true));
   EXPECT_TRUE(converter.DeleteOrSuppressCandidate(2));
+}
+
+TEST_F(EngineConverterTest, CandidateDeleteReproSuppressibleAction) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("こうしょう");
+  for (const char* value : {"交渉", "公称"}) {
+    converter::Candidate* candidate = segment->add_candidate();
+    candidate->key = "こうしょう";
+    candidate->content_key = candidate->key;
+    candidate->value = value;
+    candidate->content_value = candidate->value;
+  }
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  composer_->InsertCharacterPreedit("こうしょう");
+  ASSERT_TRUE(converter.Convert(*composer_));
+
+  // The candidate has no history provenance. A suppression action must not
+  // consult or mutate history, even if the lower layer could report success.
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0))
+      .Times(0);
+  bool suppressed = false;
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry("こうしょう", "交渉"))
+      .WillOnce([&](absl::string_view, absl::string_view) {
+        suppressed = true;
+        return true;
+      });
+  ASSERT_TRUE(converter.DeleteOrSuppressCandidate(0));
+  EXPECT_TRUE(suppressed) << "REPRO_SUPPRESSION_ACTION_MISMATCH";
 }
 
 TEST_F(EngineConverterTest, CanonicalEnglishCandidateCanBeHidden) {
@@ -546,15 +584,13 @@ TEST_F(EngineConverterTest, CanonicalEnglishCandidateCanBeHidden) {
   composer_->InsertCharacterPreedit("github");
   ASSERT_TRUE(converter.Convert(*composer_));
 
-  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0))
-      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0)).Times(0);
   EXPECT_CALL(*mock_converter, AddSuppressionEntry("github", "GitHub"))
       .WillOnce(Return(true));
   EXPECT_TRUE(converter.DeleteOrSuppressCandidate(0));
   Mock::VerifyAndClearExpectations(&mock_converter);
 
-  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 1))
-      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 1)).Times(0);
   EXPECT_CALL(*mock_converter, AddSuppressionEntry("github", "github"))
       .WillOnce(Return(true));
   EXPECT_TRUE(converter.DeleteOrSuppressCandidate(1));
@@ -579,10 +615,147 @@ TEST_F(EngineConverterTest,
   composer_->InsertCharacterPreedit("ただひとつ");
   ASSERT_TRUE(converter.Convert(*composer_));
 
-  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0))
-      .WillOnce(Return(false));
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, 0, 0)).Times(0);
   EXPECT_CALL(*mock_converter, AddSuppressionEntry(_, _)).Times(0);
   EXPECT_FALSE(converter.DeleteOrSuppressCandidate(0));
+}
+
+TEST_F(EngineConverterTest, CandidateDeleteLastSuggestionReturnsToComposition) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  Segments segments;
+  AddSegmentWithSingleCandidate(&segments, "あい", "愛");
+  composer_->InsertCharacterPreedit("あい");
+  const std::string composition = composer_->GetStringForPreedit();
+  EXPECT_CALL(*mock_converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)))
+      .WillOnce(Return(false));
+  ASSERT_TRUE(converter.Suggest(*composer_, Context::default_instance()));
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  ASSERT_TRUE(output.has_candidate_window());
+  ASSERT_EQ(output.candidate_window().candidate_size(), 1);
+  EXPECT_TRUE(
+      output.candidate_window().candidate(0).annotation().suppressible());
+  ASSERT_EQ(output.all_candidate_words().candidates_size(), 1);
+  EXPECT_TRUE(
+      output.all_candidate_words().candidates(0).annotation().suppressible());
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, _, _)).Times(0);
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry("あい", "愛"))
+      .WillOnce(Return(true));
+  ASSERT_TRUE(converter.DeleteOrSuppressCandidate(0));
+
+  // Exercise the same cancel-and-refresh path as Session::ConvertCancel.
+  EXPECT_CALL(*mock_converter, CancelConversion(_)).Times(2);
+  converter.Cancel();
+  EXPECT_FALSE(converter.Suggest(*composer_, Context::default_instance()));
+  EXPECT_TRUE(converter.CheckState(EngineConverterInterface::COMPOSITION));
+  EXPECT_FALSE(converter.IsActive());
+  EXPECT_EQ(composer_->GetStringForPreedit(), composition);
+  output.Clear();
+  converter.FillOutput(*composer_, &output);
+  EXPECT_FALSE(output.has_candidate_window());
+  EXPECT_FALSE(output.has_all_candidate_words());
+  ASSERT_TRUE(output.has_preedit());
+  ASSERT_EQ(output.preedit().segment_size(), 1);
+  EXPECT_EQ(output.preedit().segment(0).value(), composition);
+  EXPECT_FALSE(output.has_result());
+}
+
+TEST_F(EngineConverterTest,
+       CandidateDeleteLastFocusedSuggestionReturnsToComposition) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  Segments segments;
+  AddSegmentWithSingleCandidate(&segments, "あい", "愛");
+  composer_->InsertCharacterPreedit("あい");
+  const std::string composition = composer_->GetStringForPreedit();
+  EXPECT_CALL(*mock_converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)))
+      .WillOnce(Return(false));
+  ASSERT_TRUE(converter.Suggest(*composer_, Context::default_instance()));
+  EXPECT_CALL(*mock_converter, FocusSegmentValue(_, 0, 0))
+      .WillOnce(Return(true));
+  ASSERT_TRUE(converter.FocusSuggestionCandidateWithoutPrediction(0));
+  ASSERT_TRUE(converter.CheckState(EngineConverterInterface::PREDICTION));
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  ASSERT_TRUE(output.has_candidate_window());
+  EXPECT_EQ(output.candidate_window().category(), commands::PREDICTION);
+  ASSERT_EQ(output.candidate_window().candidate_size(), 1);
+  EXPECT_TRUE(
+      output.candidate_window().candidate(0).annotation().suppressible());
+  ASSERT_EQ(output.all_candidate_words().candidates_size(), 1);
+  EXPECT_TRUE(
+      output.all_candidate_words().candidates(0).annotation().suppressible());
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, _, _)).Times(0);
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry("あい", "愛"))
+      .WillOnce(Return(true));
+  ASSERT_TRUE(converter.DeleteOrSuppressCandidate(std::nullopt));
+  EXPECT_CALL(*mock_converter, CancelConversion(_)).Times(2);
+  converter.Cancel();
+  EXPECT_FALSE(converter.Suggest(*composer_, Context::default_instance()));
+  EXPECT_TRUE(converter.CheckState(EngineConverterInterface::COMPOSITION));
+  output.Clear();
+  converter.FillOutput(*composer_, &output);
+  EXPECT_FALSE(output.has_candidate_window());
+  EXPECT_FALSE(output.has_all_candidate_words());
+  ASSERT_TRUE(output.has_preedit());
+  ASSERT_EQ(output.preedit().segment_size(), 1);
+  EXPECT_EQ(output.preedit().segment(0).value(), composition);
+  EXPECT_FALSE(output.has_result());
+}
+
+TEST_F(EngineConverterTest, CandidateDeleteLastZeroQuerySuggestion) {
+  request_->set_zero_query_suggestion(true);
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  Segments segments;
+  AddSegmentWithSingleCandidate(&segments, "あい", "愛");
+  segments.mutable_conversion_segment(0)->set_key("");
+  ASSERT_TRUE(composer_->Empty());
+  EXPECT_CALL(*mock_converter, StartPrediction(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)))
+      .WillOnce(Return(false));
+  ASSERT_TRUE(converter.Suggest(*composer_, Context::default_instance()));
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  ASSERT_TRUE(output.has_candidate_window());
+  ASSERT_EQ(output.candidate_window().candidate_size(), 1);
+  EXPECT_TRUE(
+      output.candidate_window().candidate(0).annotation().suppressible());
+  EXPECT_CALL(*mock_converter, DeleteCandidateFromHistory(_, _, _)).Times(0);
+  EXPECT_CALL(*mock_converter, AddSuppressionEntry("あい", "愛"))
+      .WillOnce(Return(true));
+  ASSERT_TRUE(converter.DeleteOrSuppressCandidate(0));
+  EXPECT_CALL(*mock_converter, CancelConversion(_)).Times(2);
+  converter.Cancel();
+  EXPECT_FALSE(converter.Suggest(*composer_, Context::default_instance()));
+  EXPECT_TRUE(converter.CheckState(EngineConverterInterface::COMPOSITION));
+  output.Clear();
+  converter.FillOutput(*composer_, &output);
+  EXPECT_FALSE(output.has_candidate_window());
+  EXPECT_FALSE(output.has_all_candidate_words());
+  EXPECT_FALSE(output.has_preedit());
+  EXPECT_FALSE(output.has_result());
+}
+
+TEST_F(EngineConverterTest,
+       CandidateDeleteConversionWithoutCandidatesKeepsComposition) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  composer_->InsertCharacterPreedit("あい");
+  const std::string composition = composer_->GetStringForPreedit();
+  EXPECT_CALL(*mock_converter, StartConversion(_, _)).WillOnce(Return(false));
+  EXPECT_FALSE(converter.Convert(*composer_));
+  EXPECT_TRUE(converter.CheckState(EngineConverterInterface::COMPOSITION));
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  EXPECT_FALSE(output.has_candidate_window());
+  ASSERT_TRUE(output.has_preedit());
+  ASSERT_EQ(output.preedit().segment_size(), 1);
+  EXPECT_EQ(output.preedit().segment(0).value(), composition);
+  EXPECT_FALSE(output.has_result());
 }
 
 TEST_F(EngineConverterTest, SelectedProperNounSpansUseAbsoluteOffsets) {

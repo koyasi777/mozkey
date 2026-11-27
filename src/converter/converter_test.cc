@@ -611,6 +611,144 @@ class ConverterTest : public testing::TestWithTempUserProfile {
   const commands::Request default_request_;
 };
 
+TEST_F(ConverterTest, CandidateDeleteReproRepeatedExactWithInnerSegment) {
+  auto converter = CreateConverter(std::make_unique<StubRewriter>(),
+                                   DEFAULT_PREDICTOR);
+  auto& predictor = converter->predictor();
+  ASSERT_TRUE(predictor.Wait());
+  ASSERT_TRUE(predictor.ClearAllHistory());
+
+  config::Config learning_config;
+  config::ConfigHandler::GetDefaultConfig(&learning_config);
+  learning_config.set_use_history_suggest(true);
+  learning_config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  composer::Composer composer;
+  composer.SetPreeditTextForTestOnly("きょうとの");
+  const ConversionRequest request = ConversionRequestBuilder()
+                                        .SetComposer(composer)
+                                        .SetConfigView(learning_config)
+                                        .SetRequestType(ConversionRequest::CONVERSION)
+                                        .Build();
+  Result learned;
+  learned.key = "きょうとの";
+  learned.value = "京都の";
+  learned.inner_segment_boundary = BuildInnerSegmentBoundary(
+      {{15, 9, 12, 6}}, learned.key, learned.value);
+  ASSERT_EQ(learned.inner_segment_boundary.size(), 1);
+  const std::vector<Result> results = {learned};
+  predictor.Finish(request, results, 1);
+  predictor.DiscardRevert(1);
+
+  ASSERT_TRUE(predictor.ClearHistoryEntry("きょうとの", "京都の"))
+      << "PRECONDITION_FIRST_DELETE";
+  EXPECT_FALSE(predictor.ClearHistoryEntry("きょうとの", "京都の"))
+      << "REPRO_EXACT_ALREADY_REMOVED";
+}
+
+TEST_F(ConverterTest, CandidateDeleteReproRepeatedPartialWithInnerSegment) {
+  auto converter = CreateConverter(std::make_unique<StubRewriter>(),
+                                   DEFAULT_PREDICTOR);
+  auto& predictor = converter->predictor();
+  ASSERT_TRUE(predictor.Wait());
+  ASSERT_TRUE(predictor.ClearAllHistory());
+
+  config::Config learning_config;
+  config::ConfigHandler::GetDefaultConfig(&learning_config);
+  learning_config.set_use_history_suggest(true);
+  learning_config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  composer::Composer composer;
+  composer.SetPreeditTextForTestOnly("きょうとの");
+  const ConversionRequest request = ConversionRequestBuilder()
+                                        .SetComposer(composer)
+                                        .SetConfigView(learning_config)
+                                        .SetRequestType(ConversionRequest::CONVERSION)
+                                        .Build();
+  Result learned;
+  learned.key = "きょうとの";
+  learned.value = "京都の";
+  learned.inner_segment_boundary = BuildInnerSegmentBoundary(
+      {{15, 9, 12, 6}}, learned.key, learned.value);
+  ASSERT_EQ(learned.inner_segment_boundary.size(), 1);
+  const std::vector<Result> results = {learned};
+  predictor.Finish(request, results, 1);
+  predictor.DiscardRevert(1);
+
+  ASSERT_TRUE(predictor.ClearHistoryEntry("きょうと", "京都"))
+      << "PRECONDITION_FIRST_DELETE";
+  EXPECT_FALSE(predictor.ClearHistoryEntry("きょうと", "京都"))
+      << "REPRO_PARTIAL_ALREADY_REMOVED";
+}
+
+TEST_F(ConverterTest, CandidateDeleteReproRepeatedWithoutInnerSegment) {
+  auto converter = CreateConverter(std::make_unique<StubRewriter>(),
+                                   DEFAULT_PREDICTOR);
+  auto& predictor = converter->predictor();
+  ASSERT_TRUE(predictor.Wait());
+  ASSERT_TRUE(predictor.ClearAllHistory());
+
+  config::Config learning_config;
+  config::ConfigHandler::GetDefaultConfig(&learning_config);
+  learning_config.set_use_history_suggest(true);
+  learning_config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  composer::Composer composer;
+  composer.SetPreeditTextForTestOnly("きょうと");
+  const ConversionRequest request = ConversionRequestBuilder()
+                                        .SetComposer(composer)
+                                        .SetConfigView(learning_config)
+                                        .SetRequestType(ConversionRequest::CONVERSION)
+                                        .Build();
+  Result learned;
+  learned.key = "きょうと";
+  learned.value = "京都";
+  const std::vector<Result> results = {learned};
+  predictor.Finish(request, results, 1);
+  predictor.DiscardRevert(1);
+
+  ASSERT_TRUE(predictor.ClearHistoryEntry("きょうと", "京都"))
+      << "PRECONDITION_FIRST_DELETE";
+  EXPECT_FALSE(predictor.ClearHistoryEntry("きょうと", "京都"))
+      << "CONTROL_UNIGRAM_ALREADY_REMOVED";
+}
+
+TEST_F(ConverterTest, CandidateDeleteReproRemovesChainFromRemovedHead) {
+  auto converter = CreateConverter(std::make_unique<StubRewriter>(),
+                                   DEFAULT_PREDICTOR);
+  auto& predictor = converter->predictor();
+  ASSERT_TRUE(predictor.Wait());
+  ASSERT_TRUE(predictor.ClearAllHistory());
+
+  config::Config learning_config;
+  config::ConfigHandler::GetDefaultConfig(&learning_config);
+  learning_config.set_use_history_suggest(true);
+  learning_config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  composer::Composer composer;
+  composer.SetPreeditTextForTestOnly("きょうとてら");
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetComposer(composer)
+          .SetConfigView(learning_config)
+          .SetRequestType(ConversionRequest::CONVERSION)
+          .Build();
+  Result learned;
+  learned.key = "きょうとてら";
+  learned.value = "京都寺";
+  learned.inner_segment_boundary = BuildInnerSegmentBoundary(
+      {{12, 6, 12, 6}, {6, 3, 6, 3}}, learned.key, learned.value);
+  ASSERT_EQ(learned.inner_segment_boundary.size(), 2);
+  const std::vector<Result> results = {learned};
+  predictor.Finish(request, results, 1);
+  predictor.DiscardRevert(1);
+
+  // Deleting the head also removes the combined entry, but keeps the link.
+  ASSERT_TRUE(predictor.ClearHistoryEntry("きょうと", "京都"));
+  EXPECT_FALSE(predictor.ClearHistoryEntry("きょうと", "京都"));
+  // The remaining chain must be removed even though its head is removed.
+  EXPECT_TRUE(predictor.ClearHistoryEntry("きょうとてら", "京都寺"));
+  EXPECT_FALSE(predictor.ClearHistoryEntry("きょうとてら", "京都寺"));
+  EXPECT_TRUE(predictor.ClearHistoryEntry("てら", "寺"));
+  EXPECT_FALSE(predictor.ClearHistoryEntry("てら", "寺"));
+}
+
 // test for issue:2209644
 // just checking whether this causes segmentation fault or not.
 // TODO(toshiyuki): make dictionary mock and test strictly.
@@ -2473,6 +2611,32 @@ TEST_F(ConverterTest, SuppressionEntryShouldBePrioritized) {
     ASSERT_EQ(segments.conversion_segments_size(), 1);
     ASSERT_LT(1, segments.conversion_segment(0).candidates_size());
     EXPECT_FALSE(FindCandidateByValue("哀", segments.conversion_segment(0)));
+  }
+}
+
+TEST_F(ConverterTest, CandidateDeleteSuppressesOnlyPredictionCandidate) {
+  // The stub predictor produces exactly one candidate; the actual Converter
+  // and UserDictionary still perform suppression and validate the result.
+  auto converter = CreateStubbedConverter();
+  constexpr absl::string_view kKey = "あい";
+  for (const auto request_type : {ConversionRequest::SUGGESTION,
+                                  ConversionRequest::PREDICTION}) {
+    Segments segments;
+    ASSERT_TRUE(converter->StartPrediction(ConvReq(kKey, request_type),
+                                           &segments));
+    ASSERT_EQ(segments.conversion_segments_size(), 1);
+    ASSERT_EQ(segments.conversion_segment(0).candidates_size(), 1);
+    EXPECT_EQ(segments.conversion_segment(0).candidate(0).key, kKey);
+    EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, kKey);
+  }
+  ASSERT_TRUE(converter->AddSuppressionEntry(kKey, kKey));
+  for (const auto request_type : {ConversionRequest::SUGGESTION,
+                                  ConversionRequest::PREDICTION}) {
+    Segments segments;
+    EXPECT_FALSE(converter->StartPrediction(ConvReq(kKey, request_type),
+                                            &segments));
+    ASSERT_EQ(segments.conversion_segments_size(), 1);
+    EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 0);
   }
 }
 

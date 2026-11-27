@@ -433,6 +433,12 @@ class EngineConverter : public EngineConverterInterface {
   void FillAllCandidateWords(commands::CandidateList* candidates) const;
   void FillIncognitoCandidateWords(commands::CandidateList* candidates) const;
 
+  // Use the active engine state, not the request or session state: a focused
+  // suggestion is PREDICTION even when the session itself is CONVERSION.
+  bool AllowsLastCandidateSuppression() const {
+    return CheckState(SUGGESTION | PREDICTION);
+  }
+
   bool IsEmptySegment(const Segment& segment) const;
 
   // Handles selected_indices for usage stats.

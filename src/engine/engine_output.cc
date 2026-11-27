@@ -53,6 +53,7 @@
 #include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/segments.h"
+#include "engine/candidate_deletion.h"
 #include "engine/candidate_list.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
@@ -61,31 +62,9 @@ namespace mozc {
 namespace engine {
 namespace {
 
-bool HasDeletableHistory(const converter::Candidate& candidate) {
-  return candidate.attributes &
-         (converter::Attribute::USER_HISTORY_PREDICTION |
-          converter::Attribute::USER_SEGMENT_HISTORY_REWRITER);
-}
-
-bool IsSuppressibleCandidate(const Segment& segment, int candidate_index) {
-  // Keep the footer capability identical to EngineConverter: never advertise
-  // suppression if it would remove the last regular candidate.
-  if (candidate_index < 0 || !segment.is_valid_index(candidate_index) ||
-      segment.candidates_size() <= 1) {
-    return false;
-  }
-  const converter::Candidate& candidate = segment.candidate(candidate_index);
-  if (candidate.key.empty() || candidate.value.empty()) {
-    return false;
-  }
-  if (candidate.attributes & converter::Attribute::COMMAND_CANDIDATE) {
-    return false;
-  }
-  return true;
-}
-
 bool FillAnnotation(const converter::Candidate& candidate_value,
-                    bool suppressible, commands::Annotation* annotation) {
+                    CandidateDeletionAction action,
+                    commands::Annotation* annotation) {
   bool is_modified = false;
   if (!candidate_value.prefix.empty()) {
     annotation->set_prefix(candidate_value.prefix);
@@ -103,11 +82,11 @@ bool FillAnnotation(const converter::Candidate& candidate_value,
     annotation->set_a11y_description(candidate_value.a11y_description);
     is_modified = true;
   }
-  if (HasDeletableHistory(candidate_value)) {
+  if (action == CandidateDeletionAction::kDeleteHistory) {
     annotation->set_deletable(true);
     is_modified = true;
   }
-  if (suppressible) {
+  if (action == CandidateDeletionAction::kSuppress) {
     annotation->set_suppressible(true);
     is_modified = true;
   }
@@ -121,7 +100,7 @@ bool FillAnnotation(const converter::Candidate& candidate_value,
 void FillCandidateWord(const converter::Candidate& segment_candidate,
                        const int id, const int index,
                        const absl::string_view base_key,
-                       const bool suppressible,
+                       CandidateDeletionAction action,
                        commands::CandidateWord* candidate_word_proto) {
   candidate_word_proto->set_id(id);
   candidate_word_proto->set_index(index);
@@ -131,7 +110,7 @@ void FillCandidateWord(const converter::Candidate& segment_candidate,
   candidate_word_proto->set_value(segment_candidate.value);
 
   commands::Annotation annotation;
-  if (FillAnnotation(segment_candidate, suppressible, &annotation)) {
+  if (FillAnnotation(segment_candidate, action, &annotation)) {
     *candidate_word_proto->mutable_annotation() = annotation;
   }
 
@@ -142,7 +121,7 @@ void FillCandidateWord(const converter::Candidate& segment_candidate,
       converter::Attribute::USER_HISTORY_PREDICTION) {
     candidate_word_proto->add_attributes(commands::USER_HISTORY);
   }
-  if (HasDeletableHistory(segment_candidate)) {
+  if (action == CandidateDeletionAction::kDeleteHistory) {
     candidate_word_proto->add_attributes(commands::DELETABLE);
   }
   if (segment_candidate.attributes &
@@ -168,12 +147,14 @@ void FillCandidateWord(const converter::Candidate& segment_candidate,
 
 void FillAllCandidateWordsInternal(
     const Segment& segment, const CandidateList& candidate_list,
-    const int focused_id, commands::CandidateList* candidate_list_proto) {
+    const int focused_id, commands::CandidateList* candidate_list_proto,
+    bool allow_last_candidate_suppression) {
   for (size_t i = 0; i < candidate_list.size(); ++i) {
     const Candidate& candidate = candidate_list.candidate(i);
     if (candidate.HasSubcandidateList()) {
       FillAllCandidateWordsInternal(segment, candidate.subcandidate_list(),
-                                    focused_id, candidate_list_proto);
+                                    focused_id, candidate_list_proto,
+                                    allow_last_candidate_suppression);
       continue;
     }
 
@@ -196,7 +177,8 @@ void FillAllCandidateWordsInternal(
     }
     const converter::Candidate& segment_candidate = segment.candidate(id);
     FillCandidateWord(segment_candidate, id, index, segment.key(),
-                      IsSuppressibleCandidate(segment, id),
+                      GetCandidateDeletionAction(
+                          segment, id, allow_last_candidate_suppression),
                       candidate_word_proto);
   }
 }
@@ -205,7 +187,8 @@ void FillAllCandidateWordsInternal(
 namespace output {
 
 void FillCandidate(const Segment& segment, const Candidate& candidate,
-                   commands::CandidateWindow_Candidate* candidate_proto) {
+                   commands::CandidateWindow_Candidate* candidate_proto,
+                   bool allow_last_candidate_suppression) {
   DCHECK(segment.is_valid_index(candidate.id()));
 
   if (candidate.HasSubcandidateList()) {
@@ -222,7 +205,9 @@ void FillCandidate(const Segment& segment, const Candidate& candidate,
   // Set annotations
   commands::Annotation annotation;
   if (FillAnnotation(candidate_value,
-                     IsSuppressibleCandidate(segment, candidate.id()),
+                     GetCandidateDeletionAction(
+                         segment, candidate.id(),
+                         allow_last_candidate_suppression),
                      &annotation)) {
     *candidate_proto->mutable_annotation() = annotation;
   }
@@ -235,7 +220,8 @@ void FillCandidate(const Segment& segment, const Candidate& candidate,
 void FillCandidateWindow(const Segment& segment,
                          const CandidateList& candidate_list,
                          const size_t position,
-                         commands::CandidateWindow* candidate_window_proto) {
+                         commands::CandidateWindow* candidate_window_proto,
+                         bool allow_last_candidate_suppression) {
   if (candidate_list.focused()) {
     candidate_window_proto->set_focused_index(candidate_list.focused_index());
   }
@@ -259,7 +245,8 @@ void FillCandidateWindow(const Segment& segment,
     commands::CandidateWindow_Candidate* candidate_proto =
         candidate_window_proto->add_candidate();
     candidate_proto->set_index(i);
-    FillCandidate(segment, candidate, candidate_proto);
+    FillCandidate(segment, candidate, candidate_proto,
+                  allow_last_candidate_suppression);
   }
 
   // Store sub_candidate_window.
@@ -267,7 +254,8 @@ void FillCandidateWindow(const Segment& segment,
     FillCandidateWindow(segment,
                         candidate_list.focused_candidate().subcandidate_list(),
                         candidate_list.focused_index(),
-                        candidate_window_proto->mutable_sub_candidate_window());
+                        candidate_window_proto->mutable_sub_candidate_window(),
+                        allow_last_candidate_suppression);
   }
 
   // Store usages.
@@ -277,11 +265,13 @@ void FillCandidateWindow(const Segment& segment,
 void FillAllCandidateWords(const Segment& segment,
                            const CandidateList& candidate_list,
                            const commands::Category category,
-                           commands::CandidateList* candidate_list_proto) {
+                           commands::CandidateList* candidate_list_proto,
+                           bool allow_last_candidate_suppression) {
   candidate_list_proto->set_category(category);
   FillAllCandidateWordsInternal(segment, candidate_list,
                                 candidate_list.focused_id(),
-                                candidate_list_proto);
+                                candidate_list_proto,
+                                allow_last_candidate_suppression);
 }
 
 void FillRemovedCandidates(const Segment& segment,
@@ -292,7 +282,10 @@ void FillRemovedCandidates(const Segment& segment,
   for (const converter::Candidate& candidate : candidates) {
     commands::CandidateWord* candidate_word_proto =
         candidate_list_proto->add_candidates();
-    FillCandidateWord(candidate, index, index, "", false,
+    FillCandidateWord(candidate, index, index, "",
+                      HasDeletableHistory(candidate)
+                          ? CandidateDeletionAction::kDeleteHistory
+                          : CandidateDeletionAction::kNone,
                       candidate_word_proto);
     index++;
   }
