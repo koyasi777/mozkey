@@ -65,13 +65,25 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "benchmark",
+    testonly = True,
+    hdrs = ["benchmark.h"],
+    deps = ["@google_benchmark//:benchmark"],
+)
+
+mozc_cc_library(
     name = "gunit_main_internal",
     testonly = True,
     srcs = ["gtest_main.cc"],
     visibility = ["//visibility:private"],
     deps = [
+        ":benchmark",
         ":gunit",
+        "//base:system_util",
+        "//base/file:temp_dir",
         "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
     ] + mozc_select(
         client = ["//base:init_mozc"],
         linux = [],

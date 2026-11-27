@@ -430,6 +430,29 @@ mozc_cc_library(
     ],
 )
 
+mozc_cc_test(
+    name = "engine_benchmark_test",
+    srcs = ["engine_benchmark_test.cc"],
+    data = ["//data_manager/oss:mozc.data"],
+    tags = [
+        "manual",
+        "noandroid",
+    ],
+    deps = [
+        ":engine",
+        "//base:system_util",
+        "//base/file:temp_dir",
+        "//data_manager",
+        "//data_manager/oss:oss_data_manager",
+        "//data_manager/testing:mock_data_manager",
+        "//testing:benchmark",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
 mozc_cc_library(
     name = "minimal_converter",
     srcs = ["minimal_converter.cc"],

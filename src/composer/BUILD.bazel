@@ -88,6 +88,25 @@ mozc_cc_library(
 )
 
 mozc_cc_test(
+    name = "composer_benchmark_test",
+    size = "small",
+    srcs = ["composer_benchmark_test.cc"],
+    tags = [
+        "manual",
+        "noandroid",
+    ],
+    deps = [
+        ":composer",
+        ":table",
+        "//config:character_form_manager",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//testing:benchmark",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
     name = "composer_test",
     size = "small",
     srcs = ["composer_test.cc"],

@@ -32,9 +32,22 @@
 #include <crtdbg.h>
 #endif  // _WIN32
 
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <utility>
+
+#include "absl/flags/declare.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/status/statusor.h"
+#include "base/file/temp_dir.h"
 #include "base/init_mozc.h"
+#include "base/system_util.h"
+#include "testing/benchmark.h"
 #include "testing/gunit.h"
+
+ABSL_DECLARE_FLAG(std::string, log_dir);
 
 int main(int argc, char** argv) {
   // TODO(yukawa, team): Implement b/2805528 so that you can specify any option
@@ -46,6 +59,22 @@ int main(int argc, char** argv) {
 #else   // !GTEST_HAS_ABSL
   const char* usage = argv[0];
 #endif  // GTEST_HAS_ABSL
+  // Google Benchmark defaults an empty filter to all registered benchmarks.
+  // Strip benchmark flags before passing argv to Mozc and GoogleTest.
+  benchmark::SetBenchmarkFilter("");
+  benchmark::Initialize(&argc, argv);
+  const bool run_benchmarks = !benchmark::GetBenchmarkFilter().empty();
+
+  // Benchmarks must not use the installed IME's profile or default log path.
+  // Ordinary unit tests retain their existing setup and flag handling.
+  std::optional<mozc::TempDirectory> benchmark_profile;
+  if (run_benchmarks) {
+    auto profile = mozc::TempDirectory::Default().CreateTempDirectory();
+    CHECK_OK(profile);
+    benchmark_profile.emplace(*std::move(profile));
+    mozc::SystemUtil::SetUserProfileDirectory(benchmark_profile->path());
+    absl::SetFlag(&FLAGS_log_dir, benchmark_profile->path());
+  }
   mozc::InitMozc(usage, &argc, &argv);
   testing::InitGoogleTest(&argc, argv);
 
@@ -58,6 +87,16 @@ int main(int argc, char** argv) {
   // See b/2805521 for details.
   GTEST_FLAG_SET(catch_exceptions, true);
 
-  return RUN_ALL_TESTS();
+  const int result = RUN_ALL_TESTS();
+  if (result != 0) {
+    return result;
+  }
+  if (run_benchmarks) {
+    // A mistyped filter must not silently produce a successful measurement.
+    const std::size_t count = benchmark::RunSpecifiedBenchmarks();
+    benchmark::Shutdown();
+    return count == 0 ? 1 : 0;
+  }
+  return 0;
 }
 
