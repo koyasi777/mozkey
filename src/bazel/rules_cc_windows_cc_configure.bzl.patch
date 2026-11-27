@@ -1,24 +1,6 @@
 --- cc/private/toolchain/windows_cc_configure.bzl
 +++ cc/private/toolchain/windows_cc_configure.bzl
-@@ -617,10 +617,14 @@ def _get_clang_version(repository_ctx, clang_cl):
-     result = repository_ctx.execute([clang_cl, "-v"])
-     first_line = result.stderr.strip().splitlines()[0].strip()
-
--    # The first line of stderr should look like "[vendor ]clang version X.X.X"
--    if result.return_code != 0 or first_line.find("clang version ") == -1:
-+    # The first line of stderr should look like "[vendor ]clang version X.X.X[ vendor]"
-+    clang_version_prefix = "clang version "
-+    if result.return_code != 0:
-         auto_configure_fail("Failed to get clang version by running \"%s -v\"" % clang_cl)
--    return first_line.split(" ")[-1]
-+    version_start = first_line.find(clang_version_prefix)
-+    if version_start == -1:
-+        auto_configure_fail("Failed to get clang version: unknown version string format: \"%s\"" % first_line)
-+    return first_line[version_start + len(clang_version_prefix):].split(" ")[0]
-
- def _get_clang_dir(repository_ctx, llvm_path, clang_version):
-     """Get the clang installation directory."""
-@@ -920,11 +924,13 @@ def configure_windows_toolchain(repository_ctx):
+@@ -924,11 +924,13 @@ def configure_windows_toolchain(repository_ctx):
 
      template_vars = dict()
      msvc_vars_x64 = _get_msvc_vars(repository_ctx, paths, "x64")
