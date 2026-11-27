@@ -597,6 +597,26 @@ mozc_cc_library(
 )
 
 mozc_cc_test(
+    name = "session_handler_benchmark_test",
+    size = "small",
+    srcs = ["session_handler_benchmark_test.cc"],
+    tags = [
+        "manual",
+        "noandroid",
+    ],
+    deps = [
+        ":session_handler",
+        "//config:config_handler",
+        "//data_manager/oss:oss_data_manager",
+        "//engine",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//testing:benchmark",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_test(
     name = "session_handler_test",
     size = "small",
     timeout = "long",
