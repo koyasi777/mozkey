@@ -218,5 +218,7 @@ py_test(
     name = "create_bazel_vendor_test",
     size = "small",
     srcs = ["create_bazel_vendor_test.py"],
+    # The test creates a temporary Git repository using host Git.
+    env_inherit = ["PATH"],
     deps = [":create_bazel_vendor_lib"],
 )
