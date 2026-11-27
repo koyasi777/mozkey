@@ -208,3 +208,15 @@ py_test(
     srcs = ["vs_util_sdk_test.py"],
     deps = [":vs_util"],
 )
+
+mozc_py_library(
+    name = "create_bazel_vendor_lib",
+    srcs = ["create_bazel_vendor.py"],
+)
+
+py_test(
+    name = "create_bazel_vendor_test",
+    size = "small",
+    srcs = ["create_bazel_vendor_test.py"],
+    deps = [":create_bazel_vendor_lib"],
+)
