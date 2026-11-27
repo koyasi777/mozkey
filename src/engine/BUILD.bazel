@@ -533,11 +533,21 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "candidate_deletion",
+    hdrs = ["candidate_deletion.h"],
+    deps = [
+        "//converter:attribute",
+        "//converter:segments",
+    ],
+)
+
+mozc_cc_library(
     name = "engine_converter",
     srcs = ["engine_converter.cc"],
     hdrs = ["engine_converter.h"],
     visibility = ["//session:__pkg__"],
     deps = [
+        ":candidate_deletion",
         ":candidate_list",
         ":contextual_candidate_reranker",
         ":engine_converter_interface",
@@ -654,6 +664,7 @@ mozc_cc_library(
     srcs = ["engine_output.cc"],
     hdrs = ["engine_output.h"],
     deps = [
+        ":candidate_deletion",
         ":candidate_list",
         "//base:port",
         "//base:text_normalizer",

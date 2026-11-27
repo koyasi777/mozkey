@@ -245,7 +245,7 @@ EXPECT_NOT_IN_ALL_CANDIDATE_WORDS	今日は晴れの感じです
 SEND_KEY	TAB
 EXPECT_PREEDIT	今日は晴れ
 
-# SCENARIO 5 (Suppression fallback after history deletion fails)
+# SCENARIO 5 (History deletion and candidate suppression)
 
 # Reset.
 CLEAR_USER_PREDICTION
@@ -274,9 +274,9 @@ EXPECT_PREEDIT	平面図
 SEND_KEY	TAB
 EXPECT_PREEDIT	経い目
 
-# History deletion does not apply to 経い目, so Ctrl-Delete falls back to
-# suppression. Successful deletion/hiding cancels conversion and restores the
-# original composition.
+# 経い目 is a non-history candidate, so Ctrl-Delete suppresses it directly.
+# Successful suppression cancels prediction and restores the original
+# composition.
 SEND_KEY	CTRL DELETE
 EXPECT_PREEDIT	へいめ
 EXPECT_NOT_IN_ALL_CANDIDATE_WORDS	経い目
@@ -302,9 +302,17 @@ EXPECT_PREEDIT	へいめんず
 SEND_KEY	TAB
 EXPECT_PREEDIT	平面図
 
-# The learned-history contribution has already been deleted, but only one
-# regular candidate remains. Suppression of the last regular candidate is
-# intentionally blocked, so Ctrl-Delete is a no-op here.
+# The learned-history contribution has already been deleted. Prediction
+# allows suppression of the last regular candidate, unlike normal conversion.
+# Ctrl-Delete suppresses the selected candidate and restores composition.
 SEND_KEY	CTRL DELETE
-EXPECT_PREEDIT	平面図
-EXPECT_IN_ALL_CANDIDATE_WORDS	平面図
+EXPECT_PREEDIT	へいめんず
+EXPECT_NOT_IN_ALL_CANDIDATE_WORDS	平面図
+
+# Suppression remains effective when the same reading is entered again.
+SEND_KEY	ESC
+SEND_KEYS	heimenzu
+EXPECT_PREEDIT	へいめんず
+EXPECT_NOT_IN_ALL_CANDIDATE_WORDS	平面図
+SEND_KEY	TAB
+EXPECT_NOT_IN_ALL_CANDIDATE_WORDS	平面図

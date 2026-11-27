@@ -635,8 +635,10 @@ bool UserHistoryPredictor::ClearHistoryEntry(absl::string_view key,
     //   generates this key value pair.
     // 2) key/value are the substring of entry.
     storage_.ForEach([&](uint64_t fp, Entry& entry) {
+      // Removed entries may still be part of an N-gram chain. Only count
+      // an inner-segment removal when the entry has not already been removed.
       if (RemoveNgramChain(key, value, entry) ||
-          RemoveEntryWithInnerSegment(key, value, entry)) {
+          (!entry.removed() && RemoveEntryWithInnerSegment(key, value, entry))) {
         deleted = true;
       }
       return true;

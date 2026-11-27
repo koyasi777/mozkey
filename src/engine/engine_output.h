@@ -49,12 +49,14 @@ namespace output {
 
 // Fill the CandidateWindow_Candidate protobuf with the contents of candidate.
 void FillCandidate(const Segment& segment, const Candidate& candidate,
-                   commands::CandidateWindow_Candidate* candidate_proto);
+                   commands::CandidateWindow_Candidate* candidate_proto,
+                   bool allow_last_candidate_suppression = false);
 
 // Fill the CandidateWindow protobuf with the contents of candidate_list.
 void FillCandidateWindow(const Segment& segment,
                          const CandidateList& candidate_list, size_t position,
-                         commands::CandidateWindow* candidate_window_proto);
+                         commands::CandidateWindow* candidate_window_proto,
+                         bool allow_last_candidate_suppression = false);
 
 // Fill the CandidateList protobuf with the contents of
 // candidate_list.  Candidates in the candidate_list are flatten
@@ -62,7 +64,8 @@ void FillCandidateWindow(const Segment& segment,
 void FillAllCandidateWords(const Segment& segment,
                            const CandidateList& candidate_list,
                            commands::Category category,
-                           commands::CandidateList* candidate_list_proto);
+                           commands::CandidateList* candidate_list_proto,
+                           bool allow_last_candidate_suppression = false);
 
 // For debug. Fill the CandidateList protobuf with the
 // removed_candidates_for_debug in the segment.

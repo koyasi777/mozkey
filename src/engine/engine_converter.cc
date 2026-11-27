@@ -57,6 +57,7 @@
 #include "converter/candidate.h"
 #include "converter/converter_interface.h"
 #include "converter/segments.h"
+#include "engine/candidate_deletion.h"
 #include "engine/candidate_list.h"
 #include "engine/contextual_candidate_reranker.h"
 #include "engine/engine_converter_interface.h"
@@ -140,23 +141,6 @@ void PreferStandalonePostalLiteral(const composer::Composer& composer,
       }
     }
   }
-}
-
-bool IsSuppressibleCandidate(const Segment& segment, int candidate_index) {
-  // Desktop conversion requires at least one regular candidate per segment.
-  // Hiding the last regular candidate would make the next conversion invalid.
-  if (candidate_index < 0 || !segment.is_valid_index(candidate_index) ||
-      segment.candidates_size() <= 1) {
-    return false;
-  }
-  const converter::Candidate& candidate = segment.candidate(candidate_index);
-  if (candidate.key.empty() || candidate.value.empty()) {
-    return false;
-  }
-  if (candidate.attributes & converter::Attribute::COMMAND_CANDIDATE) {
-    return false;
-  }
-  return true;
 }
 
 #if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
@@ -1696,23 +1680,19 @@ bool EngineConverter::DeleteOrSuppressCandidate(std::optional<int> id) {
   }
 
   const Segment& segment = segments_.conversion_segment(segment_index_);
-  if (!segment.is_valid_index(*id)) {
-    return false;
+  switch (GetCandidateDeletionAction(segment, *id,
+                                     AllowsLastCandidateSuppression())) {
+    case CandidateDeletionAction::kDeleteHistory:
+      return converter_->DeleteCandidateFromHistory(
+          segments_, segments_.history_segments_size() + segment_index_, *id);
+    case CandidateDeletionAction::kSuppress: {
+      const converter::Candidate& candidate = segment.candidate(*id);
+      return converter_->AddSuppressionEntry(candidate.key, candidate.value);
+    }
+    case CandidateDeletionAction::kNone:
+      return false;
   }
-
-  // Preserve the existing meaning first: if this exact candidate has any
-  // deletable predictor/segment history, Ctrl+Del removes that history only.
-  // Suppression is a fallback only when no history entry could be deleted.
-  if (converter_->DeleteCandidateFromHistory(
-          segments_, segments_.history_segments_size() + segment_index_, *id)) {
-    return true;
-  }
-
-  if (!IsSuppressibleCandidate(segment, *id)) {
-    return false;
-  }
-  const converter::Candidate& candidate = segment.candidate(*id);
-  return converter_->AddSuppressionEntry(candidate.key, candidate.value);
+  return false;
 }
 
 void EngineConverter::SegmentFocusInternal(size_t index) {
@@ -2609,7 +2589,8 @@ void EngineConverter::FillCandidateWindow(
 
   const Segment& segment = segments_.conversion_segment(segment_index_);
   output::FillCandidateWindow(segment, candidate_list_, position,
-                              candidate_window);
+                              candidate_window,
+                              AllowsLastCandidateSuppression());
   // The renderer owns only presentation. The server annotates which visible
   // candidate matches the persisted pin for the exact single-segment reading.
   if (CheckState(CONVERSION) && request_type_ == ConversionRequest::CONVERSION &&
@@ -2712,7 +2693,8 @@ void EngineConverter::FillAllCandidateWords(
     return;
   }
   const Segment& segment = segments_.conversion_segment(segment_index_);
-  output::FillAllCandidateWords(segment, candidate_list_, category, candidates);
+  output::FillAllCandidateWords(segment, candidate_list_, category, candidates,
+                                AllowsLastCandidateSuppression());
 }
 
 void EngineConverter::FillIncognitoCandidateWords(

@@ -98,7 +98,8 @@ class UserHistoryPredictor : public PredictorInterface {
   // Clears unused data.
   bool ClearUnusedHistory() override;
 
-  // Clears a specific history entry.
+  // Clears a specific history entry. Returns true only if an entry or an
+  // N-gram link was actually removed.
   bool ClearHistoryEntry(absl::string_view key,
                          absl::string_view value) override;
 
