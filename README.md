@@ -148,6 +148,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - ローマ字入力中、単なる未解決の Roman suffix では直前の passive suggestion を保持して候補ウィンドウのちらつきを抑制。一方、カスタムローマ字規則の「曖昧なローマ字規則の途中表示」によって有効な読みが現れ、予測クエリが変化した場合は、suffix が未解決のままでもサジェストを更新。候補へ移動する場合は画面に表示中の候補集合を使用
 - ライブ変換中も画面に表示されたサジェストに対するキー操作を優先。専用キー割り当てと通常の変換・編集操作は維持
 - 未解決ローマ字の入力中、表示中の英字救済候補が古くなった場合はサジェストを更新し、候補の表示・選択・確定の整合性を維持（例：`AIde` → `AIdev`）
+- Shift キーによる2文字以上の連続大文字入力から日本語入力へ自動復帰した際、推測に基づく英字救済サジェストを最大15文字に制限し、長い日本語入力中に不要な英字候補が表示され続けることを防止
 - 日本語と英字の混在入力では、条件を満たす `もうGoogle` を `mouGoogle` より優先。短い読みの `iPhone` / `iPad` などや未知語の `azooKey` は元の英字表記を優先
 - 明示的に選んで確定したサジェストについて、候補が持つ全文の読みと、通常変換で検証できた文節・候補順位を使ってユーザーセグメント履歴の学習を補強。確定結果やサジェスト履歴は従来どおり維持し、検証できない文節や順位は推測で学習しない
 - デフォルトでは 1 文字だけの未確定文字列で、助詞などの誤変換を避けるためライブ変換を実行しない
@@ -1446,6 +1447,7 @@ Main features added in this fork
 - Reduces candidate-window flicker by holding passive suggestions for unresolved Roman prefixes that do not change the prediction reading; when a custom DisplayAmbiguousResult rule exposes a meaningful reading and changes the prediction query, suggestions refresh even while the Roman suffix remains pending. Entering the candidate list uses the exact displayed candidates
 - Prioritizes eligible key actions for suggestions visible during live conversion, while preserving explicit state-specific key bindings and ordinary conversion/editing operations
 - Refreshes a stale raw-ASCII rescue suggestion when more Roman keys are typed (for example, `AIde` → `AIdev`), keeping the displayed candidate consistent with its selectable value
+- Limits heuristic raw-ASCII rescue suggestions to 15 characters when automatically returning to Japanese input after typing two or more consecutive uppercase letters using Shift, preventing unwanted ASCII suggestions from persisting during longer Japanese input
 - Prefers a mixed Japanese/Latin preedit such as `もうGoogle` over `mouGoogle` under conservative dictionary and prefix-length checks, while retaining ASCII-first suggestions for names such as `iPhone`, `iPad`, and `azooKey`
 - For explicitly accepted suggestions, verifies the complete reading, native segment mapping, and actual normal-conversion candidate order before learning segment-level preferences; preserves the original committed text and suggestion history, and skips speculative learning when the mapping or displayed ranking cannot be verified
 - By default, suppresses live conversion for one-character compositions to avoid over-converting particles

@@ -111,6 +111,8 @@ int LanguageAwareRewriter::capability(const ConversionRequest& request) const {
 }
 
 namespace {
+constexpr size_t kMaxShiftedAsciiRescueLength = 15;
+
 // Only an explicitly registered AUTO_ASCII token followed by Japanese input
 // identifies a mixed-script composition whose full raw keystrokes should not
 // appear in passive suggestions (e.g. "githubwot" -> "githubをt").
@@ -321,6 +323,22 @@ bool LanguageAwareRewriter::FillRawText(const ConversionRequest& request,
   }
 
   const std::string raw_string = request.composer().GetRawString();
+  // Limit only speculative passive rescue after an actual shifted-uppercase
+  // run returned to Japanese mode. Keep dictionary-backed and independently
+  // generated candidates, other rescue paths, and explicit prediction intact.
+  const bool suppress_raw_rescue =
+      request.request_type() == ConversionRequest::SUGGESTION &&
+      request.config().preedit_method() == config::Config::ROMAN &&
+      request.config().shift_key_mode_switch() ==
+          config::Config::ASCII_INPUT_MODE &&
+      request.request().special_romanji_table() ==
+          commands::Request::DEFAULT_TABLE &&
+      !IsMobileRequest(request) &&
+      request.composer().GetInputMode() == transliteration::HIRAGANA &&
+      request.composer().has_shifted_ascii_rescue_context() &&
+      raw_string.size() > kMaxShiftedAsciiRescueLength &&
+      Util::IsAscii(raw_string) && !dictionary_->HasValue(raw_string);
+  bool modified = false;
 
   uint16_t lid = unknown_id_;
   uint16_t rid = unknown_id_;
@@ -349,6 +367,7 @@ bool LanguageAwareRewriter::FillRawText(const ConversionRequest& request,
     if (existing_index >= 0) {
       if (existing_index != 0) {
         segment->move_candidate(existing_index, 0);
+        modified = true;
       }
     } else {
       converter::Candidate* preedit_candidate = segment->insert_candidate(0);
@@ -361,7 +380,14 @@ bool LanguageAwareRewriter::FillRawText(const ConversionRequest& request,
       preedit_candidate->attributes |=
           converter::Attribute::NO_VARIANTS_EXPANSION |
           converter::Attribute::NO_EXTRA_DESCRIPTION;
+      modified = true;
     }
+  }
+
+  // Do not discard the mixed-script preedit candidate above, or mutate any
+  // independently generated candidate, when the raw rescue is out of budget.
+  if (suppress_raw_rescue) {
+    return modified;
   }
 
   // Create a candidate.

@@ -68,7 +68,8 @@ class ComposerData {
                std::string source_text,
                std::vector<commands::SessionCommand::CompositionEvent>
                    compositions_for_handwriting,
-               bool suppress_language_aware_raw_input = false);
+               bool suppress_language_aware_raw_input = false,
+               bool has_shifted_ascii_rescue_context = false);
 
   // Copyable and movable.
   ComposerData(const ComposerData& other) = default;
@@ -82,6 +83,12 @@ class ComposerData {
   // the current composition. This is a snapshot of Composer's semantic state.
   bool suppress_language_aware_raw_input() const {
     return suppress_language_aware_raw_input_;
+  }
+
+  // True when an actual shifted uppercase run reverted to Japanese input
+  // and its originating prefix has not been edited away.
+  bool has_shifted_ascii_rescue_context() const {
+    return has_shifted_ascii_rescue_context_;
   }
 
   // Returns input field type captured when ComposerData was created.
@@ -146,6 +153,7 @@ class ComposerData {
   // Input mode of IME (e.g. HIRAGANA, HALF_ASCII, etc.)
   transliteration::TransliterationType input_mode_ = transliteration::HIRAGANA;
   bool suppress_language_aware_raw_input_ = false;
+  bool has_shifted_ascii_rescue_context_ = false;
   // Type of the input field to input texts.
   commands::Context::InputFieldType input_field_type_ =
       commands::Context::NORMAL;
@@ -423,6 +431,7 @@ class Composer final {
   friend class ComposerTestPeer;
 
   bool ProcessCompositionInput(CompositionInput input);
+  void InvalidateShiftedAsciiRescueContextForEdit(size_t position);
 
   // Change input mode temporarily according to the current context and
   // the given input character.
@@ -450,6 +459,11 @@ class Composer final {
   // two or more shifted alphabet keys temporarily enter ASCII mode, and the
   // following unshifted alphabet key returns input to the comeback mode.
   bool is_in_shifted_ascii_revert_context_;
+  // End of the originating prefix in composition-character coordinates.
+  // Unlike the transient revert latch, suffix edits and punctuation do not
+  // reset this provenance. An edit inside the prefix invalidates it.
+  // Zero means there is no tracked shifted ASCII rescue context.
+  size_t shifted_ascii_rescue_prefix_length_ = 0;
   bool suppress_language_aware_raw_input_ = false;
 
   // The original text for the composition.  The value is usually
