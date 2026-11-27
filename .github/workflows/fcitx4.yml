@@ -1,0 +1,40 @@
+name: Fcitx4 CI
+on:
+  push:
+    branches:
+      - fcitx
+  pull_request:
+    branches:
+      - fcitx
+  workflow_dispatch: # can be manually dispatched under GitHub's "Actions" tab
+jobs:
+  check:
+    name: Build and test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        include:
+          - compiler: gcc
+            cxx_compiler: g++
+          - compiler: clang
+            cxx_compiler: clang++
+    env:
+      CC: ${{ matrix.compiler }}
+      CXX: ${{ matrix.cxx_compiler }}
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install fcitx-libs-dev
+      - uses: actions/checkout@v4
+        with:
+          path: mozc
+          submodules: true
+      - uses: bazelbuild/setup-bazelisk@v3
+      - name: Build fcitx-mozc
+        shell: bash
+        run: |
+          cd mozc/src/
+          _BUILD_TARGETS=unix/fcitx:fcitx-mozc.so ../scripts/build_fcitx_bazel --cxxopt=-Wno-uninitialized --host_cxxopt=-Wno-uninitialized
