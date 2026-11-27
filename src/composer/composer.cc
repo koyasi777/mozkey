@@ -462,11 +462,13 @@ ComposerData::ComposerData(
     commands::Context::InputFieldType input_field_type, std::string source_text,
     std::vector<commands::SessionCommand::CompositionEvent>
         compositions_for_handwriting,
-    bool suppress_language_aware_raw_input)
+    bool suppress_language_aware_raw_input,
+    bool has_shifted_ascii_rescue_context)
     : composition_(std::move(composition)),
       position_(position),
       input_mode_(input_mode),
       suppress_language_aware_raw_input_(suppress_language_aware_raw_input),
+      has_shifted_ascii_rescue_context_(has_shifted_ascii_rescue_context),
       input_field_type_(input_field_type),
       source_text_(std::move(source_text)),
       compositions_for_handwriting_(std::move(compositions_for_handwriting)) {}
@@ -591,7 +593,8 @@ const ComposerData& Composer::EmptyComposerData() {
 ComposerData Composer::CreateComposerData() const {
   return ComposerData(composition_, position_, input_mode_, input_field_type_,
                       source_text_, compositions_for_handwriting_,
-                      suppress_language_aware_raw_input_);
+                      suppress_language_aware_raw_input_,
+                      shifted_ascii_rescue_prefix_length_ != 0);
 }
 
 void Composer::Reset() {
@@ -753,6 +756,18 @@ void Composer::ApplyTemporaryInputMode(const absl::string_view input,
     // of temporary half-width Ascii input.
     if (shifted_sequence_count_ > 1 &&
         switch_mode == config::Config::ASCII_INPUT_MODE) {
+      // Record the origin only on the real temporary ASCII -> Japanese
+      // transition, not merely from uppercase letters in a raw string.
+      if (shifted_ascii_rescue_prefix_length_ == 0 &&
+          input_mode_ == transliteration::HALF_ASCII &&
+          comeback_input_mode_ == transliteration::HIRAGANA &&
+          position_ >= 2) {
+        const std::string shifted = GetRawSubString(position_ - 2, 2);
+        if (shifted.size() == 2 && shifted[0] >= 'A' && shifted[0] <= 'Z' &&
+            shifted[1] >= 'A' && shifted[1] <= 'Z') {
+          shifted_ascii_rescue_prefix_length_ = position_;
+        }
+      }
       SetInputMode(comeback_input_mode_);
       is_in_shifted_ascii_revert_context_ = true;
     }
@@ -769,11 +784,18 @@ void Composer::ApplyTemporaryInputMode(const absl::string_view input,
   }
 }
 
+void Composer::InvalidateShiftedAsciiRescueContextForEdit(size_t position) {
+  if (position < shifted_ascii_rescue_prefix_length_) {
+    shifted_ascii_rescue_prefix_length_ = 0;
+  }
+}
+
 bool Composer::ProcessCompositionInput(CompositionInput input) {
   if (!EnableInsert()) {
     return false;
   }
 
+  InvalidateShiftedAsciiRescueContextForEdit(position_);
   position_ = composition_.InsertInput(position_, std::move(input));
   is_new_input_ = false;
   return true;
@@ -817,6 +839,7 @@ void Composer::InsertCharacterPreedit(const absl::string_view input) {
 
 // Note: This method is only for test.
 void Composer::SetPreeditTextForTestOnly(const absl::string_view input) {
+  InvalidateShiftedAsciiRescueContextForEdit(position_);
   composition_.SetInputMode(Transliterators::RAW_STRING);
 
   const Utf8AsChars input_chars(input);
@@ -951,6 +974,7 @@ bool Composer::InsertCharacterKeyEvent(const commands::KeyEvent& key) {
 }
 
 void Composer::DeleteAt(size_t pos) {
+  InvalidateShiftedAsciiRescueContextForEdit(pos);
   composition_.DeleteAt(pos);
   // Adjust cursor position for composition mode.
   if (position_ > pos) {
@@ -959,6 +983,7 @@ void Composer::DeleteAt(size_t pos) {
 }
 
 void Composer::Delete() {
+  InvalidateShiftedAsciiRescueContextForEdit(position_);
   position_ = composition_.DeleteAt(position_);
   UpdateInputMode();
 }
@@ -973,6 +998,7 @@ void Composer::EditErase() {
   composition_.Erase();
   position_ = 0;
   suppress_language_aware_raw_input_ = false;
+  shifted_ascii_rescue_prefix_length_ = 0;
   SetInputMode(comeback_input_mode_);
 }
 
@@ -995,6 +1021,7 @@ void Composer::Backspace() {
   UpdateInputMode();
 
   // Delete 'character to be deleted'
+  InvalidateShiftedAsciiRescueContextForEdit(position_);
   position_ = composition_.DeleteAt(position_);
 }
 

@@ -592,6 +592,95 @@ TEST_F(LanguageAwareRewriterTest,
   EXPECT_EQ(segment.candidate(0).value, "AIdev");
 }
 
+// The cap must follow the actual shifted-input origin, not uppercase spelling
+// alone. It applies to passive raw rescue, not prediction or native candidates.
+TEST_F(LanguageAwareRewriterTest, ShiftedAsciiRawRescueLengthLimit) {
+  MockDictionary dictionary;
+  LanguageAwareRewriter rewriter(PosMatcher(data_manager_.GetPosMatcherData()),
+                                 dictionary);
+  commands::Request client_request;
+  client_request.set_language_aware_input(
+      commands::Request::LANGUAGE_AWARE_SUGGESTION);
+  config::Config config;
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_shift_key_mode_switch(config::Config::ASCII_INPUT_MODE);
+  config.set_auto_switch_composition_mode(false);
+  auto table = std::make_shared<composer::Table>();
+  ASSERT_TRUE(table->InitializeWithRequestAndConfig(client_request, config));
+  composer::Composer composer(table, client_request, config);
+
+  const auto has_raw = [&](ConversionRequest::RequestType type) {
+    const ConversionRequest request = ConversionRequestBuilder()
+                                          .SetComposer(composer)
+                                          .SetConfig(config)
+                                          .SetRequest(client_request)
+                                          .SetRequestType(type)
+                                          .Build();
+    Segments segments;
+    Segment* segment = segments.add_segment();
+    segment->set_key(request.key());
+    PushFrontCandidate("native", segment);
+    rewriter.Rewrite(request, &segments);
+    bool raw_found = false;
+    bool native_found = false;
+    for (int i = 0; i < segment->candidates_size(); ++i) {
+      raw_found |= segment->candidate(i).value == composer.GetRawString();
+      native_found |= segment->candidate(i).value == "native";
+    }
+    EXPECT_TRUE(native_found);
+    return raw_found;
+  };
+
+  InsertASCIISequence("AIdev", &composer);
+  ASSERT_TRUE(composer.CreateComposerData().has_shifted_ascii_rescue_context());
+  EXPECT_TRUE(has_raw(ConversionRequest::SUGGESTION));
+  composer.Reset();
+  EXPECT_FALSE(composer.CreateComposerData().has_shifted_ascii_rescue_context());
+
+  InsertASCIISequence("AIdekaihatusuru", &composer);
+  ASSERT_EQ(composer.GetRawString().size(), 15u);
+  ASSERT_EQ(composer.GetInputMode(), transliteration::HIRAGANA);
+  ASSERT_TRUE(composer.CreateComposerData().has_shifted_ascii_rescue_context());
+  EXPECT_TRUE(has_raw(ConversionRequest::SUGGESTION));
+
+  InsertASCIISequence("k", &composer);
+  ASSERT_EQ(composer.GetRawString().size(), 16u);
+  EXPECT_FALSE(has_raw(ConversionRequest::SUGGESTION));
+  EXPECT_TRUE(has_raw(ConversionRequest::PREDICTION));
+  EXPECT_CALL(dictionary, HasValue(StrEq("AIdekaihatusuruk")))
+      .WillOnce(Return(true));
+  EXPECT_TRUE(has_raw(ConversionRequest::SUGGESTION));
+  Mock::VerifyAndClearExpectations(&dictionary);
+  EXPECT_FALSE(has_raw(ConversionRequest::SUGGESTION));
+
+  composer.Backspace();
+  ASSERT_EQ(composer.GetRawString().size(), 15u);
+  EXPECT_TRUE(composer.CreateComposerData().has_shifted_ascii_rescue_context());
+  EXPECT_TRUE(has_raw(ConversionRequest::SUGGESTION));
+
+  InsertASCIISequence("kot", &composer);
+  ASSERT_EQ(composer.GetRawString().size(), 18u);
+  EXPECT_FALSE(has_raw(ConversionRequest::SUGGESTION));
+  composer.Backspace();
+  ASSERT_EQ(composer.GetRawString().size(), 17u);
+  EXPECT_TRUE(composer.CreateComposerData().has_shifted_ascii_rescue_context());
+  EXPECT_FALSE(has_raw(ConversionRequest::SUGGESTION));
+  composer.MoveCursorToBeginning();
+  composer.Delete();
+  EXPECT_FALSE(composer.CreateComposerData().has_shifted_ascii_rescue_context());
+
+  for (const std::string raw : {"pythonpythonpython", "iPhoneabcdefghijkl",
+                                "azooKeyabcdefghijkl"}) {
+    composer.Reset();
+    InsertASCIISequence(raw, &composer);
+    ASSERT_EQ(composer.GetRawString(), raw);
+    ASSERT_GT(raw.size(), 15u);
+    EXPECT_FALSE(composer.CreateComposerData().has_shifted_ascii_rescue_context())
+        << raw;
+    EXPECT_TRUE(has_raw(ConversionRequest::SUGGESTION)) << raw;
+  }
+}
+
 TEST_F(LanguageAwareRewriterTest,
        EnglishRawRescueStillWorksWithExceptionsEnabled) {
   MockDictionary dictionary;
