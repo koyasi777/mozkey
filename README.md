@@ -141,6 +141,7 @@ Windows の `universal` MSI は、製品全体が x64 / ARM64 の両方でネイ
 - Windows 版の「辞書」タブに読み取り専用の辞書コスト検索を追加。システム辞書・ユーザー辞書を読みの完全一致で検索し、単語コスト・左右文脈ID・属性ビットを確認可能。辞書や学習内容は変更しない
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
+- Windows / macOS 版の辞書ツール・単語登録、および Windows 版の辞書コスト検索では、全体の設定にかかわらずライブ変換を自動的に無効化。通常の変換操作は維持し、他のアプリケーションでのライブ変換には影響しない
 - `こまんど` の変換候補から、設定画面を開かずにライブ変換と Zenz ライブ補正を個別に ON/OFF 可能
 - ハイフンなし7桁の郵便番号（例：`1000001`）を、既存の郵便番号辞書を使って住所へ変換可能。ライブ変換では数字表記を第1候補に保ち、キー設定の `ConvertNext`（次候補、標準では Space）で住所などの後続候補を選択可能
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
@@ -1441,6 +1442,7 @@ Main features added in this fork
 - Adds a read-only dictionary cost inspector to the Windows Dictionary tab, with exact-reading lookup of system/user dictionary entries, word costs, left/right context IDs, and attribute bits, without modifying dictionaries or learning data
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
+- Automatically disables live conversion in the Dictionary Tool and Word Register Dialog on Windows / macOS, as well as in the Dictionary Cost Inspector on Windows, regardless of the global setting, while preserving explicit conversion and leaving live conversion in other applications unaffected
 - Allows toggling live conversion and Zenz live correction independently through conversion candidates for `こまんど` (komando), without opening the config dialog
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
