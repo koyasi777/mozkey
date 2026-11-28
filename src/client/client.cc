@@ -463,6 +463,17 @@ bool Client::CreateSession() {
   input.set_type(commands::Input::CREATE_SESSION);
 
   *input.mutable_capability() = client_capability_;
+#ifdef _WIN32
+  // TIP runs inside the editing application. Check the native environment
+  // rather than the CRT environment, which can differ across DLLs.
+  wchar_t marker[16] = {};
+  const DWORD length = ::GetEnvironmentVariableW(
+      kSuppressLiveConversionProcessEnv, marker, 16);
+  if (length > 0 && length < 16 &&
+      std::to_wstring(::GetCurrentProcessId()) == marker) {
+    input.mutable_capability()->set_suppress_live_conversion(true);
+  }
+#endif  // _WIN32
 
   commands::ApplicationInfo *info = input.mutable_application_info();
   DCHECK(info);

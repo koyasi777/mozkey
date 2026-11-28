@@ -3771,9 +3771,9 @@ void Session::SetTable(std::shared_ptr<const composer::Table> table) {
 void Session::SetConfig(std::shared_ptr<const config::Config> config) {
   DCHECK(config);
   ClearUndoContext();
-  if (config->use_auto_conversion()) {
-    // Also protect callers that supply a Config directly instead of using
-    // ConfigHandler's normalization.
+  if (config->use_auto_conversion() || suppress_live_conversion_) {
+    // Keep the shared user config unchanged. Also protect callers that
+    // supply a Config directly instead of using ConfigHandler's normalization.
     if (config->use_live_conversion()) {
       auto normalized = std::make_shared<config::Config>(*config);
       normalized->set_use_live_conversion(false);
@@ -8637,6 +8637,7 @@ bool Session::CommitPendingLiveConversionDisplayForSubmit(
 }
 
 void Session::set_client_capability(commands::Capability capability) {
+  suppress_live_conversion_ = capability.suppress_live_conversion();
   *context_->mutable_client_capability() = std::move(capability);
 }
 

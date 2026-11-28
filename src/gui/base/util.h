@@ -44,7 +44,9 @@ class GuiUtil {
  public:
   // Initializes the common Qt configuration such as High DPI, font, and theme.
   // The type of argc is a reference.
-  static std::unique_ptr<QApplication> InitQt(int &argc, char *argv[]);
+  // Windows dictionary editing tools opt out before Qt initializes the IME.
+  static std::unique_ptr<QApplication> InitQt(
+      int &argc, char *argv[], bool suppress_live_conversion = false);
 
   // Installs the translation message.
   // Resource name is the prefix of Qt resource.

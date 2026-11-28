@@ -607,6 +607,10 @@ message Capability {
   }
   optional TextDeletionCapabilityType text_deletion = 1
       [default = NO_TEXT_DELETION_CAPABILITY];
+
+  // Session creation only: use ordinary conversion in dictionary editing
+  // tools without modifying the user's global configuration.
+  optional bool suppress_live_conversion = 2 [default = false];
 }
 
 // Next ID: 158

@@ -105,7 +105,9 @@
   int liveConversionAnchorLeft_;
   bool hasLiveConversionAnchorLeft_;
 
-  /** True when the current config enables live conversion. */
+  /** Session-local opt-out for the packaged dictionary tools. */
+  bool suppressLiveConversion_;
+  /** True when live conversion is enabled for this input session. */
   bool useLiveConversion_;
   /** True when the current config enables the independent status overlay. */
   bool useConversionStatusIndicator_;

@@ -1190,6 +1190,47 @@ TEST_F(MozcImkInputControllerTest, handleConfig) {
       << [mock_client_.overriddenLayout UTF8String];
 }
 
+TEST_F(MozcImkInputControllerTest, SuppressLiveConversionForDictionaryTools) {
+  struct TestCase {
+    NSString *bundle_id;
+    bool suppress;
+  };
+  const TestCase cases[] = {
+      {@"org.mozc.inputmethod.Japanese.Tool.DictionaryTool", true},
+      {@"org.mozc.inputmethod.Japanese.Tool.WordRegisterDialog", true},
+      {@"org.mozc.inputmethod.Japanese.Tool.ConfigDialog", false},
+      {@"org.mozc.inputmethod.Japanese.Tool.DictionaryTool.Other", false},
+      {@"com.example.DictionaryTool", false},
+      {@"com.apple.TextEdit", false},
+      {@"", false},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE([test.bundle_id UTF8String]);
+    ResetClientBundleIdentifier(test.bundle_id);
+    commands::Capability capability;
+    EXPECT_CALL(*mock_mozc_client_, set_client_capability(_))
+        .WillOnce(SaveArg<0>(&capability));
+    [controller_ setupCapability];
+    EXPECT_EQ(capability.suppress_live_conversion(), test.suppress);
+    EXPECT_EQ(capability.text_deletion(),
+              commands::Capability::DELETE_PRECEDING_TEXT);
+
+    // Repeated config reads must not undo the session-local policy.
+    const bool live_settings[] = {true, false, true};
+    for (bool live : live_settings) {
+      config::Config config;
+      config.set_use_live_conversion(live);
+      config.set_use_zenz_live_correction(true);
+      EXPECT_CALL(*mock_mozc_client_, GetConfig(NotNull()))
+          .WillOnce(DoAll(SetArgPointee<0>(config), Return(true)));
+      [controller_ handleConfig];
+      EXPECT_EQ(controller_.useLiveConversionForTest, live && !test.suppress);
+      EXPECT_EQ(controller_.useZenzContextAcquisitionForTest,
+                live && !test.suppress);
+    }
+  }
+}
+
 TEST_F(MozcImkInputControllerTest, DoubleTapKanaReconvert) {
   // tap (short) tap -> emit undo command
   controller_.mode = commands::HIRAGANA;

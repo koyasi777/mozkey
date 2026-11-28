@@ -41,6 +41,7 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
+#include "base/const.h"
 #include "base/number_util.h"
 #include "base/strings/assign.h"
 #include "base/version.h"
@@ -56,6 +57,10 @@
 #include "testing/mozctest.h"
 #include "testing/test_peer.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif  // _WIN32
+
 namespace mozc {
 namespace client {
 
@@ -64,6 +69,7 @@ class ClientTestPeer : public testing::TestPeer<Client> {
   explicit ClientTestPeer(Client& client) : testing::TestPeer<Client>(client) {}
 
   PEER_METHOD(GetHistoryInputs);
+  PEER_METHOD(CreateSession);
 };
 
 namespace {
@@ -238,6 +244,51 @@ class ClientTest : public testing::TestWithTempUserProfile {
   TestServerLauncher* server_launcher_;
   int version_diff_;
 };
+
+#ifdef _WIN32
+TEST_F(ClientTest, SuppressLiveConversionOnlyForMarkedProcess) {
+  // Restore the process environment even if an assertion fails.
+  struct RestoreMarker {
+    std::wstring value;
+    bool present = false;
+    RestoreMarker() {
+      wchar_t buffer[32768] = {};
+      const DWORD size = ::GetEnvironmentVariableW(
+          kSuppressLiveConversionProcessEnv, buffer, 32768);
+      present = size > 0 && size < 32768;
+      if (present) {
+        value.assign(buffer, size);
+      }
+    }
+    ~RestoreMarker() {
+      ::SetEnvironmentVariableW(kSuppressLiveConversionProcessEnv,
+                                present ? value.c_str() : nullptr);
+    }
+  } restore_marker;
+
+  ASSERT_TRUE(SetupConnection(123));
+  ClientTestPeer peer(*client_);
+  const auto expect_create = [&](bool expected) {
+    ASSERT_TRUE(peer.CreateSession());
+    commands::Input input;
+    GetGeneratedInput(&input);
+    ASSERT_EQ(input.type(), commands::Input::CREATE_SESSION);
+    EXPECT_EQ(input.capability().suppress_live_conversion(), expected);
+  };
+
+  // Simulate a marker inherited from a different process.
+  ASSERT_TRUE(::SetEnvironmentVariableW(kSuppressLiveConversionProcessEnv,
+                                       L"0"));
+  expect_create(false);
+  ASSERT_TRUE(::SetEnvironmentVariableW(kSuppressLiveConversionProcessEnv,
+                                       nullptr));
+  expect_create(false);
+  ASSERT_TRUE(::SetEnvironmentVariableW(
+      kSuppressLiveConversionProcessEnv,
+      std::to_wstring(::GetCurrentProcessId()).c_str()));
+  expect_create(true);
+}
+#endif  // _WIN32
 
 TEST_F(ClientTest, ConnectionError) {
   client_factory_->SetConnection(false);

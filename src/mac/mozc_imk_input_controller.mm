@@ -161,6 +161,13 @@ absl::string_view GetModeId(CompositionMode mode) {
   }
 }
 
+// The IDs are assigned by mozc_macos_qt_application in bazel/qt.bzl,
+// using MACOS_BUNDLE_ID_PREFIX from config.bzl. Match only dictionary tools.
+bool ShouldSuppressLiveConversion(absl::string_view bundle_id) {
+  return bundle_id == "org.mozc.inputmethod.Japanese.Tool.DictionaryTool" ||
+         bundle_id == "org.mozc.inputmethod.Japanese.Tool.WordRegisterDialog";
+}
+
 bool CanOpenLink(absl::string_view bundle_id) {
   // Should not open links during screensaver.
   return bundle_id != "com.apple.securityagent";
@@ -359,6 +366,7 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   verticalWriting_ = false;
   liveConversionAnchorLeft_ = 0;
   hasLiveConversionAnchorLeft_ = false;
+  suppressLiveConversion_ = false;
   useLiveConversion_ = false;
   useConversionStatusIndicator_ = false;
   useZenzContextAcquisition_ = false;
@@ -513,7 +521,8 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
   }
   [keyCodeMap_ setInputMode:input_mode];
   yenSignCharacter_ = config.yen_sign_character();
-  useLiveConversion_ = config.use_live_conversion();
+  useLiveConversion_ =
+      config.use_live_conversion() && !suppressLiveConversion_;
   useConversionStatusIndicator_ = config.show_conversion_status_indicator();
   // Avoid an extra TEST_SEND_KEY round trip for ordinary Mozc input.
   useZenzContextAcquisition_ =
@@ -536,6 +545,10 @@ NSString *TrimIncompleteZenzSurrogateEdges(NSString *text) {
 
 - (void)setupCapability {
   Capability capability;
+  // InputMethodKit creates one controller per client input session. Bind
+  // this policy at capability setup, before the client creates its session.
+  suppressLiveConversion_ = ShouldSuppressLiveConversion(clientBundle_);
+  capability.set_suppress_live_conversion(suppressLiveConversion_);
 
   if (CanSelectedRange(clientBundle_)) {
     capability.set_text_deletion(Capability::DELETE_PRECEDING_TEXT);
