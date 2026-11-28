@@ -5634,6 +5634,62 @@ TEST_F(SessionTest, PostalLiveSentenceKeepsZipCandidatesWithoutReconversion) {
   EXPECT_PREEDIT("今日は東京都千代田区千代田です", command);
 }
 
+TEST_F(SessionTest, SuppressLiveConversionPreservesExplicitConversion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  commands::Capability capability;
+  capability.set_suppress_live_conversion(true);
+  session.set_client_capability(capability);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_auto_conversion(false);
+  config.set_use_live_conversion(true);
+  config.set_use_zenz_live_correction(false);
+  config.set_live_conversion_min_key_length(1);
+  config.set_live_conversion_delay_msec(0);
+  session.SetConfig(config);
+
+  EXPECT_CALL(*converter, StartConversion(_, _)).Times(0);
+  commands::Command command;
+  InsertCharacterString("あ", "a", &session, &command);
+  EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  EXPECT_FALSE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().live_conversion_pending());
+  EXPECT_FALSE(command.output().pre_live_conversion_reading());
+  EXPECT_TRUE(EnsurePreedit("あ", command));
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::ENTER, &session, &command));
+  EXPECT_RESULT("あ", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+
+  // A configured debounce delay must not reserve a live conversion either.
+  config.set_live_conversion_delay_msec(228);
+  session.SetConfig(config);
+  InsertCharacterString("あ", "a", &session, &command);
+  EXPECT_FALSE(command.output().live_conversion());
+  EXPECT_FALSE(command.output().live_conversion_pending());
+  EXPECT_FALSE(command.output().pre_live_conversion_reading());
+  EXPECT_TRUE(EnsurePreedit("あ", command));
+  ASSERT_TRUE(Mock::VerifyAndClearExpectations(converter.get()));
+
+  Segments segments;
+  Segment* segment = segments.add_segment();
+  segment->set_key("あ");
+  converter::Candidate* candidate = segment->add_candidate();
+  candidate->key = "あ";
+  candidate->content_key = "あ";
+  candidate->value = "亜";
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::SPACE, &session, &command));
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_FALSE(command.output().live_conversion());
+  EXPECT_TRUE(EnsurePreedit("亜", command));
+}
+
 TEST_F(SessionTest, LiveConversionUsesDefaultMinKeyLength) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

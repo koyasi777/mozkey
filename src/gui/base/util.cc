@@ -29,10 +29,16 @@
 
 #include "gui/base/util.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif  // _WIN32
+
 #include "absl/base/no_destructor.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/string_view.h"
+#include "base/const.h"
 
 // Show the build number on the title for debugging when the build
 // configuration is official dev channel.
@@ -91,7 +97,17 @@ void InstallDefaultTranslator() {
 }  // namespace
 
 // static
-std::unique_ptr<QApplication> GuiUtil::InitQt(int &argc, char *argv[]) {
+std::unique_ptr<QApplication> GuiUtil::InitQt(
+    int &argc, char *argv[], [[maybe_unused]] bool suppress_live_conversion) {
+#ifdef _WIN32
+  if (suppress_live_conversion &&
+      !::SetEnvironmentVariableW(
+          kSuppressLiveConversionProcessEnv,
+          std::to_wstring(::GetCurrentProcessId()).c_str())) {
+    LOG(WARNING) << "Failed to mark dictionary editing process";
+  }
+#endif  // _WIN32
+
   QApplication::setStyle(QStyleFactory::create(QLatin1String("fusion")));
 
   // QApplication takes argc as a reference.

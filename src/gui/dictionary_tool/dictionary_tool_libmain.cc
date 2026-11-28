@@ -48,7 +48,8 @@ int RunDictionaryTool(int argc, char *argv[]) {
 #endif  // _WIN32
 
   Q_INIT_RESOURCE(qrc_dictionary_tool);
-  auto app = mozc::gui::GuiUtil::InitQt(argc, argv);
+  auto app = mozc::gui::GuiUtil::InitQt(
+      argc, argv, /*suppress_live_conversion=*/true);
 
   std::string name = "dictionary_tool.";
   name += mozc::SystemUtil::GetDesktopNameAsString();

@@ -726,6 +726,59 @@ TEST_F(SessionHandlerTest, UpdateComposition) {
   }
 }
 
+TEST_F(SessionHandlerTest, SuppressLiveConversionIsSessionLocal) {
+  absl::SetFlag(&FLAGS_create_session_min_interval, 0);
+  config::Config config = config::ConfigHandler::GetCopiedConfig();
+  config.set_use_auto_conversion(false);
+  config.set_use_live_conversion(true);
+  ASSERT_TRUE(config::ConfigHandler::SetConfig(config));
+  SessionHandler handler(CreateMockDataEngine());
+
+  commands::Command create;
+  create.mutable_input()->set_type(commands::Input::CREATE_SESSION);
+  create.mutable_input()->mutable_capability()->set_suppress_live_conversion(
+      true);
+  ASSERT_TRUE(handler.EvalCommand(&create));
+  ASSERT_EQ(create.output().error_code(), commands::Output::SESSION_SUCCESS);
+  const uint64_t suppressed_id = create.output().id();
+  uint64_t normal_id = 0;
+  ASSERT_TRUE(CreateSession(handler, &normal_id));
+  ASSERT_NE(suppressed_id, normal_id);
+
+  KeyMapManagerAccessorTestPeer peer(handler);
+  auto* suppressed = peer.session_map_()->MutableLookup(suppressed_id);
+  auto* normal = peer.session_map_()->MutableLookup(normal_id);
+  ASSERT_NE(suppressed, nullptr);
+  ASSERT_NE(normal, nullptr);
+  ASSERT_NE(suppressed->get(), nullptr);
+  ASSERT_NE(normal->get(), nullptr);
+  EXPECT_FALSE((*suppressed)->context().GetConfig().use_live_conversion());
+  EXPECT_TRUE((*normal)->context().GetConfig().use_live_conversion());
+
+  // A per-key capability update must not erase the creation-time policy.
+  commands::Command key;
+  key.mutable_input()->set_id(suppressed_id);
+  key.mutable_input()->set_type(commands::Input::SEND_KEY);
+  key.mutable_input()->mutable_key()->set_special_key(commands::KeyEvent::ON);
+  key.mutable_input()->mutable_capability()->set_text_deletion(
+      commands::Capability::DELETE_PRECEDING_TEXT);
+  ASSERT_TRUE(handler.EvalCommand(&key));
+
+  // Reapply the global configuration through the real handler path.
+  for (const bool enabled : {false, true}) {
+    config.set_use_live_conversion(enabled);
+    commands::Command update;
+    update.mutable_input()->set_type(commands::Input::SET_CONFIG);
+    *update.mutable_input()->mutable_config() = config;
+    ASSERT_TRUE(handler.EvalCommand(&update));
+    EXPECT_EQ(update.output().config().use_live_conversion(), enabled);
+    EXPECT_EQ(config::ConfigHandler::GetCopiedConfig().use_live_conversion(),
+              enabled);
+    EXPECT_FALSE((*suppressed)->context().GetConfig().use_live_conversion());
+    EXPECT_EQ((*normal)->context().GetConfig().use_live_conversion(), enabled);
+  }
+}
+
 // Exercise the complete configuration lifecycle against an already-created
 // Session.  The fixture isolates ConfigHandler storage in a temporary profile.
 // Changing CUSTOM table content (without changing SessionKeymap::CUSTOM) must

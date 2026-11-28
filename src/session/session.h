@@ -334,6 +334,10 @@ class Session {
 
   std::unique_ptr<ImeContext> context_;
 
+  // Captured at session creation, independent of per-command capabilities
+  // and ImeContext snapshots used by Undo.
+  bool suppress_live_conversion_ = false;
+
   // True only while ordinary composition is displaying a passive suggestion
   // that was intentionally held across unresolved trailing Roman input.
   bool composition_holds_passive_suggestion_ = false;

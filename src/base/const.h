@@ -52,6 +52,12 @@ inline constexpr int kIMEUIwndClassNameLimitInTchars = 16;
 
 inline constexpr wchar_t kDefaultKeyboardLayout[] = L"00000411";
 
+// Process-local opt-out from live conversion for dictionary editing tools.
+// The value is the originating PID, so child processes do not opt out merely
+// by inheriting their parent's environment.
+inline constexpr wchar_t kSuppressLiveConversionProcessEnv[] =
+    L"MOZKEY_SUPPRESS_LIVE_CONVERSION_PID";
+
 #ifdef GOOGLE_JAPANESE_INPUT_BUILD
 inline constexpr char kCompanyNameInEnglish[] = "Google";
 // Use Local prefix so that modules running under AppContainer can access.

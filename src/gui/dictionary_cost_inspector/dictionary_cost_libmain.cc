@@ -11,7 +11,8 @@
 #include "gui/dictionary_cost_inspector/dictionary_cost_dialog.h"
 
 int RunDictionaryCostInspector(int argc, char* argv[]) {
-  auto app = mozc::gui::GuiUtil::InitQt(argc, argv);
+  auto app = mozc::gui::GuiUtil::InitQt(
+      argc, argv, /*suppress_live_conversion=*/true);
   std::string singleton = "dictionary_cost_inspector.";
   singleton += mozc::SystemUtil::GetDesktopNameAsString();
   mozc::gui::SingletonWindowHelper helper(singleton);

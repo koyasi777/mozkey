@@ -143,6 +143,7 @@ mozc_cc_test(
         ":character_renderability",
         ":client",
         ":client_interface",
+        "//base:const",
         "//base:number_util",
         "//base:version",
         "//base/strings:assign",
